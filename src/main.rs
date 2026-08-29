@@ -11,6 +11,7 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 usage: texrs [OPTIONS] FILE.tex
 
+  --lsp           speak the Language Server Protocol over stdio
   --dump-tokens   print the mouth's token stream and exit
   --disasm        print the lowered fusevm bytecode and exit
   --no-cache      compile this run rather than reading the bytecode cache
@@ -38,6 +39,12 @@ fn main() -> ExitCode {
             "-h" | "--help" => {
                 print!("{USAGE}");
                 return ExitCode::SUCCESS;
+            }
+            "--lsp" => {
+                return match texrs::lsp::run() {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => fail(&e),
+                }
             }
             "--dump-tokens" => dump_tokens = true,
             "--disasm" => disasm = true,

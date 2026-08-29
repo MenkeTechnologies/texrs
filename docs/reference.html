@@ -76,92 +76,161 @@
       </div>
     </div>
 
-    <main class="tutorial-main">
+    
       <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>PRIMITIVE REFERENCE</h2>
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
 
-      <section class="tutorial-section">
+      <section class="tutorial-section" id="ch-category-codes">
         <h2>Category codes</h2>
-        <p>A character's category is a mutable table entry, not a property of the language. texrs starts from INITEX's sparse defaults, which is why every example opens by making <code>{</code> and <code>}</code> group characters.</p>
         <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\catcode`\X=N</code></td><td>Set the category code of character <code>X</code> to <code>N</code>. Codes 1 and 2 are group open/close, 6 is the parameter character, 14 is comment.</td><td>Compile time — it changes how the rest of the file reads</td></tr>
-            <tr><td><code>`\X, `X</code></td><td>A character code as a number, for a <code>\count</code> assignment or a comparison.</td><td>Compile time</td></tr>
-            <tr><td><code>^^X</code></td><td>Control-character notation (<code>tex.web</code> §352): a superscript character twice, then one character.</td><td>Mouth</td></tr>
+            <tr><td><code>\catcode</code></td><td>Set or read a character's category code. A character's category is a mutable table entry, not a property of the language: texrs starts from INITEX's sparse defaults, where <code>{</code> is an ordinary character until something makes it a group opener. Takes effect at COMPILE time, because it changes how the rest of the file reads.</td><td><pre>\catcode`\X=N
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{now braces group}</pre></td></tr>
+            <tr><td><code>^^X</code></td><td>Control-character notation (tex.web §352): a superscript character twice, then one character, denotes the control character 64 above or below it. This is how a line end is written inside a macro body.</td><td><pre>^^M   % carriage return
+^^I   % tab</pre></td></tr>
+            <tr><td><code>`</code></td><td>A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence.</td><td><pre>\count1=`\A
+\message{\the\count1}   % =&gt; 65</pre></td></tr>
           </tbody>
         </table>
       </section>
 
-      <section class="tutorial-section">
+      <section class="tutorial-section" id="ch-macro-definition">
         <h2>Macro definition</h2>
         <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\def</code></td><td>Define a macro. Parameters may be undelimited (<code>#1</code>) or delimited (<code>\def\pair#1,#2.{…}</code>); <code>##</code> is a literal parameter character. The parameter text is validated as <code>tex.web</code> §476 validates it.</td><td>Compile time</td></tr>
-            <tr><td><code>\gdef</code></td><td>Define globally — the definition survives the enclosing group.</td><td>Compile time</td></tr>
-            <tr><td><code>\edef</code></td><td>Define with the body expanded NOW. A register read is frozen into a scratch register, so a later assignment cannot move it.</td><td>Compile time</td></tr>
-            <tr><td><code>\xdef</code></td><td>Global <code>\edef</code>.</td><td>Compile time</td></tr>
-            <tr><td><code>\let</code></td><td><code>\let\a=\b</code> gives <code>\a</code> <code>\b</code>'s CURRENT meaning, not a reference to it.</td><td>Compile time</td></tr>
-            <tr><td><code>\global</code></td><td>Prefix making the following assignment global.</td><td>Compile time</td></tr>
+            <tr><td><code>\def</code></td><td>Define a macro. Parameters may be undelimited (<code>#1</code>) or delimited (<code>\def\pair#1,#2.{...}</code>, where the argument is whatever precedes the delimiter), and <code>##</code> is a literal parameter character. The parameter text is validated as tex.web §476 validates it: every <code>#</code> must be followed by a digit, and the digits must run consecutively. Takes effect at COMPILE time.</td><td><pre>\def\name&lt;parameter text&gt;{&lt;body&gt;}
+\def\greet#1{HELLO-#1}
+\def\pair#1,#2.{[#1|#2]}
+\message{\greet{WORLD}}   % =&gt; HELLO-WORLD
+\message{\pair 1,2.}      % =&gt; [1|2]</pre></td></tr>
+            <tr><td><code>\gdef</code></td><td>Define globally: the definition survives the enclosing group, where a <code>\def</code> inside braces is undone at the closing brace.</td><td><pre>\gdef\name{&lt;body&gt;}
+{\gdef\v{IN}}
+\message{\v}   % =&gt; IN</pre></td></tr>
+            <tr><td><code>\edef</code></td><td>Define with the body expanded NOW, so a register read is frozen at definition time and a later assignment cannot move it. texrs freezes a <code>\the\count</code> read into a scratch register (taken from the top of the count range). It does NOT yet decide a conditional in the body at definition time — see BUGS.md.</td><td><pre>\edef\name{&lt;body&gt;}
+\count1=1
+\edef\frozen{\the\count1}
+\count1=2
+\message{\frozen}   % =&gt; 1</pre></td></tr>
+            <tr><td><code>\xdef</code></td><td>A global <code>\edef</code>: the body is expanded now and the definition survives the enclosing group.</td><td><pre>\xdef\name{&lt;body&gt;}
+{\xdef\frozen{\the\count1}}</pre></td></tr>
+            <tr><td><code>\let</code></td><td>Give a control sequence another's CURRENT meaning, not a reference to it: redefining the source afterwards does not change the alias.</td><td><pre>\let\alias=\source
+\def\v{ONE}
+\let\w=\v
+\def\v{TWO}
+\message{\w}   % =&gt; ONE</pre></td></tr>
+            <tr><td><code>\global</code></td><td>Prefix making the following assignment global, so it survives the enclosing group.</td><td><pre>\global\count1=5
+\global\def\v{OUT}</pre></td></tr>
           </tbody>
         </table>
       </section>
 
-      <section class="tutorial-section">
+      <section class="tutorial-section" id="ch-expansion">
         <h2>Expansion</h2>
         <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\csname … \endcsname</code></td><td>Build a control sequence out of the characters between them, so a macro can name another macro.</td><td>Compile time</td></tr>
-            <tr><td><code>\string</code></td><td>Print a control sequence as text, including its escape character.</td><td>Compile time</td></tr>
-            <tr><td><code>\the</code></td><td>The value of a register, as characters.</td><td>Run time — the read happens on the VM</td></tr>
-            <tr><td><code>\number</code></td><td>A scanned number, as characters.</td><td>Compile time or run time, depending on the operand</td></tr>
-            <tr><td><code>\expandafter</code></td><td>One token of lookahead: expand what comes after the next token, then put the token back.</td><td>Compile time</td></tr>
-            <tr><td><code>\noexpand</code></td><td>Suppress expansion of the next token.</td><td>Compile time</td></tr>
-            <tr><td><code>\message</code></td><td>Write to the terminal. This is the parity contract for the milestone: two host builtins, one appending a rendered piece and one flushing the assembled string.</td><td>Run time</td></tr>
-            <tr><td><code>\relax, \par, \ignorespaces</code></td><td>Accepted and ignored — they belong to the stomach or do nothing here.</td><td>—</td></tr>
-            <tr><td><code>\end</code></td><td>Stop the run. It does not ship a page: there is no stomach.</td><td>Compile time</td></tr>
+            <tr><td><code>\csname</code></td><td>Build a control sequence out of the characters up to <code>\endcsname</code>, so a macro can name another macro. A name with no meaning becomes <code>\relax</code>, as in tex.</td><td><pre>\csname &lt;characters&gt;\endcsname
+\def\greeting{HI}
+\def\name{greeting}
+\message{\csname \name\endcsname}   % =&gt; HI</pre></td></tr>
+            <tr><td><code>\endcsname</code></td><td>Terminate a <code>\csname</code>. It is an error to reach one without an open <code>\csname</code>.</td><td><pre>\csname foo\endcsname</pre></td></tr>
+            <tr><td><code>\string</code></td><td>Print a control sequence as text, escape character included — the inverse of <code>\csname</code>.</td><td><pre>\string\cs
+\message{\string\undefined}   % =&gt; \undefined</pre></td></tr>
+            <tr><td><code>\the</code></td><td>The value of a register, as characters. The read happens at RUN time on the VM, which is why a <code>\message</code> containing <code>\the\count0</code> follows a later assignment.</td><td><pre>\the\count&lt;N&gt;
+\count1=12
+\message{count=\the\count1}   % =&gt; count=12</pre></td></tr>
+            <tr><td><code>\number</code></td><td>A scanned number, as characters, with no leading zeros or plus sign. The scan keeps reading (and expanding) until something that cannot be part of a number stops it, so a following letter needs a terminating space.</td><td><pre>\number&lt;number&gt;
+\message{\number0042}   % =&gt; 42</pre></td></tr>
+            <tr><td><code>\expandafter</code></td><td>One token of lookahead: hold the next token back, expand what follows it once, then put the held token in front of the result.</td><td><pre>\expandafter&lt;token&gt;&lt;token&gt;
+\def\a{\b}
+\def\b{DEEP}
+\message{\expandafter\string\a}   % =&gt; \b</pre></td></tr>
+            <tr><td><code>\noexpand</code></td><td>Suppress expansion of the next token for one step — the token is used for its own sake rather than its meaning.</td><td><pre>\noexpand&lt;token&gt;
+\edef\keep{\noexpand\later}</pre></td></tr>
+            <tr><td><code>\message</code></td><td>Write to the terminal. This is texrs's parity contract for the milestone: two host builtins, one appending a rendered piece and one flushing the assembled string, so a message reads its registers at run time.</td><td><pre>\message{&lt;text&gt;}
+\message{HELLO-WORLD}   % =&gt; (./file.tex HELLO-WORLD )</pre></td></tr>
+            <tr><td><code>\relax</code></td><td>Do nothing. Accepted so a document can stop a number scan, or fill a slot that needs a token but no action — which is also what <code>\csname</code> makes of a name with no meaning.</td><td><pre>\relax</pre></td></tr>
+            <tr><td><code>\par</code></td><td>End a paragraph. Accepted and ignored: paragraphs belong to the stomach, which texrs does not have. A blank line produces one, which is why the line scanner tracks its state.</td><td><pre>\par</pre></td></tr>
+            <tr><td><code>\ignorespaces</code></td><td>Skip the spaces that follow. Accepted and ignored in this milestone, because spacing only matters once there is a stomach to typeset it.</td><td><pre>\ignorespaces</pre></td></tr>
+            <tr><td><code>\end</code></td><td>Stop the run. It does not ship a page: there is no stomach, which is why real tex reports <code>No pages of output.</code> for every case in the corpus.</td><td><pre>\end</pre></td></tr>
           </tbody>
         </table>
       </section>
 
-      <section class="tutorial-section">
+      <section class="tutorial-section" id="ch-conditionals">
         <h2>Conditionals</h2>
-        <p>A conditional that tests run-time state becomes a real branch; one decidable from the macro table alone is folded while lowering. Both forms nest, and both work inside a <code>\message</code> body.</p>
         <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\ifnum A&lt;B, =B, &gt;B</code></td><td>Compare two numbers.</td><td>Run time — a comparison plus a jump</td></tr>
-            <tr><td><code>\ifodd N</code></td><td>Test the parity of a number.</td><td>Run time</td></tr>
-            <tr><td><code>\ifcase N \or … \else … \fi</code></td><td>Switch on a number.</td><td>Run time</td></tr>
-            <tr><td><code>\iftrue, \iffalse</code></td><td>Constant truth.</td><td>Compile time — folded</td></tr>
-            <tr><td><code>\ifx\a\b</code></td><td>Compare two meanings.</td><td>Compile time — folded</td></tr>
-            <tr><td><code>\if</code></td><td>Compare two character codes after expansion.</td><td>Compile time</td></tr>
-            <tr><td><code>\ifdefined</code></td><td>Test whether a control sequence has a meaning.</td><td>Compile time</td></tr>
-            <tr><td><code>\else, \or, \fi</code></td><td>Branch separators and terminator.</td><td>—</td></tr>
+            <tr><td><code>\ifnum</code></td><td>Compare two numbers with <code>&lt;</code>, <code>=</code> or <code>&gt;</code>. It tests run-time state, so it lowers to a real branch — a comparison plus a jump — rather than a decision taken while walking a tree.</td><td><pre>\ifnum&lt;number&gt;&lt;rel&gt;&lt;number&gt; &lt;true&gt;\else &lt;false&gt;\fi
+\count1=5
+\message{\ifnum\count1&gt;3 BIG\else SMALL\fi}   % =&gt; BIG</pre></td></tr>
+            <tr><td><code>\ifodd</code></td><td>True when a number is odd. Lowers to a real branch.</td><td><pre>\ifodd&lt;number&gt; &lt;true&gt;\else &lt;false&gt;\fi
+\message{\ifodd\count1 ODD\else EVEN\fi}</pre></td></tr>
+            <tr><td><code>\ifcase</code></td><td>Switch on a number: the first case is 0, each <code>\or</code> starts the next, and <code>\else</code> catches everything past the last. Lowers to a real branch.</td><td><pre>\ifcase&lt;number&gt; &lt;0&gt;\or &lt;1&gt;\or &lt;2&gt;\else &lt;other&gt;\fi
+\count1=2
+\message{\ifcase\count1 ZERO\or ONE\or TWO\else MANY\fi}   % =&gt; TWO</pre></td></tr>
+            <tr><td><code>\iftrue</code></td><td>Constant truth. Decidable without the VM, so it is FOLDED while lowering and the untaken arm is never emitted.</td><td><pre>\iftrue &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\iffalse</code></td><td>Constant falsity. Folded while lowering, like <code>\iftrue</code>.</td><td><pre>\iffalse &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifx</code></td><td>Compare two meanings: two macros are equal when their parameter texts and bodies match, and two primitives when they are the same primitive. Decidable from the macro table alone, so it is folded while lowering.</td><td><pre>\ifx&lt;token&gt;&lt;token&gt; &lt;true&gt;\else &lt;false&gt;\fi
+\def\a{X}\def\b{X}
+\message{\ifx\a\b SAME\else DIFF\fi}   % =&gt; SAME</pre></td></tr>
+            <tr><td><code>\if</code></td><td>Compare two character codes after expansion.</td><td><pre>\if&lt;token&gt;&lt;token&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifdefined</code></td><td>True when a control sequence has a meaning.</td><td><pre>\ifdefined&lt;token&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\else</code></td><td>Start the false arm of a conditional. Both arms are collected as token runs and lowered, so the untaken one is real code the VM jumps over rather than a subtree nobody walked.</td><td><pre>\else</pre></td></tr>
+            <tr><td><code>\or</code></td><td>Start the next case of an <code>\ifcase</code>: the case before the first <code>\or</code> is 0, and each <code>\or</code> moves to the next.</td><td><pre>\or</pre></td></tr>
+            <tr><td><code>\fi</code></td><td>End a conditional. A control word swallows the space after it, so <code>\fi X</code> prints <code>X</code> with no leading space.</td><td><pre>\fi</pre></td></tr>
+            <tr><td><code>\ifcat</code></td><td>RECOGNISED BUT NOT EVALUATED. Compares category codes; texrs skips the construct correctly so an unbalanced branch cannot confuse the scanner, but cannot decide it.</td><td><pre>\ifcat&lt;token&gt;&lt;token&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifdim</code></td><td>RECOGNISED BUT NOT EVALUATED: there are no dimen registers yet.</td><td><pre>\ifdim&lt;dimen&gt;&lt;rel&gt;&lt;dimen&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifvoid</code></td><td>RECOGNISED BUT NOT EVALUATED: there are no box registers yet.</td><td><pre>\ifvoid&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifhbox</code></td><td>RECOGNISED BUT NOT EVALUATED: there are no box registers yet.</td><td><pre>\ifhbox&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifvbox</code></td><td>RECOGNISED BUT NOT EVALUATED: there are no box registers yet.</td><td><pre>\ifvbox&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifvmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach.</td><td><pre>\ifvmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifhmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach.</td><td><pre>\ifhmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifmmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach.</td><td><pre>\ifmmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifinner</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifeof</code></td><td>RECOGNISED BUT NOT EVALUATED: there is no file I/O yet.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifcsname</code></td><td>RECOGNISED BUT NOT EVALUATED. Use <code>\ifdefined</code> on a <code>\csname</code>-built token instead.</td><td><pre>\ifcsname &lt;characters&gt;\endcsname &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
           </tbody>
         </table>
-        <p>The remaining TeX conditionals — <code>\ifdim</code>, <code>\ifvoid</code>, <code>\ifhbox</code>, <code>\ifvbox</code>, <code>\ifvmode</code>, <code>\ifhmode</code>, <code>\ifmmode</code>, <code>\ifinner</code>, <code>\ifeof</code>, <code>\ifcat</code>, <code>\ifcsname</code> — are recognised for skipping purposes, so an unbalanced branch does not confuse the scanner, but they cannot be evaluated: each tests state that belongs to the stomach, to other register types, or to file I/O.</p>
       </section>
 
-      <section class="tutorial-section">
+      <section class="tutorial-section" id="ch-registers">
         <h2>Registers</h2>
         <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\count N = M</code></td><td>Assign a count register. There are 256 of them (<code>tex.web</code> §236), mapped onto VM slots 0..255.</td><td>Run time — <code>LoadInt / SetSlot</code></td></tr>
-            <tr><td><code>\advance\count N by M</code></td><td>Add.</td><td>Run time — <code>GetSlot / LoadInt / Add / SetSlot</code></td></tr>
-            <tr><td><code>\multiply\count N by M</code></td><td>Multiply.</td><td>Run time</td></tr>
-            <tr><td><code>\divide\count N by M</code></td><td>Divide, truncating toward zero as TeX does.</td><td>Run time</td></tr>
+            <tr><td><code>\count</code></td><td>A count register. There are exactly 256 of them (tex.web §236) and they map onto VM slots 0..255, so a read is an array index rather than a hash lookup. texrs loads no format, so every register starts at zero as INITEX leaves them — where the reference <code>tex</code> has plain's values, including <code>\count0</code> = the page number.</td><td><pre>\count&lt;N&gt;=&lt;number&gt;
+\count1=7
+\message{\the\count1}   % =&gt; 7</pre></td></tr>
+            <tr><td><code>\advance</code></td><td>Add to a register. Lowers to <code>GetSlot / LoadInt / Add / SetSlot</code> — native ops the JIT can compile.</td><td><pre>\advance\count&lt;N&gt; by &lt;number&gt;
+\count1=7 \advance\count1 by 5
+\message{\the\count1}   % =&gt; 12</pre></td></tr>
+            <tr><td><code>\multiply</code></td><td>Multiply a register. Like the other arithmetic, it lowers to native fusevm ops on the register's slot rather than a call.</td><td><pre>\multiply\count&lt;N&gt; by &lt;number&gt;
+\count1=7 \multiply\count1 by 3   % =&gt; 21</pre></td></tr>
+            <tr><td><code>\divide</code></td><td>Divide a register, truncating toward zero as TeX's does.</td><td><pre>\divide\count&lt;N&gt; by &lt;number&gt;
+\count1=7 \divide\count1 by 2   % =&gt; 3</pre></td></tr>
           </tbody>
         </table>
-        <p>No other register type exists yet: <code>\dimen</code>, <code>\skip</code>, <code>\muskip</code>, <code>\toks</code> and <code>\box</code> are unimplemented, and <code>\edef</code> takes its scratch registers from the top of the count range (255 downward).</p>
       </section>
 
-      <section class="tutorial-section">
-        <h2>Groups</h2>
-        <p>A brace group scopes the macro table and the count registers written inside it: the lowered body is wrapped in save/restore for exactly the registers it assigns, so an assignment inside braces is undone at the closing brace exactly as TeX undoes it. <code>\begingroup</code> and <code>\endgroup</code> do the same without the braces. <code>\global</code> and <code>\gdef</code> opt out.</p>
+      <section class="tutorial-section" id="ch-grouping">
+        <h2>Grouping</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>{</code></td><td>Open a group (category code 1), which scopes the macro table AND the count registers written inside it: the lowered body is wrapped in save/restore for exactly the registers it assigns. It also delimits a macro argument.</td><td><pre>{&lt;body&gt;}
+\def\v{OUT}
+{\def\v{IN}\message{\v}}   % =&gt; IN
+\message{\v}             % =&gt; OUT</pre></td></tr>
+            <tr><td><code>}</code></td><td>Close a group (category code 2), undoing every non-global assignment made inside it.</td><td><pre>{&lt;body&gt;}</pre></td></tr>
+            <tr><td><code>\begingroup</code></td><td>Open a group without braces, scoping the macro table and the registers written inside it. It must be closed by <code>\endgroup</code>, not by <code>}</code>.</td><td><pre>\begingroup &lt;body&gt;\endgroup</pre></td></tr>
+            <tr><td><code>\endgroup</code></td><td>Close a <code>\begingroup</code>, undoing every non-global assignment made since it. A <code>}</code> will not close one, and neither will the end of the file.</td><td><pre>\begingroup &lt;body&gt;\endgroup</pre></td></tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="tutorial-section">
@@ -190,7 +259,7 @@
           <li><strong>Source</strong> — <a href="https://github.com/MenkeTechnologies/texrs">github.com/MenkeTechnologies/texrs</a></li>
         </ul>
       </section>
-    </main>
+        </main>
   </div>
 
   <script src="hud-theme.js"></script>

@@ -86,6 +86,7 @@ man texrsall     # the comprehensive one, modeled on zshall(1)
 
 ```sh
 texrs file.tex             # run it, print the \message stream
+texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dump-tokens file   # the mouth's token stream, no expansion
 texrs --disasm file        # the lowered fusevm bytecode
 texrs --no-cache file      # compile this run instead of reading the cache
@@ -195,7 +196,7 @@ the harness on a machine with no nightly toolchain.
 
 - **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)
-- **Primitive reference** — every primitive texrs carries and where it happens (`docs/reference.html`)
+- **Primitive reference** — every primitive texrs carries and where it happens (`docs/reference.html`, generated from `src/corpus.rs` with `cargo run --bin gen-docs`)
 - **Known gaps** — the ledger, each entry pinned by a case the suite gates on (`BUGS.md`)
 - **Roadmap** — what the stomach would take (`docs/ROADMAP.md`)
 

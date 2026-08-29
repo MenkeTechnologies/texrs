@@ -45,6 +45,17 @@ impl Lexer {
         }
     }
 
+    /// The 1-based line the mouth has reached, for a diagnostic that has to
+    /// point somewhere. Counted from the characters already consumed rather
+    /// than tracked incrementally: the scanner rewinds and pushes back, and a
+    /// counter that has to be maintained through both is a counter that drifts.
+    pub fn line(&self) -> u32 {
+        1 + self.chars[..self.pos.min(self.chars.len())]
+            .iter()
+            .filter(|c| **c == '\n')
+            .count() as u32
+    }
+
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }

@@ -28,12 +28,25 @@ exclude = [
 name = "texrs"
 path = "src/main.rs"
 
+[[bin]]
+name = "gen-docs"
+path = "src/bin/gen_docs.rs"
+
 [lib]
 name = "texrs"
 path = "src/lib.rs"
 
 [dependencies]
 fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache"] }
+
+# LSP (`texrs --lsp`) over stdio, the same pair every sibling frontend speaks it
+# with. libc is the orphan guard: a language server whose editor died must exit
+# rather than linger.
+lsp-server = "0.7.9"
+lsp-types = "0.97.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
 
 # The rkyv bytecode cache, the same shard format the sibling engines write
 # (zshrs ZRSC, awkrs AWKR, vimlrs VIML, elisprs ELSP) under texrs's own TEXR

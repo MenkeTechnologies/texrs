@@ -13,10 +13,13 @@
 
 pub mod catcode;
 pub mod compiler;
+pub mod corpus;
+pub mod docs;
 pub mod expand;
 pub mod ir;
 pub mod lexer;
 pub mod lower;
+pub mod lsp;
 pub mod runtime;
 pub mod script_cache;
 pub mod token;
@@ -54,5 +57,14 @@ pub fn run_messages_cached(path: &std::path::Path, src: &str) -> Result<String, 
 /// see that a construct really lowered rather than being folded away.
 pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
     let cmds = crate::lower::Lowerer::new().lower(src)?;
+    Ok(crate::compiler::Compiler::new().compile(&cmds))
+}
+
+/// Compile `src`, reporting the line the mouth had reached if it stopped.
+///
+/// `src/lsp.rs` publishes the diagnostic this returns; every other caller wants
+/// [`compile`], which drops the position.
+pub fn compile_located(src: &str) -> Result<fusevm::Chunk, (TexError, u32)> {
+    let cmds = crate::lower::Lowerer::new().lower_located(src)?;
     Ok(crate::compiler::Compiler::new().compile(&cmds))
 }

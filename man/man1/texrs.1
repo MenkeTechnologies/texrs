@@ -77,6 +77,14 @@ For what is not carried, see
 in the source tree.
 .SH OPTIONS
 .TP
+.B \-\-lsp
+Speak the Language Server Protocol over stdio.  Completion and hover come from
+the same primitive corpus that generates the reference documentation, and
+diagnostics come from the engine's own lowerer \(em a document the editor shows
+as clean is a document
+.B texrs
+will run.  Nothing is written to the terminal.
+.TP
 .B \-\-dump\-tokens
 Print the mouth's token stream for the file and exit.  No expansion happens,
 so what prints is what the category codes made of the bytes.

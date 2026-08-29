@@ -37,8 +37,22 @@ impl Lowerer {
 
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
+        self.lower_located(src).map_err(|(e, _line)| e)
+    }
+
+    /// The same, reporting the line the mouth had reached when it stopped.
+    ///
+    /// A `TexError` carries a reason and no position, which is all a terminal
+    /// message needs (`! Undefined control sequence.`) and not enough for an
+    /// editor: a diagnostic has to land on a line. The lexer knows where it is,
+    /// so the position is taken from it at the point the error escapes rather
+    /// than threaded through every `?` in the expander.
+    pub fn lower_located(&mut self, src: &str) -> Result<Vec<Cmd>, (TexError, u32)> {
         let mut lx = Lexer::new(src);
-        self.block(&mut lx, None)
+        match self.block(&mut lx, None) {
+            Ok(cmds) => Ok(cmds),
+            Err(e) => Err((e, lx.line())),
+        }
     }
 
     /// Lower commands until the input ends, `\end` is seen, or one of `stop` is

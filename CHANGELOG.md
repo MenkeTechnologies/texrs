@@ -12,6 +12,17 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--lsp`: a language server over stdio. Completion and hover answer from
+  `src/corpus.rs` — the same table that generates `docs/reference.html`, so the
+  editor and the site cannot disagree — and diagnostics come from the engine's
+  own lowerer, landing on the line the mouth had reached.
+- `src/corpus.rs`, the primitive reference table, with `tests/corpus_coverage.rs`
+  holding it against the engine's dispatch in both directions: a primitive the
+  engine gained and the corpus never heard of fails, and so does an entry naming
+  a control sequence the engine no longer dispatches.
+- `cargo run --bin gen-docs` regenerates `docs/reference.html` from the corpus,
+  and `tests/docs_generated.rs` fails when the committed page and the generator
+  disagree.
 - `--dump-tokens` and `--disasm`: the mouth's token stream, and the lowered
   fusevm bytecode.
 - Differential fuzzing: `scripts/fuzz_parity.sh` generates seeded random
@@ -24,6 +35,15 @@ All notable changes to texrs are recorded here. The format follows
   known-gap escape hatch.
 - Man pages (`texrs(1)`, `texrsall(1)`), a zsh completion, and the docs site
   (`docs/index.html`, `docs/report.html`, `docs/reference.html`).
+- A JetBrains plugin under `editors/intellij`, ported from the sibling engines':
+  highlighting by category code (the sixteen classes of `tex.web` §207, with the
+  primitives texrs implements told apart from the control sequences a document
+  defines), run configurations over the CLI including `--dump-tokens`,
+  `--disasm` and `--no-cache`, `%` comments, brace matching, spell-checking that
+  reads prose and skips markup, new-file templates that set the category codes
+  INITEX leaves ordinary, and a colour settings page. No LSP client and no
+  debugger, since texrs ships neither server — which is also why this plugin
+  runs on Community editions where its siblings need a paid IDE.
 
 ### Fixed
 
