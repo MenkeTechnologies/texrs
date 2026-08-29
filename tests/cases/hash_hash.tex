@@ -1,0 +1,5 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\outer#1{\def\inner##1{[#1|##1]}}
+\outer{A}
+\message{\inner{B}}
+\end

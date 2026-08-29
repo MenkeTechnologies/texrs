@@ -1,0 +1,18 @@
+[package]
+name = "texrs"
+version = "0.1.0"
+edition = "2021"
+description = "A TeX engine: Knuth's mouth and expander, lowered for a bytecode VM"
+license = "MIT"
+repository = "https://github.com/MenkeTechnologies/texrs"
+readme = "README.md"
+
+[[bin]]
+name = "texrs"
+path = "src/main.rs"
+
+[lib]
+name = "texrs"
+path = "src/lib.rs"
+
+[dependencies]
