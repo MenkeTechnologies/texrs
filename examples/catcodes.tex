@@ -1,0 +1,20 @@
+% Category codes are what a character MEANS, and a document can change them at
+% any point -- this is the reconfigurability that makes TeX's mouth a machine
+% rather than a fixed grammar.
+%
+% INITEX starts with `{` and `}` ordinary, which is why every example here opens
+% by assigning them; plain.tex does the same thing, it is just already done for
+% you by the time a normal document runs.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\show#1{[#1]}
+\message{\show{grouped}}
+% A character can be made a letter, which lets it appear in a control word --
+% the trick plain.tex uses for `@` so internal macros cannot be typed by
+% accident.
+\catcode`\@=11
+\def\intern@l{PRIVATE}
+\message{\intern@l}
+\catcode`\@=12
+% And back to ordinary: now `@` is just a character again.
+\message{at-sign is \string@}
+\end

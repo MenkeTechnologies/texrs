@@ -1,0 +1,17 @@
+% A group undoes what happens inside it. \global says otherwise: the assignment
+% survives the group, which is how a macro reaches out of its own scope.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\colour{OUTER}
+\count0=1
+\begingroup
+    \def\colour{INNER}
+    \count0=2
+    \message{inside: \colour\ \the\count0}
+\endgroup
+\message{after: \colour\ \the\count0}
+\begingroup
+    \gdef\colour{GLOBAL}
+    \global\count0=3
+\endgroup
+\message{global: \colour\ \the\count0}
+\end

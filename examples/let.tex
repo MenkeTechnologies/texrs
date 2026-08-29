@@ -1,0 +1,14 @@
+% \let binds a control sequence to what another one MEANS RIGHT NOW, not to its
+% name. Redefining the original afterwards leaves the copy alone -- which is how
+% a macro package saves a primitive before overriding it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\colour{RED}
+\let\saved\colour
+\def\colour{BLUE}
+\message{\colour, was \saved}
+% \let takes the meaning even when the target is undefined at the time, and a
+% later definition of the target does not reach the copy either.
+\let\copy\notyet
+\def\notyet{DEFINED-LATER}
+\message{\notyet}
+\end

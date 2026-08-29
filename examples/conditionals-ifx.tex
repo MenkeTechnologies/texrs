@@ -1,0 +1,18 @@
+% \ifx compares MEANING, not text: two macros with the same replacement text
+% are \ifx-equal, and a macro is never \ifx-equal to what it expands to.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\one{SAME}
+\def\two{SAME}
+\def\three{OTHER}
+\ifx\one\two \message{one=two}\else \message{one<>two}\fi
+\ifx\one\three \message{one=three}\else \message{one<>three}\fi
+% An undefined control sequence has a meaning too -- "undefined" -- so two of
+% them are \ifx-equal to each other.
+\ifx\notdefinedA\notdefinedB \message{undefined=undefined}\fi
+% \ifcase selects by number, with \or between the arms and an optional \else
+% for everything past the last one.
+\count0=2
+\message{\ifcase\count0 ZERO\or ONE\or TWO\else MANY\fi}
+\count0=9
+\message{\ifcase\count0 ZERO\or ONE\or TWO\else MANY\fi}
+\end

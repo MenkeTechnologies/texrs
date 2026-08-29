@@ -1,0 +1,14 @@
+% \the and \number both print a count register, and the difference is what they
+% do to what follows: \number reads a number, \the reads an internal quantity.
+% Both are expandable, so what they produce can be captured by \edef.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count0=40
+\advance\count0 by 2
+\message{the=\the\count0}
+\message{number=\number\count0}
+% \edef freezes what its body expands to, so the value is the one at definition
+% time -- changing the register afterwards does not change the macro.
+\edef\frozen{\the\count0}
+\count0=99
+\message{frozen=\frozen now=\the\count0}
+\end

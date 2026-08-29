@@ -1,0 +1,5 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\part{PART}
+\expandafter\def\csname built:\part\endcsname{BUILT}
+\message{\csname built:PART\endcsname}
+\end

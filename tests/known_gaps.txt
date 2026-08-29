@@ -37,3 +37,33 @@ param_brace_delim.tex
 #                  parameter list on a trailing `#'. Found by `cargo fuzz run
 #                  lower'; the crashing input is kept as
 #                  fuzz/corpus/lower/crash_param_brace.tex.
+
+group_restores_count.tex
+#                  `\begingroup' scopes the macro table but not the count
+#                  registers: a `\count0=2' inside one survives `\endgroup',
+#                  where tex restores the outer value. The brace form does save
+#                  them -- lower.rs wraps a `{...}' body in Cmd::Group with the
+#                  registers it assigns -- so the two group forms disagree,
+#                  which is the bug. Found by writing examples/globals.tex,
+#                  which is why that example is not in examples/.
+expandafter_toplevel.tex
+#                  `\expandafter' outside an expansion context is not
+#                  expandable: lower.rs dispatches top-level control sequences
+#                  and has no arm for it, so `\expandafter\def\csname...' is
+#                  reported as an undefined control sequence. The expander
+#                  implements it (expand.rs do_expandafter); nothing routes a
+#                  top-level occurrence through it.
+expandafter_brace_arg.tex
+#                  `\expandafter\wrap\expandafter{\inner}' expands `\inner'
+#                  but loses the brace group: texrs prints `[]{INNER}' where tex
+#                  prints `[INNER]', so the held token is put back after the
+#                  expansion rather than in front of the argument it was meant
+#                  to take.
+let_char_token.tex
+#                  `\let\egroup=}' copies a CHARACTER token, and printing one
+#                  through \message must print the character. texrs prints the
+#                  name with the trailing space a multi-letter control word
+#                  gets (tex.web 294's print_cs), so the stream ends
+#                  `INSIDE\egroup ' where tex ends `INSIDE\egroup'. The
+#                  meaning-copy half of \let is in parity; this is the
+#                  char-token half.

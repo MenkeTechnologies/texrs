@@ -178,6 +178,84 @@ fn the_cache_can_be_inspected_and_cleared_from_the_command_line() {
     let _ = std::fs::remove_dir_all(&cache);
 }
 
+/// Every document the binary compiles has to reach the shard, by whichever
+/// route it was compiled — otherwise the cache is a promise kept only for the
+/// paths someone remembered to wire up.
+#[test]
+fn every_document_the_binary_compiles_lands_in_the_shard() {
+    let cache = scratch_cache("all_documents");
+    let examples: Vec<PathBuf> = std::fs::read_dir(repo("examples"))
+        .expect("examples/")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "tex"))
+        .collect();
+    assert!(!examples.is_empty(), "there are examples to run");
+
+    let env = |cmd: &mut Command| -> String {
+        stdout_of(cmd.env("XDG_CACHE_HOME", &cache).env("HOME", &cache))
+    };
+    for doc in &examples {
+        env(texrs().arg(doc));
+    }
+    let stats = env(texrs().arg("--cache-stats"));
+    assert!(
+        stats.contains(&format!("documents: {}", examples.len())),
+        "every one of the {} examples is cached: {stats}",
+        examples.len()
+    );
+
+    // A listing is a compile too, so it caches what it compiled: after
+    // clearing, `--disasm` alone leaves the document in the shard, and the run
+    // that follows is a hit rather than a second entry.
+    env(texrs().arg("--cache-clear"));
+    let doc = &examples[0];
+    env(texrs().arg("--disasm").arg(doc));
+    let after_disasm = env(texrs().arg("--cache-stats"));
+    assert!(
+        after_disasm.contains("documents: 1"),
+        "a --disasm run caches the chunk it compiled: {after_disasm}"
+    );
+    env(texrs().arg(doc));
+    let after_run = env(texrs().arg("--cache-stats"));
+    assert!(
+        after_run.contains("documents: 1"),
+        "and the run that follows reads it rather than adding another: {after_run}"
+    );
+
+    // --no-cache compiles without writing, so a cleared shard stays empty.
+    env(texrs().arg("--cache-clear"));
+    env(texrs().arg("--no-cache").arg(doc));
+    let untouched = env(texrs().arg("--cache-stats"));
+    assert!(
+        untouched.contains("documents: 0"),
+        "--no-cache leaves the shard alone: {untouched}"
+    );
+
+    // A document that does not compile has nothing to cache.
+    let broken = cache.join("broken.tex");
+    std::fs::write(
+        &broken,
+        "\\undefined@sequence{
+",
+    )
+    .unwrap();
+    let out = texrs()
+        .env("XDG_CACHE_HOME", &cache)
+        .env("HOME", &cache)
+        .arg(&broken)
+        .output()
+        .expect("run");
+    assert!(!out.status.success(), "the document is rejected");
+    let still_empty = env(texrs().arg("--cache-stats"));
+    assert!(
+        still_empty.contains("documents: 0"),
+        "a failed compile caches nothing: {still_empty}"
+    );
+
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
 #[test]
 fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
     let out = texrs().arg("--nope").output().expect("run");

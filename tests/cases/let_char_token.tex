@@ -1,0 +1,6 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\let\bgroup={
+\let\egroup=}
+\def\group#1{<#1>}
+\message{\group\bgroup INSIDE\egroup}
+\end
