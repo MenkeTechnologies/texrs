@@ -16,3 +16,4 @@ name = "texrs"
 path = "src/lib.rs"
 
 [dependencies]
+fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache"] }

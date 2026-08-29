@@ -12,16 +12,30 @@
 //! `tex` by `scripts/parity.sh`.
 
 pub mod catcode;
+pub mod compiler;
 pub mod expand;
+pub mod ir;
 pub mod lexer;
+pub mod lower;
+pub mod runtime;
 pub mod token;
 
 pub use expand::{Engine, TexError};
 
-/// Run `src` and return what `\message` wrote, joined the way TeX's terminal
-/// joins it — a space before each message that is not at the start of a line.
+/// Compile `src` to fusevm bytecode and run it on the VM.
+///
+/// This is the whole pipeline: mouth -> expander -> command stream -> fusevm
+/// bytecode -> fusevm. Nothing here interprets TeX; the VM runs the program.
 pub fn run_messages(src: &str) -> Result<String, TexError> {
-    let mut eng = Engine::new();
-    eng.run(src)?;
-    Ok(eng.messages.join(" "))
+    let cmds = crate::lower::Lowerer::new().lower(src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds);
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(msgs.join(" "))
+}
+
+/// The bytecode `src` compiles to, for `--disasm` and for tests that want to
+/// see that a construct really lowered rather than being folded away.
+pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
+    let cmds = crate::lower::Lowerer::new().lower(src)?;
+    Ok(crate::compiler::Compiler::new().compile(&cmds))
 }

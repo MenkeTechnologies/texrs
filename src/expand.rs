@@ -1,10 +1,14 @@
 //! TeX's expander: the half of the engine that turns tokens into other tokens.
 //!
 //! Everything here is "mouth" work in Knuth's sense — `\def`, `\csname`, the
-//! conditionals and `\the` all produce token lists and never build a box. That
-//! separation is the reason this is the tractable half to implement first, and
-//! it is also the half where the time goes in a real document: a macro-heavy
-//! preamble expands far more tokens than it typesets.
+//! conditionals and `\the` all produce token lists and never build a box.
+//!
+//! Two reading contexts exist and the difference is load-bearing. Executing a
+//! file reads from the mouth, which falls through to the source when the
+//! pushed-back list runs dry. Expanding a token list — a `\message` body, an
+//! `\edef` body — must NOT: the list is the whole world, and a scanner that
+//! reaches past it pulls the next line of the FILE into the result. Every
+//! scanner below therefore takes `pending_only` rather than guessing.
 
 use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
@@ -12,24 +16,52 @@ use crate::token::Token;
 use std::collections::HashMap;
 
 /// A `\def`'d macro: the parameter text as written, and the body.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Macro {
-    /// The parameter text between the name and the body — `#1#2`, or a
-    /// delimited form like `#1,#2.`. Stored as tokens because the delimiters
-    /// are arbitrary token sequences, not just characters.
     pub params: Vec<Token>,
     pub body: Vec<Token>,
 }
 
+/// What a control sequence means. `\let` is why this is a value and not just a
+/// macro table: `\let\a=\relax` makes `\a` a primitive, not a macro.
+#[derive(Clone, PartialEq)]
+pub enum Meaning {
+    Macro(Macro),
+    /// A primitive, by its canonical name (`relax`, `par`, …).
+    Primitive(String),
+    /// `\let\a=b` — a character token.
+    Char(char, Cat),
+}
+
+/// One undo record. TeX's save stack restores individual changes at group end
+/// rather than snapshotting the whole state, which is what makes deep grouping
+/// affordable; the same choice is made here.
+enum Save {
+    Cat(char, Cat),
+    Count(i64, Option<i64>),
+    Meaning(String, Option<Meaning>),
+}
+
 pub struct Engine {
     pub cats: CatTable,
-    pub macros: HashMap<String, Macro>,
+    pub meanings: HashMap<String, Meaning>,
     pub count: HashMap<i64, i64>,
-    /// What `\message` has written, in order. The terminal contract is
-    /// space-separated (`tex.web` §1279 adds a space before a message when the
-    /// line is not empty), which the driver reproduces.
     pub messages: Vec<String>,
     pub escape: char,
+    /// One frame per open group; each holds the undo records for that group.
+    groups: Vec<Vec<Save>>,
+    /// Open conditionals, so `\else`/`\fi` know what they close.
+    conds: Vec<CondState>,
+    /// Set by `\global`, cleared by the assignment it prefixes.
+    global: bool,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum CondState {
+    /// The true branch is running; an `\else` here starts skipping.
+    Taken,
+    /// A branch was skipped to get here; `\else` must not re-enter.
+    Done,
 }
 
 #[derive(Debug)]
@@ -37,18 +69,45 @@ pub struct TexError(pub String);
 
 type R<T> = Result<T, TexError>;
 
+/// Every conditional primitive, so the skipper can count nesting correctly.
+/// Missing one here would make a skipped `\ifnum` eat its own `\fi` and unbalance
+/// everything after it.
+const CONDITIONALS: &[&str] = &[
+    "if",
+    "ifcat",
+    "ifnum",
+    "ifdim",
+    "ifodd",
+    "ifvmode",
+    "ifhmode",
+    "ifmmode",
+    "ifinner",
+    "ifvoid",
+    "ifhbox",
+    "ifvbox",
+    "ifx",
+    "ifeof",
+    "iftrue",
+    "iffalse",
+    "ifcase",
+    "ifdefined",
+    "ifcsname",
+];
+
 impl Engine {
     pub fn new() -> Self {
         Self {
             cats: CatTable::new(),
-            macros: HashMap::new(),
+            meanings: HashMap::new(),
             count: HashMap::new(),
             messages: Vec::new(),
             escape: '\\',
+            groups: Vec::new(),
+            conds: Vec::new(),
+            global: false,
         }
     }
 
-    /// Run a source file to `\end` or exhaustion.
     pub fn run(&mut self, src: &str) -> R<()> {
         let mut lx = Lexer::new(src);
         while let Some(tok) = lx.next_token(&self.cats) {
@@ -59,14 +118,116 @@ impl Engine {
         Ok(())
     }
 
+    // ── grouping ─────────────────────────────────────────────────────────
+
+    fn begin_group(&mut self) {
+        self.groups.push(Vec::new());
+    }
+
+    /// Undo this group's assignments, newest first.
+    fn end_group(&mut self) -> R<()> {
+        let Some(frame) = self.groups.pop() else {
+            return Err(TexError("Too many }'s".into()));
+        };
+        for save in frame.into_iter().rev() {
+            match save {
+                Save::Cat(c, cat) => self.cats.set(c, cat),
+                Save::Count(reg, old) => match old {
+                    Some(v) => {
+                        self.count.insert(reg, v);
+                    }
+                    None => {
+                        self.count.remove(&reg);
+                    }
+                },
+                Save::Meaning(name, old) => match old {
+                    Some(m) => {
+                        self.meanings.insert(name, m);
+                    }
+                    None => {
+                        self.meanings.remove(&name);
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Record the current value so the enclosing group can put it back.
+    ///
+    /// `\global` skips every frame, which is what makes `\gdef` survive to the
+    /// outermost level rather than only to the next `}`.
+    fn save(&mut self, rec: Save) {
+        if self.global || self.groups.is_empty() {
+            return;
+        }
+        if let Some(frame) = self.groups.last_mut() {
+            frame.push(rec);
+        }
+    }
+
+    fn set_meaning(&mut self, name: String, m: Meaning) {
+        let old = self.meanings.get(&name).cloned();
+        self.save(Save::Meaning(name.clone(), old));
+        // A global assignment wipes the saved values other groups hold, so no
+        // `}` can restore the old meaning over it.
+        if self.global {
+            for frame in &mut self.groups {
+                frame.retain(|s| !matches!(s, Save::Meaning(n, _) if *n == name));
+            }
+        }
+        self.meanings.insert(name, m);
+    }
+
+    fn set_count(&mut self, reg: i64, val: i64) {
+        let old = self.count.get(&reg).copied();
+        self.save(Save::Count(reg, old));
+        self.count.insert(reg, val);
+    }
+
+    fn set_cat(&mut self, c: char, cat: Cat) {
+        self.save(Save::Cat(c, self.cats.get(c)));
+        self.cats.set(c, cat);
+    }
+
+    // ── execution ────────────────────────────────────────────────────────
+
     /// One token of execution. `Ok(true)` means `\end` was seen.
     fn step(&mut self, lx: &mut Lexer, tok: Token) -> R<bool> {
+        match &tok {
+            Token::Char(_, Cat::BeginGroup) => {
+                self.begin_group();
+                return Ok(false);
+            }
+            Token::Char(_, Cat::EndGroup) => {
+                self.end_group()?;
+                return Ok(false);
+            }
+            Token::Char(..) => return Ok(false),
+            Token::Cs(_) => {}
+        }
         let Token::Cs(name) = &tok else {
             return Ok(false);
         };
+        let name = name.clone();
+        if self.try_expand(lx, &name, false)? {
+            return Ok(false);
+        }
         match name.as_str() {
             "end" => return Ok(true),
-            "def" => self.do_def(lx)?,
+            "def" | "gdef" | "edef" | "xdef" => self.do_def(lx, &name)?,
+            "let" => self.do_let(lx)?,
+            "global" => {
+                self.global = true;
+                let Some(next) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Missing control sequence".into()));
+                };
+                let out = self.step(lx, next);
+                self.global = false;
+                return out;
+            }
+            "begingroup" => self.begin_group(),
+            "endgroup" => self.end_group()?,
             "catcode" => self.do_catcode(lx)?,
             "count" => self.do_count_assign(lx)?,
             "advance" => self.do_arith(lx, Arith::Add)?,
@@ -76,22 +237,253 @@ impl Engine {
                 let text = self.read_group_text(lx)?;
                 self.messages.push(text);
             }
-            "relax" | "par" => {}
+            "relax" | "par" | "ignorespaces" => {}
             other => {
-                if self.macros.contains_key(other) {
-                    self.expand_macro(lx, other)?;
-                } else {
-                    return Err(TexError(format!("Undefined control sequence \\{other}")));
-                }
+                return Err(TexError(format!("Undefined control sequence \\{other}")));
             }
         }
         Ok(false)
     }
 
+    // ── the expandable primitives ────────────────────────────────────────
+
+    /// Handle `name` if it is expandable, returning whether it was.
+    ///
+    /// This is the gullet. Both the executor and `expand_to_text` route through
+    /// it so a conditional behaves identically in a file and inside a `\message`
+    /// body — in TeX they are the same machinery, and splitting them here would
+    /// make `\ifnum` work in one place and not the other.
+    fn try_expand(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<bool> {
+        if let Some(Meaning::Macro(_)) = self.meanings.get(name) {
+            self.expand_macro(lx, name, pending_only)?;
+            return Ok(true);
+        }
+        match name {
+            n if CONDITIONALS.contains(&n) => {
+                self.do_conditional(lx, n, pending_only)?;
+                Ok(true)
+            }
+            "else" => {
+                // Reaching `\else` in running text means the true branch ran;
+                // everything to the matching `\fi` is skipped.
+                match self.conds.pop() {
+                    Some(_) => {
+                        self.skip_to(lx, false, pending_only)?;
+                        Ok(true)
+                    }
+                    None => Err(TexError("Extra \\else".into())),
+                }
+            }
+            "or" => match self.conds.pop() {
+                Some(_) => {
+                    self.skip_to(lx, false, pending_only)?;
+                    Ok(true)
+                }
+                None => Err(TexError("Extra \\or".into())),
+            },
+            "fi" => match self.conds.pop() {
+                Some(_) => Ok(true),
+                None => Err(TexError("Extra \\fi".into())),
+            },
+            "expandafter" => {
+                self.do_expandafter(lx, pending_only)?;
+                Ok(true)
+            }
+            "noexpand" => {
+                // The next token is passed through unexpanded. Reading it and
+                // pushing it back is enough here because nothing re-examines it.
+                if let Some(t) = self.take(lx, pending_only) {
+                    lx.push_back(&[t]);
+                }
+                Ok(true)
+            }
+            "csname" => {
+                let built = self.read_csname(lx, pending_only)?;
+                // An undefined \csname name becomes \relax, per tex.web §372.
+                if !self.meanings.contains_key(&built) {
+                    self.meanings
+                        .insert(built.clone(), Meaning::Primitive("relax".into()));
+                }
+                lx.push_back(&[Token::Cs(built)]);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Read one token from whichever source this context uses.
+    fn take(&mut self, lx: &mut Lexer, pending_only: bool) -> Option<Token> {
+        match pending_only {
+            true => lx.pending.pop(),
+            false => lx.next_token(&self.cats),
+        }
+    }
+
+    /// `\expandafter\A\B` — hold `\A`, expand `\B` once, then put `\A` back.
+    fn do_expandafter(&mut self, lx: &mut Lexer, pending_only: bool) -> R<()> {
+        let Some(held) = self.take(lx, pending_only) else {
+            return Err(TexError("Missing token after \\expandafter".into()));
+        };
+        let Some(next) = self.take(lx, pending_only) else {
+            return Err(TexError("Missing token after \\expandafter".into()));
+        };
+        match &next {
+            Token::Cs(n) => {
+                let n = n.clone();
+                if !self.try_expand(lx, &n, true)? {
+                    lx.push_back(&[next]);
+                }
+            }
+            _ => lx.push_back(&[next]),
+        }
+        lx.push_back(&[held]);
+        Ok(())
+    }
+
+    // ── conditionals ─────────────────────────────────────────────────────
+
+    fn do_conditional(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<()> {
+        let truth = match name {
+            "iftrue" => true,
+            "iffalse" => false,
+            "ifnum" => {
+                let a = self.scan_number(lx, pending_only)?;
+                let rel = self.read_relation(lx, pending_only)?;
+                let b = self.scan_number(lx, pending_only)?;
+                match rel {
+                    '<' => a < b,
+                    '>' => a > b,
+                    _ => a == b,
+                }
+            }
+            "ifodd" => self.scan_number(lx, pending_only)? % 2 != 0,
+            "ifdefined" => match self.take(lx, pending_only) {
+                Some(Token::Cs(n)) => self.meanings.contains_key(&n),
+                _ => false,
+            },
+            "ifx" => {
+                let a = self.take(lx, pending_only);
+                let b = self.take(lx, pending_only);
+                self.meanings_equal(a.as_ref(), b.as_ref())
+            }
+            "if" => {
+                // `\if` compares CHARACTER CODES after expansion; a control
+                // sequence compares equal to any other control sequence.
+                let a = self.expand_one_char(lx, pending_only)?;
+                let b = self.expand_one_char(lx, pending_only)?;
+                a == b
+            }
+            "ifcase" => {
+                let n = self.scan_number(lx, pending_only)?;
+                return self.do_ifcase(lx, n, pending_only);
+            }
+            other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
+        };
+        match truth {
+            true => self.conds.push(CondState::Taken),
+            false => {
+                // Skip to `\else` (run that branch) or `\fi` (run nothing).
+                let hit_else = self.skip_to(lx, true, pending_only)?;
+                if hit_else {
+                    self.conds.push(CondState::Done);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `\ifcase<n>` selects the nth `\or` branch, `\else` being the default.
+    fn do_ifcase(&mut self, lx: &mut Lexer, n: i64, pending_only: bool) -> R<()> {
+        let mut remaining = n;
+        while remaining > 0 {
+            // Skip one branch; landing on `\fi` means no branch matched.
+            let hit_else = self.skip_to(lx, true, pending_only)?;
+            if !hit_else {
+                return Ok(());
+            }
+            remaining -= 1;
+        }
+        self.conds.push(CondState::Taken);
+        Ok(())
+    }
+
+    /// Skip tokens to the matching `\else`/`\or` (when `stop_at_else`) or `\fi`.
+    ///
+    /// Returns whether it stopped at an `\else`/`\or` rather than the `\fi`.
+    /// Nested conditionals are counted so a skipped branch containing its own
+    /// `\if` does not mistake that one's `\fi` for the outer one's.
+    fn skip_to(&mut self, lx: &mut Lexer, stop_at_else: bool, pending_only: bool) -> R<bool> {
+        let mut depth = 0usize;
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Incomplete \\if; all text was ignored".into()));
+            };
+            let Token::Cs(n) = &t else { continue };
+            match n.as_str() {
+                n if CONDITIONALS.contains(&n) => depth += 1,
+                "fi" => match depth {
+                    0 => return Ok(false),
+                    _ => depth -= 1,
+                },
+                "else" | "or" if depth == 0 && stop_at_else => return Ok(true),
+                _ => {}
+            }
+        }
+    }
+
+    fn read_relation(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing = inserted for \\ifnum".into()));
+            };
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char(c, _) if *c == '<' || *c == '>' || *c == '=' => return Ok(*c),
+                _ => return Err(TexError("Missing = inserted for \\ifnum".into())),
+            }
+        }
+    }
+
+    /// `\ifx` equality: same meaning, or the same character token.
+    fn meanings_equal(&self, a: Option<&Token>, b: Option<&Token>) -> bool {
+        match (a, b) {
+            (Some(Token::Cs(x)), Some(Token::Cs(y))) => {
+                match (self.meanings.get(x), self.meanings.get(y)) {
+                    (None, None) => true,
+                    (Some(mx), Some(my)) => mx == my,
+                    _ => false,
+                }
+            }
+            (Some(Token::Char(c1, k1)), Some(Token::Char(c2, k2))) => c1 == c2 && k1 == k2,
+            _ => false,
+        }
+    }
+
+    /// Expand until a character token appears, for `\if`'s code comparison.
+    fn expand_one_char(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing token for \\if".into()));
+            };
+            match &t {
+                Token::Char(c, _) => return Ok(*c),
+                Token::Cs(n) => {
+                    let n = n.clone();
+                    if !self.try_expand(lx, &n, pending_only)? {
+                        // An unexpandable control sequence compares as itself.
+                        return Ok('\u{0}');
+                    }
+                }
+            }
+        }
+    }
+
     // ── definitions ──────────────────────────────────────────────────────
 
-    /// `\def\name<params>{<body>}`.
-    fn do_def(&mut self, lx: &mut Lexer) -> R<()> {
+    /// `\def`, `\gdef`, `\edef`, `\xdef` — the last two expand the body now.
+    fn do_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        let global = matches!(kind, "gdef" | "xdef") || self.global;
+        let expand_body = matches!(kind, "edef" | "xdef");
         let Some(Token::Cs(name)) = lx.next_token(&self.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
@@ -105,12 +497,48 @@ impl Engine {
             }
             params.push(t);
         }
-        let body = self.read_balanced(lx)?;
-        self.macros.insert(name, Macro { params, body });
+        let raw = self.read_balanced(lx)?;
+        let body = match expand_body {
+            true => self.expand_to_tokens(lx, &raw)?,
+            false => raw,
+        };
+        let was = std::mem::replace(&mut self.global, global);
+        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        self.global = was;
         Ok(())
     }
 
-    /// Read to the matching end-group, the opening brace already consumed.
+    /// `\let\a=\b` — `\a` takes `\b`'s CURRENT meaning, not a reference to it.
+    fn do_let(&mut self, lx: &mut Lexer) -> R<()> {
+        let Some(Token::Cs(name)) = lx.next_token(&self.cats) else {
+            return Err(TexError("Missing control sequence inserted".into()));
+        };
+        // An optional `=` and one optional space, then the source token.
+        let mut src = None;
+        while let Some(t) = lx.next_token(&self.cats) {
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char('=', _) => continue,
+                other => {
+                    src = Some(other.clone());
+                    break;
+                }
+            }
+        }
+        let Some(src) = src else {
+            return Err(TexError("Missing token for \\let".into()));
+        };
+        let meaning = match &src {
+            Token::Char(c, k) => Meaning::Char(*c, *k),
+            Token::Cs(n) => match self.meanings.get(n) {
+                Some(m) => m.clone(),
+                None => Meaning::Primitive(n.clone()),
+            },
+        };
+        self.set_meaning(name, meaning);
+        Ok(())
+    }
+
     fn read_balanced(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         let mut depth = 1usize;
         let mut out = Vec::new();
@@ -132,40 +560,31 @@ impl Engine {
 
     // ── macro calls ──────────────────────────────────────────────────────
 
-    /// Bind the arguments a macro's parameter text calls for, then push the
-    /// substituted body back in front of the input.
-    ///
-    /// Undelimited (`#1`) takes one balanced group or a single token; delimited
-    /// (`#1,`) takes everything up to the next occurrence of the delimiter. Both
-    /// are `tex.web` §392's `macro_call`, and both are common enough in real
-    /// documents that supporting only the first would be useless.
-    fn expand_macro(&mut self, lx: &mut Lexer, name: &str) -> R<()> {
-        let m = self.macros[name].clone();
-        let args = self.match_params(lx, &m.params)?;
+    fn expand_macro(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<()> {
+        let Some(Meaning::Macro(m)) = self.meanings.get(name).cloned() else {
+            return Err(TexError(format!("\\{name} is not a macro")));
+        };
+        let args = self.match_params(lx, &m.params, pending_only)?;
         let mut out = Vec::with_capacity(m.body.len());
         let mut i = 0;
         while i < m.body.len() {
             match &m.body[i] {
-                Token::Char(_, Cat::Param) => {
-                    // `#1`..`#9` substitutes; `##` is a literal `#`.
-                    match m.body.get(i + 1) {
-                        Some(Token::Char(d, _)) if d.is_ascii_digit() && *d != '0' => {
-                            let idx = (*d as u8 - b'1') as usize;
-                            if let Some(a) = args.get(idx) {
-                                out.extend(a.iter().cloned());
-                            }
-                            i += 2;
-                            continue;
+                Token::Char(_, Cat::Param) => match m.body.get(i + 1) {
+                    Some(Token::Char(d, _)) if d.is_ascii_digit() && *d != '0' => {
+                        let idx = (*d as u8 - b'1') as usize;
+                        if let Some(a) = args.get(idx) {
+                            out.extend(a.iter().cloned());
                         }
-                        Some(Token::Char(_, Cat::Param)) => {
-                            out.push(m.body[i + 1].clone());
-                            i += 2;
-                            continue;
-                        }
-                        _ => {}
+                        i += 2;
+                        continue;
                     }
-                    out.push(m.body[i].clone());
-                }
+                    Some(Token::Char(_, Cat::Param)) => {
+                        out.push(m.body[i + 1].clone());
+                        i += 2;
+                        continue;
+                    }
+                    _ => out.push(m.body[i].clone()),
+                },
                 t => out.push(t.clone()),
             }
             i += 1;
@@ -174,30 +593,32 @@ impl Engine {
         Ok(())
     }
 
-    fn match_params(&mut self, lx: &mut Lexer, params: &[Token]) -> R<Vec<Vec<Token>>> {
+    fn match_params(
+        &mut self,
+        lx: &mut Lexer,
+        params: &[Token],
+        pending_only: bool,
+    ) -> R<Vec<Vec<Token>>> {
         let mut args: Vec<Vec<Token>> = Vec::new();
         let mut i = 0;
         while i < params.len() {
-            let is_param = matches!(params[i], Token::Char(_, Cat::Param));
-            if !is_param {
-                // Literal text in the parameter text must match the input.
+            if !matches!(params[i], Token::Char(_, Cat::Param)) {
                 let want = params[i].clone();
-                let got = lx.next_token(&self.cats);
+                let got = self.take(lx, pending_only);
                 if got.as_ref() != Some(&want) {
                     return Err(TexError("Use of macro doesn't match its definition".into()));
                 }
                 i += 1;
                 continue;
             }
-            // `#n` — look at what follows to decide delimited vs undelimited.
             let delim: Vec<Token> = params[i + 2..]
                 .iter()
                 .take_while(|t| !matches!(t, Token::Char(_, Cat::Param)))
                 .cloned()
                 .collect();
             let arg = match delim.is_empty() {
-                true => self.read_undelimited(lx)?,
-                false => self.read_delimited(lx, &delim)?,
+                true => self.read_undelimited(lx, pending_only)?,
+                false => self.read_delimited(lx, &delim, pending_only)?,
             };
             args.push(arg);
             i += 2 + delim.len();
@@ -205,31 +626,56 @@ impl Engine {
         Ok(args)
     }
 
-    /// One balanced group (braces stripped) or one token.
-    fn read_undelimited(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+    fn read_undelimited(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Vec<Token>> {
         loop {
-            let Some(t) = lx.next_token(&self.cats) else {
+            let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError(
                     "Paragraph ended before argument was complete".into(),
                 ));
             };
             if t.is_space() {
-                continue; // Leading spaces before an argument are skipped.
+                continue;
             }
             return match t {
-                Token::Char(_, Cat::BeginGroup) => self.read_balanced(lx),
+                Token::Char(_, Cat::BeginGroup) => self.read_balanced_from(lx, pending_only),
                 other => Ok(vec![other]),
             };
         }
     }
 
-    /// Everything up to the next occurrence of `delim`, brace-aware. A single
-    /// group wrapping the whole argument has its braces stripped, as TeX does.
-    fn read_delimited(&mut self, lx: &mut Lexer, delim: &[Token]) -> R<Vec<Token>> {
+    /// `read_balanced` for whichever source this context uses.
+    fn read_balanced_from(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Vec<Token>> {
+        if !pending_only {
+            return self.read_balanced(lx);
+        }
+        let mut depth = 1usize;
+        let mut out = Vec::new();
+        while let Some(t) = lx.pending.pop() {
+            match &t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(out);
+                    }
+                }
+                _ => {}
+            }
+            out.push(t);
+        }
+        Err(TexError("Runaway argument".into()))
+    }
+
+    fn read_delimited(
+        &mut self,
+        lx: &mut Lexer,
+        delim: &[Token],
+        pending_only: bool,
+    ) -> R<Vec<Token>> {
         let mut out: Vec<Token> = Vec::new();
         let mut depth = 0usize;
         loop {
-            let Some(t) = lx.next_token(&self.cats) else {
+            let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError(
                     "Paragraph ended before argument was complete".into(),
                 ));
@@ -242,10 +688,10 @@ impl Engine {
             out.push(t);
             if depth == 0 && out.len() >= delim.len() && out[out.len() - delim.len()..] == *delim {
                 out.truncate(out.len() - delim.len());
-                let stripped = out.len() >= 2
+                let wrapped = out.len() >= 2
                     && matches!(out[0], Token::Char(_, Cat::BeginGroup))
                     && matches!(out[out.len() - 1], Token::Char(_, Cat::EndGroup));
-                if stripped {
+                if wrapped {
                     out.remove(0);
                     out.pop();
                 }
@@ -253,26 +699,25 @@ impl Engine {
             }
         }
     }
+
     // ── assignments ──────────────────────────────────────────────────────
 
-    /// `\catcode<number>=<number>`.
     fn do_catcode(&mut self, lx: &mut Lexer) -> R<()> {
-        let ch = self.read_number(lx)?;
+        let ch = self.scan_number(lx, false)?;
         self.skip_equals(lx)?;
-        let val = self.read_number(lx)?;
+        let val = self.scan_number(lx, false)?;
         let (Some(c), Some(cat)) = (char::from_u32(ch as u32), cat_from_i64(val)) else {
             return Err(TexError("Invalid code".into()));
         };
-        self.cats.set(c, cat);
+        self.set_cat(c, cat);
         Ok(())
     }
 
-    /// `\count<n>=<number>`.
     fn do_count_assign(&mut self, lx: &mut Lexer) -> R<()> {
-        let reg = self.read_number(lx)?;
+        let reg = self.scan_number(lx, false)?;
         self.skip_equals(lx)?;
-        let val = self.read_number(lx)?;
-        self.count.insert(reg, val);
+        let val = self.scan_number(lx, false)?;
+        self.set_count(reg, val);
         Ok(())
     }
 
@@ -283,28 +728,22 @@ impl Engine {
         if what != "count" {
             return Err(TexError(format!("Unsupported register \\{what}")));
         }
-        let reg = self.read_number(lx)?;
+        let reg = self.scan_number(lx, false)?;
         self.skip_by(lx)?;
-        let val = self.read_number(lx)?;
+        let val = self.scan_number(lx, false)?;
         let cur = *self.count.get(&reg).unwrap_or(&0);
         let next = match op {
             Arith::Add => cur + val,
             Arith::Mul => cur * val,
-            // TeX truncates toward zero and refuses a zero divisor.
             Arith::Div => match val {
                 0 => return Err(TexError("Arithmetic overflow".into())),
                 d => cur / d,
             },
         };
-        self.count.insert(reg, next);
+        self.set_count(reg, next);
         Ok(())
     }
 
-    /// The optional `by` keyword before an arithmetic operand.
-    ///
-    /// `\advance\count0 by 5` puts a space before the keyword, and TeX's number
-    /// scanner skips spaces wherever it looks for one — so the keyword match has
-    /// to skip them too, or `by` is read as the number and the assignment fails.
     fn skip_by(&mut self, lx: &mut Lexer) -> R<()> {
         while let Some(t) = lx.next_token(&self.cats) {
             if !t.is_space() {
@@ -334,7 +773,7 @@ impl Engine {
                 t if t.is_space() => continue,
                 Token::Char('=', _) => return Ok(()),
                 other => {
-                    lx.push_back(&[other.clone()]);
+                    lx.push_back(std::slice::from_ref(other));
                     return Ok(());
                 }
             }
@@ -342,32 +781,10 @@ impl Engine {
         Ok(())
     }
 
-    /// An integer constant, optionally signed, optionally a backtick character
-    /// code (`` `\{ ``), optionally `\count<n>`.
-    fn read_number(&mut self, lx: &mut Lexer) -> R<i64> {
-        self.scan_number(lx, false)
-    }
-
-    /// The same scanner, restricted to already-expanded tokens.
-    ///
-    /// `\the\count0` inside a `\message` is read from the pushed-back token
-    /// list, and the digit is the LAST of them. A scanner that then asks the
-    /// mouth for one more token to test for a further digit pulls the newline
-    /// after the closing brace out of the FILE and renders it into the message
-    /// — `a=7 ` where tex writes `a=7`. During expansion the token list is the
-    /// whole world, so running out of it ends the number.
-    fn read_number_pending(&mut self, lx: &mut Lexer) -> R<i64> {
-        self.scan_number(lx, true)
-    }
-
     fn scan_number(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
-        let take = |lx: &mut Lexer, cats: &CatTable| match pending_only {
-            true => lx.pending.pop(),
-            false => lx.next_token(cats),
-        };
         let mut sign = 1i64;
         let mut cur = loop {
-            let Some(t) = take(lx, &self.cats) else {
+            let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
@@ -380,25 +797,25 @@ impl Engine {
                 other => break other.clone(),
             }
         };
-        // `` `x `` and `` `\x `` are the character code of x.
         if matches!(cur, Token::Char('`', _)) {
-            let Some(t) = take(lx, &self.cats) else {
+            let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing number".into()));
             };
             let code = match t {
                 Token::Char(c, _) => u32::from(c) as i64,
-                Token::Cs(name) => name
-                    .chars()
-                    .next()
-                    .map(|c| u32::from(c) as i64)
-                    .unwrap_or(0),
+                Token::Cs(n) => n.chars().next().map(|c| u32::from(c) as i64).unwrap_or(0),
             };
             return Ok(sign * code);
         }
         if let Token::Cs(name) = &cur {
+            let name = name.clone();
             if name == "count" {
                 let reg = self.scan_number(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
+            }
+            // A macro in numeric position expands and the scan resumes.
+            if self.try_expand(lx, &name, pending_only)? {
+                return Ok(sign * self.scan_number(lx, pending_only)?);
             }
             return Err(TexError(format!("Missing number, found \\{name}")));
         }
@@ -407,11 +824,11 @@ impl Engine {
             match &cur {
                 Token::Char(c, _) if c.is_ascii_digit() => digits.push(*c),
                 other => {
-                    lx.push_back(&[other.clone()]);
+                    lx.push_back(std::slice::from_ref(other));
                     break;
                 }
             }
-            match take(lx, &self.cats) {
+            match self.take(lx, pending_only) {
                 Some(t) => cur = t,
                 None => break,
             }
@@ -425,9 +842,8 @@ impl Engine {
             .map_err(|_| TexError("Number too big".into()))
     }
 
-    // ── \message ─────────────────────────────────────────────────────────
+    // ── text production ──────────────────────────────────────────────────
 
-    /// Read `{...}` and expand it to the text `\message` prints.
     fn read_group_text(&mut self, lx: &mut Lexer) -> R<String> {
         loop {
             let Some(t) = lx.next_token(&self.cats) else {
@@ -445,32 +861,50 @@ impl Engine {
         self.expand_to_text(lx, &body)
     }
 
-    /// Fully expand a token list and render it, which is what `\message` and
-    /// `\edef` both need.
+    /// Fully expand a token list to the tokens it produces.
+    fn expand_to_tokens(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<Vec<Token>> {
+        let saved: Vec<Token> = std::mem::take(&mut lx.pending);
+        lx.push_back(toks);
+        let mut out = Vec::new();
+        let mut steps = 0usize;
+        while let Some(t) = lx.pending.pop() {
+            steps += 1;
+            if steps > 200_000 {
+                return Err(TexError("TeX capacity exceeded".into()));
+            }
+            match &t {
+                Token::Cs(name) => {
+                    let name = name.clone();
+                    if !self.try_expand(lx, &name, true)? {
+                        out.push(t);
+                    }
+                }
+                _ => out.push(t),
+            }
+        }
+        lx.pending = saved;
+        Ok(out)
+    }
+
+    /// Fully expand a token list and render it, for `\message`.
     fn expand_to_text(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<String> {
         let saved: Vec<Token> = std::mem::take(&mut lx.pending);
         lx.push_back(toks);
         let mut out = String::new();
-        let depth_guard = 100_000usize;
         let mut steps = 0usize;
         while let Some(t) = lx.pending.pop() {
             steps += 1;
-            if steps > depth_guard {
+            if steps > 200_000 {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
-                Token::Cs(name) if self.macros.contains_key(name) => {
-                    self.expand_macro(lx, name)?;
-                }
-                Token::Cs(name) if name == "the" => {
-                    let n = self.read_the(lx)?;
+                Token::Cs(name) if name == "the" || name == "number" => {
+                    let n = self.read_the(lx, name == "number")?;
                     out.push_str(&n);
                 }
                 Token::Cs(name) if name == "string" => {
                     // `\string` is `sprint_cs` (tex.web §262), NOT `print_cs`:
-                    // it writes the escape and the name and stops. `print_cs`'s
-                    // trailing space after a multi-letter name is for showing a
-                    // token, so `\string\foo` is `\foo` and not `\foo `.
+                    // no trailing space after a multi-letter name.
                     if let Some(next) = lx.pending.pop() {
                         out.push_str(&match &next {
                             Token::Cs(n) => format!("{}{n}", self.escape),
@@ -478,9 +912,11 @@ impl Engine {
                         });
                     }
                 }
-                Token::Cs(name) if name == "csname" => {
-                    let built = self.read_csname(lx)?;
-                    lx.push_back(&[Token::Cs(built)]);
+                Token::Cs(name) => {
+                    let name = name.clone();
+                    if !self.try_expand(lx, &name, true)? {
+                        out.push_str(&t.to_text(self.escape));
+                    }
                 }
                 other => out.push_str(&other.to_text(self.escape)),
             }
@@ -489,30 +925,36 @@ impl Engine {
         Ok(out)
     }
 
-    /// `\the\count<n>` — the only `\the` this milestone answers.
-    fn read_the(&mut self, lx: &mut Lexer) -> R<String> {
+    /// `\the\count<n>`, and `\number<n>` which takes a bare number.
+    fn read_the(&mut self, lx: &mut Lexer, bare: bool) -> R<String> {
+        if bare {
+            return Ok(self.scan_number(lx, true)?.to_string());
+        }
         let Some(Token::Cs(what)) = lx.pending.pop() else {
             return Err(TexError("You can't use \\the here".into()));
         };
         if what != "count" {
             return Err(TexError(format!("Unsupported \\the\\{what}")));
         }
-        let reg = self.read_number_pending(lx)?;
+        let reg = self.scan_number(lx, true)?;
         Ok(self.count.get(&reg).unwrap_or(&0).to_string())
     }
 
-    /// `\csname ... \endcsname` builds a control sequence name from expanded text.
-    fn read_csname(&mut self, lx: &mut Lexer) -> R<String> {
+    fn read_csname(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
         let mut name = String::new();
         loop {
-            let Some(t) = lx.pending.pop() else {
+            let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing \\endcsname inserted".into()));
             };
             match &t {
                 Token::Cs(n) if n == "endcsname" => return Ok(name),
-                Token::Cs(n) if self.macros.contains_key(n) => self.expand_macro(lx, n)?,
                 Token::Char(c, _) => name.push(*c),
-                Token::Cs(n) => return Err(TexError(format!("Missing \\endcsname before \\{n}"))),
+                Token::Cs(n) => {
+                    let n = n.clone();
+                    if !self.try_expand(lx, &n, pending_only)? {
+                        return Err(TexError(format!("Missing \\endcsname before \\{n}")));
+                    }
+                }
             }
         }
     }
@@ -527,5 +969,96 @@ enum Arith {
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The frontend surface `crate::lower` drives.
+///
+/// Lowering needs the expander's compile-time half — the macro table, the
+/// catcode table, and the scanners — without its executor. These are thin,
+/// deliberately named wrappers so the lowering pass reads as a compiler rather
+/// than as a second interpreter reaching into private state.
+impl Engine {
+    /// `\def`/`\gdef` at compile time: it changes how the rest of the file reads.
+    pub fn compile_time_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        self.do_def(lx, kind)
+    }
+
+    /// `\catcode` at compile time, for the same reason.
+    pub fn compile_time_catcode(&mut self, lx: &mut Lexer) -> R<()> {
+        self.do_catcode(lx)
+    }
+
+    pub fn scan_number_file(&mut self, lx: &mut Lexer) -> R<i64> {
+        self.scan_number(lx, false)
+    }
+
+    pub fn scan_number_pending(&mut self, lx: &mut Lexer) -> R<i64> {
+        self.scan_number(lx, true)
+    }
+
+    pub fn skip_equals_file(&mut self, lx: &mut Lexer) -> R<()> {
+        self.skip_equals(lx)
+    }
+
+    pub fn skip_by_file(&mut self, lx: &mut Lexer) -> R<()> {
+        self.skip_by(lx)
+    }
+
+    pub fn read_relation_file(&mut self, lx: &mut Lexer) -> R<char> {
+        self.read_relation(lx, false)
+    }
+
+    pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: &str) -> R<()> {
+        self.expand_macro(lx, name, false)
+    }
+
+    pub fn expand_macro_pending(&mut self, lx: &mut Lexer, name: &str) -> R<()> {
+        self.expand_macro(lx, name, true)
+    }
+
+    /// Read `{...}` after `\message`, unexpanded — the pieces are split by the
+    /// lowering pass, which has to keep `\the` as a run-time read.
+    pub fn read_message_body(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                return Err(TexError("Missing { inserted".into()));
+            };
+            if t.is_space() {
+                continue;
+            }
+            if !matches!(t, Token::Char(_, Cat::BeginGroup)) {
+                return Err(TexError("Missing { inserted".into()));
+            }
+            break;
+        }
+        self.read_balanced(lx)
+    }
+}
+
+/// Compile-time control the lowering pass needs: grouping and `\let`, both of
+/// which act on the macro table and so belong to the frontend, not the VM.
+impl Engine {
+    pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {
+        self.do_let(lx)
+    }
+    pub fn compile_time_begin_group(&mut self) {
+        self.begin_group();
+    }
+    pub fn compile_time_end_group(&mut self) -> R<()> {
+        self.end_group()
+    }
+    pub fn set_global_prefix(&mut self, on: bool) {
+        self.global = on;
+    }
+    /// `\ifx` equality over the CURRENT meanings — decidable while lowering,
+    /// because a macro's meaning is a frontend fact and not VM state.
+    pub fn ifx_equal(&mut self, lx: &mut Lexer) -> R<bool> {
+        let a = lx.next_token(&self.cats);
+        let b = lx.next_token(&self.cats);
+        Ok(self.meanings_equal(a.as_ref(), b.as_ref()))
+    }
+    pub fn take_file(&mut self, lx: &mut Lexer) -> Option<Token> {
+        lx.next_token(&self.cats)
     }
 }

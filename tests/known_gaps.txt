@@ -1,0 +1,15 @@
+# Cases that do NOT match real tex yet, one per line, with the reason.
+# BUGS.md explains each class. This file is a BASELINE, not an excuse: the gate
+# fails on any case that diverges and is NOT listed here, and it also fails on a
+# listed case that has started PASSING -- so the list cannot quietly go stale.
+cond_ifcase.tex        conditional inside a \message body
+cond_ifnum.tex         conditional inside a \message body
+cond_ifodd.tex         conditional inside a \message body
+cond_iftrue_false.tex  conditional inside a \message body
+cond_ifx.tex           conditional inside a \message body
+cond_nested.tex        conditional inside a \message body
+csname.tex             \csname inside a \message body
+csname_from_macro.tex  \csname inside a \message body
+count_group_restore.tex  a count register is a VM slot; group restore is runtime
+edef_expands_now.tex   \edef must freeze a slot value at definition time
+expandafter.tex        \expandafter not handled by the lowering pass
