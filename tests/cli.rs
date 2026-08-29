@@ -1,0 +1,203 @@
+//! The driver's own contract: what the flags do, and that the three places a
+//! user meets them agree.
+//!
+//! The binary, the zsh completion and the man page each list the options. They
+//! drift silently — a flag added to one and not the others is a flag nobody
+//! discovers — so they are compared here rather than by remembering to.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn texrs() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_texrs"))
+}
+
+fn repo(rel: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)
+}
+
+/// A cache of this test's own, so a run never reads or writes the one the
+/// user's own texrs runs are using.
+fn scratch_cache(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("texrs_cli_{}_{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn stdout_of(cmd: &mut Command) -> String {
+    let out = cmd.output().expect("run texrs");
+    assert!(
+        out.status.success(),
+        "texrs failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Every option the binary accepts, read from its own usage text — the list the
+/// other two are held against.
+fn options_from_usage() -> Vec<String> {
+    let usage = stdout_of(texrs().arg("--help"));
+    let mut out: Vec<String> = Vec::new();
+    for line in usage.lines() {
+        for word in line.split_whitespace() {
+            let word = word.trim_end_matches(',');
+            if word.starts_with("--") && word.len() > 2 {
+                out.push(word.to_string());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[test]
+fn the_completion_offers_every_option_the_binary_takes() {
+    let completion = std::fs::read_to_string(repo("completions/_texrs")).expect("completions");
+    for opt in options_from_usage() {
+        // A flag is offered either on its own (`--disasm[…]`) or inside a brace
+        // group with its short form (`{-h,--help}'[…]`), so what is looked for
+        // is the flag followed by anything that cannot continue it.
+        let offered = completion.match_indices(&opt).any(|(at, _)| {
+            completion[at + opt.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
+        });
+        assert!(offered, "the zsh completion does not offer {opt}");
+    }
+    // And offers nothing the binary would refuse.
+    for line in completion.lines() {
+        let Some(start) = line.find("'--") else {
+            continue;
+        };
+        let rest = &line[start + 1..];
+        let flag: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        let out = texrs().arg(&flag).arg("--help").output().expect("run");
+        assert!(
+            out.status.success(),
+            "the completion offers {flag}, which the binary refuses"
+        );
+    }
+}
+
+#[test]
+fn the_man_page_documents_every_option_the_binary_takes() {
+    let man = std::fs::read_to_string(repo("man/man1/texrs.1")).expect("man page");
+    // Options are escaped in roff (`\-\-disasm`), so the hyphens are unescaped
+    // before looking for them.
+    let plain = man.replace("\\-", "-");
+    for opt in options_from_usage() {
+        assert!(plain.contains(&opt), "the man page does not document {opt}");
+    }
+}
+
+#[test]
+fn a_document_runs_the_same_with_the_cache_and_without_it() {
+    let cache = scratch_cache("same");
+    let doc = cache.join("doc.tex");
+    std::fs::write(
+        &doc,
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\message{FROM-THE-CACHE}\n\\end\n",
+    )
+    .unwrap();
+
+    let cold = stdout_of(
+        texrs()
+            .env("XDG_CACHE_HOME", &cache)
+            .env("HOME", &cache)
+            .arg(&doc),
+    );
+    assert!(cold.contains("FROM-THE-CACHE"), "{cold}");
+
+    // The second run reads the cache; the third is told not to. All three print
+    // the same thing, which is the only promise a cache may make.
+    let warm = stdout_of(
+        texrs()
+            .env("XDG_CACHE_HOME", &cache)
+            .env("HOME", &cache)
+            .arg(&doc),
+    );
+    let uncached = stdout_of(
+        texrs()
+            .env("XDG_CACHE_HOME", &cache)
+            .env("HOME", &cache)
+            .arg("--no-cache")
+            .arg(&doc),
+    );
+    assert_eq!(cold, warm, "a cached run prints what the cold run printed");
+    assert_eq!(cold, uncached, "and so does one that skips the cache");
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+#[test]
+fn the_cache_can_be_inspected_and_cleared_from_the_command_line() {
+    let cache = scratch_cache("stats");
+    let doc = cache.join("doc.tex");
+    std::fs::write(
+        &doc,
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\message{X}\n\\end\n",
+    )
+    .unwrap();
+    let env = |cmd: &mut Command| -> String {
+        stdout_of(cmd.env("XDG_CACHE_HOME", &cache).env("HOME", &cache))
+    };
+
+    // Nothing has run, so the cache holds nothing but still says where it is.
+    let before = env(texrs().arg("--cache-stats"));
+    assert!(before.contains("documents: 0"), "{before}");
+    assert!(before.contains("scripts.rkyv"), "{before}");
+
+    env(texrs().arg(&doc));
+    let after = env(texrs().arg("--cache-stats"));
+    assert!(
+        after.contains("documents: 1"),
+        "the run was cached: {after}"
+    );
+
+    // Clearing empties it, and the next run fills it again.
+    let cleared = env(texrs().arg("--cache-clear"));
+    assert!(cleared.contains("cleared"), "{cleared}");
+    let empty = env(texrs().arg("--cache-stats"));
+    assert!(empty.contains("documents: 0"), "{empty}");
+
+    // Turned off, it reports itself off rather than pretending to be empty.
+    let off = stdout_of(
+        texrs()
+            .env("XDG_CACHE_HOME", &cache)
+            .env("HOME", &cache)
+            .env("TEXRS_CACHE", "0")
+            .arg("--cache-stats"),
+    );
+    assert!(off.contains("cache: off"), "{off}");
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+#[test]
+fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
+    let out = texrs().arg("--nope").output().expect("run");
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("unknown option"),
+        "{:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let out = texrs().arg("/no/such/file.tex").output().expect("run");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("/no/such/file.tex"), "{err}");
+
+    // No arguments at all prints the usage rather than doing nothing.
+    let out = texrs().output().expect("run");
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("usage: texrs"),
+        "no usage on stderr"
+    );
+}

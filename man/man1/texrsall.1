@@ -1,0 +1,325 @@
+.\" texrsall(1) — comprehensive all-in-one man page for texrs
+.\" Modeled after zshall(1): every section of the reference in one document.
+.\" Render with:  man -l man/man1/texrsall.1
+.\" Install:      cp man/man1/texrsall.1 /usr/local/share/man/man1/
+.TH TEXRSALL 1 "2026" "texrs 0.1.0" "User Commands"
+.SH NAME
+texrsall \- the texrs comprehensive reference (invocation, the mouth, the
+expander, lowering, the bytecode VM, parity harnesses, gaps)
+.SH OVERVIEW
+This is the all\-in\-one
+.B texrs
+manual, modeled on
+.BR zshall (1).
+It concatenates the major sections of the reference into a single page so you
+can grep with `/':
+.RS 2
+.PP
+.B 1.  INVOCATION
+.RB "\(em " "running a file, introspection flags"
+.br
+.B 2.  THE MOUTH
+.RB "\(em " "category codes, the line scanner, ^^X"
+.br
+.B 3.  THE EXPANDER
+.RB "\(em " "\edef, \ecsname, \ethe, the conditionals"
+.br
+.B 4.  REGISTERS
+.RB "\(em " "\ecount, arithmetic, groups and the save stack"
+.br
+.B 5.  LOWERING
+.RB "\(em " "what happens at compile time and what does not"
+.br
+.B 6.  BYTECODE VM
+.RB "\(em " "fusevm slots, branches, the \emessage host calls"
+.br
+.B 7.  PARITY
+.RB "\(em " "the differential corpus and the fuzzers"
+.br
+.B 8.  GAPS
+.br
+.B 9.  EXIT STATUS
+.br
+.B 10. FILES
+.br
+.B 11. EXAMPLES
+.RE
+.PP
+For a shorter quick\-reference page see
+.BR texrs (1).
+.SH "1.  INVOCATION"
+.B texrs
+takes one file and any of the introspection flags:
+.RS
+.nf
+texrs FILE.tex          run it, print the \emessage stream
+texrs \-\-dump\-tokens F   print the mouth's token stream, then exit
+texrs \-\-disasm F        print the lowered fusevm bytecode, then exit
+texrs \-\-help            print the option grammar
+texrs \-\-version         print the version banner
+.fi
+.RE
+.PP
+Output is written the way tex writes it on the terminal \(em the opened file
+name, the messages, and the closing paren:
+.RS
+.nf
+(./hello.tex HELLO\-WORLD )
+.fi
+.RE
+.PP
+That line is the parity contract for this milestone.  The engine banner tex
+prints above it is deliberately not reproduced: texrs does not claim to be TeX
+Live.
+.SH "2.  THE MOUTH"
+The mouth turns bytes into tokens under the category\-code table
+.RB ( tex.web
+\(sc303).  A character's category is not fixed by the language: it is a
+mutable table entry, so
+.B \ecatcode`\e{=1
+is what makes
+.B {
+a group opener, and INITEX \(em which is what texrs starts from \(em leaves it
+an ordinary character.  A file that wants groups says so first.
+.PP
+The scanner is a three\-state machine per line:
+.B N
+at the start of a line,
+.B M
+in the middle,
+.B S
+while skipping blanks.  The states are not decoration.  They are what makes a
+blank line a
+.BR \epar ,
+what collapses a run of spaces to one, and what makes the space after a
+control word vanish while the space after a control symbol stays.
+.PP
+.B ^^X
+notation
+.RB ( tex.web
+\(sc352) is carried: a superscript character twice, then one character,
+denotes a control character \(em which is how a line end gets written inside a
+macro body.
+.SH "3.  THE EXPANDER"
+.TP
+.B \edef \egdef \exdef \eedef
+Macro definition, with undelimited
+.RB ( #1 )
+and delimited
+.RB ( \(dq\edef\epair#1,#2.\(dq )
+parameters, and
+.B ##
+for a literal parameter character.
+.B \eedef
+and
+.B \exdef
+expand the body at definition time;
+.B \egdef
+and
+.B \exdef
+are global.
+.TP
+.B \elet
+.B \ea
+takes
+.BR \eb 's
+CURRENT meaning, not a reference to it.
+.TP
+.B \ecsname\eendcsname
+Builds a control sequence out of the characters between them, so a macro can
+name another macro.
+.TP
+.B \estring, \ethe, \enumber
+.B \estring
+prints a control sequence as text;
+.B \ethe
+and
+.B \enumber
+print a register's value.
+.TP
+.B \eexpandafter, \enoexpand
+One token of lookahead, and one token of suppression.
+.TP
+.B conditionals
+.BR \eiftrue ,
+.BR \eiffalse ,
+.BR \eifnum ,
+.BR \eifodd ,
+.BR \eifx ,
+.B \eifcase
+with
+.BR \eor ,
+plus
+.B \eelse
+and
+.BR \efi ,
+nested, and usable inside a
+.B \emessage
+body.
+.SH "4.  REGISTERS"
+TeX has exactly 256
+.B \ecount
+registers
+.RB ( tex.web
+\(sc236) and texrs maps them onto VM slots 0..255, so a register read is an
+array index.
+.B \eadvance ,
+.B \emultiply
+and
+.B \edivide
+do the arithmetic;
+.B \edivide
+truncates toward zero, as TeX's does.
+.PP
+A brace group scopes the macro table AND the registers written inside it: the
+lowered body is wrapped in save/restore for exactly the registers it assigns.
+.B \eglobal
+opts out.
+.SH "5.  LOWERING"
+.B \ecatcode
+and
+.B \edef
+take effect at COMPILE time \(em they change how the rest of the file reads,
+so they cannot be deferred to run time.  Everything whose value is only known
+when the program runs becomes a command in the intermediate stream.
+.PP
+A conditional is the interesting case.  A tree\-walker decides the branch as it
+goes; a compiler cannot, because the registers it tests are run\-time state.
+So both arms are collected as token runs, lowered recursively, and emitted as a
+real branch.  That is what makes
+.B \eifnum
+compile to a comparison plus a jump instead of a Rust
+.BR if .
+A conditional whose truth depends only on the macro table
+.RB ( \eiftrue ,
+.BR \eifx )
+is folded while lowering, because there is nothing left for the VM to test.
+.SH "6.  BYTECODE VM"
+texrs is a
+.B fusevm
+frontend, not an interpreter:
+.RS
+.nf
+mouth \(-> expander \(-> command stream \(-> fusevm bytecode \(-> VM + Cranelift JIT
+.fi
+.RE
+.PP
+A count register is a VM slot, so
+.B \eadvance\ecount0 by 5
+is
+.B GetSlot / LoadInt / Add / SetSlot
+\(em native ops the JIT can compile \(em rather than a hash lookup and a match
+in a tree\-walker.
+.B \emessage
+is two host builtins: one appends a rendered piece, one flushes the assembled
+string, which is why a message containing
+.B \ethe\ecount0
+reads the register at RUN time.
+.PP
+.B texrs \-\-disasm
+prints the listing.
+.SH "7.  PARITY"
+The contract is the
+.B \emessage
+stream, compared byte\-for\-byte against the real
+.B tex
+binary.  No expectation is written by hand \(em the reference is produced by
+running tex at test time \(em so a case cannot be made to pass by changing
+texrs.
+.TP
+.B cargo test
+Runs the differential corpus, the example programs, the bytecode assertions,
+and the fuzz smoke and mass\-replay harnesses.
+.TP
+.B bash scripts/parity.sh
+The same comparison as a script, over
+.IR tests/cases .
+.TP
+.B bash scripts/fuzz_parity.sh \-n 500
+Generates seeded random programs confined to the implemented subset, runs both
+engines in parallel, and reduces whatever diverges to a minimal case.
+.TP
+.B cargo +nightly fuzz run lower
+Coverage\-guided fuzzing for panics rather than divergences; targets
+.BR lex ,
+.BR lower ,
+and
+.BR run .
+.PP
+Both shell harnesses read the tex version they were measured against out of
+.B BUGS.md
+and refuse to run against a different engine: a mismatched oracle does not fail
+loudly, it reports a different divergence set that reads like a regression.
+.SH "8.  GAPS"
+No stomach: no boxes, glue, paragraphs, fonts or DVI.  No registers other than
+.BR \ecount .
+No format is preloaded, so every register starts at zero as INITEX leaves them,
+while the reference
+.B tex
+has plain's values.  An undefined control sequence prints its name instead of
+raising an error.
+.B \eedef
+does not decide a conditional in its body at definition time.
+.B #{
+parameter text is refused.  Each of these is pinned by a case in
+.I tests/cases
+and written down in
+.I tests/known_gaps.txt
+with its reason; the gate fails on any divergence that is NOT listed, and on a
+listed case that has started passing.
+.SH "9.  EXIT STATUS"
+.TP
+.B 0
+Successful completion.
+.TP
+.B 1
+The file could not be read, an option was not recognised, or the engine
+stopped.  Errors are written to stderr as
+.BR "! <reason>." .
+.SH "10. FILES"
+.TP
+.I examples/*.tex
+Runnable examples, each held in parity with real tex by the test suite.
+.TP
+.I tests/cases/*.tex
+The differential corpus.
+.TP
+.I tests/known_gaps.txt
+Every case that does not match tex yet, with the reason.
+.TP
+.I fuzz/corpus/*
+Seed inputs for the cargo\-fuzz targets.
+.SH "11. EXAMPLES"
+.PP
+A macro with a delimited parameter:
+.RS
+.nf
+\ecatcode`\e{=1 \ecatcode`\e}=2 \ecatcode`\e#=6
+\edef\epair#1,#2.{[#1|#2]}
+\emessage{\epair 1,2.}
+\eend
+.fi
+.RE
+.PP
+A conditional inside a message body, tested against a register:
+.RS
+.nf
+\ecatcode`\e{=1 \ecatcode`\e}=2
+\ecount2=5
+\emessage{\eifnum\ecount2>3 BIG\eelse SMALL\efi}
+\eend
+.fi
+.RE
+.SH SEE ALSO
+.BR texrs (1),
+.BR tex (1),
+.BR stryke (1),
+.BR zshrs (1)
+.PP
+Project home:
+.UR https://github.com/MenkeTechnologies/texrs
+.UE
+.SH BUGS
+Report bugs at
+.UR https://github.com/MenkeTechnologies/texrs/issues
+.UE .

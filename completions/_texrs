@@ -1,0 +1,19 @@
+#compdef texrs
+# Zsh completion for the texrs binary.
+#
+# The option set mirrors src/main.rs; a flag added there needs a line here or it
+# completes to nothing.
+
+_texrs() {
+  _arguments -s \
+    '(- *)--version[print the version banner and exit]' \
+    '(- *)'{-h,--help}'[print the option grammar and exit]' \
+    '(--disasm)--dump-tokens[print the mouth'\''s token stream and exit]' \
+    '(--dump-tokens)--disasm[print the lowered fusevm bytecode and exit]' \
+    '--no-cache[compile this run rather than reading the bytecode cache]' \
+    '(- *)--cache-stats[say what the bytecode cache holds and where, and exit]' \
+    '(- *)--cache-clear[delete the bytecode cache and exit]' \
+    '*:TeX file:_files -g "*.tex"'
+}
+
+_texrs "$@"

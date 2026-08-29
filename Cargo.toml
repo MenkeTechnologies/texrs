@@ -35,6 +35,19 @@ path = "src/lib.rs"
 [dependencies]
 fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache"] }
 
+# The rkyv bytecode cache, the same shard format the sibling engines write
+# (zshrs ZRSC, awkrs AWKR, vimlrs VIML, elisprs ELSP) under texrs's own TEXR
+# magic — pinned to the version and features they serialize with, or a shard one
+# of them wrote could not be validated by the others' tools.
+rkyv = { version = "0.7", features = ["validation", "archive_le", "size_32"] }
+memmap2 = "0.9"
+# The inner blob of a cache entry: a bincode-encoded fusevm::Chunk.
+bincode = "1.3"
+# flock for the writer lock, so two texrs runs cannot interleave a shard write.
+nix = { version = "0.29", features = ["fs"] }
+dirs = "5"
+once_cell = "1"
+
 # texrs is a standalone crate, not a workspace member. An explicit empty
 # `[workspace]` stops cargo walking up to the MenkeTechnologiesMeta parent, and
 # keeps `fuzz/` (which has its own) out of this one.

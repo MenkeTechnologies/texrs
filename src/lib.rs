@@ -18,6 +18,7 @@ pub mod ir;
 pub mod lexer;
 pub mod lower;
 pub mod runtime;
+pub mod script_cache;
 pub mod token;
 
 pub use expand::{Engine, TexError};
@@ -27,8 +28,24 @@ pub use expand::{Engine, TexError};
 /// This is the whole pipeline: mouth -> expander -> command stream -> fusevm
 /// bytecode -> fusevm. Nothing here interprets TeX; the VM runs the program.
 pub fn run_messages(src: &str) -> Result<String, TexError> {
-    let cmds = crate::lower::Lowerer::new().lower(src)?;
-    let chunk = crate::compiler::Compiler::new().compile(&cmds);
+    let chunk = compile(src)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(msgs.join(" "))
+}
+
+/// The same, for a document read from `path`: the bytecode comes from the cache
+/// when the file has not changed since it was compiled, and is put there when it
+/// has. The result is identical either way — the cache is a way of skipping the
+/// front of the pipeline, never of changing what it produces.
+pub fn run_messages_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
+    let chunk = match crate::script_cache::try_load(path) {
+        Some(chunk) => chunk,
+        None => {
+            let chunk = compile(src)?;
+            crate::script_cache::store(path, &chunk);
+            chunk
+        }
+    };
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;
     Ok(msgs.join(" "))
 }

@@ -1,0 +1,189 @@
+.TH TEXRS 1 "2026" "texrs 0.1.0" "User Commands"
+.SH NAME
+texrs \- a TeX engine: Knuth's mouth and expander, lowered onto a bytecode VM
+.SH SYNOPSIS
+.B texrs
+[\fIOPTIONS\fR] \fIFILE\fR.tex
+.SH DESCRIPTION
+.B texrs
+reads a TeX file, tokenises it under a mutable category\-code table, expands
+the macros, and lowers what is left to
+.B fusevm
+bytecode which the shared VM executes.  Nothing in texrs interprets TeX: the
+program runs as bytecode, the same way
+.BR zshrs ,
+.BR stryke ,
+.BR rubylang ,
+and
+.B pythonrs
+run on that engine.
+.PP
+TeX is two machines.  The
+.I mouth
+turns bytes into tokens; the
+.I expander
+turns tokens into other tokens \(em
+.BR \edef ,
+.BR \ecsname ,
+.BR \ethe ,
+the conditionals.  Only after that does the
+.I stomach
+build boxes and ship DVI.  texrs implements the first two, which is the half a
+macro\-heavy document spends its time in.  It is
+.B not
+a typesetter: there are no boxes, no glue, no paragraph breaking, no fonts and
+no DVI, and
+.B \eend
+stops the run rather than shipping a page.
+.PP
+What is carried: category codes and
+.BR \ecatcode ,
+the three\-state line scanner,
+.B ^^X
+notation,
+.B \edef
+with undelimited and delimited parameters,
+.BR \elet ,
+.BR \eedef / \exdef ,
+.BR \egdef ,
+.BR \eglobal ,
+.BR \ebegingroup / \eendgroup
+and brace groups,
+.BR \ecsname / \eendcsname ,
+.BR \estring ,
+.BR \ethe ,
+.BR \enumber ,
+.BR \eexpandafter ,
+.BR \enoexpand ,
+the conditionals
+.RB ( \eiftrue ,
+.BR \eiffalse ,
+.BR \eifnum ,
+.BR \eifodd ,
+.BR \eifx ,
+.BR \eifcase
+with
+.BR \eor ,
+.BR \eelse ,
+.BR \efi ),
+the 256
+.B \ecount
+registers with
+.BR \eadvance / \emultiply / \edivide ,
+and
+.BR \emessage .
+For what is not carried, see
+.B BUGS.md
+in the source tree.
+.SH OPTIONS
+.TP
+.B \-\-dump\-tokens
+Print the mouth's token stream for the file and exit.  No expansion happens,
+so what prints is what the category codes made of the bytes.
+.TP
+.B \-\-disasm
+Print the lowered fusevm bytecode disassembly and exit.  A
+.B \ecount
+register is a VM slot, so
+.B \eadvance\ecount0 by 5
+reads as
+.BR "GetSlot / LoadInt / Add / SetSlot" .
+.TP
+.B \-\-no\-cache
+Compile this run rather than reading the bytecode cache.  The result is the
+same either way; this is how a run is timed against a cold one, or how a cache
+that is suspected of being wrong is ruled out.
+.TP
+.B \-\-cache\-stats
+Print where the cache is, how many documents it holds and how large it is, then
+exit.  With
+.B TEXRS_CACHE
+set to
+.BR 0 ,
+.B false
+or
+.BR no ,
+it says the cache is off and names the path it would have used.
+.TP
+.B \-\-cache\-clear
+Delete the cache and exit.  Every document compiles again on its next run.
+Deleting a cache is never destructive: it holds only what can be recompiled.
+.TP
+.BR \-h ", " \-\-help
+Print the option grammar and exit.
+.TP
+.B \-\-version
+Print the version banner and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Successful completion.
+.TP
+.B 1
+The file could not be read, an option was not recognised, or the engine
+stopped.  Engine errors are written to stderr as
+.BR "! <reason>." ,
+the way tex writes them.
+.SH EXAMPLES
+.PP
+Run a file and see its
+.B \emessage
+stream, printed the way tex prints it:
+.RS
+.nf
+texrs hello.tex
+(./hello.tex HELLO\-WORLD )
+.fi
+.RE
+.PP
+Read the bytecode a document lowered to:
+.RS
+.nf
+texrs \-\-disasm examples/counters.tex
+.fi
+.RE
+.PP
+Read the token stream the mouth produced:
+.RS
+.nf
+texrs \-\-dump\-tokens examples/macros.tex
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.cache/texrs/scripts.rkyv
+The bytecode cache: an rkyv shard of source path to compiled
+.B fusevm::Chunk
+, written after a document compiles and read instead of compiling it again.
+Entries carry the source's mtime and the mtime of the texrs that wrote them, so
+an edited document or a rebuilt texrs is a miss rather than a stale hit, and a
+shard this build cannot read is rebuilt rather than misread.  On macOS the path
+is under
+.IR ~/Library/Caches .
+The shard's header carries the magic
+.B TEXR
+and follows the header convention the sibling engines share, so
+.BR zdbview (1)
+opens it as a key/value cache.
+.TP
+.I examples/*.tex
+Runnable examples, each held in parity with real tex by the test suite.
+.TP
+.I tests/cases/*.tex
+The differential corpus.
+.TP
+.I tests/known_gaps.txt
+Every case that does not match tex yet, with the reason.
+.SH SEE ALSO
+.BR texrsall (1),
+.BR tex (1),
+.BR stryke (1),
+.BR zshrs (1)
+.PP
+Project home:
+.UR https://github.com/MenkeTechnologies/texrs
+.UE
+.SH BUGS
+Report bugs at
+.UR https://github.com/MenkeTechnologies/texrs/issues
+.UE .
