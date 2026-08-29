@@ -1,0 +1,133 @@
+<idea-plugin>
+    <id>com.menketechnologies.texrs</id>
+    <name>Texrs</name>
+    <vendor email="linux.dev25@gmail.com" url="https://github.com/MenkeTechnologies/texrs">MenkeTechnologies</vendor>
+
+    <!-- BEGIN-CANONICAL: plugin-description -->
+    <description><![CDATA[
+        <p>JetBrains IDE support for <b>texrs</b> — a TeX engine that compiles
+        Knuth's mouth and expander to <b>fusevm</b> bytecode instead of
+        interpreting it.</p>
+
+        <ul>
+            <li><b>.tex</b> file association with category-code-aware
+                highlighting: comments, control words and control symbols,
+                the primitives texrs implements, group braces, math shift,
+                alignment tabs, parameters, super/subscripts and active
+                characters — the sixteen classes the engine itself works in.</li>
+            <li><b>Run configurations</b> for any document — runs
+                <code>texrs FILE.tex</code>, with <code>--dump-tokens</code>
+                to stop after the mouth, <code>--disasm</code> to stop after
+                lowering, and <code>--no-cache</code> to compile rather than
+                read the bytecode cache.</li>
+            <li><b>Color settings page</b> with a slot for every category.</li>
+            <li><b>Settings → Tools → texrs</b> to point at a non-PATH
+                <code>texrs</code> binary, claim more file extensions, and
+                force cold runs.</li>
+            <li><b>Comments</b> with TeX's <code>%</code>, brace matching on
+                <code>{</code>/<code>}</code>, and spell-checking that reads
+                prose while leaving control sequences alone.</li>
+            <li><b>File → New → TeX Document</b>, with templates that set the
+                category codes INITEX leaves ordinary.</li>
+        </ul>
+
+        <p><b>Requirements:</b> any JetBrains IDE on 2025.2+, Community
+        editions included. Unlike the sibling plugins this one uses no
+        paid-only platform API, because texrs ships no language server: there
+        is no LSP client here, and no debugger, since there is no debug adapter
+        to talk to.</p>
+    ]]></description>
+    <!-- END-CANONICAL: plugin-description -->
+
+    <change-notes><![CDATA[
+        <h3>0.1.0</h3>
+        <ul>
+            <li>Initial release. .tex file type, catcode-based lexer and
+                highlighting, run configurations over the texrs CLI including
+                the two introspection flags and the cache switch, color scheme,
+                <code>%</code> comments, brace matching, new-file templates.</li>
+        </ul>
+    ]]></change-notes>
+
+    <!-- Nothing paid-only: no platform LSP API is used. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <!-- Plugin model v2 dependencies. `intellij.spellchecker` is a bundled V2
+         module with its own classloader rather than an installable plugin ID,
+         so it is declared here and not with a legacy <depends> tag;
+         build.gradle.kts has the matching bundledModule() for compile-time
+         resolution. Without this the `spellchecker.support` registration below
+         loads but no-ops, and TypoInspection flags every control sequence. -->
+    <dependencies>
+        <module name="intellij.spellchecker"/>
+    </dependencies>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- File type. `.tex` by extension; TexrsSettings.isSupportedFile
+             mirrors this for the run paths and can be widened by the user
+             (.sty, .cls, .ltx). -->
+        <fileType
+            name="TeX"
+            implementationClass="com.menketechnologies.texrs.TexrsFileType"
+            fieldName="INSTANCE"
+            language="texrs"
+            extensions="tex"/>
+
+        <!-- Parser definition (flat — token-stream PSI, no tree). Required for
+             the comment toggle, brace matching and structural selection to
+             have something to anchor to. -->
+        <lang.parserDefinition
+            language="texrs"
+            implementationClass="com.menketechnologies.texrs.TexrsParserDefinition"/>
+
+        <lang.syntaxHighlighterFactory
+            language="texrs"
+            implementationClass="com.menketechnologies.texrs.TexrsSyntaxHighlighterFactory"/>
+
+        <colorSettingsPage implementation="com.menketechnologies.texrs.TexrsColorSettingsPage"/>
+
+        <!-- Spell-check prose, not markup: every control sequence and macro
+             name a document defines would otherwise be flagged as a typo. -->
+        <spellchecker.support
+            language="texrs"
+            implementationClass="com.menketechnologies.texrs.TexrsSpellcheckingStrategy"/>
+
+        <lang.commenter language="texrs" implementationClass="com.menketechnologies.texrs.TexrsCommenter"/>
+        <lang.braceMatcher language="texrs" implementationClass="com.menketechnologies.texrs.TexrsBraceMatcher"/>
+
+        <!-- Settings -->
+        <applicationService serviceImplementation="com.menketechnologies.texrs.TexrsSettings"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.menketechnologies.texrs.TexrsSettingsConfigurable"
+            id="com.menketechnologies.texrs.settings"
+            displayName="texrs"/>
+
+        <!-- Run configuration -->
+        <configurationType implementation="com.menketechnologies.texrs.run.TexrsRunConfigurationType"/>
+        <runConfigurationProducer
+            implementation="com.menketechnologies.texrs.run.TexrsRunConfigurationProducer"/>
+        <programRunner implementation="com.menketechnologies.texrs.run.TexrsProgramRunner"/>
+    </extensions>
+
+    <actions>
+        <action
+            id="texrs.RunFile"
+            class="com.menketechnologies.texrs.actions.RunTexrsFileAction"
+            text="Run with texrs"
+            description="Run the selected TeX document with the texrs engine"
+            icon="com.menketechnologies.texrs.TexrsIcons.FILE">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+
+        <action
+            id="texrs.NewFile"
+            class="com.menketechnologies.texrs.actions.CreateTexrsFileAction"
+            text="TeX Document"
+            description="Create a new TeX document"
+            icon="com.menketechnologies.texrs.TexrsIcons.FILE">
+            <add-to-group group-id="NewGroup" anchor="before" relative-to-action="NewFile"/>
+        </action>
+    </actions>
+</idea-plugin>
