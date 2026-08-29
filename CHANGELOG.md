@@ -12,6 +12,11 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--tiers`: run a document, then report what fusevm's tiers did with its
+  bytecode — block-tier eligibility, the largest eligible op region, every loop
+  header and whether the tracing tier compiled it, and the ops the block tier
+  refuses with their counts. The answers come from fusevm's own predicates,
+  because enabling the JIT is not the same as being compiled by it.
 - `--lsp`: a language server over stdio. Completion and hover answer from
   `src/corpus.rs` — the same table that generates `docs/reference.html`, so the
   editor and the site cannot disagree — and diagnostics come from the engine's

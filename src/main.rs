@@ -14,6 +14,7 @@ usage: texrs [OPTIONS] FILE.tex
   --lsp           speak the Language Server Protocol over stdio
   --dump-tokens   print the mouth's token stream and exit
   --disasm        print the lowered fusevm bytecode and exit
+  --tiers         run it, then report which fusevm tier took its bytecode
   --no-cache      compile this run rather than reading the bytecode cache
   --cache-stats   say what the cache holds and where, and exit
   --cache-clear   delete the cache and exit
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
     let mut path: Option<String> = None;
     let mut dump_tokens = false;
     let mut disasm = false;
+    let mut tiers = false;
     let mut no_cache = false;
 
     for arg in std::env::args().skip(1) {
@@ -48,6 +50,7 @@ fn main() -> ExitCode {
             }
             "--dump-tokens" => dump_tokens = true,
             "--disasm" => disasm = true,
+            "--tiers" => tiers = true,
             "--no-cache" => no_cache = true,
             "--cache-stats" => return cache_stats(),
             "--cache-clear" => return cache_clear(),
@@ -89,6 +92,19 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => fail(&e.0),
+        };
+    }
+
+    if tiers {
+        // The report runs the document, so its own output comes first: what is
+        // measured is what an ordinary run does. It compiles rather than
+        // reading the cache, because the question is about this bytecode.
+        return match texrs::tiers::report(&src) {
+            Ok(r) => {
+                println!("{r}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e),
         };
     }
 

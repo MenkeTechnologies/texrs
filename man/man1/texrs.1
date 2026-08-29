@@ -97,6 +97,14 @@ register is a VM slot, so
 reads as
 .BR "GetSlot / LoadInt / Add / SetSlot" .
 .TP
+.B \-\-tiers
+Run the document, then report what fusevm's tiers did with its bytecode: how
+many ops the chunk holds, whether the block tier accepts and has compiled it,
+the largest block\-eligible op range, every loop header and whether the tracing
+tier compiled it, and the ops the block tier refuses with their counts.  The
+answers come from fusevm's own predicates, not from an assumption about them \(em
+enabling the JIT is not the same as being compiled by it.
+.TP
 .B \-\-no\-cache
 Compile this run rather than reading the bytecode cache.  The result is the
 same either way; this is how a run is timed against a cold one, or how a cache

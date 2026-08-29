@@ -89,6 +89,7 @@ texrs file.tex             # run it, print the \message stream
 texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dump-tokens file   # the mouth's token stream, no expansion
 texrs --disasm file        # the lowered fusevm bytecode
+texrs --tiers file         # run it, then say which fusevm tier took it
 texrs --no-cache file      # compile this run instead of reading the cache
 texrs --cache-stats        # what the bytecode cache holds, and where
 texrs --cache-clear        # delete it; it holds only what can be recompiled

@@ -11,6 +11,7 @@ _texrs() {
     '(- *)'{-h,--help}'[print the option grammar and exit]' \
     '(--disasm)--dump-tokens[print the mouth'\''s token stream and exit]' \
     '(--dump-tokens)--disasm[print the lowered fusevm bytecode and exit]' \
+    '--tiers[run it, then report which fusevm tier took its bytecode]' \
     '--no-cache[compile this run rather than reading the bytecode cache]' \
     '(- *)--cache-stats[say what the bytecode cache holds and where, and exit]' \
     '(- *)--cache-clear[delete the bytecode cache and exit]' \

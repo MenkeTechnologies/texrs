@@ -22,6 +22,7 @@ pub mod lower;
 pub mod lsp;
 pub mod runtime;
 pub mod script_cache;
+pub mod tiers;
 pub mod token;
 
 pub use expand::{Engine, TexError};
