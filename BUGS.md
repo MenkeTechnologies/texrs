@@ -1,31 +1,52 @@
 # Known gaps
 
 texrs implements TeX's mouth and expander. What follows is what is deliberately
-not done, and what is done differently — measured against `tex` 3.141592653
-(TeX Live 2026).
+not done, and what is done differently. Everything here was
+measured against **tex 3.141592653** (TeX Live 2026).
 
-## The corpus: 27 of 27 in parity
+That version string is not decoration: `scripts/lib.sh` reads it out of this file
+and refuses to run either parity harness against a different engine. A
+mismatched oracle does not fail loudly — it reports a different set of
+divergences, which reads exactly like a regression in texrs. `TEX_VERSION_EXPECT`
+overrides it for a deliberate cross-version run.
 
-Every committed case matches `tex` 3.141592653 (TeX Live 2026), and
+## The corpus
+
+Every committed case in `tests/cases` matches the reference engine, and
 `tests/known_gaps.txt` is empty. The gate fails on any divergence not listed
-there AND on a listed case that starts passing, so an empty list is a claim the
-harness enforces rather than a note.
+there AND on a listed case that has started passing, so an empty list is a claim
+the harness enforces rather than a note.
 
 ## Not implemented
 
 - **The stomach.** No boxes, glue, paragraphs, fonts or DVI. `\end` stops the
   run; it does not ship a page. `tex` prints `No pages of output.` for the
   corpus here, which is why the parity contract is the `\message` stream.
-- **Conditionals.** `\if`, `\ifnum`, `\ifx`, `\else`, `\fi` are not implemented.
-  A document using them will fail with `Undefined control sequence`, which is
-  honest but useless — this is the next thing worth doing (milestone 3).
-- **Groups.** `{...}` delimits macro arguments but does not open a save-stack
-  group, so an assignment inside braces is not undone at the closing brace.
 - **Registers other than `\count`.** No `\dimen`, `\skip`, `\muskip`, `\toks`,
-  `\box`.
-- **`\edef`, `\gdef`, `\xdef`, `\let`, `\futurelet`, `\noexpand`,
-  `\expandafter`.** `\expandafter` in particular is load-bearing in real macro
-  packages; its absence caps what can be run far more than the missing stomach.
+  `\box`, so `\ifdim`, `\ifvoid`, `\ifhbox` and `\ifvbox` are recognised as
+  conditionals for skipping purposes but cannot be evaluated.
+- **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
+  `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
+  to file I/O, neither of which exists yet.
+- **`\futurelet`, `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`,
+  `\meaning`, `\jobname`, `\input`.**
+- **`\edef` does not freeze a conditional.** tex decides `\ifcase`/`\ifodd`
+  inside an `\edef` body while READING it, so the body becomes the token run
+  the branch produced and a later register change cannot move it. texrs keeps
+  the conditional in the body and decides it at use time, which also makes two
+  bodies tex froze to the same tokens compare unequal under `\ifx`.
+  `tests/cases/edef_freezes_conditional.tex` and
+  `tests/cases/ifx_after_edef_conditional.tex` pin both faces of it; found by
+  `scripts/fuzz_parity.sh` at seed 77.
+- **Errors.** An undefined control sequence is not an error: texrs prints its
+  name into the message stream and exits 0, where tex reports `! Undefined
+  control sequence.` and expands it to nothing. `tests/cases/undefined_cs.tex`
+  pins it. Every other error path is the same shape -- texrs either handles the
+  construct or stops with one `TexError`, and does not have tex's recover-and-
+  continue behaviour.
+- **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
+  real tex — neither engine has a step limit, so this is parity rather than a
+  bug. It is why the fuzz targets are run under a timeout (see below).
 
 ## Divergences from tex
 
@@ -34,3 +55,27 @@ harness enforces rather than a note.
   what `\string` prints and how a delimited argument matches. Deliberate for now
   — matching TeX means reading bytes, which is the right call but has to be made
   once, everywhere, rather than piecemeal.
+- **No format is preloaded.** The oracle is `tex`, which loads `plain.tex`, so
+  `\count0` already holds the page number 1 and `\count255` holds plain's own
+  scratch value. texrs starts every register at zero, as INITEX does.
+  `tests/cases/plain_count0.tex` pins that, and `scripts/fuzz/gen.pl` generates
+  against `\count1`..`\count9`, the window where both engines start equal.
+- **`\edef` scratch registers.** Freezing `\the\count0` into a macro body needs
+  somewhere to put the value now, and the count registers are the only run-time
+  store this milestone has. texrs takes them from the top (255 downward), so a
+  document that both uses `\edef` and reads a high register can see a value real
+  tex would not put there. Low registers are untouched.
+
+## How gaps get found
+
+Four harnesses, in increasing order of how much they cost to run:
+
+| harness | what it does | how to run |
+| --- | --- | --- |
+| `tests/differential.rs` | every committed case against real `tex`, no hand-written expectations | `cargo test` |
+| `tests/fuzz_smoke.rs`, `tests/fuzz_mass_replay.rs` | replays the fuzz targets on the seed corpus and on generated mutations of every `.tex` in the tree | `cargo test` |
+| `scripts/fuzz_parity.sh` | generates random programs in the implemented subset and diffs both engines, reducing whatever diverges | `bash scripts/fuzz_parity.sh -n 200` |
+| `fuzz/` (cargo-fuzz) | coverage-guided, looking for panics rather than divergences | `cargo +nightly fuzz run lower -- -timeout=10` |
+
+A divergence the fuzzer finds is reduced to a minimal case and committed to
+`tests/cases`, where the differential gate keeps it from coming back.

@@ -1,0 +1,39 @@
+[package]
+name = "texrs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.texrs]
+path = ".."
+
+# One `[[bin]]` per target: that is how cargo-fuzz discovers them.
+[[bin]]
+name = "lex"
+path = "fuzz_targets/lex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lower"
+path = "fuzz_targets/lower.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "run"
+path = "fuzz_targets/run.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone workspace: the fuzz dependencies stay off the main build path.
+[workspace]

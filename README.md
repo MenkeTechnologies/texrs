@@ -69,11 +69,41 @@ bash scripts/parity.sh case.tex # one ad-hoc case
 cargo test                      # the same comparison, as a gate
 ```
 
+Both harnesses read the engine version they were measured against out of
+`BUGS.md` and refuse to run against a different `tex`: a mismatched oracle does
+not fail loudly, it reports a different set of divergences, which reads exactly
+like a regression.
+
 The corpus is small and deliberately awkward — `##` inside a nested `\def`,
 catcode changes mid-file, `\csname` built from a macro, control-word space
-swallowing. 27 of 27 cases are in parity, including conditionals nested inside a `\message`
-body, `\ifcase`, `\csname`, `\expandafter`, `\edef` freezing a register, and a
-`\count` assignment scoped by a group.
+swallowing, conditionals nested inside a `\message` body, `\ifcase`,
+`\expandafter`, `\edef` freezing a register, a `\count` assignment scoped by a
+group. Every case is in parity except the ones `tests/known_gaps.txt` names,
+and the gate fails both on an unlisted divergence and on a listed case that has
+started passing, so the list cannot go stale.
+
+## Fuzzing
+
+Hand-written cases only cover what someone thought to write down.
+
+```sh
+bash scripts/fuzz_parity.sh -n 500        # random programs, both engines, diffed
+bash scripts/fuzz_parity.sh -1 case.tex   # one file, verbose
+cargo +nightly fuzz run lower -- -timeout=10
+```
+
+`scripts/fuzz_parity.sh` generates seeded random programs confined to the
+implemented subset, runs them under both engines in parallel, and REDUCES
+whatever diverges — dropping statements for as long as the divergence survives,
+and refusing a reduction that changes the divergence into a different one — so
+what it hands back is small enough to commit to `tests/cases`. The same seed
+generates the same corpus on any machine.
+
+`fuzz/` is a cargo-fuzz crate (targets `lex`, `lower`, `run`) looking for panics
+rather than divergences. `tests/fuzz_smoke.rs` replays each target on its seed
+corpus under stable Rust, and `tests/fuzz_mass_replay.rs` points the mouth at
+generated mutations of every `.tex` in the tree, so `cargo test` still exercises
+the harness on a machine with no nightly toolchain.
 
 ## Licence
 

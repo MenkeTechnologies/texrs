@@ -1,0 +1,5 @@
+\catcode`\{=1 \catcode`\}=2
+\edef\a{\the\count2 }
+\edef\b{\ifodd\count3 ODD\else \the\count1 \fi }
+\message{\ifx\a\b SAME\else DIFF\fi }
+\end

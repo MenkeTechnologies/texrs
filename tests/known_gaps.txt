@@ -4,3 +4,28 @@
 # listed case that has started PASSING -- so the list cannot quietly go stale.
 #
 # Currently EMPTY: all 27 cases match tex 3.141592653 (TeX Live 2026).
+
+undefined_cs.tex   An undefined control sequence is not an error. tex reports
+#                  `! Undefined control sequence.' and expands it to nothing;
+#                  texrs prints its NAME into the message stream and exits 0.
+#                  Found by scripts/fuzz_parity.sh. Fixing it means an error
+#                  path through the expander that the milestone does not have.
+plain_count0.tex   The oracle is `tex' with the PLAIN format preloaded, where
+#                  \count0 is the page number and already holds 1. texrs starts
+#                  every register at zero, as INITEX does, and loads no format.
+#                  Not an engine bug -- a startup-state difference, recorded so
+#                  it cannot be mistaken for one later.
+edef_freezes_conditional.tex
+#                  `\edef' does not decide a conditional in its body at
+#                  DEFINITION time. tex expands `\ifcase\count1 ZERO\else
+#                  OTHER\fi' while reading the \edef -- \count1 is 0 there, so
+#                  the body becomes the single token run `ZERO' and a later
+#                  `\count1=5' cannot move it. texrs keeps the conditional in
+#                  the body and decides it at use time, printing OTHER.
+#                  Found by scripts/fuzz_parity.sh (seed 77).
+ifx_after_edef_conditional.tex
+#                  The same root cause seen through `\ifx': two \edef bodies
+#                  that tex froze to the same token run compare equal there and
+#                  unequal here, because texrs still has the unexpanded
+#                  conditional in one of them. Fixing the entry above fixes
+#                  this one; it is listed separately so the gate proves it.

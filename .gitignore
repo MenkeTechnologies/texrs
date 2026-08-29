@@ -2,3 +2,9 @@
 **/*.rs.bk
 *.log
 *.dvi
+# cargo-fuzz working state. The seed corpus in fuzz/corpus IS committed; the
+# artifacts, coverage data and build tree are per-machine.
+/fuzz/target
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/Cargo.lock
