@@ -1,0 +1,11 @@
+% Count registers and their arithmetic.
+%
+% A register is a VM slot in texrs, so \advance is an Add on the stack rather
+% than a hash lookup -- see `texrs --disasm counters.tex'.
+\catcode`\{=1 \catcode`\}=2
+\count1=7
+\advance\count1 by 5
+\multiply\count1 by 3
+\divide\count1 by 2
+\message{count=\the\count1}
+\end

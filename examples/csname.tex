@@ -1,0 +1,8 @@
+% \csname builds a control sequence out of characters, so a macro can name
+% another macro; \string goes the other way and prints one as text.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\greeting{FROM-CSNAME}
+\def\name{greeting}
+\message{\csname \name\endcsname}
+\message{\string\undefined}
+\end

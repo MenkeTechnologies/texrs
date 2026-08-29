@@ -29,3 +29,49 @@ jobs:
         run: cargo build --verbose
       - name: Test
         run: cargo test --verbose
+
+  # The shape gates, ported from the sibling engines. Each one is a small
+  # shell audit over the tree's own docs, man pages, README and workflows;
+  # they run separately from the Rust job so a formatting failure and a
+  # broken link are two different red X's rather than one.
+  docs-gates:
+    name: Docs gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/docs-target-blank-rel-noopener.sh
+      - run: bash tests/docs-no-http-links.sh
+      - run: bash tests/docs-no-inline-handlers.sh
+      - run: bash tests/docs-has-h1.sh
+      - run: bash tests/docs-no-deprecated-tags.sh
+      - run: bash tests/docs-no-placeholder-href.sh
+      - run: bash tests/docs-has-html-closing.sh
+      - run: bash tests/docs-has-body-tag.sh
+
+  polish-gates:
+    name: Polish gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/man-page-no-trailing-whitespace.sh
+      - run: bash tests/man-page-final-newline.sh
+      - run: bash tests/man-page-synopsis-section.sh
+      - run: bash tests/tests-shell-executable.sh
+      - run: bash tests/tests-shell-shebang.sh
+
+  newline-gates:
+    name: Newline + README gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/readme-final-newline.sh
+      - run: bash tests/docs-final-newline.sh
+      - run: bash tests/workflow-final-newline.sh
+      - run: bash tests/cargo-final-newline.sh
+      - run: bash tests/readme-has-https-link.sh
+      - run: bash tests/readme-has-h2-section.sh
+      - run: bash tests/readme-has-badges.sh
+      - run: bash tests/workflow-no-tabs.sh

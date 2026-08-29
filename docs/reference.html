@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="texrs — Primitive reference. Every TeX primitive texrs carries: category codes, macro definition, expansion, conditionals, count registers and their arithmetic, with what each one lowers to. MIT licensed.">
+  <title>texrs &mdash; Primitive Reference</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 76rem; }
+    .file-table { width:100%;border-collapse:collapse;margin:0.6rem 0;font-size:12px; }
+    .file-table th { background:var(--bg-secondary);color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;text-align:left;padding:7px 10px;border:1px solid var(--border); }
+    .file-table td { padding:6px 10px;border:1px solid var(--border);color:var(--text-dim);vertical-align:middle; }
+    .file-table tr:hover td { background:var(--bg-hover); }
+    .file-table td:first-child { font-family:'Share Tech Mono',monospace;color:var(--accent-light);font-weight:600;white-space:nowrap; }
+    .file-table code { font-size:11px;color:var(--accent-light);background:var(--bg-primary);padding:1px 4px;border-radius:2px; }
+    .stat-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:0.75rem;margin:1.2rem 0; }
+    .stat-card { border:1px solid var(--border);border-top:3px solid var(--cyan);background:var(--bg-card);padding:1rem 1.2rem;border-radius:2px;text-align:center; }
+    .stat-card .stat-val { font-family:'Orbitron',sans-serif;font-size:28px;font-weight:900;color:var(--cyan);line-height:1.1;text-shadow:0 0 20px var(--cyan-glow); }
+    .stat-card .stat-val.accent { color:var(--accent);text-shadow:0 0 20px var(--accent-glow); }
+    .stat-card .stat-label { font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);margin-top:0.5rem; }
+    .feature-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(22rem,1fr));gap:0.65rem;margin:0.8rem 0; }
+    .feature-card { border:1px solid var(--border);border-left:3px solid var(--cyan);background:var(--bg-card);padding:0.7rem 1rem;border-radius:2px; }
+    .feature-card h4 { font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--cyan);margin:0 0 0.3rem; }
+    .feature-card p { margin:0;font-size:11px;color:var(--text-dim);line-height:1.55; }
+    .feature-card code { font-size:10.5px;color:var(--accent-light);background:var(--bg-primary);padding:1px 4px;border-radius:2px; }
+    .section-rule { border:none;border-top:1px dashed var(--border);margin:2rem 0; }
+    .hub-scheme-strip { border-bottom:1px dashed var(--border);background:color-mix(in srgb, var(--bg-secondary) 85%, transparent);padding:0.55rem 1.5rem 0.65rem;position:relative; }
+    .hub-scheme-strip-inner { max-width:76rem;margin:0 auto;display:flex;align-items:center;gap:0.85rem; }
+    .hub-scheme-strip .hud-scheme-label { flex:0 0 auto;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-align:left; }
+    .hub-scheme-strip .scheme-grid { flex:1 1 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px; }
+    @media (max-width:720px){ .hub-scheme-strip-inner{flex-direction:column;align-items:stretch}.hub-scheme-strip .scheme-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    .docs-build-line { margin:0.35rem 0 0;font-family:'Share Tech Mono',ui-monospace,monospace;font-size:11px;color:var(--text-dim);letter-spacing:0.03em;max-width:44rem;opacity:0.75; }
+  </style>
+</head>
+<body>
+  <div class="app tutorial-app" id="docsApp">
+    <div class="crt-scanline" id="crtH" aria-hidden="true"></div>
+    <div class="crt-scanline-v" id="crtV" aria-hidden="true"></div>
+
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <div>
+          <h1 class="tutorial-brand">// TEXRS — PRIMITIVE REFERENCE</h1>
+          <nav class="tutorial-crumbs" aria-label="Breadcrumb">
+            <a href="index.html">Docs</a>
+            <span class="sep">/</span>
+            <a href="report.html">Engineering Report</a>
+            <span class="sep">/</span>
+            <span class="current">Reference</span>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </nav>
+          <p class="docs-build-line">texrs v0.1.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
+        </div>
+        <div class="tutorial-toolbar">
+          <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
+          <button type="button" class="btn btn-secondary active" id="btnCrt" title="CRT scanline overlay">CRT</button>
+          <button type="button" class="btn btn-secondary active" id="btnNeon" title="Neon border pulse">Neon</button>
+          <a class="btn btn-secondary" href="index.html">Docs</a>
+          <a class="btn btn-secondary" href="report.html">Report</a>
+          <a class="btn btn-secondary" href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="hub-scheme-strip">
+      <div class="hub-scheme-strip-inner">
+        <span class="hud-scheme-label">// Color scheme</span>
+        <div class="scheme-grid" id="hudSchemeGrid"></div>
+      </div>
+    </div>
+
+    <main class="tutorial-main">
+      <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>PRIMITIVE REFERENCE</h2>
+      <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
+
+      <section class="tutorial-section">
+        <h2>Category codes</h2>
+        <p>A character's category is a mutable table entry, not a property of the language. texrs starts from INITEX's sparse defaults, which is why every example opens by making <code>{</code> and <code>}</code> group characters.</p>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><code>\catcode`\X=N</code></td><td>Set the category code of character <code>X</code> to <code>N</code>. Codes 1 and 2 are group open/close, 6 is the parameter character, 14 is comment.</td><td>Compile time — it changes how the rest of the file reads</td></tr>
+            <tr><td><code>`\X, `X</code></td><td>A character code as a number, for a <code>\count</code> assignment or a comparison.</td><td>Compile time</td></tr>
+            <tr><td><code>^^X</code></td><td>Control-character notation (<code>tex.web</code> §352): a superscript character twice, then one character.</td><td>Mouth</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Macro definition</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><code>\def</code></td><td>Define a macro. Parameters may be undelimited (<code>#1</code>) or delimited (<code>\def\pair#1,#2.{…}</code>); <code>##</code> is a literal parameter character. The parameter text is validated as <code>tex.web</code> §476 validates it.</td><td>Compile time</td></tr>
+            <tr><td><code>\gdef</code></td><td>Define globally — the definition survives the enclosing group.</td><td>Compile time</td></tr>
+            <tr><td><code>\edef</code></td><td>Define with the body expanded NOW. A register read is frozen into a scratch register, so a later assignment cannot move it.</td><td>Compile time</td></tr>
+            <tr><td><code>\xdef</code></td><td>Global <code>\edef</code>.</td><td>Compile time</td></tr>
+            <tr><td><code>\let</code></td><td><code>\let\a=\b</code> gives <code>\a</code> <code>\b</code>'s CURRENT meaning, not a reference to it.</td><td>Compile time</td></tr>
+            <tr><td><code>\global</code></td><td>Prefix making the following assignment global.</td><td>Compile time</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Expansion</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><code>\csname … \endcsname</code></td><td>Build a control sequence out of the characters between them, so a macro can name another macro.</td><td>Compile time</td></tr>
+            <tr><td><code>\string</code></td><td>Print a control sequence as text, including its escape character.</td><td>Compile time</td></tr>
+            <tr><td><code>\the</code></td><td>The value of a register, as characters.</td><td>Run time — the read happens on the VM</td></tr>
+            <tr><td><code>\number</code></td><td>A scanned number, as characters.</td><td>Compile time or run time, depending on the operand</td></tr>
+            <tr><td><code>\expandafter</code></td><td>One token of lookahead: expand what comes after the next token, then put the token back.</td><td>Compile time</td></tr>
+            <tr><td><code>\noexpand</code></td><td>Suppress expansion of the next token.</td><td>Compile time</td></tr>
+            <tr><td><code>\message</code></td><td>Write to the terminal. This is the parity contract for the milestone: two host builtins, one appending a rendered piece and one flushing the assembled string.</td><td>Run time</td></tr>
+            <tr><td><code>\relax, \par, \ignorespaces</code></td><td>Accepted and ignored — they belong to the stomach or do nothing here.</td><td>—</td></tr>
+            <tr><td><code>\end</code></td><td>Stop the run. It does not ship a page: there is no stomach.</td><td>Compile time</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Conditionals</h2>
+        <p>A conditional that tests run-time state becomes a real branch; one decidable from the macro table alone is folded while lowering. Both forms nest, and both work inside a <code>\message</code> body.</p>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><code>\ifnum A&lt;B, =B, &gt;B</code></td><td>Compare two numbers.</td><td>Run time — a comparison plus a jump</td></tr>
+            <tr><td><code>\ifodd N</code></td><td>Test the parity of a number.</td><td>Run time</td></tr>
+            <tr><td><code>\ifcase N \or … \else … \fi</code></td><td>Switch on a number.</td><td>Run time</td></tr>
+            <tr><td><code>\iftrue, \iffalse</code></td><td>Constant truth.</td><td>Compile time — folded</td></tr>
+            <tr><td><code>\ifx\a\b</code></td><td>Compare two meanings.</td><td>Compile time — folded</td></tr>
+            <tr><td><code>\if</code></td><td>Compare two character codes after expansion.</td><td>Compile time</td></tr>
+            <tr><td><code>\ifdefined</code></td><td>Test whether a control sequence has a meaning.</td><td>Compile time</td></tr>
+            <tr><td><code>\else, \or, \fi</code></td><td>Branch separators and terminator.</td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p>The remaining TeX conditionals — <code>\ifdim</code>, <code>\ifvoid</code>, <code>\ifhbox</code>, <code>\ifvbox</code>, <code>\ifvmode</code>, <code>\ifhmode</code>, <code>\ifmmode</code>, <code>\ifinner</code>, <code>\ifeof</code>, <code>\ifcat</code>, <code>\ifcsname</code> — are recognised for skipping purposes, so an unbalanced branch does not confuse the scanner, but they cannot be evaluated: each tests state that belongs to the stomach, to other register types, or to file I/O.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Registers</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><code>\count N = M</code></td><td>Assign a count register. There are 256 of them (<code>tex.web</code> §236), mapped onto VM slots 0..255.</td><td>Run time — <code>LoadInt / SetSlot</code></td></tr>
+            <tr><td><code>\advance\count N by M</code></td><td>Add.</td><td>Run time — <code>GetSlot / LoadInt / Add / SetSlot</code></td></tr>
+            <tr><td><code>\multiply\count N by M</code></td><td>Multiply.</td><td>Run time</td></tr>
+            <tr><td><code>\divide\count N by M</code></td><td>Divide, truncating toward zero as TeX does.</td><td>Run time</td></tr>
+          </tbody>
+        </table>
+        <p>No other register type exists yet: <code>\dimen</code>, <code>\skip</code>, <code>\muskip</code>, <code>\toks</code> and <code>\box</code> are unimplemented, and <code>\edef</code> takes its scratch registers from the top of the count range (255 downward).</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Groups</h2>
+        <p>A brace group scopes the macro table and the count registers written inside it: the lowered body is wrapped in save/restore for exactly the registers it assigns, so an assignment inside braces is undone at the closing brace exactly as TeX undoes it. <code>\begingroup</code> and <code>\endgroup</code> do the same without the braces. <code>\global</code> and <code>\gdef</code> opt out.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Command line</h2>
+        <table class="file-table">
+          <thead><tr><th>Invocation</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>texrs FILE.tex</code></td><td>Run the file and print its <code>\message</code> stream as <code>(./FILE.tex … )</code>.</td></tr>
+            <tr><td><code>texrs --dump-tokens FILE</code></td><td>Print the mouth's token stream and exit. No expansion happens.</td></tr>
+            <tr><td><code>texrs --disasm FILE</code></td><td>Print the lowered fusevm bytecode and exit.</td></tr>
+            <tr><td><code>texrs --no-cache FILE</code></td><td>Compile this run rather than reading the bytecode cache. The result is identical either way.</td></tr>
+            <tr><td><code>texrs --cache-stats</code></td><td>Print where the bytecode cache is, how many documents it holds and how large it is.</td></tr>
+            <tr><td><code>texrs --cache-clear</code></td><td>Delete the bytecode cache. Every document compiles again on its next run.</td></tr>
+            <tr><td><code>texrs --help</code></td><td>Print the option grammar.</td></tr>
+            <tr><td><code>texrs --version</code></td><td>Print the version banner.</td></tr>
+          </tbody>
+        </table>
+        <p>Errors go to stderr as <code>! &lt;reason&gt;.</code>, the way tex writes them, and the exit status is 1. <code>TEXRS_CACHE=0</code> (or <code>false</code>, or <code>no</code>) turns the bytecode cache off for a run without deleting it.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Links</h2>
+        <ul>
+          <li><strong>Documentation</strong> — <a href="index.html">index.html</a></li>
+          <li><strong>Engineering report</strong> — <a href="report.html">report.html</a></li>
+          <li><strong>Source</strong> — <a href="https://github.com/MenkeTechnologies/texrs">github.com/MenkeTechnologies/texrs</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="hud-theme.js"></script>
+</body>
+</html>

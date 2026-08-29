@@ -1,0 +1,11 @@
+% Conditionals, including a nested one inside a \message body.
+%
+% \ifnum tests a register, which is run-time state, so it lowers to a real
+% branch. \iftrue is decided while lowering, because there is nothing to test.
+\catcode`\{=1 \catcode`\}=2
+\count2=5
+\message{\ifnum\count2>3 BIG\else SMALL\fi}
+\message{\ifodd\count2 ODD\else EVEN\fi}
+\message{\ifcase\count2 ZERO\or ONE\or TWO\else MANY\fi}
+\message{\iftrue ALWAYS\else NEVER\fi}
+\end

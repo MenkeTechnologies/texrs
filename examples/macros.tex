@@ -1,0 +1,10 @@
+% \def with undelimited and delimited parameters.
+%
+% A delimited parameter is TeX's pattern matching: the argument is whatever
+% appears before the delimiter, so \pair reads `1,2.' as two arguments.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\greet#1{HELLO-#1}
+\def\pair#1,#2.{[#1|#2]}
+\message{\greet{WORLD}}
+\message{\pair 1,2.}
+\end

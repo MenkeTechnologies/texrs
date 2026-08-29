@@ -1,0 +1,8 @@
+% A group scopes the macro table AND the registers written inside it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\v{OUT}
+\count3=1
+\message{\v-\the\count3}
+{\def\v{IN}\count3=2 \message{\v-\the\count3}}
+\message{\v-\the\count3}
+\end

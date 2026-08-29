@@ -1,0 +1,10 @@
+% \edef expands its body NOW, so the value is frozen at definition time and a
+% later assignment cannot move it. \def defers, and follows the register.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count4=1
+\edef\frozen{\the\count4}
+\def\live{\the\count4}
+\count4=2
+\message{frozen=\frozen}
+\message{live=\live}
+\end

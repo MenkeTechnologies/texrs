@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="texrs — a TeX engine in Rust. Knuth's mouth and expander: category codes, macro expansion and the conditionals, lowered to fusevm bytecode and run on the shared VM with a three-tier Cranelift JIT. Not a typesetter. MIT licensed.">
+  <title>texrs — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+    .docs-build-line { margin:0.35rem 0 0;font-family:'Share Tech Mono',ui-monospace,monospace;font-size:11px;color:var(--text-dim);letter-spacing:0.03em;max-width:44rem;opacity:0.75; }
+    .hub-scheme-strip { border-bottom:1px dashed var(--border);background:color-mix(in srgb, var(--bg-secondary) 85%, transparent);padding:0.55rem 1.5rem 0.65rem;position:relative; }
+    .hub-scheme-strip-inner { max-width:68rem;margin:0 auto;display:flex;align-items:center;gap:0.85rem; }
+    .hub-scheme-strip .hud-scheme-label { flex:0 0 auto;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-align:left; }
+    .hub-scheme-strip .scheme-grid { flex:1 1 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px; }
+    @media (max-width:720px){ .hub-scheme-strip-inner{flex-direction:column;align-items:stretch}.hub-scheme-strip .scheme-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    .cat-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:0.6rem;margin:0.7rem 0; }
+    .cat-card { border:1px solid var(--border);border-left:2px solid var(--cyan);padding:0.6rem 0.8rem;background:color-mix(in srgb, var(--bg-card) 92%, transparent);border-radius:2px; }
+    .cat-card h4 { font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--cyan);margin:0 0 0.35rem; }
+    .cat-card p { margin:0;font-size:11.5px;color:var(--text-dim);line-height:1.5; }
+    .cat-card code { font-size:11px;color:var(--accent-light); }
+    .reflection-table { width:100%;border-collapse:collapse;margin:0.6rem 0 0.2rem;font-size:12px; }
+    .reflection-table th { background:var(--bg-secondary);color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:6px 10px;border:1px solid var(--border); }
+    .reflection-table td { padding:6px 10px;border:1px solid var(--border);color:var(--text-dim);vertical-align:top; }
+    .reflection-table td code { color:var(--accent-light);background:var(--bg); }
+    .status-pill { display:inline-block;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:2px 7px;border-radius:2px;border:1px solid var(--border); }
+    .status-implemented { color:var(--green); border-color:var(--green); }
+    .status-progress { color:var(--accent-light); }
+    .status-planned { color:var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="app tutorial-app" id="docsApp">
+    <div class="crt-scanline" id="crtH" aria-hidden="true"></div>
+    <div class="crt-scanline-v" id="crtV" aria-hidden="true"></div>
+
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <div>
+          <h1 class="tutorial-brand">// TEXRS — A TEX ENGINE IN RUST</h1>
+          <nav class="tutorial-crumbs" aria-label="Breadcrumb">
+            <span class="current">Docs</span>
+            <span class="sep">/</span>
+            <a href="report.html">Engineering Report</a>
+            <span class="sep">/</span>
+            <a href="reference.html">Reference</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </nav>
+          <p class="docs-build-line">texrs v0.1.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · no interpreter, no DVI yet · a fusevm language host (with zshrs, stryke, rubylang, pythonrs, scalars) · MIT · in active development</p>
+        </div>
+        <div class="tutorial-toolbar">
+          <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
+          <button type="button" class="btn btn-secondary active" id="btnCrt" title="CRT scanline overlay">CRT</button>
+          <button type="button" class="btn btn-secondary active" id="btnNeon" title="Neon border pulse">Neon</button>
+          <a class="btn btn-secondary" href="report.html">Report</a>
+          <a class="btn btn-secondary" href="reference.html">Reference</a>
+          <a class="btn btn-secondary" href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="hub-scheme-strip">
+      <div class="hub-scheme-strip-inner">
+        <span class="hud-scheme-label">// Color scheme</span>
+        <div class="scheme-grid" id="hudSchemeGrid"></div>
+      </div>
+    </div>
+
+    <main class="tutorial-main">
+      <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>TEXRS REFERENCE</h2>
+      <p class="tutorial-subtitle">A TeX engine written in Rust. Source is tokenised under a mutable category-code table, macros are expanded, and what is left is lowered to <code>fusevm</code> bytecode and executed on the same language-agnostic VM and three-tier Cranelift JIT that hosts <code>zshrs</code>, <code>stryke</code>, <code>rubylang</code>, <code>pythonrs</code> and <code>scalars</code>. <strong>In active development — the mouth and the expander, not the stomach.</strong></p>
+
+      <section class="tutorial-section">
+        <h2>What it is</h2>
+        <p>TeX is two machines. The <em>mouth</em> turns bytes into tokens under a category-code table the document itself can change; the <em>expander</em> turns tokens into other tokens — <code>\def</code>, <code>\csname</code>, <code>\the</code>, the conditionals. Only after that does the <em>stomach</em> build boxes and ship DVI.</p>
+        <p><code>texrs</code> implements the first two. That is the half a macro-heavy document spends its time in, and the half where a compiled implementation has something to prove: every mainstream engine — pdfTeX, XeTeX, LuaTeX — descends from <code>tex.web</code> through web2c and <em>interprets</em> the expander.</p>
+        <p><strong>Scope today.</strong> It is not a typesetter: no boxes, no glue, no paragraph breaking, no fonts, no DVI. <code>\end</code> stops the run rather than shipping a page, which is why the parity contract for this milestone is the <code>\message</code> stream. See <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> for the ledger of what is not carried.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Architecture</h2>
+        <p>The pipeline mirrors how <code>zshrs</code> hosts zsh and <code>rubylang</code> hosts Ruby:</p>
+        <pre>TeX source  →  mouth (catcodes, 3-state line scanner)  →  expander  →  command stream
+                                                                        │
+                                     lower  →  fusevm bytecode  →  fusevm VM + Cranelift JIT
+                                                                        │
+                                                         host: \message append + flush</pre>
+        <div class="cat-grid">
+          <div class="cat-card"><h4>fusevm-hosted</h4><p>No local <code>vm.rs</code> and no tree-walker. The command stream is compiled to fusevm bytecode and executed on the shared three-tier Cranelift JIT; <code>jit-disk-cache</code> persists native code across runs.</p></div>
+          <div class="cat-card"><h4>Registers are slots</h4><p>TeX has exactly 256 <code>\count</code> registers (<code>tex.web</code> §236) and they map onto VM slots 0..255, so <code>\advance\count0 by 5</code> is <code>GetSlot / LoadInt / Add / SetSlot</code> — native ops the JIT can compile.</p></div>
+          <div class="cat-card"><h4>Conditionals are branches</h4><p>A tree-walker decides a branch as it goes; a compiler cannot, because the registers it tests are run-time state. Both arms are lowered and emitted as a real branch. <code>\iftrue</code> and <code>\ifx</code> — decidable from the macro table alone — are folded while lowering instead.</p></div>
+          <div class="cat-card"><h4>Compile-time expansion</h4><p><code>\catcode</code> and <code>\def</code> take effect while lowering: they change how the rest of the file <em>reads</em>, so they cannot be deferred to run time.</p></div>
+          <div class="cat-card"><h4>Bytecode cache</h4><p>The chunk a document compiled to is kept in an rkyv shard keyed by path, valid while the source's mtime matches to the nanosecond. The second run of a document skips the mouth, the expander and the lowerer entirely — an mmap, a zero-copy lookup and a decode. <code>TEXRS_CACHE=0</code> turns it off.</p></div>
+        </div>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Example</h2>
+<pre>\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\greet#1{HELLO-#1}
+\def\pair#1,#2.{[#1|#2]}
+\count1=7
+\advance\count1 by 5
+
+\message{\greet{WORLD}}                       % =&gt; HELLO-WORLD
+\message{\pair 1,2.}                          % =&gt; [1|2]
+\message{\ifnum\count1&gt;3 BIG\else SMALL\fi}   % =&gt; BIG
+\message{count=\the\count1}                   % =&gt; count=12
+\end</pre>
+        <p>Run it with <code>texrs file.tex</code> and the output is written the way tex writes it on the terminal: <code>(./file.tex HELLO-WORLD [1|2] BIG count=12 )</code>.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Toolchain</h2>
+        <div class="cat-grid">
+          <div class="cat-card"><h4>texrs &lt;file&gt;</h4><p>Tokenise, expand, lower, and run a <code>.tex</code> file on fusevm; print its <code>\message</code> stream.</p></div>
+          <div class="cat-card"><h4>--dump-tokens</h4><p>Print the mouth's token stream and exit — no expansion, so what prints is what the category codes made of the bytes.</p></div>
+          <div class="cat-card"><h4>--disasm</h4><p>Print the lowered fusevm bytecode disassembly and exit.</p></div>
+          <div class="cat-card"><h4>--no-cache</h4><p>Compile this run rather than reading the bytecode cache — how a warm run is timed against a cold one.</p></div>
+          <div class="cat-card"><h4>--cache-stats / --cache-clear</h4><p>Say what the bytecode cache holds and where, or delete it. Deleting is never destructive: it holds only what can be recompiled.</p></div>
+          <div class="cat-card"><h4>--version / --help</h4><p>Print the version banner or the option grammar.</p></div>
+          <div class="cat-card"><h4>scripts/parity.sh</h4><p>Diff the committed corpus against the real <code>tex</code> binary. No expectation is written by hand.</p></div>
+          <div class="cat-card"><h4>scripts/fuzz_parity.sh</h4><p>Generate seeded random programs in the implemented subset, run both engines, and reduce whatever diverges to a minimal case.</p></div>
+        </div>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Status &amp; roadmap</h2>
+        <p>The table below reflects the current state of the tree. See <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> for the ledger of what is not yet carried, and <a href="https://github.com/MenkeTechnologies/texrs/blob/main/docs/ROADMAP.md">ROADMAP.md</a> for what the stomach would take.</p>
+        <table class="reflection-table">
+          <thead><tr><th>Component</th><th>State</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Category codes, <code>\catcode</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>INITEX's sparse defaults — <code>{</code> is not a group character until something makes it one (<code>src/catcode.rs</code>).</td></tr>
+            <tr><td>Three-state line scanner, <code>^^X</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>Blank line to <code>\par</code>, spaces collapsed, the space after a control word swallowed and after a control symbol kept (<code>src/lexer.rs</code>).</td></tr>
+            <tr><td><code>\def</code> with delimited parameters, <code>##</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>Parameter text validated as <code>tex.web</code> §476 validates it (<code>src/expand.rs</code>).</td></tr>
+            <tr><td><code>\let</code>, <code>\edef</code>/<code>\xdef</code>, <code>\gdef</code>, <code>\global</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td><code>\edef</code> freezes register reads at definition time via scratch registers.</td></tr>
+            <tr><td><code>\csname</code>, <code>\string</code>, <code>\the</code>, <code>\number</code>, <code>\expandafter</code>, <code>\noexpand</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>Control sequences built from characters, and printed back as text.</td></tr>
+            <tr><td>Conditionals</td><td><span class="status-pill status-implemented">Implemented</span></td><td><code>\iftrue</code>/<code>\iffalse</code>/<code>\ifnum</code>/<code>\ifodd</code>/<code>\ifx</code>/<code>\ifcase</code> with <code>\or</code>, nested and inside a <code>\message</code> body (<code>src/lower.rs</code>).</td></tr>
+            <tr><td>Groups scoping macros and registers</td><td><span class="status-pill status-implemented">Implemented</span></td><td>The lowered body is wrapped in save/restore for exactly the registers it assigns.</td></tr>
+            <tr><td><code>\count</code> registers and arithmetic</td><td><span class="status-pill status-implemented">Implemented</span></td><td>256 registers on VM slots; <code>\advance</code>/<code>\multiply</code>/<code>\divide</code> with TeX's truncation.</td></tr>
+            <tr><td>Differential parity vs real <code>tex</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>Corpus, examples, a generative reducing fuzzer, and cargo-fuzz targets for panics.</td></tr>
+            <tr><td>Errors that recover like tex's</td><td><span class="status-pill status-progress">In progress</span></td><td>An undefined control sequence prints its name instead of raising; every other error stops the run.</td></tr>
+            <tr><td>Other registers (<code>\dimen</code>, <code>\skip</code>, <code>\toks</code>, <code>\box</code>)</td><td><span class="status-pill status-planned">Planned</span></td><td>Needed before <code>\ifdim</code>, <code>\ifvoid</code>, <code>\ifhbox</code> can be evaluated.</td></tr>
+            <tr><td>The stomach: boxes, glue, paragraphs, DVI</td><td><span class="status-pill status-planned">Planned</span></td><td>See <code>docs/ROADMAP.md</code>.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Parity</h2>
+        <p>The contract is the <code>\message</code> stream, compared byte-for-byte against the real <code>tex</code> binary. No expectation is written by hand — the reference is produced by running tex at test time, so a case cannot be made to pass by changing texrs.</p>
+<pre># the committed corpus, and the examples on this page
+cargo test
+
+# the same comparison as a script
+bash scripts/parity.sh
+
+# random programs in the implemented subset, both engines, reduced on divergence
+bash scripts/fuzz_parity.sh -n 500
+
+# coverage-guided fuzzing for panics rather than divergences
+cargo +nightly fuzz run lower -- -timeout=10</pre>
+        <p>Both shell harnesses read the tex version they were measured against out of <code>BUGS.md</code> and refuse to run against a different engine: a mismatched oracle does not fail loudly, it reports a different divergence set that reads like a regression.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Building from source</h2>
+        <p>texrs builds as a standalone Rust crate (it is not a workspace member of the meta repo):</p>
+<pre># clone
+git clone https://github.com/MenkeTechnologies/texrs
+cd texrs
+
+# build (produces target/debug/texrs)
+cargo build
+
+# run a .tex file
+./target/debug/texrs examples/hello.tex
+
+# introspection
+./target/debug/texrs --disasm examples/counters.tex
+./target/debug/texrs --dump-tokens examples/macros.tex
+
+# run tests
+cargo test</pre>
+        <p>fusevm is pulled from crates.io with the <code>jit</code> and <code>jit-disk-cache</code> features.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>License</h2>
+        <p>texrs is <strong>MIT licensed</strong> — free and open source. See <a href="https://github.com/MenkeTechnologies/texrs/blob/main/LICENSE">LICENSE</a>.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Repository &amp; links</h2>
+        <ul>
+          <li><strong>Engineering report</strong> — <a href="report.html">report.html</a> (architecture, lowering, parity posture, dependencies)</li>
+          <li><strong>Primitive reference</strong> — <a href="reference.html">reference.html</a> (every primitive texrs carries, and what it does)</li>
+          <li><strong>Source</strong> — <a href="https://github.com/MenkeTechnologies/texrs">github.com/MenkeTechnologies/texrs</a></li>
+          <li><strong>The shared VM</strong> — <a href="https://github.com/MenkeTechnologies/fusevm">fusevm</a> (also behind <code>zshrs</code>, <code>stryke</code>, <code>rubylang</code>, <code>pythonrs</code>, <code>scalars</code>)</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="hud-theme.js"></script>
+</body>
+</html>

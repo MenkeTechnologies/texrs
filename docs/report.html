@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="texrs — Engineering report. A TeX mouth and expander lowered onto the fusevm bytecode VM with a three-tier Cranelift JIT: architecture, lowering decisions, the differential parity posture, and dependencies. MIT licensed.">
+  <title>texrs &mdash; Engineering Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 76rem; }
+    .file-table { width:100%;border-collapse:collapse;margin:0.6rem 0;font-size:12px; }
+    .file-table th { background:var(--bg-secondary);color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;text-align:left;padding:7px 10px;border:1px solid var(--border); }
+    .file-table td { padding:6px 10px;border:1px solid var(--border);color:var(--text-dim);vertical-align:middle; }
+    .file-table tr:hover td { background:var(--bg-hover); }
+    .file-table td:first-child { font-family:'Share Tech Mono',monospace;color:var(--accent-light);font-weight:600;white-space:nowrap; }
+    .file-table code { font-size:11px;color:var(--accent-light);background:var(--bg-primary);padding:1px 4px;border-radius:2px; }
+    .stat-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:0.75rem;margin:1.2rem 0; }
+    .stat-card { border:1px solid var(--border);border-top:3px solid var(--cyan);background:var(--bg-card);padding:1rem 1.2rem;border-radius:2px;text-align:center; }
+    .stat-card .stat-val { font-family:'Orbitron',sans-serif;font-size:28px;font-weight:900;color:var(--cyan);line-height:1.1;text-shadow:0 0 20px var(--cyan-glow); }
+    .stat-card .stat-val.accent { color:var(--accent);text-shadow:0 0 20px var(--accent-glow); }
+    .stat-card .stat-label { font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);margin-top:0.5rem; }
+    .feature-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(22rem,1fr));gap:0.65rem;margin:0.8rem 0; }
+    .feature-card { border:1px solid var(--border);border-left:3px solid var(--cyan);background:var(--bg-card);padding:0.7rem 1rem;border-radius:2px; }
+    .feature-card h4 { font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--cyan);margin:0 0 0.3rem; }
+    .feature-card p { margin:0;font-size:11px;color:var(--text-dim);line-height:1.55; }
+    .feature-card code { font-size:10.5px;color:var(--accent-light);background:var(--bg-primary);padding:1px 4px;border-radius:2px; }
+    .section-rule { border:none;border-top:1px dashed var(--border);margin:2rem 0; }
+    .hub-scheme-strip { border-bottom:1px dashed var(--border);background:color-mix(in srgb, var(--bg-secondary) 85%, transparent);padding:0.55rem 1.5rem 0.65rem;position:relative; }
+    .hub-scheme-strip-inner { max-width:76rem;margin:0 auto;display:flex;align-items:center;gap:0.85rem; }
+    .hub-scheme-strip .hud-scheme-label { flex:0 0 auto;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-align:left; }
+    .hub-scheme-strip .scheme-grid { flex:1 1 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px; }
+    @media (max-width:720px){ .hub-scheme-strip-inner{flex-direction:column;align-items:stretch}.hub-scheme-strip .scheme-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    .docs-build-line { margin:0.35rem 0 0;font-family:'Share Tech Mono',ui-monospace,monospace;font-size:11px;color:var(--text-dim);letter-spacing:0.03em;max-width:44rem;opacity:0.75; }
+  </style>
+</head>
+<body>
+  <div class="app tutorial-app" id="docsApp">
+    <div class="crt-scanline" id="crtH" aria-hidden="true"></div>
+    <div class="crt-scanline-v" id="crtV" aria-hidden="true"></div>
+
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <div>
+          <h1 class="tutorial-brand">// TEXRS — ENGINEERING REPORT</h1>
+          <nav class="tutorial-crumbs" aria-label="Breadcrumb">
+            <a href="index.html">Docs</a>
+            <span class="sep">/</span>
+            <span class="current">Engineering Report</span>
+            <span class="sep">/</span>
+            <a href="reference.html">Reference</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </nav>
+          <p class="docs-build-line">texrs v0.1.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
+        </div>
+        <div class="tutorial-toolbar">
+          <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
+          <button type="button" class="btn btn-secondary active" id="btnCrt" title="CRT scanline overlay">CRT</button>
+          <button type="button" class="btn btn-secondary active" id="btnNeon" title="Neon border pulse">Neon</button>
+          <a class="btn btn-secondary" href="index.html">Docs</a>
+          <a class="btn btn-secondary" href="reference.html">Reference</a>
+          <a class="btn btn-secondary" href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="hub-scheme-strip">
+      <div class="hub-scheme-strip-inner">
+        <span class="hud-scheme-label">// Color scheme</span>
+        <div class="scheme-grid" id="hudSchemeGrid"></div>
+      </div>
+    </div>
+
+    <main class="tutorial-main">
+      <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>ENGINEERING REPORT</h2>
+      <p class="tutorial-subtitle">texrs is a TeX engine in Rust — Knuth's mouth and expander — hosted on the <code>fusevm</code> bytecode VM and its three-tier Cranelift JIT. This report describes the architecture, the decisions lowering forced, how parity is measured, and the dependency posture. The statements below are facts about the design, the manifest and the test suite, not aspirational metrics.</p>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val accent">TeX</div><div class="stat-label">fusevm language host</div></div>
+        <div class="stat-card"><div class="stat-val">256</div><div class="stat-label">count registers as VM slots</div></div>
+        <div class="stat-card"><div class="stat-val">v0.1.0</div><div class="stat-label">version</div></div>
+        <div class="stat-card"><div class="stat-val">MIT</div><div class="stat-label">license · free / OSS</div></div>
+      </div>
+
+      <section class="tutorial-section">
+        <h2>Summary</h2>
+        <p>Every mainstream TeX engine — pdfTeX, XeTeX, LuaTeX — descends from Knuth's <code>tex.web</code> through web2c, and every one of them <em>interprets</em> the expander. texrs compiles it. Source is tokenised under a mutable category-code table, macros are expanded while lowering, and what is left becomes <code>fusevm</code> bytecode that the shared VM executes and the Cranelift JIT can compile.</p>
+        <p>The scope is deliberate and stated plainly: this is the mouth and the expander, not the stomach. There are no boxes, no glue, no paragraph breaking, no fonts and no DVI. It is the half of TeX a macro-heavy document spends its time in, and the half where compilation has something to prove.</p>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>Hosting on fusevm</h2>
+        <p>texrs carries no VM and no JIT of its own. It is a frontend, in the same sense <code>zshrs</code>, <code>stryke</code>, <code>rubylang</code>, <code>pythonrs</code> and <code>scalars</code> are frontends:</p>
+        <pre>TeX source  →  mouth  →  expander  →  command stream  →  fusevm bytecode  →  VM + Cranelift JIT</pre>
+        <div class="feature-grid">
+          <div class="feature-card"><h4>Registers are slots</h4><p>TeX has exactly 256 <code>\count</code> registers (<code>tex.web</code> §236). They map onto VM slots 0..255, so a register read is an array index and <code>\advance\count0 by 5</code> is <code>GetSlot / LoadInt / Add / SetSlot</code> — ops the JIT can compile, not a hash lookup and a match arm.</p></div>
+          <div class="feature-card"><h4>Conditionals are branches</h4><p><code>\ifnum</code> tests run-time state, so it lowers to a comparison plus a jump. Both arms are collected as token runs and lowered recursively. A tree-walker cannot do this: it decides the branch as it walks.</p></div>
+          <div class="feature-card"><h4>Constant folding</h4><p><code>\iftrue</code> and <code>\ifx</code> depend only on the macro table, which lowering already owns — so they are decided at compile time and never reach the VM. <code>tests/lowering.rs</code> asserts the emitted bytecode, because output parity alone would not distinguish a frontend from a tree-walker.</p></div>
+          <div class="feature-card"><h4>Bytecode cache</h4><p>What a document compiled to is kept in an rkyv shard — the layout the sibling engines write, under texrs's own magic — keyed by path and valid while the source's mtime matches to the nanosecond. A hit skips the mouth, the expander and the lowerer entirely. Writes take a lock, fsync and rename, so a reader never sees a half-written shard.</p></div>
+          <div class="feature-card"><h4>Two host builtins</h4><p><code>\message</code> is an append and a flush on the host side. That is what makes a message containing <code>\the\count0</code> read the register at run time rather than freezing it when the file was read.</p></div>
+        </div>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>What lowering forces</h2>
+        <p>Two categories of work cannot be deferred, and one cannot be hoisted:</p>
+        <table class="file-table">
+          <thead><tr><th>Construct</th><th>When it happens</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><code>\catcode</code></td><td>Compile time</td><td>It changes how the rest of the file <em>reads</em>. Deferring it would mean tokenising text whose categories are not known yet.</td></tr>
+            <tr><td><code>\def</code>, <code>\let</code>, <code>\edef</code></td><td>Compile time</td><td>The macro table decides what the following tokens mean; expansion is a source-to-source transform, not a run-time call.</td></tr>
+            <tr><td><code>\count</code> assignment, arithmetic</td><td>Run time</td><td>A register is a slot the program writes. <code>\advance</code> lowers to native ops.</td></tr>
+            <tr><td><code>\ifnum</code>, <code>\ifodd</code>, <code>\ifcase</code></td><td>Run time (real branch)</td><td>They test registers, which only exist while the program runs.</td></tr>
+            <tr><td><code>\iftrue</code>, <code>\iffalse</code>, <code>\ifx</code></td><td>Compile time (folded)</td><td>Decidable from the macro table alone; emitting a branch would be dead weight.</td></tr>
+            <tr><td>Brace group</td><td>Both</td><td>It scopes the macro table (compile time) and the registers written inside it (a save/restore pair around the lowered body).</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>Parity posture</h2>
+        <p>The contract for this milestone is the <code>\message</code> stream, compared byte-for-byte against the real <code>tex</code> binary. Nothing is written by hand: the reference is produced by running tex at test time, so a case cannot be made to pass by editing an expectation.</p>
+        <table class="file-table">
+          <thead><tr><th>Harness</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>tests/differential.rs</code></td><td>Every case in <code>tests/cases</code> against real tex. Fails on any divergence not listed in <code>tests/known_gaps.txt</code>, and on a listed case that has started passing — so the list cannot go stale.</td></tr>
+            <tr><td><code>tests/examples.rs</code></td><td>Every program in <code>examples/</code>, held to the same comparison with no known-gap escape hatch. Documentation that has drifted from the engine is worse than none.</td></tr>
+            <tr><td><code>tests/lowering.rs</code></td><td>Asserts the emitted bytecode: that a conditional became a branch, that <code>\count</code> arithmetic became native ops, that a foldable conditional was folded.</td></tr>
+            <tr><td><code>scripts/fuzz_parity.sh</code></td><td>Generates seeded random programs confined to the implemented subset, runs both engines in parallel, and reduces whatever diverges — dropping statements while the divergence survives, refusing a reduction that turns it into a different divergence.</td></tr>
+            <tr><td><code>tests/fuzz_smoke.rs</code>, <code>tests/fuzz_mass_replay.rs</code></td><td>Replays the cargo-fuzz targets on their seed corpus under stable Rust, and points the mouth at generated mutations of every <code>.tex</code> in the tree.</td></tr>
+            <tr><td><code>fuzz/</code></td><td>cargo-fuzz targets <code>lex</code>, <code>lower</code> and <code>run</code>, looking for panics rather than divergences.</td></tr>
+          </tbody>
+        </table>
+        <p>The oracle itself is pinned: both shell harnesses read the tex version out of <code>BUGS.md</code> and refuse a different engine. A mismatched oracle does not fail loudly — it reports a different divergence set, which reads exactly like a regression.</p>
+        <p>The fuzzer has already paid for itself: it found that <code>\edef</code> does not freeze a conditional in its body, that an undefined control sequence prints its own name instead of raising, and a panic in the argument reader on TeX's <code>#{</code> parameter form. Each is a committed case with its reason written down.</p>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>Dependency posture</h2>
+        <p>One dependency: <code>fusevm</code>, with the <code>jit</code> and <code>jit-disk-cache</code> features. No parser generator, no regex engine, no async runtime, no C shim. The mouth and the expander are hand-written because <code>tex.web</code> is the specification and a generated parser cannot express a category-code table the document mutates while it is being read.</p>
+        <p>That posture is a durability decision as much as a performance one. The crate should still build from a fresh checkout in ten years; every added dependency is a bet that someone else maintains theirs for that long.</p>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>Gaps, stated plainly</h2>
+        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: no stomach; no registers other than <code>\count</code>; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence prints its name instead of raising; <code>\edef</code> does not decide a conditional at definition time; <code>#{</code> parameter text is refused; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
+      </section>
+
+      <hr class="section-rule">
+
+      <section class="tutorial-section">
+        <h2>Links</h2>
+        <ul>
+          <li><strong>Documentation</strong> — <a href="index.html">index.html</a></li>
+          <li><strong>Primitive reference</strong> — <a href="reference.html">reference.html</a></li>
+          <li><strong>Source</strong> — <a href="https://github.com/MenkeTechnologies/texrs">github.com/MenkeTechnologies/texrs</a></li>
+          <li><strong>The shared VM</strong> — <a href="https://github.com/MenkeTechnologies/fusevm">fusevm</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="hud-theme.js"></script>
+</body>
+</html>

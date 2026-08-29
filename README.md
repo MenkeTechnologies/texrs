@@ -8,10 +8,42 @@
                                          
 ```
 
+[![CI](https://github.com/MenkeTechnologies/texrs/actions/workflows/ci.yml/badge.svg)](https://github.com/MenkeTechnologies/texrs/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/texrs?style=flat-square&color=05d9e8)](https://crates.io/crates/texrs)
+![Rust](https://img.shields.io/badge/Rust-2021-05d9e8?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-ff2a6d?style=flat-square)
+![status](https://img.shields.io/badge/status-active%20%C2%B7%20in%20development-9b5de5?style=flat-square)
+
+### `[TEX'S MOUTH AND EXPANDER, COMPILED TO BYTECODE — NOT INTERPRETED]`
+
+> *"Every TeX since 1982 interprets the expander. This one compiles it."*
+
+A TeX engine in Rust: Knuth's **mouth** and **expander**, lowered onto
+[`fusevm`](https://github.com/MenkeTechnologies/fusevm) bytecode and run on the
+shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
+`rubylang`, `pythonrs` and `scalars`.
+
+---
+
+## Table of Contents
+
+- [\[0x00\] What it is](#0x00-what-it-is)
+- [\[0x01\] Install](#0x01-install)
+- [\[0x02\] Usage](#0x02-usage)
+- [\[0x03\] What works](#0x03-what-works)
+- [\[0x04\] What does not](#0x04-what-does-not)
+- [\[0x05\] How it runs](#0x05-how-it-runs)
+- [\[0x06\] Parity](#0x06-parity)
+- [\[0x07\] Fuzzing](#0x07-fuzzing)
+- [\[0x08\] Documentation](#0x08-documentation)
+- [\[0xFF\] Licence](#0xff-licence)
+
+---
+
 A TeX engine in Rust: Knuth's **mouth** and **expander**, built to be lowered
 onto a bytecode VM.
 
-## What it is
+## [0x00] What it is
 
 TeX is two machines. The *mouth* turns bytes into tokens under a mutable
 category-code table; the *expander* turns tokens into other tokens — `\def`,
@@ -23,7 +55,61 @@ its time in, and the half where a compiled implementation has something to prove
 every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends from `tex.web` through
 web2c and *interprets* the expander.
 
-## What works
+## [0x01] Install
+
+```sh
+# Homebrew (macOS + Linux)
+brew install MenkeTechnologies/menketech/texrs
+
+# Or via crates.io
+cargo install texrs
+
+# Or from source
+git clone https://github.com/MenkeTechnologies/texrs && cd texrs && cargo build
+```
+
+#### Zsh tab completion
+
+```sh
+cp completions/_texrs /usr/local/share/zsh/site-functions/_texrs
+```
+
+#### Man pages
+
+```sh
+cp man/man1/texrs.1 man/man1/texrsall.1 /usr/local/share/man/man1/
+man texrs        # the quick reference
+man texrsall     # the comprehensive one, modeled on zshall(1)
+```
+
+## [0x02] Usage
+
+```sh
+texrs file.tex             # run it, print the \message stream
+texrs --dump-tokens file   # the mouth's token stream, no expansion
+texrs --disasm file        # the lowered fusevm bytecode
+texrs --no-cache file      # compile this run instead of reading the cache
+texrs --cache-stats        # what the bytecode cache holds, and where
+texrs --cache-clear        # delete it; it holds only what can be recompiled
+texrs --help
+texrs --version
+```
+
+Output is written the way tex writes it on the terminal, which is what the
+parity harnesses compare:
+
+```
+$ texrs examples/macros.tex
+(./examples/macros.tex HELLO-WORLD [1|2] )
+```
+
+`examples/` carries a runnable program per construct — macros with delimited
+parameters, count arithmetic, conditionals, groups, `\csname`, `\edef` — and
+`tests/examples.rs` holds every one of them in parity with real `tex`, with no
+known-gap escape hatch. Documentation that has drifted from the engine is worse
+than none.
+
+## [0x03] What works
 
 - Category codes, `\catcode`, and INITEX's sparse defaults — `{` is not a group
   character until something makes it one, exactly as a bare `tex` run behaves.
@@ -40,12 +126,12 @@ web2c and *interprets* the expander.
 - `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
 - `\message`.
 
-## What does not
+## [0x04] What does not
 
 No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
 typesetter yet — see `docs/ROADMAP.md`.
 
-## How it runs
+## [0x05] How it runs
 
 texrs is a **fusevm frontend**, not an interpreter: mouth → expander → command
 stream → fusevm bytecode → the VM runs it. A count register is a VM **slot**, so
@@ -58,7 +144,7 @@ is folded while lowering instead, because there is nothing for the VM to test.
 `tests/lowering.rs` asserts the emitted bytecode rather than the printed output —
 output parity alone would not distinguish a frontend from a tree-walker.
 
-## Parity
+## [0x06] Parity
 
 The contract is the `\message` stream, compared byte-for-byte against the real
 `tex` binary. No expectation is written by hand:
@@ -82,7 +168,7 @@ group. Every case is in parity except the ones `tests/known_gaps.txt` names,
 and the gate fails both on an unlisted divergence and on a listed case that has
 started passing, so the list cannot go stale.
 
-## Fuzzing
+## [0x07] Fuzzing
 
 Hand-written cases only cover what someone thought to write down.
 
@@ -105,6 +191,14 @@ corpus under stable Rust, and `tests/fuzz_mass_replay.rs` points the mouth at
 generated mutations of every `.tex` in the tree, so `cargo test` still exercises
 the harness on a machine with no nightly toolchain.
 
-## Licence
+## [0x08] Documentation
+
+- **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
+- **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)
+- **Primitive reference** — every primitive texrs carries and where it happens (`docs/reference.html`)
+- **Known gaps** — the ledger, each entry pinned by a case the suite gates on (`BUGS.md`)
+- **Roadmap** — what the stomach would take (`docs/ROADMAP.md`)
+
+## [0xFF] Licence
 
 MIT.
