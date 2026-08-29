@@ -7,6 +7,7 @@
 _texrs() {
   _arguments -s \
     '(- *)--lsp[speak the Language Server Protocol over stdio]' \
+    '(- *)--dap[speak the Debug Adapter Protocol over stdio]' \
     '(- *)--version[print the version banner and exit]' \
     '(- *)'{-h,--help}'[print the option grammar and exit]' \
     '(--disasm)--dump-tokens[print the mouth'\''s token stream and exit]' \

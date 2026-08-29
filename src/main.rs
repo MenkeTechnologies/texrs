@@ -12,6 +12,7 @@ const USAGE: &str = "\
 usage: texrs [OPTIONS] FILE.tex
 
   --lsp           speak the Language Server Protocol over stdio
+  --dap           speak the Debug Adapter Protocol over stdio
   --dump-tokens   print the mouth's token stream and exit
   --disasm        print the lowered fusevm bytecode and exit
   --tiers         run it, then report which fusevm tier took its bytecode
@@ -44,6 +45,12 @@ fn main() -> ExitCode {
             }
             "--lsp" => {
                 return match texrs::lsp::run() {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => fail(&e),
+                }
+            }
+            "--dap" => {
+                return match texrs::dap::run() {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(e) => fail(&e),
                 }
@@ -86,7 +93,14 @@ fn main() -> ExitCode {
     }
 
     if disasm {
-        return match texrs::compile(&src) {
+        // The same bytecode an ordinary run would execute, so it goes to the
+        // cache like one: a listing is a compile, and the next run should not
+        // have to do it again.
+        let compiled = match no_cache {
+            true => texrs::compile(&src),
+            false => texrs::compile_cached(std::path::Path::new(&path), &src),
+        };
+        return match compiled {
             Ok(chunk) => {
                 print!("{}", chunk.disassemble());
                 ExitCode::SUCCESS

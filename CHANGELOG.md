@@ -12,6 +12,15 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--dap`: a debug adapter over stdio — source-line breakpoints, single
+  stepping, a stack frame, and the `\count` registers as the variables scope.
+  What is debuggable is what survives lowering: macros expand at compile time,
+  so a breakpoint stops on lines that left run-time work behind, and one set on
+  a line that did not is reported unverified rather than silently never firing.
+- Source lines on every op. The lowerer emits a line directive when the line
+  changes and the code generator stamps it onto each op, so `--disasm` reads
+  against the document and the debugger has something to map. Before this every
+  op reported line 0.
 - `--tiers`: run a document, then report what fusevm's tiers did with its
   bytecode — block-tier eligibility, the largest eligible op region, every loop
   header and whether the tracing tier compiled it, and the ops the block tier

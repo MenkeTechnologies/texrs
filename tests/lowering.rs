@@ -70,3 +70,41 @@ fn a_meaning_conditional_is_folded_at_compile_time() {
         "a compile-time-known conditional must not emit a branch: {got:?}"
     );
 }
+
+/// Every op carries the source line it came from.
+///
+/// Before this, every op in the chunk reported line 0: a disassembly could not
+/// be read against the document, and a source-line debugger had nothing to map.
+/// The line is taken at the token that STARTS a command, so a construct that
+/// ends at the newline is still attributed to the line it began on.
+#[test]
+fn ops_carry_the_line_they_came_from() {
+    // Lines: 1 catcodes, 2 assignment, 3 arithmetic, 4 message.
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\count1=7\n\\advance\\count1 by 5\n\\message{\\the\\count1}\n\\end\n";
+    let chunk = texrs::compile(src).expect("compiles");
+
+    // The register prologue is emitted before any line directive, so it carries
+    // line 0; everything after it must carry a real line.
+    let body: Vec<u32> = chunk
+        .ops
+        .iter()
+        .enumerate()
+        .skip(512)
+        .map(|(i, _)| chunk.lines[i])
+        .collect();
+    assert!(!body.is_empty(), "no document ops after the prologue");
+    assert!(
+        body.iter().all(|l| *l >= 2),
+        "an op after the prologue still reports a line before the document's \
+         first command: {body:?}"
+    );
+    assert!(
+        body.windows(2).all(|w| w[0] <= w[1]),
+        "line stamps are not monotonic through a straight-line document: {body:?}"
+    );
+    assert_eq!(
+        *body.last().unwrap(),
+        4,
+        "the last op should belong to the \\message on line 4"
+    );
+}

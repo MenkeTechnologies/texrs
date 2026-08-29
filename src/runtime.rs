@@ -45,11 +45,33 @@ fn render(v: &Value) -> String {
 
 /// Run `chunk` and return the messages it wrote.
 pub fn run(chunk: fusevm::Chunk) -> Result<Vec<String>, String> {
+    run_with(chunk, None)
+}
+
+/// The same, with the `--dap` statement-marker builtin installed.
+///
+/// The tracing JIT is deliberately NOT enabled here: it compiles hot code and
+/// the compiled form does not call the marker, so a debugger would silently stop
+/// stopping. A debug run is an interpreted run.
+pub fn run_debug(
+    chunk: fusevm::Chunk,
+    on_line: fn(&mut VM, u8) -> Value,
+) -> Result<Vec<String>, String> {
+    run_with(chunk, Some(on_line))
+}
+
+fn run_with(
+    chunk: fusevm::Chunk,
+    on_line: Option<fn(&mut VM, u8) -> Value>,
+) -> Result<Vec<String>, String> {
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
     let mut vm = VM::new(chunk);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    if let Some(f) = on_line {
+        vm.register_builtin(ops::DBG_LINE, f);
+    }
     match vm.run() {
         VMResult::Ok(_) | VMResult::Halted => Ok(MESSAGES.with(|m| m.borrow().clone())),
         VMResult::Error(e) => Err(e),

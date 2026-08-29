@@ -57,6 +57,14 @@ pub enum MsgOp {
 
 #[derive(Clone, Debug)]
 pub enum Cmd {
+    /// The source line the commands after this one came from.
+    ///
+    /// A line directive, the way any compiler carries one: the lowerer emits it
+    /// when the line changes, and the code generator stamps it onto every op it
+    /// emits afterwards. Without it every op in the chunk reports line 0, which
+    /// makes a disassembly unreadable and a source-line debugger impossible.
+    /// It generates no code.
+    Line(u32),
     /// `\count<n>=<num>`
     SetCount(i64, Num),
     /// `\advance`/`\multiply`/`\divide` on a count register.

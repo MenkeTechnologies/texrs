@@ -85,6 +85,16 @@ as clean is a document
 .B texrs
 will run.  Nothing is written to the terminal.
 .TP
+.B \-\-dap
+Speak the Debug Adapter Protocol over stdio: source\-line breakpoints, single
+stepping, a stack frame, and the
+.B \ecount
+registers as the variables scope.  What is debuggable is what survives
+lowering \(em macros expand at COMPILE time, so a breakpoint stops on the lines
+that left run\-time work behind, and one set on a line that did not is reported
+unverified rather than silently never firing.  The debug run is interpreted:
+the tracing JIT would compile the markers away.
+.TP
 .B \-\-dump\-tokens
 Print the mouth's token stream for the file and exit.  No expansion happens,
 so what prints is what the category codes made of the bytes.

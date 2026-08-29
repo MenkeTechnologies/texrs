@@ -18,6 +18,9 @@ pub mod ops {
     pub const MSG_APPEND: u16 = 4000;
     /// Finish the message being built and record it.
     pub const MSG_FLUSH: u16 = 4001;
+    /// A statement boundary, emitted only under `--dap`. The debug adapter
+    /// stops here; an ordinary run carries none of these ops.
+    pub const DBG_LINE: u16 = 4002;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -25,12 +28,28 @@ pub const COUNT_SLOTS: u16 = 256;
 
 pub struct Compiler {
     b: ChunkBuilder,
+    /// Emit a `DBG_LINE` marker at every statement boundary. Off for an
+    /// ordinary run, so nothing pays for the debugger that is not using it.
+    debug: bool,
+    /// The source line the commands being lowered came from, updated by
+    /// [`Cmd::Line`] and stamped onto every op emitted after it.
+    line: u32,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         Self {
             b: ChunkBuilder::new(),
+            debug: false,
+            line: 0,
+        }
+    }
+
+    /// A compiler that also emits the `--dap` statement markers.
+    pub fn new_debug() -> Self {
+        Self {
+            debug: true,
+            ..Self::new()
         }
     }
 
@@ -38,8 +57,8 @@ impl Compiler {
         // Every count register starts at zero, as INITEX leaves them; the slots
         // have to be written before they are read or a read finds `Undef`.
         for reg in 0..COUNT_SLOTS {
-            self.b.emit(Op::LoadInt(0), 0);
-            self.b.emit(Op::SetSlot(reg), 0);
+            self.b.emit(Op::LoadInt(0), self.line);
+            self.b.emit(Op::SetSlot(reg), self.line);
         }
         self.block(cmds);
         self.b.build()
@@ -53,41 +72,51 @@ impl Compiler {
 
     fn cmd(&mut self, c: &Cmd) {
         match c {
+            // A line directive: no code of its own, just the stamp every
+            // following op carries -- unless this is a debug build, where it is
+            // also where the debugger is allowed to stop.
+            Cmd::Line(n) => {
+                self.line = *n;
+                if self.debug {
+                    self.b.emit(Op::CallBuiltin(ops::DBG_LINE, 0), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
+            }
             Cmd::SetCount(reg, n) => {
                 self.num(n);
-                self.b.emit(Op::SetSlot(slot(*reg)), 0);
+                self.b.emit(Op::SetSlot(slot(*reg)), self.line);
             }
             Cmd::Arith(op, reg, n) => {
-                self.b.emit(Op::GetSlot(slot(*reg)), 0);
+                self.b.emit(Op::GetSlot(slot(*reg)), self.line);
                 self.num(n);
                 let native = match op {
                     Arith::Add => Op::Add,
                     Arith::Mul => Op::Mul,
                     Arith::Div => Op::Div,
                 };
-                self.b.emit(native, 0);
+                self.b.emit(native, self.line);
                 // TeX's `\divide` is INTEGER division truncating toward zero
                 // (tex.web §1236); fusevm's `Div` is the numeric one and yields a
                 // float, which printed `count=Float(18.0)` where tex prints 18.
                 if matches!(op, Arith::Div) {
-                    self.b.emit(Op::TruncInt, 0);
+                    self.b.emit(Op::TruncInt, self.line);
                 }
-                self.b.emit(Op::SetSlot(slot(*reg)), 0);
+                self.b.emit(Op::SetSlot(slot(*reg)), self.line);
             }
             Cmd::Message(msg) => {
                 self.msg_ops(msg);
-                self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), 0);
-                self.b.emit(Op::Pop, 0);
+                self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
             }
             Cmd::Group { saves, body } => {
                 // The saved values sit on the VM stack under the group's own
                 // work, which stays balanced, and are written back in reverse.
                 for reg in saves {
-                    self.b.emit(Op::GetSlot(slot(*reg)), 0);
+                    self.b.emit(Op::GetSlot(slot(*reg)), self.line);
                 }
                 self.block(body);
                 for reg in saves.iter().rev() {
-                    self.b.emit(Op::SetSlot(slot(*reg)), 0);
+                    self.b.emit(Op::SetSlot(slot(*reg)), self.line);
                 }
             }
             Cmd::IfNum {
@@ -105,7 +134,7 @@ impl Compiler {
                         Rel::Equal => Op::NumEq,
                         Rel::Greater => Op::NumGt,
                     },
-                    0,
+                    self.line,
                 );
                 self.branch(then_branch, else_branch);
             }
@@ -117,11 +146,11 @@ impl Compiler {
                 // `\ifodd n` is `n mod 2 = 1`, and a negative odd number is odd
                 // too -- so compare against zero rather than against one.
                 self.num(value);
-                self.b.emit(Op::LoadInt(2), 0);
-                self.b.emit(Op::Mod, 0);
-                self.b.emit(Op::LoadInt(0), 0);
-                self.b.emit(Op::NumEq, 0);
-                self.b.emit(Op::LogNot, 0);
+                self.b.emit(Op::LoadInt(2), self.line);
+                self.b.emit(Op::Mod, self.line);
+                self.b.emit(Op::LoadInt(0), self.line);
+                self.b.emit(Op::NumEq, self.line);
+                self.b.emit(Op::LogNot, self.line);
                 self.branch(then_branch, else_branch);
             }
         }
@@ -133,14 +162,14 @@ impl Compiler {
             match m {
                 MsgOp::Text(t) => {
                     let k = self.b.add_constant(Value::Str(t.clone().into()));
-                    self.b.emit(Op::LoadConst(k), 0);
-                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), 0);
-                    self.b.emit(Op::Pop, 0);
+                    self.b.emit(Op::LoadConst(k), self.line);
+                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::Number(n) => {
                     self.num(n);
-                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), 0);
-                    self.b.emit(Op::Pop, 0);
+                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::If {
                     left,
@@ -157,7 +186,7 @@ impl Compiler {
                             Rel::Equal => Op::NumEq,
                             Rel::Greater => Op::NumGt,
                         },
-                        0,
+                        self.line,
                     );
                     self.msg_branch(then_ops, else_ops);
                 }
@@ -167,11 +196,11 @@ impl Compiler {
                     else_ops,
                 } => {
                     self.num(value);
-                    self.b.emit(Op::LoadInt(2), 0);
-                    self.b.emit(Op::Mod, 0);
-                    self.b.emit(Op::LoadInt(0), 0);
-                    self.b.emit(Op::NumEq, 0);
-                    self.b.emit(Op::LogNot, 0);
+                    self.b.emit(Op::LoadInt(2), self.line);
+                    self.b.emit(Op::Mod, self.line);
+                    self.b.emit(Op::LoadInt(0), self.line);
+                    self.b.emit(Op::NumEq, self.line);
+                    self.b.emit(Op::LogNot, self.line);
                     self.msg_branch(then_ops, else_ops);
                 }
             }
@@ -179,9 +208,9 @@ impl Compiler {
     }
 
     fn msg_branch(&mut self, then_ops: &[MsgOp], else_ops: &[MsgOp]) {
-        let to_else = self.b.emit(Op::JumpIfFalse(0), 0);
+        let to_else = self.b.emit(Op::JumpIfFalse(0), self.line);
         self.msg_ops(then_ops);
-        let over = self.b.emit(Op::Jump(0), 0);
+        let over = self.b.emit(Op::Jump(0), self.line);
         let at = self.b.current_pos();
         self.b.patch_jump(to_else, at);
         self.msg_ops(else_ops);
@@ -191,9 +220,9 @@ impl Compiler {
 
     /// The condition is on the stack; emit the two arms around it.
     fn branch(&mut self, then_branch: &[Cmd], else_branch: &[Cmd]) {
-        let to_else = self.b.emit(Op::JumpIfFalse(0), 0);
+        let to_else = self.b.emit(Op::JumpIfFalse(0), self.line);
         self.block(then_branch);
-        let over_else = self.b.emit(Op::Jump(0), 0);
+        let over_else = self.b.emit(Op::Jump(0), self.line);
         let else_at = self.b.current_pos();
         self.b.patch_jump(to_else, else_at);
         self.block(else_branch);
@@ -204,10 +233,10 @@ impl Compiler {
     fn num(&mut self, n: &Num) {
         match n {
             Num::Literal(v) => {
-                self.b.emit(Op::LoadInt(*v), 0);
+                self.b.emit(Op::LoadInt(*v), self.line);
             }
             Num::Count(reg) => {
-                self.b.emit(Op::GetSlot(slot(*reg)), 0);
+                self.b.emit(Op::GetSlot(slot(*reg)), self.line);
             }
         }
     }

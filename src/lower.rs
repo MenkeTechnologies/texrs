@@ -57,9 +57,39 @@ impl Lowerer {
 
     /// Lower commands until the input ends, `\end` is seen, or one of `stop` is
     /// reached at nesting depth zero (used for a conditional's arms).
+    /// Drop a line directive no command follows.
+    ///
+    /// A line whose tokens all vanish at compile time — a `\def`, a `\catcode`,
+    /// a comment, `\end` — leaves no run-time work behind. A marker there is not
+    /// merely useless: `--dap` verifies a breakpoint against the marker set, so
+    /// one would let a client set a breakpoint on a line that can never be
+    /// reached and report it verified.
+    fn drop_empty_line_directives(cmds: Vec<Cmd>) -> Vec<Cmd> {
+        let mut out: Vec<Cmd> = Vec::with_capacity(cmds.len());
+        for cmd in cmds {
+            if matches!(cmd, Cmd::Line(_)) && matches!(out.last(), Some(Cmd::Line(_))) {
+                out.pop();
+            }
+            out.push(cmd);
+        }
+        if matches!(out.last(), Some(Cmd::Line(_))) {
+            out.pop();
+        }
+        out
+    }
+
     fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
         let mut out = Vec::new();
+        // The line the last directive named, so one is emitted per line rather
+        // than per command: a `\count` assignment and the `\message` beside it
+        // share a line and need only one.
+        let mut marked = 0u32;
         while let Some(tok) = lx.next_token(&self.eng.cats) {
+            let line = lx.line();
+            if line != marked {
+                out.push(Cmd::Line(line));
+                marked = line;
+            }
             let Token::Cs(name) = &tok else {
                 // Braces group the macro table while lowering, so a `\def`
                 // inside them is undone at the `}` exactly as TeX undoes it.
@@ -74,7 +104,9 @@ impl Lowerer {
                         let saves = assigned_counts(&body);
                         out.push(Cmd::Group { saves, body });
                     }
-                    Token::Char(_, Cat::EndGroup) => return Ok(out),
+                    Token::Char(_, Cat::EndGroup) => {
+                        return Ok(Self::drop_empty_line_directives(out))
+                    }
                     _ => {}
                 }
                 continue;
@@ -83,7 +115,7 @@ impl Lowerer {
             if let Some(stops) = stop {
                 if stops.contains(&name.as_str()) {
                     lx.push_back(&[Token::Cs(name)]);
-                    return Ok(out);
+                    return Ok(Self::drop_empty_line_directives(out));
                 }
             }
             match name.as_str() {
@@ -178,7 +210,7 @@ impl Lowerer {
                 }
             }
         }
-        Ok(out)
+        Ok(Self::drop_empty_line_directives(out))
     }
 
     /// `\edef\x{...\the\count<n>...}` freezes the register's CURRENT value.
@@ -510,6 +542,8 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
         for c in cmds {
             match c {
+                // A line directive assigns nothing.
+                Cmd::Line(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);
