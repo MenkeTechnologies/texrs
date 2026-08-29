@@ -30,6 +30,13 @@ the harness enforces rather than a note.
   to file I/O, neither of which exists yet.
 - **`\futurelet`, `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`,
   `\meaning`, `\jobname`, `\input`.**
+- **`#{` parameter text.** A parameter delimited by the left brace, which tex
+  then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs
+  refuses the definition. Until `cargo fuzz run lower` found it, the argument
+  reader indexed past the end of the parameter list on the trailing `#` and
+  PANICKED; `src/expand.rs` now validates the parameter text at definition time,
+  as `tex.web` §476 does, and `fuzz/corpus/lower/crash_param_brace.tex` keeps the
+  crashing input.
 - **`\edef` does not freeze a conditional.** tex decides `\ifcase`/`\ifodd`
   inside an `\edef` body while READING it, so the body becomes the token run
   the branch produced and a later register change cannot move it. texrs keeps

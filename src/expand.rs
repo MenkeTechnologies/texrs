@@ -497,6 +497,7 @@ impl Engine {
             }
             params.push(t);
         }
+        validate_params(&params)?;
         let raw = self.read_balanced(lx)?;
         let body = match expand_body {
             true => self.expand_to_tokens(lx, &raw)?,
@@ -1095,4 +1096,38 @@ impl Engine {
             }),
         );
     }
+}
+
+/// Check a macro's parameter text the way `tex.web` §476 does.
+///
+/// Every `#` must be followed by a digit, and the digits must run 1, 2, 3 ... in
+/// order. TeX has one exception -- `#{`, a parameter delimited by the left brace
+/// -- which this milestone does not implement and therefore refuses rather than
+/// mis-parses.
+///
+/// Without this the argument reader walks off the end of the parameter list on a
+/// trailing `#`: `\def\a#{...}` panicked with `range start index 2 out of range`
+/// (found by `cargo fuzz run lower`).
+fn validate_params(params: &[Token]) -> R<()> {
+    let mut expect = b'1';
+    let mut i = 0;
+    while i < params.len() {
+        if !matches!(params[i], Token::Char(_, Cat::Param)) {
+            i += 1;
+            continue;
+        }
+        match params.get(i + 1) {
+            Some(Token::Char(c, _)) if *c as u8 == expect => {
+                expect += 1;
+                i += 2;
+            }
+            Some(Token::Char(c, _)) if c.is_ascii_digit() => {
+                return Err(TexError("Parameters must be numbered consecutively".into()))
+            }
+            // `#` last in the parameter text is TeX's `#{` form.
+            None => return Err(TexError("`#{` parameter text is not implemented".into())),
+            _ => return Err(TexError("Illegal parameter number in definition".into())),
+        }
+    }
+    Ok(())
 }

@@ -17,14 +17,18 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every seed in `fuzz/corpus/<target>`, sorted so a failure names the same file
-/// on every machine.
+/// The committed seeds in `fuzz/corpus/<target>`, sorted so a failure names the
+/// same file on every machine.
+///
+/// Only `.tex` files: libfuzzer grows the same directories with hash-named,
+/// frequently non-UTF-8 inputs of its own while it runs, and those are its
+/// working state rather than anything this repository committed.
 fn corpus(target: &str) -> Vec<(PathBuf, Vec<u8>)> {
     let dir = root().join("fuzz/corpus").join(target);
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "tex"))
         .collect();
     entries.sort();
     assert!(
@@ -76,10 +80,27 @@ fn run_corpus_does_not_panic() {
 /// The corpus seeds are hand-picked, so they should all be programs texrs can
 /// actually compile. A seed that stopped compiling is either a regression or a
 /// seed that was never doing any work; both are worth failing over.
+///
+/// `crash_*` is the exception: those are inputs the fuzzer found a PANIC on, and
+/// they are kept precisely because they must not compile -- they must fail with
+/// a `TexError` instead of taking the process down.
 #[test]
 fn lower_and_run_seeds_are_real_programs() {
     for target in ["lower", "run"] {
         for (path, bytes) in corpus(target) {
+            if path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("crash_"))
+            {
+                let s = utf8(&path, &bytes);
+                assert!(
+                    texrs::run_messages(&s).is_err(),
+                    "{} was kept as a crash regression but now compiles cleanly -- \
+                     rename it if that is deliberate",
+                    path.display()
+                );
+                continue;
+            }
             let s = utf8(&path, &bytes);
             if let Err(e) = texrs::run_messages(&s) {
                 panic!("seed no longer compiles: {} -- {}", path.display(), e.0);

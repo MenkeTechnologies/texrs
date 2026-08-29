@@ -4,6 +4,11 @@
 *.dvi
 # cargo-fuzz working state. The seed corpus in fuzz/corpus IS committed; the
 # artifacts, coverage data and build tree are per-machine.
+# libfuzzer grows the corpus directories with its own hash-named inputs while it
+# runs. The committed seeds are the .tex files; everything else there is working
+# state.
+/fuzz/corpus/*/*
+!/fuzz/corpus/*/*.tex
 /fuzz/target
 /fuzz/artifacts
 /fuzz/coverage

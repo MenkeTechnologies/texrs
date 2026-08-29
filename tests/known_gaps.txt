@@ -29,3 +29,11 @@ ifx_after_edef_conditional.tex
 #                  unequal here, because texrs still has the unexpanded
 #                  conditional in one of them. Fixing the entry above fixes
 #                  this one; it is listed separately so the gate proves it.
+param_brace_delim.tex
+#                  `#{' -- a macro parameter delimited by the left brace, which
+#                  tex then puts back (`\def\a#{[X]}' called as `\a{Y}' prints
+#                  `[X]{Y}'). texrs refuses the definition instead. Before that
+#                  it PANICKED: the argument reader indexed past the end of the
+#                  parameter list on a trailing `#'. Found by `cargo fuzz run
+#                  lower'; the crashing input is kept as
+#                  fuzz/corpus/lower/crash_param_brace.tex.
