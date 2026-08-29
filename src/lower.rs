@@ -13,7 +13,7 @@
 
 use crate::catcode::Cat;
 use crate::expand::{Engine, Macro, Meaning, TexError};
-use crate::ir::{Arith, Cmd, Num, Part, Rel};
+use crate::ir::{Arith, Cmd, MsgOp, Num, Rel};
 use crate::lexer::Lexer;
 use crate::token::Token;
 
@@ -21,11 +21,18 @@ type R<T> = Result<T, TexError>;
 
 pub struct Lowerer {
     pub eng: Engine,
+    /// Next hidden count register. `\edef` freezing `\the\count0` needs somewhere
+    /// to put the value NOW, and a register is the only run-time store there is;
+    /// TeX reserves the high registers for exactly this kind of scratch use.
+    next_scratch: i64,
 }
 
 impl Lowerer {
     pub fn new() -> Self {
-        Self { eng: Engine::new() }
+        Self {
+            eng: Engine::new(),
+            next_scratch: 255,
+        }
     }
 
     /// Compile a whole source to a command stream.
@@ -43,8 +50,17 @@ impl Lowerer {
                 // Braces group the macro table while lowering, so a `\def`
                 // inside them is undone at the `}` exactly as TeX undoes it.
                 match &tok {
-                    Token::Char(_, Cat::BeginGroup) => self.eng.compile_time_begin_group(),
-                    Token::Char(_, Cat::EndGroup) => self.eng.compile_time_end_group()?,
+                    Token::Char(_, Cat::BeginGroup) => {
+                        // A group scopes the macro table AND the registers it
+                        // writes; the latter is run-time state, so the body is
+                        // lowered and wrapped in save/restore.
+                        self.eng.compile_time_begin_group();
+                        let body = self.block(lx, Some(&["\u{0}endgroup"]))?;
+                        self.eng.compile_time_end_group()?;
+                        let saves = assigned_counts(&body);
+                        out.push(Cmd::Group { saves, body });
+                    }
+                    Token::Char(_, Cat::EndGroup) => return Ok(out),
                     _ => {}
                 }
                 continue;
@@ -128,7 +144,11 @@ impl Lowerer {
                     out.extend(if same { t } else { e });
                 }
                 "let" => self.eng.compile_time_let(lx)?,
-                "edef" | "xdef" => self.eng.compile_time_def(lx, &name)?,
+                "edef" | "xdef" => {
+                    if let Some(cmd) = self.edef_snapshot(lx)? {
+                        out.push(cmd);
+                    }
+                }
                 "begingroup" => self.eng.compile_time_begin_group(),
                 "endgroup" => self.eng.compile_time_end_group()?,
                 "global" => self.eng.set_global_prefix(true),
@@ -145,6 +165,55 @@ impl Lowerer {
             }
         }
         Ok(out)
+    }
+
+    /// `\edef\x{...\the\count<n>...}` freezes the register's CURRENT value.
+    ///
+    /// The value lives in a VM slot, so "now" is run time. The snapshot is
+    /// written to a scratch register at this point in the program and the macro
+    /// is defined to read THAT, which is what makes a later use see the frozen
+    /// value rather than the live one.
+    fn edef_snapshot(&mut self, lx: &mut Lexer) -> R<Option<Cmd>> {
+        let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
+            return Err(TexError("Missing control sequence inserted".into()));
+        };
+        // Parameter text is not supported for the snapshot form.
+        loop {
+            let Some(t) = lx.next_token(&self.eng.cats) else {
+                return Err(TexError("Runaway definition".into()));
+            };
+            if matches!(t, Token::Char(_, Cat::BeginGroup)) {
+                break;
+            }
+        }
+        let body = self.eng.read_balanced_pub(lx)?;
+        // Find `\the\count<n>` in the body; anything else stays literal.
+        let mut work = Lexer::new("");
+        work.push_back(&body);
+        let mut new_body: Vec<Token> = Vec::new();
+        let mut cmd = None;
+        while let Some(t) = work.pending.pop() {
+            match &t {
+                Token::Cs(n) if n == "the" => {
+                    match work.pending.pop() {
+                        Some(Token::Cs(w)) if w == "count" => {}
+                        _ => return Err(TexError("Unsupported \\edef body".into())),
+                    }
+                    let reg = self.eng.scan_number_pending(&mut work)?;
+                    let scratch = self.next_scratch;
+                    self.next_scratch -= 1;
+                    cmd = Some(Cmd::SetCount(scratch, Num::Count(reg)));
+                    new_body.push(Token::Cs("the".into()));
+                    new_body.push(Token::Cs("count".into()));
+                    for ch in scratch.to_string().chars() {
+                        new_body.push(Token::Char(ch, Cat::Other));
+                    }
+                }
+                other => new_body.push(other.clone()),
+            }
+        }
+        self.eng.define_macro(name, new_body);
+        Ok(cmd)
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
@@ -191,50 +260,64 @@ impl Lowerer {
         }
     }
 
-    /// `\message{...}` split into fixed text and run-time numbers.
-    fn message_parts(&mut self, lx: &mut Lexer) -> R<Vec<Part>> {
+    /// `\message{...}` lowered to the steps that build it at run time.
+    ///
+    /// The body is walked as a token list. Macros and `\csname` resolve here --
+    /// they depend on the macro table, which is a frontend fact. `\the\count`
+    /// and conditionals do not: they read VM slots, so they become a slot read
+    /// and a real branch.
+    fn message_parts(&mut self, lx: &mut Lexer) -> R<Vec<MsgOp>> {
         let body = self.eng.read_message_body(lx)?;
-        let mut parts: Vec<Part> = Vec::new();
-        let mut text = String::new();
         let mut work = Lexer::new("");
         work.push_back(&body);
+        self.msg_ops(&mut work, &[])
+    }
+
+    /// Walk a message token list into build steps, stopping at `stop`.
+    fn msg_ops(&mut self, work: &mut Lexer, stop: &[&str]) -> R<Vec<MsgOp>> {
+        let mut out: Vec<MsgOp> = Vec::new();
+        let mut text = String::new();
+        macro_rules! flush {
+            () => {
+                if !text.is_empty() {
+                    out.push(MsgOp::Text(std::mem::take(&mut text)));
+                }
+            };
+        }
         while let Some(t) = work.pending.pop() {
-            match &t {
-                Token::Cs(n) if n == "the" || n == "number" => {
-                    // `\the\count0` is a register READ, deferred to run time.
-                    if !text.is_empty() {
-                        parts.push(Part::Text(std::mem::take(&mut text)));
-                    }
-                    let bare = n == "number";
-                    if bare {
-                        // `\number<literal>` is known now; only a register read
-                        // has to wait for the VM.
-                        let peek = work.pending.last().cloned();
-                        let is_reg = matches!(&peek, Some(Token::Cs(w)) if w == "count");
-                        if !is_reg {
-                            let v = self.eng.scan_number_pending(&mut work)?;
-                            text.push_str(&v.to_string());
-                            if !text.is_empty() {
-                                parts.push(Part::Text(std::mem::take(&mut text)));
-                            }
-                            continue;
-                        }
-                        let _ = work.pending.pop();
-                        let reg = self.eng.scan_number_pending(&mut work)?;
-                        parts.push(Part::Number(Num::Count(reg)));
-                        continue;
-                    }
-                    if !bare {
+            let Token::Cs(n) = &t else {
+                text.push_str(&t.to_text(self.eng.escape));
+                continue;
+            };
+            let n = n.clone();
+            if stop.contains(&n.as_str()) {
+                work.push_back(&[Token::Cs(n)]);
+                break;
+            }
+            match n.as_str() {
+                "the" | "number" => {
+                    flush!();
+                    if n == "the" {
                         match work.pending.pop() {
                             Some(Token::Cs(w)) if w == "count" => {}
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
+                        let reg = self.eng.scan_number_pending(work)?;
+                        out.push(MsgOp::Number(Num::Count(reg)));
+                        continue;
                     }
-                    let reg = self.eng.scan_number_pending(&mut work)?;
-                    parts.push(Part::Number(Num::Count(reg)));
+                    // `\number` takes either a register or a literal.
+                    let is_reg = matches!(work.pending.last(), Some(Token::Cs(w)) if w == "count");
+                    if is_reg {
+                        let _ = work.pending.pop();
+                        let reg = self.eng.scan_number_pending(work)?;
+                        out.push(MsgOp::Number(Num::Count(reg)));
+                    } else {
+                        let v = self.eng.scan_number_pending(work)?;
+                        text.push_str(&v.to_string());
+                    }
                 }
-                Token::Cs(n) if n == "string" => {
-                    // `\string` is `sprint_cs`: escape + name, no trailing space.
+                "string" => {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
                             Token::Cs(cs) => format!("{}{cs}", self.eng.escape),
@@ -242,18 +325,202 @@ impl Lowerer {
                         });
                     }
                 }
-                Token::Cs(n) if matches!(self.eng.meanings.get(n), Some(Meaning::Macro(_))) => {
-                    let n = n.clone();
-                    self.eng.expand_macro_pending(&mut work, &n)?;
+                "csname" => {
+                    // The name is built from text and macros, all compile-time.
+                    let built = self.eng.read_csname_pending(work)?;
+                    work.push_back(&[Token::Cs(built)]);
                 }
-                other => text.push_str(&other.to_text(self.eng.escape)),
+                "expandafter" => {
+                    let Some(held) = work.pending.pop() else {
+                        return Err(TexError("Missing token after \\expandafter".into()));
+                    };
+                    let Some(next) = work.pending.pop() else {
+                        return Err(TexError("Missing token after \\expandafter".into()));
+                    };
+                    match &next {
+                        Token::Cs(m) if self.eng.is_macro(m) => {
+                            let m = m.clone();
+                            self.eng.expand_macro_pending(work, &m)?;
+                        }
+                        _ => work.push_back(&[next]),
+                    }
+                    work.push_back(&[held]);
+                }
+                "iftrue" | "iffalse" => {
+                    let taken = n == "iftrue";
+                    let (t_ops, e_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.extend(if taken { t_ops } else { e_ops });
+                }
+                "ifx" => {
+                    let a = work.pending.pop();
+                    let b = work.pending.pop();
+                    let same = self.eng.meanings_equal_pub(a.as_ref(), b.as_ref());
+                    let (t_ops, e_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.extend(if same { t_ops } else { e_ops });
+                }
+                "ifnum" => {
+                    let left = self.msg_number(work)?;
+                    let rel = match self.eng.read_relation_pending(work)? {
+                        '<' => Rel::Less,
+                        '>' => Rel::Greater,
+                        _ => Rel::Equal,
+                    };
+                    let right = self.msg_number(work)?;
+                    let (then_ops, else_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.push(MsgOp::If {
+                        left,
+                        rel,
+                        right,
+                        then_ops,
+                        else_ops,
+                    });
+                }
+                "ifodd" => {
+                    let value = self.msg_number(work)?;
+                    let (then_ops, else_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.push(MsgOp::IfOdd {
+                        value,
+                        then_ops,
+                        else_ops,
+                    });
+                }
+                "ifcase" => {
+                    let value = self.msg_number(work)?;
+                    let branches = self.msg_case_arms(work)?;
+                    flush!();
+                    out.push(self.case_chain(value, branches));
+                }
+                _ if self.eng.is_macro(&n) => self.eng.expand_macro_pending(work, &n)?,
+                _ => text.push_str(&t.to_text(self.eng.escape)),
             }
         }
         if !text.is_empty() {
-            parts.push(Part::Text(text));
+            out.push(MsgOp::Text(text));
         }
-        Ok(parts)
+        Ok(out)
     }
+
+    /// `\ifcase` becomes a chain of equality branches -- one per `\or` arm, with
+    /// the `\else` arm as the tail. The VM has no jump table op, and a chain is
+    /// what `\ifcase` means anyway: the nth branch for the value n.
+    fn case_chain(&mut self, value: Num, mut branches: Vec<Vec<MsgOp>>) -> MsgOp {
+        let default = match branches.len() {
+            0 => Vec::new(),
+            _ => branches.pop().unwrap_or_default(),
+        };
+        let mut chain = default;
+        for (i, arm) in branches.into_iter().enumerate().rev() {
+            chain = vec![MsgOp::If {
+                left: value.clone(),
+                rel: Rel::Equal,
+                right: Num::Literal(i as i64),
+                then_ops: arm,
+                else_ops: chain,
+            }];
+        }
+        match chain.len() {
+            1 => chain.pop().unwrap_or(MsgOp::Text(String::new())),
+            _ => MsgOp::Text(String::new()),
+        }
+    }
+
+    /// The `\or`-separated arms of an `\ifcase`, the last being `\else`'s.
+    fn msg_case_arms(&mut self, work: &mut Lexer) -> R<Vec<Vec<MsgOp>>> {
+        let mut arms = Vec::new();
+        loop {
+            let arm = self.msg_ops(work, &["or", "else", "fi"])?;
+            arms.push(arm);
+            match work.pending.pop() {
+                Some(Token::Cs(n)) if n == "or" => continue,
+                Some(Token::Cs(n)) if n == "else" => {
+                    let default = self.msg_ops(work, &["fi"])?;
+                    arms.push(default);
+                    let _ = work.pending.pop();
+                    return Ok(arms);
+                }
+                Some(Token::Cs(n)) if n == "fi" => {
+                    // No `\else`: the default arm is empty.
+                    arms.push(Vec::new());
+                    return Ok(arms);
+                }
+                _ => return Err(TexError("Incomplete \\ifcase".into())),
+            }
+        }
+    }
+
+    /// The two arms of a conditional inside a message.
+    fn msg_arms(&mut self, work: &mut Lexer) -> R<(Vec<MsgOp>, Vec<MsgOp>)> {
+        let then_ops = self.msg_ops(work, &["else", "fi"])?;
+        let mut else_ops = Vec::new();
+        match work.pending.pop() {
+            Some(Token::Cs(n)) if n == "else" => {
+                else_ops = self.msg_ops(work, &["fi"])?;
+                let _ = work.pending.pop();
+            }
+            Some(Token::Cs(n)) if n == "fi" => {}
+            _ => return Err(TexError("Incomplete \\if; missing \\fi".into())),
+        }
+        Ok((then_ops, else_ops))
+    }
+
+    /// A number operand inside a message body.
+    fn msg_number(&mut self, work: &mut Lexer) -> R<Num> {
+        loop {
+            let Some(t) = work.pending.pop() else {
+                return Err(TexError("Missing number, treated as zero".into()));
+            };
+            if t.is_space() {
+                continue;
+            }
+            match &t {
+                Token::Cs(n) if n == "count" => {
+                    let reg = self.eng.scan_number_pending(work)?;
+                    return Ok(Num::Count(reg));
+                }
+                _ => {
+                    work.push_back(&[t]);
+                    return Ok(Num::Literal(self.eng.scan_number_pending(work)?));
+                }
+            }
+        }
+    }
+}
+
+/// Every count register a command block assigns, so a group knows what to save.
+fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
+    let mut regs = Vec::new();
+    fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
+        for c in cmds {
+            match c {
+                Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
+                    if !regs.contains(r) {
+                        regs.push(*r);
+                    }
+                }
+                Cmd::IfNum {
+                    then_branch,
+                    else_branch,
+                    ..
+                }
+                | Cmd::IfOdd {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    walk(then_branch, regs);
+                    walk(else_branch, regs);
+                }
+                Cmd::Group { body, .. } => walk(body, regs),
+                Cmd::Message(_) => {}
+            }
+        }
+    }
+    walk(cmds, &mut regs);
+    regs
 }
 
 impl Default for Lowerer {

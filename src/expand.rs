@@ -823,6 +823,11 @@ impl Engine {
         loop {
             match &cur {
                 Token::Char(c, _) if c.is_ascii_digit() => digits.push(*c),
+                // A constant is terminated by ONE optional space, which is
+                // ABSORBED (tex.web §444) -- it delimits the number and is not
+                // part of what follows. Pushing it back put it in the text, so
+                // `\ifnum\count0>3 BIG` rendered as " BIG".
+                other if other.is_space() && !digits.is_empty() => break,
                 other => {
                     lx.push_back(std::slice::from_ref(other));
                     break;
@@ -1060,5 +1065,34 @@ impl Engine {
     }
     pub fn take_file(&mut self, lx: &mut Lexer) -> Option<Token> {
         lx.next_token(&self.cats)
+    }
+}
+
+/// More frontend surface for the lowering pass.
+impl Engine {
+    pub fn is_macro(&self, name: &str) -> bool {
+        matches!(self.meanings.get(name), Some(Meaning::Macro(_)))
+    }
+    pub fn read_balanced_pub(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        self.read_balanced(lx)
+    }
+    pub fn read_csname_pending(&mut self, lx: &mut Lexer) -> R<String> {
+        self.read_csname(lx, true)
+    }
+    pub fn read_relation_pending(&mut self, lx: &mut Lexer) -> R<char> {
+        self.read_relation(lx, true)
+    }
+    pub fn meanings_equal_pub(&self, a: Option<&Token>, b: Option<&Token>) -> bool {
+        self.meanings_equal(a, b)
+    }
+    /// Define a macro with no parameters, for `\edef`'s rewritten body.
+    pub fn define_macro(&mut self, name: String, body: Vec<Token>) {
+        self.set_meaning(
+            name,
+            Meaning::Macro(Macro {
+                params: Vec::new(),
+                body,
+            }),
+        );
     }
 }

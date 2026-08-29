@@ -31,12 +31,28 @@ pub enum Arith {
     Div,
 }
 
-/// One piece of a `\message`: either text fixed at expansion time, or a number
-/// that is only known when the program runs.
+/// One step of building a `\message`.
+///
+/// A message is assembled at RUN time, not folded to a string while lowering,
+/// because a conditional inside one tests registers the VM holds. `\ifnum`
+/// there becomes a real branch around the pieces it selects, exactly as it does
+/// in running text.
 #[derive(Clone, Debug)]
-pub enum Part {
+pub enum MsgOp {
     Text(String),
     Number(Num),
+    If {
+        left: Num,
+        rel: Rel,
+        right: Num,
+        then_ops: Vec<MsgOp>,
+        else_ops: Vec<MsgOp>,
+    },
+    IfOdd {
+        value: Num,
+        then_ops: Vec<MsgOp>,
+        else_ops: Vec<MsgOp>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -45,8 +61,12 @@ pub enum Cmd {
     SetCount(i64, Num),
     /// `\advance`/`\multiply`/`\divide` on a count register.
     Arith(Arith, i64, Num),
-    /// `\message{...}`
-    Message(Vec<Part>),
+    /// `\message{...}` — built piece by piece at run time.
+    Message(Vec<MsgOp>),
+    /// A group: the listed count registers are saved on entry and restored on
+    /// exit, which is what `{\count0=99}` needs and the macro table alone
+    /// cannot give — a register lives in a VM slot, not in the frontend.
+    Group { saves: Vec<i64>, body: Vec<Cmd> },
     /// `\ifnum<a><rel><b>` … `\else` … `\fi`
     IfNum {
         left: Num,

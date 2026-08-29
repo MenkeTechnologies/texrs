@@ -32,7 +32,11 @@ web2c and *interprets* the expander.
 - `^^X` notation.
 - `\def` with undelimited *and* delimited parameters (`\def\pair#1,#2.{...}`),
   `##`, and nested definitions.
-- `\csname`/`\endcsname`, `\string`, `\the`.
+- `\csname`/`\endcsname`, `\string`, `\the`, `\number`, `\expandafter`.
+- `\let`, `\edef`/`\xdef`, `\gdef`, `\global`, `\begingroup`/`\endgroup`.
+- Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\ifcase`
+  with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.
+- Groups, which scope the macro table AND the count registers they write.
 - `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
 - `\message`.
 
@@ -67,10 +71,9 @@ cargo test                      # the same comparison, as a gate
 
 The corpus is small and deliberately awkward — `##` inside a nested `\def`,
 catcode changes mid-file, `\csname` built from a macro, control-word space
-swallowing. 16 of 27 cases are in parity. The engine was rebuilt to lower onto fusevm rather
-than interpret, and the lowering pass is narrower than the interpreter it
-replaced; `BUGS.md` lists every remaining divergence by class, the largest being
-conditionals inside a `\message` body.
+swallowing. 27 of 27 cases are in parity, including conditionals nested inside a `\message`
+body, `\ifcase`, `\csname`, `\expandafter`, `\edef` freezing a register, and a
+`\count` assignment scoped by a group.
 
 ## Licence
 

@@ -9,13 +9,15 @@
 //! There are 256 count registers and they map onto slots 0..255 directly, which
 //! keeps the mapping trivial to read and means a register read is an array index.
 
-use crate::ir::{Arith, Cmd, Num, Part, Rel};
+use crate::ir::{Arith, Cmd, MsgOp, Num, Rel};
 use fusevm::{Chunk, ChunkBuilder, Op, Value};
 
 /// Builtin ids this frontend registers on the VM.
 pub mod ops {
-    /// `\message` — pops `argc` rendered pieces and records the message.
-    pub const MESSAGE: u16 = 4000;
+    /// Append one rendered piece to the message being built.
+    pub const MSG_APPEND: u16 = 4000;
+    /// Finish the message being built and record it.
+    pub const MSG_FLUSH: u16 = 4001;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -72,20 +74,21 @@ impl Compiler {
                 }
                 self.b.emit(Op::SetSlot(slot(*reg)), 0);
             }
-            Cmd::Message(parts) => {
-                for p in parts {
-                    match p {
-                        Part::Text(t) => {
-                            let k = self.b.add_constant(Value::Str(t.clone().into()));
-                            self.b.emit(Op::LoadConst(k), 0);
-                        }
-                        Part::Number(n) => self.num(n),
-                    }
-                }
-                let argc = u8::try_from(parts.len()).unwrap_or(u8::MAX);
-                self.b.emit(Op::CallBuiltin(ops::MESSAGE, argc), 0);
-                // The builtin leaves its result on the stack; nothing reads it.
+            Cmd::Message(msg) => {
+                self.msg_ops(msg);
+                self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), 0);
                 self.b.emit(Op::Pop, 0);
+            }
+            Cmd::Group { saves, body } => {
+                // The saved values sit on the VM stack under the group's own
+                // work, which stays balanced, and are written back in reverse.
+                for reg in saves {
+                    self.b.emit(Op::GetSlot(slot(*reg)), 0);
+                }
+                self.block(body);
+                for reg in saves.iter().rev() {
+                    self.b.emit(Op::SetSlot(slot(*reg)), 0);
+                }
             }
             Cmd::IfNum {
                 left,
@@ -122,6 +125,68 @@ impl Compiler {
                 self.branch(then_branch, else_branch);
             }
         }
+    }
+
+    /// Emit the steps that build a message, appending each piece as it goes.
+    fn msg_ops(&mut self, msg: &[MsgOp]) {
+        for m in msg {
+            match m {
+                MsgOp::Text(t) => {
+                    let k = self.b.add_constant(Value::Str(t.clone().into()));
+                    self.b.emit(Op::LoadConst(k), 0);
+                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), 0);
+                    self.b.emit(Op::Pop, 0);
+                }
+                MsgOp::Number(n) => {
+                    self.num(n);
+                    self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), 0);
+                    self.b.emit(Op::Pop, 0);
+                }
+                MsgOp::If {
+                    left,
+                    rel,
+                    right,
+                    then_ops,
+                    else_ops,
+                } => {
+                    self.num(left);
+                    self.num(right);
+                    self.b.emit(
+                        match rel {
+                            Rel::Less => Op::NumLt,
+                            Rel::Equal => Op::NumEq,
+                            Rel::Greater => Op::NumGt,
+                        },
+                        0,
+                    );
+                    self.msg_branch(then_ops, else_ops);
+                }
+                MsgOp::IfOdd {
+                    value,
+                    then_ops,
+                    else_ops,
+                } => {
+                    self.num(value);
+                    self.b.emit(Op::LoadInt(2), 0);
+                    self.b.emit(Op::Mod, 0);
+                    self.b.emit(Op::LoadInt(0), 0);
+                    self.b.emit(Op::NumEq, 0);
+                    self.b.emit(Op::LogNot, 0);
+                    self.msg_branch(then_ops, else_ops);
+                }
+            }
+        }
+    }
+
+    fn msg_branch(&mut self, then_ops: &[MsgOp], else_ops: &[MsgOp]) {
+        let to_else = self.b.emit(Op::JumpIfFalse(0), 0);
+        self.msg_ops(then_ops);
+        let over = self.b.emit(Op::Jump(0), 0);
+        let at = self.b.current_pos();
+        self.b.patch_jump(to_else, at);
+        self.msg_ops(else_ops);
+        let end = self.b.current_pos();
+        self.b.patch_jump(over, end);
     }
 
     /// The condition is on the stack; emit the two arms around it.
