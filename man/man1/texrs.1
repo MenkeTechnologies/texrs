@@ -77,6 +77,22 @@ For what is not carried, see
 in the source tree.
 .SH OPTIONS
 .TP
+.B \-\-repl
+Start the interactive prompt.  A line is a line of TeX read with every line
+before it still in effect: a
+.B \ecatcode
+set on one prompt changes how the next one READS, a
+.B \edef
+changes what it means, and a register assignment survives \(em the session
+re-runs the document it has built rather than evaluating each line in a vacuum.
+A line that fails is rolled back rather than left in the document, and
+.B \eend
+ends the line, not the session.  Tab completes the primitives; history lives in
+.IR ~/.texrs/history .
+With stdin on a pipe the line editor is skipped and lines are read plainly, so
+.B texrs \-\-repl < doc.tex
+works.
+.TP
 .B \-\-lsp
 Speak the Language Server Protocol over stdio.  Completion and hover come from
 the same primitive corpus that generates the reference documentation, and

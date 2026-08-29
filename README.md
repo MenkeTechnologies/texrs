@@ -86,6 +86,7 @@ man texrsall     # the comprehensive one, modeled on zshall(1)
 
 ```sh
 texrs file.tex             # run it, print the \message stream
+texrs --repl               # interactive prompt; state carries across lines
 texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dap                # Debug Adapter Protocol over stdio: breakpoints, stepping
 texrs --dump-tokens file   # the mouth's token stream, no expansion

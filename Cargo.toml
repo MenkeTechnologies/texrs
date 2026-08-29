@@ -48,6 +48,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"
 
+# The interactive prompt (`texrs --repl`), the same line editor the sibling
+# frontends' REPLs use: history in ~/.texrs/history and Tab completion over the
+# primitive corpus. nu-ansi-term paints the prompt; the home comes from `dirs`,
+# which the cache already depends on.
+reedline = "0.47.0"
+nu-ansi-term = "0.50"
+
 # The rkyv bytecode cache, the same shard format the sibling engines write
 # (zshrs ZRSC, awkrs AWKR, vimlrs VIML, elisprs ELSP) under texrs's own TEXR
 # magic — pinned to the version and features they serialize with, or a shard one

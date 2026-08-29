@@ -6,6 +6,7 @@
 
 _texrs() {
   _arguments -s \
+    '(- *)--repl[start the interactive prompt]' \
     '(- *)--lsp[speak the Language Server Protocol over stdio]' \
     '(- *)--dap[speak the Debug Adapter Protocol over stdio]' \
     '(- *)--version[print the version banner and exit]' \

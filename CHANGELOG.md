@@ -12,6 +12,15 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--repl`: an interactive prompt. A line is read with every line before it
+  still in effect — the session re-lowers and re-runs the document it has built,
+  so a `\catcode` changes how the next line reads and a register assignment
+  survives, because it IS the same program with one more line. A line that fails
+  is rolled back rather than left in the document, `\end` ends the line rather
+  than the session, and with stdin on a pipe the line editor is skipped so
+  `texrs --repl < doc.tex` works.
+- `src/banner.rs`: the version line names the TeX level first and the engine
+  second, so nothing is misrepresented as TeX Live.
 - `--dap`: a debug adapter over stdio — source-line breakpoints, single
   stepping, a stack frame, and the `\count` registers as the variables scope.
   What is debuggable is what survives lowering: macros expand at compile time,

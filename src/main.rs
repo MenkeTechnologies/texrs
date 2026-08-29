@@ -11,6 +11,7 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 usage: texrs [OPTIONS] FILE.tex
 
+  --repl          start the interactive prompt
   --lsp           speak the Language Server Protocol over stdio
   --dap           speak the Debug Adapter Protocol over stdio
   --dump-tokens   print the mouth's token stream and exit
@@ -33,15 +34,18 @@ fn main() -> ExitCode {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--version" => {
-                println!(
-                    "texrs {} (TeX 3.141592653 mouth+expander)",
-                    env!("CARGO_PKG_VERSION")
-                );
+                println!("{}", texrs::banner::version_banner());
                 return ExitCode::SUCCESS;
             }
             "-h" | "--help" => {
                 print!("{USAGE}");
                 return ExitCode::SUCCESS;
+            }
+            "--repl" => {
+                return match texrs::repl::run() {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => fail(&e),
+                }
             }
             "--lsp" => {
                 return match texrs::lsp::run() {

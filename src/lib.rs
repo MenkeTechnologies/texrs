@@ -11,6 +11,7 @@
 //! this milestone is the `\message` stream, compared byte-for-byte against real
 //! `tex` by `scripts/parity.sh`.
 
+pub mod banner;
 pub mod catcode;
 pub mod compiler;
 pub mod corpus;
@@ -21,12 +22,23 @@ pub mod ir;
 pub mod lexer;
 pub mod lower;
 pub mod lsp;
+pub mod repl;
 pub mod runtime;
 pub mod script_cache;
 pub mod tiers;
 pub mod token;
 
 pub use expand::{Engine, TexError};
+
+/// The messages `src` writes, as a list rather than one joined line.
+///
+/// [`run_messages`] joins them the way the terminal line does; the REPL needs
+/// them apart, because it prints only the ones the newest line added.
+pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
+    let cmds = crate::lower::Lowerer::new().lower(src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds);
+    crate::runtime::run(chunk).map_err(TexError)
+}
 
 /// Compile `src` to fusevm bytecode and run it on the VM.
 ///
