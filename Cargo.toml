@@ -2,10 +2,27 @@
 name = "texrs"
 version = "0.1.0"
 edition = "2021"
+authors = ["MenkeTechnologies <linux.dev25@gmail.com>"]
 description = "A TeX engine: Knuth's mouth and expander, lowered for a bytecode VM"
 license = "MIT"
 repository = "https://github.com/MenkeTechnologies/texrs"
+homepage = "https://menketechnologies.github.io/texrs/"
+documentation = "https://docs.rs/texrs"
 readme = "README.md"
+keywords = ["tex", "typesetting", "macro", "expander", "fusevm"]
+categories = ["command-line-utilities", "text-processing"]
+# Dev-only trees kept out of the published crate: consumers get src and the
+# `texrs` binary, not the differential corpus, the fuzz harness, the parity
+# scripts or CI config. Nothing here is referenced at compile time (no
+# include_str! into any of it), so the packaged crate still builds.
+exclude = [
+    "/.github/",
+    "/tests/",
+    "/fuzz/",
+    "/scripts/",
+    "/docs/",
+    "/BUGS.md",
+]
 
 [[bin]]
 name = "texrs"
@@ -17,3 +34,8 @@ path = "src/lib.rs"
 
 [dependencies]
 fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache"] }
+
+# texrs is a standalone crate, not a workspace member. An explicit empty
+# `[workspace]` stops cargo walking up to the MenkeTechnologiesMeta parent, and
+# keeps `fuzz/` (which has its own) out of this one.
+[workspace]
