@@ -25,13 +25,35 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
+    /// How deep `block` is currently nested.
+    ///
+    /// Lowering inlines a macro into the stream and lowers through its body, and
+    /// it lowers BOTH arms of a run-time conditional because neither is decided
+    /// yet. A macro whose body names itself therefore inlines into its own arm
+    /// without end -- `\def\r{\ifnum\count0<3 \r \fi}` never terminates while
+    /// lowering, whichever way the test would go at run time, and the Rust stack
+    /// runs out before anything is emitted. Real TeX never meets this because it
+    /// interprets: `pass_text` skips the arm it did not take without expanding
+    /// it. Until a recursive macro lowers to a run-time call rather than an
+    /// inline copy, this bounds the nesting so the failure is TeX's own
+    /// "capacity exceeded" rather than a segfault.
+    depth: usize,
 }
+
+/// The nesting `block` refuses to go past.
+///
+/// Chosen to sit far above any real document -- a hand-written file nests
+/// groups and conditionals a few dozen deep at the very most -- while still
+/// tripping long before the stack does. Matches the spirit of the expander's
+/// 200_000-step ceiling: bound the runaway, name it the way TeX names it.
+const MAX_LOWER_DEPTH: usize = 256;
 
 impl Lowerer {
     pub fn new() -> Self {
         Self {
             eng: Engine::new(),
             next_scratch: 255,
+            depth: 0,
         }
     }
 
@@ -79,6 +101,19 @@ impl Lowerer {
     }
 
     fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
+        self.depth += 1;
+        if self.depth > MAX_LOWER_DEPTH {
+            self.depth -= 1;
+            return Err(TexError(
+                "TeX capacity exceeded, sorry [input stack size=256]".into(),
+            ));
+        }
+        let out = self.block_inner(lx, stop);
+        self.depth -= 1;
+        out
+    }
+
+    fn block_inner(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
         let mut out = Vec::new();
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
