@@ -6,6 +6,17 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `.tfm` reading, ported from xetex's `read_font_info` (`tex.web` §539-§576):
+  character widths, heights, depths and italic corrections, the ligature and
+  kern program, and the `FONTDIMEN` parameters. `-X tfm FILE.tfm [CHAR]` prints
+  a font's own description or one character's, and takes a font name as well as
+  a path. Held against `tftopl`, Knuth's own reader, for every character of
+  cmr10, cmmi10, cmsy10, cmex10 and cmtt10, and for cmr10's whole lig/kern
+  program. This is the piece nothing that sets type can be right without, and it
+  is what `width$` in a `.bst` was waiting on.
+
 ## [0.4.0] - 2026-08-30
 
 Versions 0.2.0, 0.3.0 and 0.3.1 were released without cutting a section here;

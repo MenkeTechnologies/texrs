@@ -273,6 +273,34 @@ which measures a string in a font and so needs a
 An interpreter that was right for the styles avoiding that and quietly wrong for
 the rest would be worse than none.
 .TP
+.BI \-X " tfm \fIFILE\fR.tfm [" \fICHAR\fR ]
+Read a font's metrics.  With no
+.I CHAR
+this prints what the font says about itself \(em its family, coding scheme,
+design size, checksum, how many characters it defines, and the seven
+.B FONTDIMEN
+parameters every text font carries.  With one, it prints that character's
+width, height, depth and italic correction, and every ligature and kern it takes
+part in.
+.PP
+The argument may be a path or a font name:
+.B \-X tfm cmr10
+asks
+.B kpsewhich
+where the installation keeps it.
+.PP
+A
+.I .tfm
+is what every TeX engine measures with, and it is entirely a table of indices
+\(em a character carries a width index, not a width, because the characters of a
+text font share a handful of widths.  Reading one is therefore bounds checking:
+a file whose header disagrees with its own tables, or whose index runs past the
+table it names, is refused rather than read into whatever lies next to it.
+Lengths are printed in units of the design size, as
+.BR tftopl (1)
+prints them, and the two agree character for character on the Computer Modern
+fonts.
+.TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
 .PP

@@ -920,3 +920,45 @@ fn the_bst_reader_reads_a_style_and_names_what_nothing_defines() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `-X tfm` reads a font's metrics, by path or by name.
+#[test]
+fn the_tfm_reader_reads_a_font_by_name_and_by_path() {
+    // A font that is not there names what was asked for.
+    let missing = texrs()
+        .args(["-X", "tfm", "nosuchfont"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("nosuchfont"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("cmr10.tfm")
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    // By path and by name, the same font.
+    let by_path = stdout_of(texrs().args(["-X", "tfm", &path]));
+    let by_name = stdout_of(texrs().args(["-X", "tfm", "cmr10"]));
+    assert_eq!(by_path, by_name, "a name is looked up, not read as a path");
+    assert!(by_path.contains("family        CMR"), "{by_path}");
+    assert!(by_path.contains("designsize    10.000000pt"), "{by_path}");
+    assert!(by_path.contains("characters    128"), "{by_path}");
+
+    // One character, with the program it takes part in: f makes three
+    // ligatures in cmr10, which is why "office" sets the way it does.
+    let f = stdout_of(texrs().args(["-X", "tfm", "cmr10", "f"]));
+    assert!(f.contains("width 0.305557"), "{f}");
+    assert!(f.contains("lig  i -> 0o14"), "{f}");
+    assert!(f.contains("kern ! +0.077779"), "{f}");
+}

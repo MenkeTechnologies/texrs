@@ -85,6 +85,7 @@ const USAGE: &str = "\
   -X bib FILE.bib         // Read a bibliography database
   -X bib FILE.aux         // Say what a document cites, and what is missing
   -X bst FILE.bst         // Read a bibliography style, and check its names
+  -X tfm FILE.tfm [C]     // Read a font's metrics, or one character's
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -495,6 +496,30 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "tfm" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X tfm` needs a .tfm file");
+            };
+            // A bare name is a font to look up, so `-X tfm cmr10` works the way
+            // a person would type it.
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich(file),
+            };
+            match texrs::tfm::Tfm::open(&found) {
+                Ok(tfm) => {
+                    match args.get(2).and_then(|c| c.chars().next()) {
+                        // A second argument asks about one character, with the
+                        // ligatures and kerns it takes part in.
+                        Some(c) if c.is_ascii() => print!("{}", tfm.describe(c as u8)),
+                        Some(c) => return fail(&format!("{c} is not an 8-bit character")),
+                        None => print!("{}", tfm.summary()),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "bst" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X bst` needs a .bst file");
@@ -648,6 +673,28 @@ fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
             eprintln!("texrs: {program}: {e}");
             Some(ExitCode::from(1))
         }
+    }
+}
+
+/// Where TeX keeps a file, asked of `kpsewhich`. A font is named `cmr10`, not
+/// by its path, and every TeX installation puts it somewhere different.
+fn kpsewhich(name: &str) -> String {
+    let named = match name.ends_with(".tfm") {
+        true => name.to_string(),
+        false => format!("{name}.tfm"),
+    };
+    let found = std::process::Command::new("kpsewhich").arg(&named).output();
+    match found {
+        Ok(out) => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match path.is_empty() {
+                // Nothing found: hand back what was asked for, so the error
+                // names what the user typed rather than a lookup they did not.
+                true => name.to_string(),
+                false => path,
+            }
+        }
+        Err(_) => name.to_string(),
     }
 }
 

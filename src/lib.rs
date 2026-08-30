@@ -41,6 +41,7 @@ pub mod runtime;
 pub mod rust_ffi;
 pub mod script_cache;
 pub mod status;
+pub mod tfm;
 pub mod tiers;
 pub mod token;
 
