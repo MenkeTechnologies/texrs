@@ -24,6 +24,9 @@ class TexrsSettingsConfigurable : Configurable {
     }
     private val fileExtensionsField = JBTextField()
     private val noCacheBox = JBCheckBox("Pass --no-cache on every run started from the IDE")
+    private val lspEnabledBox = JBCheckBox("Enable the language server (runs `texrs --lsp`)")
+    private val extraLspArgsField = JBTextField()
+    private val lspEnvField = JBTextField()
 
     private var panel: JPanel? = null
 
@@ -34,6 +37,13 @@ class TexrsSettingsConfigurable : Configurable {
             .addComponent(sectionHeader("Engine"))
             .addLabeledComponent(JBLabel("texrs executable:"), executableField, 1, false)
             .addTooltip("Leave blank to use the first `texrs` on \$PATH.")
+
+            .addComponent(sectionHeader("Language server"))
+            .addComponent(lspEnabledBox)
+            .addLabeledComponent(JBLabel("Extra server args:"), extraLspArgsField, 1, false)
+            .addTooltip("Whitespace-separated, passed after `--lsp`.")
+            .addLabeledComponent(JBLabel("Server environment:"), lspEnvField, 1, false)
+            .addTooltip("`KEY=VALUE` pairs, whitespace-separated. e.g. RUST_LOG=info")
 
             .addComponent(sectionHeader("Editor"))
             .addLabeledComponent(JBLabel("File extensions:"), fileExtensionsField, 1, false)
@@ -61,7 +71,10 @@ class TexrsSettingsConfigurable : Configurable {
         val s = TexrsSettings.getInstance()
         return executableField.text != (s.texrsExecutable ?: "") ||
             fileExtensionsField.text != s.fileExtensions ||
-            noCacheBox.isSelected != s.passNoCache
+            noCacheBox.isSelected != s.passNoCache ||
+            lspEnabledBox.isSelected != s.lspEnabled ||
+            extraLspArgsField.text != s.extraLspArgs ||
+            lspEnvField.text != s.lspEnv
     }
 
     override fun apply() {
@@ -69,6 +82,9 @@ class TexrsSettingsConfigurable : Configurable {
         s.texrsExecutable = executableField.text.takeIf { it.isNotBlank() }
         s.fileExtensions = fileExtensionsField.text.ifBlank { "tex" }
         s.passNoCache = noCacheBox.isSelected
+        s.lspEnabled = lspEnabledBox.isSelected
+        s.extraLspArgs = extraLspArgsField.text
+        s.lspEnv = lspEnvField.text
     }
 
     override fun reset() {
@@ -76,6 +92,9 @@ class TexrsSettingsConfigurable : Configurable {
         executableField.text = s.texrsExecutable ?: ""
         fileExtensionsField.text = s.fileExtensions
         noCacheBox.isSelected = s.passNoCache
+        lspEnabledBox.isSelected = s.lspEnabled
+        extraLspArgsField.text = s.extraLspArgs
+        lspEnvField.text = s.lspEnv
     }
 
     override fun disposeUIResources() {

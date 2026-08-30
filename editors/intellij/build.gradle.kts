@@ -35,6 +35,9 @@ dependencies {
         zipSigner()
         testFramework(TestFrameworkType.Platform)
     }
+    // The DAP client speaks JSON; gson is what the platform already ships, so
+    // taking it from there keeps the plugin jar to its own classes.
+    compileOnly("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
 }
 

@@ -31,13 +31,19 @@ spell-checking that reads prose and skips markup, `File → New → TeX Document
 templates that set the category codes INITEX leaves ordinary, and a colour
 settings page with a slot per category.
 
-## What it deliberately does not do
+**LSP integration** over `texrs --lsp`: completion over the primitives the
+engine implements, triggered by `\` since that is what opens a control
+sequence, hover documentation, and diagnostics produced by the real mouth and
+expander rather than by a re-implementation of them that would drift. Only what
+the server advertises is opted into — an opt-in for a capability it does not
+have is a feature that silently does nothing, which is worse than a missing one
+because it looks present.
 
-The sibling plugins (`vimlrs`, `elisprs`) drive an LSP server and a DAP
-debugger compiled into their engines. texrs has neither, so there is no LSP
-client here and no Debug button: a button wired to a server that does not exist
-is worse than no button. That is also why this plugin needs no paid-only
-platform API — unlike its siblings it runs on Community editions.
+**Debugger** over `texrs --dap`: line breakpoints, step over/into/out, pause,
+frames with their scopes and variables, expression evaluation, and
+run-to-cursor. The adapter is stdio-only, so its stdout carries protocol frames
+and nothing else; the document's own `\message` output reaches the console as
+DAP `output` events.
 
 ## Build
 
@@ -47,6 +53,9 @@ cd editors/intellij
 ./gradlew buildPlugin   # build/distributions/texrs-intellij-<version>.zip
 ./gradlew runIde        # a sandbox IDE with the plugin loaded
 ```
+
+A paid JetBrains IDE (2025.2+) is required, because the platform LSP API is not
+in the Community editions — the same requirement the sibling plugins carry.
 
 JDK 17 is required (the Kotlin version the platform plugin pins cannot parse
 newer JDK version strings). Set `org.gradle.java.home` in your **user-level**

@@ -24,6 +24,14 @@
             <li><b>Settings → Tools → texrs</b> to point at a non-PATH
                 <code>texrs</code> binary, claim more file extensions, and
                 force cold runs.</li>
+            <li><b>LSP integration</b> via <code>texrs --lsp</code>: completion
+                over the primitives the engine implements (triggered by
+                <code>\</code>), hover documentation, and diagnostics from the
+                real mouth and expander rather than a re-implementation of
+                them.</li>
+            <li><b>Debugger</b> wired to <code>texrs --dap</code> over stdio:
+                line breakpoints, step over/into/out, frames, scopes, variables,
+                evaluate, and run-to-cursor.</li>
             <li><b>Comments</b> with TeX's <code>%</code>, brace matching on
                 <code>{</code>/<code>}</code>, and spell-checking that reads
                 prose while leaving control sequences alone.</li>
@@ -31,11 +39,9 @@
                 category codes INITEX leaves ordinary.</li>
         </ul>
 
-        <p><b>Requirements:</b> any JetBrains IDE on 2025.2+, Community
-        editions included. Unlike the sibling plugins this one uses no
-        paid-only platform API, because texrs ships no language server: there
-        is no LSP client here, and no debugger, since there is no debug adapter
-        to talk to.</p>
+        <p><b>Requirements:</b> a paid JetBrains IDE on 2025.2+ (RustRover, IDEA
+        Ultimate, GoLand, PyCharm Pro, WebStorm, …), because the platform LSP
+        API is not in the Community editions.</p>
     ]]></description>
     <!-- END-CANONICAL: plugin-description -->
 
@@ -43,14 +49,18 @@
         <h3>0.1.0</h3>
         <ul>
             <li>Initial release. .tex file type, catcode-based lexer and
-                highlighting, run configurations over the texrs CLI including
-                the two introspection flags and the cache switch, color scheme,
-                <code>%</code> comments, brace matching, new-file templates.</li>
+                highlighting, LSP client over <code>texrs --lsp</code>, DAP
+                debugger over <code>texrs --dap</code>, run configurations over
+                the texrs CLI including the two introspection flags and the
+                cache switch, color scheme, <code>%</code> comments, brace
+                matching, new-file templates.</li>
         </ul>
     ]]></change-notes>
 
-    <!-- Nothing paid-only: no platform LSP API is used. -->
+    <!-- The platform LSP API is paid-IDE only, which is what the ultimate
+         dependency records: the plugin cannot load where that API is absent. -->
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.ultimate</depends>
 
     <!-- Plugin model v2 dependencies. `intellij.spellchecker` is a bundled V2
          module with its own classloader rather than an installable plugin ID,
@@ -103,11 +113,22 @@
             id="com.menketechnologies.texrs.settings"
             displayName="texrs"/>
 
+        <!-- Language server: `texrs` in its LSP mode, started when a TeX file
+             is opened and the setting allows it. -->
+        <platform.lsp.serverSupportProvider
+            implementation="com.menketechnologies.texrs.lsp.TexrsLspServerSupportProvider"/>
+
+        <!-- Debugger: the line-breakpoint type, and the runner that speaks the
+             Debug Adapter Protocol to the engine's DAP mode. -->
+        <xdebugger.breakpointType
+            implementation="com.menketechnologies.texrs.dap.TexrsBreakpointType"/>
+
         <!-- Run configuration -->
         <configurationType implementation="com.menketechnologies.texrs.run.TexrsRunConfigurationType"/>
         <runConfigurationProducer
             implementation="com.menketechnologies.texrs.run.TexrsRunConfigurationProducer"/>
         <programRunner implementation="com.menketechnologies.texrs.run.TexrsProgramRunner"/>
+        <programRunner implementation="com.menketechnologies.texrs.run.TexrsDebugRunner"/>
     </extensions>
 
     <actions>

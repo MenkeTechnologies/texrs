@@ -12,6 +12,16 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--aot`: compile a document to a standalone native executable. The chunk is
+  emitted as a relocatable object through fusevm's ahead-of-time compiler and
+  linked against the texrs runtime staticlib, so the result runs with no
+  interpreter dispatch loop and needs no texrs on the machine. It prints exactly
+  what an ordinary run prints, which `tests/aot.rs` checks byte for byte —
+  "compiled" that behaves differently is not a compiler. Short compared with the
+  sibling frontends' AOT paths for a structural reason: their closures live in a
+  host table outside the bytecode and have to be smuggled through the chunk and
+  rebuilt, while texrs has nothing outside the chunk. A macro is gone by the
+  time the VM starts.
 - `--repl`: an interactive prompt. A line is read with every line before it
   still in effect — the session re-lowers and re-runs the document it has built,
   so a `\catcode` changes how the next line reads and a register assignment
@@ -64,9 +74,12 @@ All notable changes to texrs are recorded here. The format follows
   defines), run configurations over the CLI including `--dump-tokens`,
   `--disasm` and `--no-cache`, `%` comments, brace matching, spell-checking that
   reads prose and skips markup, new-file templates that set the category codes
-  INITEX leaves ordinary, and a colour settings page. No LSP client and no
-  debugger, since texrs ships neither server — which is also why this plugin
-  runs on Community editions where its siblings need a paid IDE.
+  INITEX leaves ordinary, and a colour settings page. Since the engine grew
+  `--lsp` and `--dap`, the plugin drives both: completion over the primitives
+  the engine implements, hover and diagnostics from the real mouth and expander,
+  and a debugger with line breakpoints, stepping, frames, scopes, variables,
+  evaluation and run-to-cursor. A paid IDE is required, as for the sibling
+  plugins, because the platform LSP API is not in the Community editions.
 
 - Benchmarks. `cargo bench` measures the pipeline against itself — the mouth
   alone, the frontend, the VM alone, and the whole run — so a slow expander and

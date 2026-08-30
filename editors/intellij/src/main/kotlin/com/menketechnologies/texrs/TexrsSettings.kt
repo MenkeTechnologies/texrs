@@ -10,10 +10,10 @@ import com.intellij.util.xmlb.XmlSerializerUtil
 /**
  * Where the texrs binary is, and which files this plugin claims.
  *
- * Deliberately small: texrs ships no language server and no debug adapter, so
- * there is nothing here to configure about either. What a user does need is a
- * path to a texrs that is not on `PATH`, and the ability to add file extensions
- * — plenty of TeX lives in `.sty`, `.cls` and `.ltx` files.
+ * The binary is one command with three faces — the engine, `--lsp` and `--dap`
+ * — so one executable path serves all three, and what is configurable about the
+ * server is only how it is started. File extensions are configurable because
+ * plenty of TeX lives in `.sty`, `.cls` and `.ltx` files.
  */
 @Service(Service.Level.APP)
 @State(name = "TexrsSettings", storages = [Storage("texrs.xml")])
@@ -22,6 +22,9 @@ class TexrsSettings : PersistentStateComponent<TexrsSettings.State> {
         var texrsExecutable: String? = null,
         var fileExtensions: String = "tex",
         var passNoCache: Boolean = false,
+        var lspEnabled: Boolean = true,
+        var extraLspArgs: String = "",
+        var lspEnv: String = "",
     )
 
     private var stateData = State()
@@ -50,6 +53,27 @@ class TexrsSettings : PersistentStateComponent<TexrsSettings.State> {
         get() = stateData.passNoCache
         set(value) {
             stateData.passNoCache = value
+        }
+
+    /** Whether to start `texrs --lsp` for a TeX file. */
+    var lspEnabled: Boolean
+        get() = stateData.lspEnabled
+        set(value) {
+            stateData.lspEnabled = value
+        }
+
+    /** Extra arguments passed after `--lsp`, whitespace separated. */
+    var extraLspArgs: String
+        get() = stateData.extraLspArgs
+        set(value) {
+            stateData.extraLspArgs = value
+        }
+
+    /** `KEY=VALUE` pairs put in the language server's environment. */
+    var lspEnv: String
+        get() = stateData.lspEnv
+        set(value) {
+            stateData.lspEnv = value
         }
 
     fun supportedExtensions(): List<String> =
