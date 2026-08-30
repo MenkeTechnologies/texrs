@@ -73,6 +73,19 @@ the harness enforces rather than a note.
   document that both uses `\edef` and reads a high register can see a value real
   tex would not put there. Low registers are untouched.
 
+## Inline Rust
+
+- **Two runs compiling the same block at once can collide.** fusevm keys its FFI
+  cache by the body's hash under one shared directory, and two `rustc`
+  invocations landing there together trample each other's intermediate object
+  files (`rust-lld: cannot open …rcgu.o`). One run is fine, and the second run of
+  a document is a cache hit that compiles nothing; a build that starts several
+  texrs processes on documents sharing a block is what to avoid.
+  `tests/ffi.rs` serializes for the same reason.
+- **A block needs `rustc` on PATH.** `RUSTC` overrides it. A block that does not
+  compile stops the run with rustc's own diagnostic rather than failing later at
+  the call.
+
 ## How gaps get found
 
 Four harnesses, in increasing order of how much they cost to run:

@@ -11,6 +11,16 @@
 //! nothing happened.
 
 use std::process::Command;
+use std::sync::Mutex;
+
+/// Serializes the tests that compile a block.
+///
+/// fusevm keys its FFI cache by body hash under one shared directory, and two
+/// rustc invocations landing in it at once trample each other's intermediate
+/// object files -- which is what CI saw first, as `rust-lld: cannot open
+/// ...rcgu.o`. Compiling a block is slow enough that serializing costs little,
+/// and the tests are about the engine rather than about concurrency.
+static COMPILING: Mutex<()> = Mutex::new(());
 
 fn have_rustc() -> bool {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
@@ -31,6 +41,7 @@ const BLOCK: &str = "\\rust{\n\
 
 fn run(body: &str) -> Result<String, String> {
     let src = format!("{BLOCK}\\catcode`\\{{=1 \\catcode`\\}}=2\n{body}\\end\n");
+    let _guard = COMPILING.lock().unwrap_or_else(|e| e.into_inner());
     texrs::run_messages(&src).map_err(|e| e.0)
 }
 
