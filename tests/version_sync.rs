@@ -35,6 +35,14 @@ fn read(rel: &str) -> String {
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
 }
 
+/// The brand a slot carries.
+///
+/// The crate and the binary share a name here, so one string does for both. A
+/// sibling where they differ — strykelang's pages say `stryke vX.Y.Z` because
+/// the binary is `stryke` — would need the BINARY name, not the crate's, which
+/// is the alias to remember if this gate is ever lifted into the meta repo.
+const BRAND: &str = "texrs";
+
 /// The version the crate is, from the compiler rather than from a re-parse of
 /// the manifest — this is the number every other file has to match.
 fn crate_version() -> &'static str {
@@ -61,8 +69,9 @@ fn slots_in(text: &str) -> Vec<String> {
 
 /// `texrs vX.Y.Z` — the build line's form.
 fn branded(text: &str) -> Vec<String> {
-    text.match_indices("texrs v")
-        .map(|(at, _)| version_at(&text[at + "texrs v".len()..]))
+    let marker = format!("{BRAND} v");
+    text.match_indices(marker.as_str())
+        .map(|(at, _)| version_at(&text[at + marker.len()..]))
         .filter(|v| v.split('.').count() == 3)
         .collect()
 }
@@ -149,13 +158,23 @@ fn the_manifest_states_the_crate_version() {
 
 #[test]
 fn every_docs_page_states_the_crate_version() {
-    let want = format!("texrs v{}", crate_version());
+    let want = format!("{BRAND} v{}", crate_version());
     for page in ["docs/index.html", "docs/report.html", "docs/reference.html"] {
         let text = read(page);
         assert!(
             text.contains(&want),
             "{page} does not say `{want}` -- run scripts/bump.sh, or \
              `cargo run --bin gen-docs` for the generated page"
+        );
+        // A page with NO slot at all must fail rather than pass. Otherwise a
+        // build line reworded out of the pattern becomes permanently exempt --
+        // the same masking the fleet's max-based comparison suffers, one level
+        // down: a checker that cannot see a page reports it as fine.
+        assert!(
+            !slots_in(&text).is_empty(),
+            "{page} carries no recognisable version slot, so nothing on it is \
+             being checked. Give it a `texrs vX.Y.Z` build line, or a stat card \
+             labelled `version`."
         );
         // And every OTHER slot on the page agrees, which is what catches a
         // page stamped in one place and left stale in another. Only slots: a
