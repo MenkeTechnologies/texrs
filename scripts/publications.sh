@@ -21,9 +21,11 @@
 # will show the ones written to be refused among them.
 #
 # "Runs" is the exact claim, and it is what this measures: the mouth and the
-# expander read the whole document and produce what its text says. Nothing is
-# typeset. The bytes of text are reported next to the count because a document
-# that "runs" and says nothing is not the same result as one that says a book.
+# expander read the whole document and produce what its text says. This sweep
+# does not typeset -- `--dvi` does that, and whether a document produces a PAGE
+# is a separate question from whether it runs. The bytes of text are reported
+# next to the count because a document that "runs" and says nothing is not the
+# same result as one that says a book.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

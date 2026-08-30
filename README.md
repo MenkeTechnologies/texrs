@@ -318,11 +318,10 @@ survive it. `\directlua` is consumed rather than run — there is no Lua here �
 a document whose output depended on what its Lua computed is WRONG rather than
 refused, which is the one failure mode worth knowing about before trusting this.
 
-The number, run against the 241 `.tex` files of a real LaTeX/LuaLaTeX corpus
+The number, run against the 167 `.tex` files of a real LaTeX/LuaLaTeX corpus
 (Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
-`--include-in-header` fragments): **239 run to completion**, and say 74 MB of
-text. The two that do not are fixtures for `#{` parameter text, a gap listed in
-`BUGS.md` and `tests/known_gaps.txt`; they are written to be refused.
+`--include-in-header` fragments): **167 of 167 run to completion**, and say
+69,751,923 bytes of text.
 
 That is a measurement, so it is re-measurable rather than remembered:
 
@@ -343,7 +342,10 @@ compiles.
 produce what its text says. With `--dvi` there is also a page, set in Computer
 Modern at whatever measure was asked for — and a document that said
 `\setmainfont` gets Computer Modern anyway, because fontspec is not loaded.
-Boxes a document nests, TikZ pictures, colour and maths do not exist. A draft
+Colour does reach the page: `\textcolor` becomes the `color push rgb R G B` /
+`color pop` `\special` pair that dvipdfmx and dvips both read, so the words come
+out coloured in the PDF. Boxes a document nests, TikZ pictures and maths do
+not exist. A draft
 reads correctly; a book being sold on its typography should still be set by an
 engine with a real stomach, and `scripts/texrs-pdf` says the same thing where a
 `pandoc --pdf-engine` build would meet it.
