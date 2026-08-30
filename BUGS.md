@@ -98,6 +98,15 @@ the harness enforces rather than a note.
   compile stops the run with rustc's own diagnostic rather than failing later at
   the call.
 
+## The JIT
+
+The tracing JIT is enabled for an ordinary run, and NOT for `--dap`: a compiled
+loop does not call the debugger's line marker, so a debug run stays interpreted.
+`texrs --tiers FILE` reports what actually happened rather than what was enabled
+— `traced=true` is a trace installed, `block-JIT compiled` is the whole chunk in
+one piece — and `src/tiers.rs` pins that TeX's loop idiom reaches native code, so
+the recogniser, the rotated lowering and the switch cannot silently be lost.
+
 ## How gaps get found
 
 Four harnesses, in increasing order of how much they cost to run:

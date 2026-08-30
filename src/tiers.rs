@@ -304,6 +304,41 @@ mod tests {
         );
     }
 
+    /// A TeX loop reaches native code.
+    ///
+    /// This is the end of the chain the rest of the engine exists to make
+    /// possible: TeX's `\def\r{… \ifnum … \r \fi}` idiom is recognised as a
+    /// loop, lowered as a rotated conditional back edge — the one shape
+    /// fusevm's trace compiler accepts — and the run enables the tracing JIT, so
+    /// the loop is compiled rather than interpreted. Every link is needed: the
+    /// recogniser, the rotation, and the switch. This test fails if any of them
+    /// is removed, which is what it is for; a document that reaches no native
+    /// code at all is a frontend claiming a JIT it does not use.
+    #[test]
+    fn a_tex_loop_reaches_a_compiled_trace() {
+        let src = "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n\
+                   \\count1=0\n\
+                   \\def\\r{\\advance\\count1 by 1 \\ifnum\\count1<100000 \\r \\fi}\n\
+                   \\r\n\\message{\\the\\count1 }\n\\end\n";
+        let report = report(src).expect("runs");
+        let loops = &report.chunks[0].loops;
+        assert_eq!(
+            loops.len(),
+            1,
+            "the loop idiom was not recognised: {report}"
+        );
+        assert!(
+            loops[0].trace_eligible,
+            "the loop body holds something the tracing tier refuses: {report}"
+        );
+        assert!(
+            loops[0].traced,
+            "the loop was eligible and never compiled -- either the rotation or \
+             the tracing JIT is gone: {report}"
+        );
+        assert!(report.reaches_native(), "{report}");
+    }
+
     /// The report is about the document that ran, not about a fresh one: the
     /// same source twice gives the same verdict.
     #[test]

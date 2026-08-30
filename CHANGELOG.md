@@ -56,6 +56,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading OpenType and TrueType fonts, ported from `sfnt.c`, `tt_table.c`,
+  `tt_cmap.c` and `tt_post.c` in `xdvipdfmx`: the table directory (collections
+  included), `head`, `hhea`, `maxp`, `hmtx`, `name`, `cmap` formats 0, 4, 6 and
+  12, and `post` glyph names with the 258 Macintosh names a font numbers rather
+  than spells. `-X otf FILE.otf [CHAR]`. Held against `otfinfo` on four fonts:
+  the table directory table for table, the `name` table string for string,
+  every one of 2000+ `cmap` mappings, and every glyph name.
 - `--dump-ast` prints the command stream the frontend lowered the document to.
   TeX has no expression grammar to parse into a tree; the mouth and the expander
   hand the stomach a flat run of primitive commands, and that run is this
@@ -176,6 +183,14 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- The tracing JIT is switched on. It was compiled in, measured by `--tiers`, and
+  described in the README — and never enabled on the run path, so every document
+  ran interpreted while `--tiers` reported `trace-eligible=true traced=false` on
+  a loop that was correctly rotated and waiting. A 2,000,000-iteration TeX loop
+  goes from 4.4-5.7s to 0.02s, printing the same answer to the byte. A debug run
+  stays interpreted on purpose: the JIT compiles a hot loop into native code
+  that does not call the `--dap` line marker, so a debugger under it would
+  silently stop stopping.
 - `tests/eval.rs`, the unit layer the siblings carry: one behaviour per test, so
   a regression in delimited-parameter matching reads as "a delimited parameter
   matches up to its delimiter" rather than as "macros.tex diverges". Nineteen

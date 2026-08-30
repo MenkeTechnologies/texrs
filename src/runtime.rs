@@ -161,8 +161,17 @@ fn run_with(
     FAULT.with(|f| *f.borrow_mut() = None);
     let mut vm = VM::new(chunk);
     register_message_builtins(&mut vm);
-    if let Some(f) = on_line {
-        vm.register_builtin(ops::DBG_LINE, f);
+    match on_line {
+        // A debug run stays interpreted. The tracing JIT compiles a hot loop
+        // into native code that does not call the `DBG_LINE` marker, so a
+        // debugger under it would silently stop stopping -- which is why
+        // `--dap` asks for the marker builtin and gets the interpreter with it.
+        Some(f) => vm.register_builtin(ops::DBG_LINE, f),
+        // Everything else gets the JIT the crate has been compiling in and
+        // never switching on. A TeX loop lowers to a rotated conditional back
+        // edge, which is the shape fusevm's trace compiler accepts; without
+        // this it recorded the trace and had nowhere to install it.
+        None => vm.enable_tracing_jit(),
     }
     let result = vm.run();
     // A builtin that faulted halted the VM, so the halt has to be read as the
