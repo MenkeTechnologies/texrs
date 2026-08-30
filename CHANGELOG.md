@@ -66,6 +66,10 @@ All notable changes to texrs are recorded here. The format follows
   generated mutations of every `.tex` in the tree.
 - `examples/`, held in parity with real tex by `tests/examples.rs` with no
   known-gap escape hatch.
+- `editors/` configuration for coc.nvim, Helix, Vim/Neovim (native LSP) and
+  VS Code, pointing at `texrs --lsp` and `texrs --dap`.
+- `docs/_config.yml`, excluding Markdown from the Pages build: GitHub Pages
+  ships Jekyll 3.10, whose Liquid parser aborts the whole site on a TeX brace.
 - Man pages (`texrs(1)`, `texrsall(1)`), a zsh completion, and the docs site
   (`docs/index.html`, `docs/report.html`, `docs/reference.html`).
 - A JetBrains plugin under `editors/intellij`, ported from the sibling engines':

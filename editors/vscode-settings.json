@@ -1,0 +1,23 @@
+{
+  "//": "VS Code: run and debug TeX documents with texrs. Merge into .vscode/settings.json and .vscode/launch.json respectively.",
+  "files.associations": {
+    "*.tex": "tex"
+  },
+  "[tex]": {
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true
+  },
+  "launch": {
+    "configurations": [
+      {
+        "//": "texrs --dap: source-line breakpoints, stepping, and the \\count registers as the variables scope.",
+        "name": "Run this TeX document",
+        "type": "texrs",
+        "request": "launch",
+        "program": "${file}",
+        "debugServer": null
+      }
+    ]
+  },
+  "debug.javascript.autoAttachFilter": "disabled"
+}

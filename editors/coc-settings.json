@@ -1,0 +1,11 @@
+{
+  "//": "coc.nvim: texrs as the language server for TeX files. Copy into ~/.config/nvim/coc-settings.json, or merge the languageserver block into the one already there.",
+  "languageserver": {
+    "texrs": {
+      "command": "texrs",
+      "args": ["--lsp"],
+      "filetypes": ["tex", "plaintex"],
+      "rootPatterns": [".git", "Makefile", "*.tex"]
+    }
+  }
+}

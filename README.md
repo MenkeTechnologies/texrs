@@ -75,6 +75,20 @@ git clone https://github.com/MenkeTechnologies/texrs && cd texrs && cargo build
 cp completions/_texrs /usr/local/share/zsh/site-functions/_texrs
 ```
 
+#### Editors
+
+`texrs --lsp` and `texrs --dap` are ordinary LSP/DAP servers over stdio, so any
+client can drive them. `editors/` carries ready-made configuration:
+
+```sh
+editors/coc-settings.json      # coc.nvim
+editors/helix-languages.toml   # Helix
+editors/texrs.vim              # Vim / Neovim (native LSP on 0.8+)
+editors/texrs.lua              # the same, as a lua module
+editors/vscode-settings.json   # VS Code
+editors/intellij/              # the JetBrains plugin
+```
+
 #### Man pages
 
 ```sh

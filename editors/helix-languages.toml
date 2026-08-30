@@ -1,0 +1,19 @@
+# Helix configuration for texrs.
+# Add to ~/.config/helix/languages.toml.
+#
+# texrs implements TeX's mouth and expander, so it serves plain TeX files. It
+# has no opinion about LaTeX packages -- diagnostics come from the engine's own
+# lowerer, and a LaTeX document will report the first primitive texrs does not
+# carry rather than pretending to understand it.
+
+[[language]]
+name = "tex"
+scope = "source.tex"
+file-types = ["tex"]
+comment-token = "%"
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["texrs"]
+
+[language-server.texrs]
+command = "texrs"
+args = ["--lsp"]

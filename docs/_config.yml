@@ -1,0 +1,31 @@
+# Jekyll site config for the docs/ GitHub Pages publish.
+#
+# Pages serves the HTML hub here (index.html, report.html, the generated
+# reference.html, and the shared HUD assets). Every Markdown file in this
+# directory is an engineering document meant to be read on github.com itself,
+# not rendered through Jekyll, so they are excluded outright:
+#
+#   1) Liquid syntax errors. ROADMAP.md and its kin are full of TeX braces
+#      (`\message{...}`, `#{`, `\ifnum\count1>3`) which Liquid mis-parses as
+#      variable interpolation and aborts the whole site build on. The
+#      `render_with_liquid: false` frontmatter added in Jekyll 4.0 is silently
+#      ignored by GitHub Pages, which still ships Jekyll 3.10, so excluding is
+#      the only thing that works in production.
+#   2) The .md files are not anchor targets for any link on the public hub. The
+#      HTML is the public surface; the Markdown is linked by plain github.com
+#      URLs, which render it fine.
+#
+# If Pages ever pins Jekyll 4+, revisit -- per-file `render_with_liquid: false`
+# would then let the Markdown build through.
+
+exclude:
+  - "*.md"
+  - "**/*.md"
+
+# Forward-compat with Jekyll 4+ (a no-op on 3.10, harmless): disables Liquid on
+# every remaining file, so a future .html holding a literal `{{` survives.
+defaults:
+  - scope:
+      path: ""
+    values:
+      render_with_liquid: false
