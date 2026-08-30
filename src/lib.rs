@@ -14,6 +14,7 @@
 pub mod aot;
 pub mod aot_runtime;
 pub mod banner;
+pub mod bundle;
 pub mod catcode;
 pub mod cli;
 pub mod compiler;
@@ -91,6 +92,20 @@ pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let cmds = crate::lower::Lowerer::new().lower(&src)?;
     Ok(crate::compiler::Compiler::new().compile(&cmds))
+}
+
+/// Whether an `\end` in `src` stops the run, rather than the source merely
+/// running out.
+///
+/// tex closes the file's paren differently for the two — `(./doc.tex MSGS )`
+/// when `\end` stopped it, `(./doc.tex MSGS)` when the file ran out — and only
+/// the second keeps reading, from the command line if there is more there. The
+/// driver asks this; nothing else needs to.
+pub fn source_ends_run(src: &str) -> bool {
+    let src = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new();
+    let _ = lowerer.lower(&src);
+    lowerer.ended
 }
 
 /// Compile `src`, reporting the line the mouth had reached if it stopped.

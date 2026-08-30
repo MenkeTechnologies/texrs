@@ -97,6 +97,19 @@ type = "messages"
 .RE
 .PP
 A
+.B bundle
+key names a zip of support files, searched after the document's own directory
+and its extra paths: what a document carries with it when it is shared as one
+file rather than as a directory somebody has to keep in order.  A file beside
+the document overrides the one in its bundle, so a recipient can change a macro
+without unpacking the archive.  Unlike
+.BR tectonic (1),
+whose bundle is fetched, this one is a path \(em a build that reaches the
+network is one that fails on an aeroplane and depends on a server still
+answering in ten years.  Fetch it with whatever fetches things and hand the file
+over.
+.PP
+A
 .B preamble
 key names files read before the inputs and kept as a FORMAT: a macro file is
 compiled once and every later build starts from what it left, which is what
@@ -191,6 +204,59 @@ added without changing the binary:
 runs
 .BR texrs-lint .
 .SH OPTIONS
+.SS tex's options
+Accepted in
+.BR tex 's
+own spelling, with one dash or two and a value after either an
+.B =
+or a space, so an invocation written for
+.B tex
+drives texrs unchanged.  This milestone acts on
+.BR \-interaction ;
+the rest are recorded and reported by
+.B \-X show
+but change nothing yet, because what they configure \(em the log file, the
+format, the DVI \(em is the stomach texrs does not have.
+.TP
+.BI \-interaction= MODE
+.BR batchmode ", " nonstopmode ", " scrollmode " or " errorstopmode .
+.B batchmode
+writes nothing to the terminal; texrs never stops to ask, so the other three
+differ only in what they would do at an error.
+.TP
+.BI \-jobname= NAME
+Set the job name.
+.TP
+.BI \-output\-directory= DIR
+Write files in
+.IR DIR .
+.TP
+.BI \-progname= NAME
+Set the program name.
+.TP
+.BI \-fmt= NAME
+Use a named format, as
+.BI & NAME
+does.
+.TP
+.B \-ini
+Be initex.  texrs loads no format either way, so it already is.
+.TP
+.B \-halt\-on\-error
+Stop at the first error, which texrs does regardless.
+.TP
+.BR \-file\-line\-error ", " \-no\-file\-line\-error
+Enable or disable
+.B file:line:error
+style messages.
+.TP
+.B \-recorder
+Record the files read.
+.TP
+.B \-8bit
+Write 8\-bit characters as themselves rather than as
+.BR ^^ -escapes.
+.SS texrs's options
 .TP
 .B \-\-repl
 Start the interactive prompt.  A line is a line of TeX read with every line

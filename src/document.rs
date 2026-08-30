@@ -92,6 +92,15 @@ pub struct DocSection {
     /// Extra directories searched for an input, after the document's own.
     #[serde(default)]
     pub extra_paths: Vec<PathBuf>,
+    /// A zip of support files, searched last: what a document carries with it
+    /// when it is shared as one file rather than a directory.
+    ///
+    /// tectonic's bundle is fetched; this one is a path, because a build that
+    /// reaches the network fails on an aeroplane and depends on a server still
+    /// answering years from now. Fetch it with whatever fetches things and hand
+    /// the file over.
+    #[serde(default)]
+    pub bundle: Option<PathBuf>,
     /// Anything the user wants to keep here. texrs does not read it.
     #[serde(default)]
     pub metadata: Option<toml::Value>,
@@ -257,6 +266,16 @@ impl Document {
         }));
         let mut stack = ProviderStack::new();
         stack.push(Box::new(crate::io::FilesystemProvider::with_roots(roots)));
+        // The bundle is searched last, so a file beside the document overrides
+        // the one it was shipped with — which is what lets a recipient change
+        // a macro without unpacking the archive.
+        if let Some(bundle) = &self.file.doc.bundle {
+            let path = match bundle.is_absolute() {
+                true => bundle.clone(),
+                false => self.src_dir.join(bundle),
+            };
+            stack.push(Box::new(crate::bundle::Bundle::open(&path)?));
+        }
 
         let mut source = String::new();
         for name in names {
@@ -315,6 +334,9 @@ impl Document {
         out.push_str(&format!("build      {}\n", self.build_dir.display()));
         for path in &self.file.doc.extra_paths {
             out.push_str(&format!("extra path {}\n", path.display()));
+        }
+        if let Some(bundle) = &self.file.doc.bundle {
+            out.push_str(&format!("bundle     {}\n", bundle.display()));
         }
         out.push_str("\ninputs\n");
         match self.assemble() {
@@ -747,6 +769,79 @@ mod tests {
         // Each profile writes its own file, so one does not overwrite another.
         assert_ne!(built.path, tokens.path);
         assert_ne!(tokens.path, disasm.path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bundle_supplies_what_the_directory_does_not_and_yields_to_what_it_does() {
+        use std::io::Write;
+
+        let dir = scratch("bundle");
+        // The bundle carries both macro files; the directory carries a newer
+        // copy of one of them.
+        let bundle_path = dir.join("support.zip");
+        {
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&bundle_path).unwrap());
+            for (name, body) in [
+                (
+                    "macros.tex",
+                    "\\catcode`\\{=1 \\catcode`\\}=2 \\def\\who{BUNDLE}\n",
+                ),
+                ("extra.tex", "\\def\\extra{FROM-BUNDLE}\n"),
+            ] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(body.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        std::fs::write(
+            dir.join("macros.tex"),
+            "\\catcode`\\{=1 \\catcode`\\}=2 \\def\\who{BESIDE-THE-DOCUMENT}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("index.tex"), "\\message{\\who\\extra}\n\\end\n").unwrap();
+
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"b\"\nbundle=\"support.zip\"\n\
+             inputs=[\"macros.tex\",\"extra.tex\",\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+
+        let built = doc.build(None).expect("builds");
+        let output = std::fs::read_to_string(&built.path).unwrap();
+        // The directory's copy won for the file it has; the bundle supplied
+        // the one it does not.
+        assert!(output.contains("BESIDE-THE-DOCUMENT"), "{output}");
+        assert!(output.contains("FROM-BUNDLE"), "{output}");
+        assert!(!output.contains("BUNDLE\\"), "{output}");
+
+        // What came from where is recorded: a bundle entry has no path.
+        let (_, read) = doc.assemble().unwrap();
+        let from_bundle = read.iter().find(|r| r.name == "extra.tex").unwrap();
+        assert_eq!(from_bundle.origin, crate::io::InputOrigin::Memory);
+        assert_eq!(from_bundle.path, None);
+        let beside = read.iter().find(|r| r.name == "macros.tex").unwrap();
+        assert_eq!(beside.origin, crate::io::InputOrigin::Filesystem);
+
+        // And `-X show` says the document has one.
+        assert!(
+            doc.show().contains("bundle     support.zip"),
+            "{}",
+            doc.show()
+        );
+
+        // A bundle that is not there stops the build rather than quietly
+        // building a document missing half its inputs.
+        let broken = Document::parse(
+            &dir,
+            "[doc]\nname=\"b\"\nbundle=\"absent.zip\"\ninputs=[\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+        assert!(broken.assemble().unwrap_err().contains("cannot read"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
