@@ -100,6 +100,15 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- `tests/eval.rs`, the unit layer the siblings carry: one behaviour per test, so
+  a regression in delimited-parameter matching reads as "a delimited parameter
+  matches up to its delimiter" rather than as "macros.tex diverges". Nineteen
+  rules — the mouth's space handling, `\let` copying a meaning, `\ifx`
+  comparing meanings, `\edef` freezing where `\def` defers, a group restoring
+  both a macro and a register, `\divide` truncating toward zero, `\ifodd` on a
+  negative number. Every expectation was produced by running the snippet through
+  real tex while writing it, because one typed from memory is a belief about TeX
+  rather than a measurement of it.
 - The examples are frozen too. They are the documentation, they were checked
   only against a live tex, and CI has none — so on every push the pages a reader
   copies from were the least verified thing in the tree. `--freeze` now records
