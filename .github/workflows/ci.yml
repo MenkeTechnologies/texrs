@@ -25,6 +25,14 @@ jobs:
         run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      # The release job builds with --locked, so a Cargo.lock that does not
+      # record the version in Cargo.toml fails THERE and nowhere else -- after
+      # the tag exists, which strands the release: no artifacts, no GitHub
+      # release, and the Homebrew tap left on the previous version. That is
+      # what happened to v0.3.1. Checking it here fails on main instead, while
+      # the fix is still a commit rather than a re-tag.
+      - name: Lockfile is current
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - name: Build
         run: cargo build --verbose
       - name: Test
