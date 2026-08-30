@@ -21,6 +21,7 @@
     "\\edef"
     "\\xdef"
     "\\let"
+    "\\futurelet"
     "\\global"
     "\\csname"
     "\\endcsname"
@@ -82,6 +83,7 @@
     (puthash "\\edef" "\\edef  —  Define with the body expanded NOW, so a register read is frozen at definition time and a later assignment cannot move it. [Macro definition]" table)
     (puthash "\\xdef" "\\xdef  —  A global `\\edef`: the body is expanded now and the definition survives the enclosing group. [Macro definition]" table)
     (puthash "\\let" "\\let  —  Give a control sequence another's CURRENT meaning, not a reference to it: redefining the source afterwards does not change the alias. [Macro definition]" table)
+    (puthash "\\futurelet" "\\futurelet  —  Look one token past the next without eating either: `\\futurelet\\a\\b\\c` gives `\\a` the meaning of `\\c` and then puts `\\b` and `\\c` back, so the stream is exactly as it was (tex.web §1221). [Macro definition]" table)
     (puthash "\\global" "\\global  —  Prefix making the following assignment global, so it survives the enclosing group. [Macro definition]" table)
     (puthash "\\csname" "\\csname  —  Build a control sequence out of the characters up to `\\endcsname`, so a macro can name another macro. [Expansion]" table)
     (puthash "\\endcsname" "\\endcsname  —  Terminate a `\\csname`. [Expansion]" table)

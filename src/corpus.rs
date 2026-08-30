@@ -91,6 +91,12 @@ pub const CORPUS: &[Entry] = &[
         "\\let\\alias=\\source\n\\def\\v{ONE}\n\\let\\w=\\v\n\\def\\v{TWO}\n\\message{\\w}   % => ONE",
     ),
     (
+        "\\futurelet",
+        "Macro definition",
+        "Look one token past the next without eating either: `\\futurelet\\a\\b\\c` gives `\\a` the meaning of `\\c` and then puts `\\b` and `\\c` back, so the stream is exactly as it was (tex.web \u{a7}1221). That non-destructive peek is what LaTeX's `\\@ifnextchar` is built from, and so is every optional argument in the language. A control sequence let to a character MEANS that character, so `\\ifx\\next[` compares true \u{2014} which is the comparison the whole idiom rests on.",
+        "\\futurelet\\next<token><token>\n\\def\\peek{\\futurelet\\next\\decide}\n\\def\\decide{\\ifx\\next[ OPTIONAL\\else PLAIN\\fi}",
+    ),
+    (
         "\\global",
         "Macro definition",
         "Prefix making the following assignment global, so it survives the enclosing group.",

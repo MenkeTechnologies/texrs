@@ -121,6 +121,9 @@
 \let\w=\v
 \def\v{TWO}
 \message{\w}   % =&gt; ONE</pre></td></tr>
+            <tr><td><code>\futurelet</code></td><td>Look one token past the next without eating either: <code>\futurelet\a\b\c</code> gives <code>\a</code> the meaning of <code>\c</code> and then puts <code>\b</code> and <code>\c</code> back, so the stream is exactly as it was (tex.web §1221). That non-destructive peek is what LaTeX's <code>\@ifnextchar</code> is built from, and so is every optional argument in the language. A control sequence let to a character MEANS that character, so <code>\ifx\next[</code> compares true — which is the comparison the whole idiom rests on.</td><td><pre>\futurelet\next&lt;token&gt;&lt;token&gt;
+\def\peek{\futurelet\next\decide}
+\def\decide{\ifx\next[ OPTIONAL\else PLAIN\fi}</pre></td></tr>
             <tr><td><code>\global</code></td><td>Prefix making the following assignment global, so it survives the enclosing group.</td><td><pre>\global\count1=5
 \global\def\v{OUT}</pre></td></tr>
           </tbody>
