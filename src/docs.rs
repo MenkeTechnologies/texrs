@@ -130,6 +130,8 @@ pub fn reference_html() -> String {
             .replace("__TEXRS_STATS__", &stats(crate::cli::USAGE))
             + &chapters(CORPUS)
             + &category_codes()
+            + &builtins()
+            + &tiers_report()
             + &divergences(),
         cli = command_line(crate::cli::USAGE) + &environment(),
         foot = FOOT,
@@ -559,6 +561,120 @@ fn environment() -> String {
         let _ = writeln!(
             out,
             "            <tr><td><code>{name}</code></td><td>{note}</td></tr>",
+        );
+    }
+    out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
+    out
+}
+
+/// One builtin the compiler emits calls to: its constant, its id, and what it
+/// does, lifted from `compiler::ops`.
+pub fn builtin_ops(source: &str) -> Vec<(String, u16, String)> {
+    let mut out = Vec::new();
+    let mut in_ops = false;
+    let mut doc = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("pub mod ops") {
+            in_ops = true;
+            continue;
+        }
+        if !in_ops {
+            continue;
+        }
+        if trimmed == "}" {
+            break;
+        }
+        if let Some(note) = trimmed.strip_prefix("/// ") {
+            if !doc.is_empty() {
+                doc.push(' ');
+            }
+            doc.push_str(note);
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("pub const ") {
+            if let Some((name, tail)) = rest.split_once(':') {
+                if let Some(value) = tail.split('=').nth(1) {
+                    if let Ok(id) = value.trim().trim_end_matches(';').parse::<u16>() {
+                        out.push((name.trim().to_string(), id, std::mem::take(&mut doc)));
+                        continue;
+                    }
+                }
+            }
+        }
+        if !trimmed.starts_with("//") {
+            doc.clear();
+        }
+    }
+    out.sort_by_key(|(_, id, _)| *id);
+    out
+}
+
+/// The builtin-call table.
+///
+/// These ids are a wire format and the page says so: the bytecode cache stores
+/// compiled chunks on disk and `--aot` serializes one into the object it emits,
+/// and both call builtins BY NUMBER. Renumbering an op still compiles; it makes
+/// every cached chunk and every already-built binary call the wrong function.
+fn builtins() -> String {
+    let mut out = String::from(
+        "      <section class=\"tutorial-section\" id=\"tbl-builtins\">\n        <h2>Builtin calls</h2>\n        <p>What the VM cannot do natively is a builtin call, emitted by the lowerer and dispatched by id. The numbers are a <strong>wire format</strong>: the bytecode cache keeps compiled chunks on disk and <code>--aot</code> serializes one into the executable it writes, and both call these BY NUMBER &mdash; so renumbering an op does not fail to build, it makes every cached chunk and every already-built binary call the wrong function.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Constant</th><th>Id</th><th>What it does</th></tr></thead>\n          <tbody>\n",
+    );
+    for (name, id, note) in builtin_ops(include_str!("compiler.rs")) {
+        let _ = writeln!(
+            out,
+            "            <tr><td><code>{name}</code></td><td><code>{id}</code></td><td>{note}</td></tr>",
+            name = escape(&name),
+            note = escape(&note),
+        );
+    }
+    out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
+    out
+}
+
+/// The lines `--tiers` prints, and what each one answers.
+///
+/// The report asks fusevm's own predicates rather than inferring anything, so
+/// the vocabulary is worth stating: "eligible" and "compiled" are different
+/// questions, and the last line is the only one that answers "did this document
+/// reach native code".
+const TIERS_REPORT: &[(&str, &str)] = &[
+    ("ops", "How many bytecode ops the document lowered to, prologue included."),
+    (
+        "block-JIT eligible",
+        "Whether a region of this chunk is a shape the block tier will take at all. Eligibility is not compilation.",
+    ),
+    (
+        "block-JIT compiled",
+        "Whether the block tier actually compiled one, asked of fusevm's cache rather than assumed from eligibility.",
+    ),
+    (
+        "largest eligible region",
+        "The widest run of ops the block tier would take, as <code>start..end</code> with its length, or <code>none</code>.",
+    ),
+    (
+        "loops",
+        "Every loop header the lowerer emitted, and whether the tracing tier compiled a trace for it. <code>none</code> means the document has no backward branch, which is the usual reason nothing reaches native code.",
+    ),
+    (
+        "block-ineligible ops",
+        "The ops that disqualified a region, counted by kind. A pair of <code>CallBuiltin</code>s is enough, which is why the smallest document reaches no tier.",
+    ),
+    (
+        "reaches native code",
+        "The one line that answers the question the flag was run to ask.",
+    ),
+];
+
+/// The `--tiers` vocabulary table.
+fn tiers_report() -> String {
+    let mut out = String::from(
+        "      <section class=\"tutorial-section\" id=\"tbl-tiers\">\n        <h2>The --tiers report</h2>\n        <p><code>texrs --tiers FILE</code> runs a document and then queries fusevm's own eligibility and cache predicates, so the answer comes from the compiler that would have done the work rather than from an assumption about it.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Line</th><th>What it answers</th></tr></thead>\n          <tbody>\n",
+    );
+    for (line, note) in TIERS_REPORT {
+        let _ = writeln!(
+            out,
+            "            <tr><td><code>{line}</code></td><td>{note}</td></tr>",
         );
     }
     out.push_str("          </tbody>\n        </table>\n      </section>\n\n");

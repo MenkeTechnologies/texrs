@@ -353,6 +353,38 @@
         </table>
       </section>
 
+      <section class="tutorial-section" id="tbl-builtins">
+        <h2>Builtin calls</h2>
+        <p>What the VM cannot do natively is a builtin call, emitted by the lowerer and dispatched by id. The numbers are a <strong>wire format</strong>: the bytecode cache keeps compiled chunks on disk and <code>--aot</code> serializes one into the executable it writes, and both call these BY NUMBER &mdash; so renumbering an op does not fail to build, it makes every cached chunk and every already-built binary call the wrong function.</p>
+        <table class="file-table">
+          <thead><tr><th>Constant</th><th>Id</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>MSG_APPEND</code></td><td><code>4000</code></td><td>Append one rendered piece to the message being built.</td></tr>
+            <tr><td><code>MSG_FLUSH</code></td><td><code>4001</code></td><td>Finish the message being built and record it.</td></tr>
+            <tr><td><code>DBG_LINE</code></td><td><code>4002</code></td><td>A statement boundary, emitted only under `--dap`. The debug adapter stops here; an ordinary run carries none of these ops.</td></tr>
+            <tr><td><code>FFI_COMPILE</code></td><td><code>4003</code></td><td>Compile and register a `\rust{ … }` block: one argument, the base64 body.</td></tr>
+            <tr><td><code>FFI_CALL</code></td><td><code>4004</code></td><td>Call a function a block exported: the name, then its arguments.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="tbl-tiers">
+        <h2>The --tiers report</h2>
+        <p><code>texrs --tiers FILE</code> runs a document and then queries fusevm's own eligibility and cache predicates, so the answer comes from the compiler that would have done the work rather than from an assumption about it.</p>
+        <table class="file-table">
+          <thead><tr><th>Line</th><th>What it answers</th></tr></thead>
+          <tbody>
+            <tr><td><code>ops</code></td><td>How many bytecode ops the document lowered to, prologue included.</td></tr>
+            <tr><td><code>block-JIT eligible</code></td><td>Whether a region of this chunk is a shape the block tier will take at all. Eligibility is not compilation.</td></tr>
+            <tr><td><code>block-JIT compiled</code></td><td>Whether the block tier actually compiled one, asked of fusevm's cache rather than assumed from eligibility.</td></tr>
+            <tr><td><code>largest eligible region</code></td><td>The widest run of ops the block tier would take, as <code>start..end</code> with its length, or <code>none</code>.</td></tr>
+            <tr><td><code>loops</code></td><td>Every loop header the lowerer emitted, and whether the tracing tier compiled a trace for it. <code>none</code> means the document has no backward branch, which is the usual reason nothing reaches native code.</td></tr>
+            <tr><td><code>block-ineligible ops</code></td><td>The ops that disqualified a region, counted by kind. A pair of <code>CallBuiltin</code>s is enough, which is why the smallest document reaches no tier.</td></tr>
+            <tr><td><code>reaches native code</code></td><td>The one line that answers the question the flag was run to ask.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
       <section class="tutorial-section" id="tbl-divergences">
         <h2>Divergences from tex</h2>
         <p>Where this engine and real <code>tex</code> disagree, taken from <code>tests/known_gaps.txt</code> &mdash; the baseline the differential gate enforces in both directions, so this list can neither grow silently nor go stale.</p>

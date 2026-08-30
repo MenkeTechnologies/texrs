@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use texrs::catcode::Cat;
-use texrs::docs::{known_gaps, reference_html};
+use texrs::docs::{builtin_ops, known_gaps, reference_html};
 
 fn manifest(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -138,4 +138,74 @@ fn every_texrs_environment_variable_is_documented() {
             .collect::<Vec<_>>()
             .join("\n  ")
     );
+}
+
+#[test]
+fn every_builtin_id_is_documented_and_unique() {
+    let compiler = fs::read_to_string(manifest("src/compiler.rs")).unwrap();
+    let ops = builtin_ops(&compiler);
+    // An independent count of the `pub const` lines inside `pub mod ops`, so a
+    // parser that dropped one cannot also lower the expectation.
+    let declared = compiler
+        .lines()
+        .skip_while(|l| !l.trim().starts_with("pub mod ops"))
+        .skip(1)
+        .take_while(|l| l.trim() != "}")
+        .filter(|l| l.trim().starts_with("pub const "))
+        .count();
+    assert_eq!(
+        ops.len(),
+        declared,
+        "the op parser found {} builtins where the module declares {declared}",
+        ops.len()
+    );
+    assert!(!ops.is_empty(), "found no builtins to document");
+
+    let mut seen: BTreeSet<u16> = BTreeSet::new();
+    for (name, id, note) in &ops {
+        assert!(
+            seen.insert(*id),
+            "builtin id {id} is used twice; the ids are a wire format that              cached chunks and --aot binaries call by number"
+        );
+        assert!(
+            !note.trim().is_empty(),
+            "{name} has no doc comment, so the reference would list an id and              no meaning"
+        );
+    }
+
+    let page = reference_html();
+    for (name, id, _) in &ops {
+        assert!(
+            page.contains(name.as_str()),
+            "builtin {name} is not in the reference"
+        );
+        assert!(
+            page.contains(&format!("<code>{id}</code>")),
+            "builtin id {id} ({name}) is not in the reference"
+        );
+    }
+}
+
+#[test]
+fn every_documented_tiers_line_is_one_the_report_prints() {
+    let tiers = fs::read_to_string(manifest("src/tiers.rs")).unwrap();
+    let page = reference_html();
+    // The rows of the --tiers table, read back off the page.
+    let section = page
+        .split("id=\"tbl-tiers\"")
+        .nth(1)
+        .and_then(|s| s.split("</section>").next())
+        .expect("no --tiers section on the page");
+    let labels: Vec<&str> = section
+        .split("<tr><td><code>")
+        .skip(1)
+        .filter_map(|s| s.split("</code>").next())
+        .collect();
+    assert!(!labels.is_empty(), "the --tiers table has no rows");
+    for label in labels {
+        assert!(
+            tiers.contains(label),
+            "the reference documents a --tiers line {label:?} that src/tiers.rs              never prints"
+        );
+    }
 }
