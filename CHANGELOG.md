@@ -67,6 +67,13 @@ All notable changes to texrs are recorded here. The format follows
   rather than as inlined copies. `texrs::commands()` is the same stage as a
   library call, and `compile()` now goes through it, so the listing cannot drift
   from what the code generator was handed.
+- `scripts/publications.sh`, the sweep the README's corpus number comes from:
+  every `.tex` under a tree is run with `--text`, one per core, and the count,
+  the bytes of text and every document that failed are reported. It is where
+  the LaTeX layer's faults have been found -- the unit tests pin behaviour a
+  sentence at a time and `tests/cases` pins parity with `tex`, and neither says
+  whether a 16,000-line book compiles. No allowlist: `--gate` exits non-zero if
+  anything failed, and what failed is printed either way.
 - `texrs::compile_text`, the bytecode `run_text` runs: the same pipeline with
   the document's own words lowered as well as its messages.
 - Reading `.pk`, the packed bitmap font, ported from `pkfont.c` in

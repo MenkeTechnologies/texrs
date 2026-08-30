@@ -260,9 +260,24 @@ refused, which is the one failure mode worth knowing about before trusting this.
 
 The number, run against the 241 `.tex` files of a real LaTeX/LuaLaTeX corpus
 (Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
-`--include-in-header` fragments): **239 run to completion.** The two that do not
-are fixtures for `#{` parameter text, a gap listed in `BUGS.md` and
-`tests/known_gaps.txt`; they are written to be refused.
+`--include-in-header` fragments): **239 run to completion**, and say 74 MB of
+text. The two that do not are fixtures for `#{` parameter text, a gap listed in
+`BUGS.md` and `tests/known_gaps.txt`; they are written to be refused.
+
+That is a measurement, so it is re-measurable rather than remembered:
+
+```sh
+bash scripts/publications.sh                  # ../MenkeTechnologiesPublications
+bash scripts/publications.sh /path/to/corpus  # any tree of .tex
+bash scripts/publications.sh --gate           # exit non-zero if any document failed
+```
+
+Every document that fails is printed with the line it stopped on; there is no
+allowlist, so a corpus carrying a file written to be refused shows it among
+them. The sweep is where the LaTeX layer's faults have actually been found —
+tests pin behaviour a sentence at a time and `tests/cases` pins byte-for-byte
+parity with `tex`, and neither of them says whether a 16,000-line book
+compiles.
 
 "Run" is the exact claim. The mouth and the expander read the whole document and
 produce what its text says; nothing is typeset, and pages, fonts, boxes and TikZ
