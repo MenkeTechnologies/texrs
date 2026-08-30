@@ -117,8 +117,12 @@ fn main() -> ExitCode {
 
     match cli.mode {
         texrs::cli::Mode::Help => {
-            texrs::banner::print_banner(true);
-            print!("{USAGE}");
+            // Colour on a terminal, plain bytes down a pipe -- the same rule the
+            // rest of the fleet's help follows, and what keeps an escape out of
+            // a file someone is grepping.
+            let colored = texrs::banner::colored_stdout();
+            texrs::banner::print_banner(colored);
+            print!("{}", texrs::banner::render_usage(USAGE, colored));
             return ExitCode::SUCCESS;
         }
         texrs::cli::Mode::Version => {
@@ -372,7 +376,7 @@ fn one_document(path: &str, no_cache: bool) -> Result<String, String> {
 /// commands act on the document rather than on a file.
 fn run_document(args: &[String]) -> ExitCode {
     let Some(command) = args.first().map(String::as_str) else {
-        eprint!("{USAGE}");
+        eprint!("{}", texrs::banner::render_usage(USAGE, false));
         return ExitCode::from(1);
     };
     match command {
@@ -561,7 +565,7 @@ fn run_document(args: &[String]) -> ExitCode {
             Some(code) => code,
             None => {
                 eprintln!("texrs: unknown document command: {other}");
-                eprint!("{USAGE}");
+                eprint!("{}", texrs::banner::render_usage(USAGE, false));
                 ExitCode::from(1)
             }
         },

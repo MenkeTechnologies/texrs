@@ -103,7 +103,7 @@ pub fn run() -> Result<(), String> {
     }
     // The logo and the live-stats box, the way every sibling engine's prompt
     // opens. Colour only when a terminal is there to read it.
-    crate::banner::print_banner(true);
+    crate::banner::print_banner(crate::banner::colored_stdout());
     let mut session = Session::new();
 
     let history = dirs::home_dir()

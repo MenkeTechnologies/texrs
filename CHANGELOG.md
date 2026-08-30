@@ -23,6 +23,11 @@ All notable changes to texrs are recorded here. The format follows
   including which side of the closing paren a message lands on.
 - `texrs` with no arguments opens the prompt rather than printing its usage.
   `tex` prompts for input here too: an engine given nothing to do should ask.
+- `--help` is painted in the house palette — yellow `USAGE:`, bold program name
+  and flags, cyan section rules, green `//` — and only when stdout is a
+  terminal. A pipe gets plain bytes, which is what keeps an escape out of a file
+  someone is grepping and what `tests/cli.rs` reads the flag list out of. The
+  banner follows the same rule.
 - The banner is the fleet's — logo, live-stats box, tagline — shared by the
   prompt, `--help` and `--version`, with every count read from the tables at
   call time so it cannot go stale. `--help` prints it above a sectioned option

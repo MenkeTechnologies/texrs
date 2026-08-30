@@ -37,6 +37,54 @@ pub fn version_banner() -> String {
     )
 }
 
+/// Whether stdout is a terminal, and therefore whether to colour what goes to
+/// it.
+///
+/// The fleet's rule, from `tp -h`: colour on a terminal, plain bytes down a
+/// pipe. A tool that writes escapes into a file someone is grepping has made
+/// its output harder to use, not prettier.
+pub fn colored_stdout() -> bool {
+    // SAFETY: isatty takes a file descriptor and never fails destructively.
+    unsafe { libc::isatty(1) == 1 }
+}
+
+/// The house palette, or nothing at all.
+///
+/// One place decides what each role looks like, so the banner, the usage text
+/// and anything printed beside them cannot drift into three different yellows.
+pub struct Palette {
+    /// Section dividers and structural rules.
+    pub rule: &'static str,
+    /// Labels: `USAGE:`, the box's row names.
+    pub label: &'static str,
+    /// A flag, or the program name.
+    pub bold: &'static str,
+    /// The `//` that introduces a description.
+    pub note: &'static str,
+    pub reset: &'static str,
+}
+
+impl Palette {
+    pub fn new(colored: bool) -> Self {
+        match colored {
+            true => Palette {
+                rule: "\x1b[36m",
+                label: "\x1b[33m",
+                bold: "\x1b[1m",
+                note: "\x1b[32m",
+                reset: "\x1b[0m",
+            },
+            false => Palette {
+                rule: "",
+                label: "",
+                bold: "",
+                note: "",
+                reset: "",
+            },
+        }
+    }
+}
+
 /// Visible columns in `s`, ignoring ANSI SGR escapes.
 ///
 /// The box is padded from this rather than from `str::len`, because an escape
@@ -148,6 +196,96 @@ pub fn render_banner(colored: bool) -> String {
     out
 }
 
+/// Colour a plain usage template in the house palette.
+///
+/// The template stays the single source of the words — this only paints it, and
+/// with `colored` false it returns the input unchanged, which is what a pipe and
+/// the CLI contract test both read. Four roles, matching `tp -h`: the `USAGE:`
+/// label, the section rules, the flags, and the `//` that opens a description.
+pub fn render_usage(template: &str, colored: bool) -> String {
+    if !colored {
+        return template.to_string();
+    }
+    let p = Palette::new(true);
+    let mut out = String::with_capacity(template.len() * 2);
+    for line in template.split_inclusive('\n') {
+        let (body, nl) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        out.push_str(&paint_line(body, &p));
+        out.push_str(nl);
+    }
+    out
+}
+
+/// One line of usage text, painted.
+fn paint_line(line: &str, p: &Palette) -> String {
+    let trimmed = line.trim_start();
+
+    // A section rule: `  ── TEX OPTIONS ──────`.
+    if trimmed.starts_with("──") {
+        return format!("{}{line}{}", p.rule, p.reset);
+    }
+
+    // The `USAGE:` label, and the program name after it.
+    if let Some(at) = line.find("USAGE:") {
+        let (before, rest) = line.split_at(at);
+        let rest = &rest["USAGE:".len()..];
+        let rest = paint_program(rest, p);
+        return format!(
+            "{before}{}USAGE:{} {rest}",
+            p.label,
+            p.reset,
+            rest = rest.trim_start()
+        );
+    }
+
+    // A continuation of the usage block: the program name again, bold as in the
+    // first line, so the three invocation forms read as one paragraph.
+    if let Some(rest) = trimmed.strip_prefix("texrs") {
+        let indent = &line[..line.len() - trimmed.len()];
+        return format!("{indent}{}texrs{}{}", p.bold, p.reset, paint_note(rest, p));
+    }
+
+    // A flag line: two spaces, then a dash. The flag runs to the first space,
+    // and a second flag may follow a comma.
+    if trimmed.starts_with('-') && !trimmed.starts_with("── ") {
+        let indent = &line[..line.len() - trimmed.len()];
+        let (flags, tail) = match trimmed.find("  ") {
+            Some(at) => trimmed.split_at(at),
+            None => (trimmed, ""),
+        };
+        let painted: Vec<String> = flags
+            .split(", ")
+            .map(|f| format!("{}{f}{}", p.bold, p.reset))
+            .collect();
+        return format!("{indent}{}{}", painted.join(", "), paint_note(tail, p));
+    }
+
+    paint_note(line, p)
+}
+
+/// The program name in a usage line, bold as `tp` prints it.
+fn paint_program(rest: &str, p: &Palette) -> String {
+    let rest = rest.trim_start();
+    match rest.split_once(' ') {
+        Some((name, tail)) => format!("{}{name}{} {}", p.bold, p.reset, paint_note(tail, p)),
+        None => format!("{}{rest}{}", p.bold, p.reset),
+    }
+}
+
+/// Green `//`, plain description, as in the rest of the fleet's help output.
+fn paint_note(text: &str, p: &Palette) -> String {
+    match text.find("//") {
+        Some(at) => {
+            let (before, rest) = text.split_at(at);
+            format!("{before}{}//{}{}", p.note, p.reset, &rest[2..])
+        }
+        None => text.to_string(),
+    }
+}
+
 /// Print the banner to stdout.
 pub fn print_banner(colored: bool) {
     print!("{}", render_banner(colored));
@@ -184,6 +322,54 @@ mod tests {
         assert!(plain.contains(&CORPUS.len().to_string()));
         assert!(plain.contains(&COUNT_SLOTS.to_string()));
         assert!(plain.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// Painting the usage adds escapes and changes not one character of text.
+    ///
+    /// The plain form is what a pipe gets and what `tests/cli.rs` parses the
+    /// flag list out of, so a renderer that reworded anything would break the
+    /// contract gate as well as the reader.
+    #[test]
+    fn painting_the_usage_changes_no_text() {
+        let template = "\n  USAGE: texrs [OPTIONS] FILE\n\n  ── RUNNING ────\n  --repl\n          // Start the prompt\n  -h, --help              // Print this\n";
+        assert_eq!(render_usage(template, false), template);
+        let painted = render_usage(template, true);
+        assert!(painted.contains("\x1b["), "nothing was painted");
+        assert_eq!(strip_ansi(&painted), template, "painting moved the words");
+    }
+
+    /// Every role the palette names is actually used, so a section rule and a
+    /// flag do not come out the same colour.
+    #[test]
+    fn each_role_gets_its_own_colour() {
+        let painted = render_usage(
+            "  USAGE: texrs FILE\n  ── RUNNING ────\n  --repl\n          // Start it\n",
+            true,
+        );
+        let p = Palette::new(true);
+        assert!(painted.contains(p.label), "no label colour");
+        assert!(painted.contains(p.rule), "no rule colour");
+        assert!(painted.contains(p.bold), "no flag emphasis");
+        assert!(painted.contains(p.note), "no note colour");
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+                i += 2;
+                while i < bytes.len() && !(0x40..=0x7E).contains(&bytes[i]) {
+                    i += 1;
+                }
+                i += 1;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).expect("ansi stripping keeps utf-8 boundaries")
     }
 
     /// Colour is the only difference: the same text, with escapes.
