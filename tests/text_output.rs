@@ -88,7 +88,11 @@ fn a_group_that_only_carries_text_does_not_break_the_run() {
     src.push_str("\n\\end{document}\n");
     let got = text(&src);
     assert!(got.contains("word0"), "the first group's text is there");
-    assert!(got.contains("word4999"), "and the last one's: {} bytes", got.len());
+    assert!(
+        got.contains("word4999"),
+        "and the last one's: {} bytes",
+        got.len()
+    );
 }
 
 #[test]
@@ -102,7 +106,10 @@ fn a_verbatim_body_is_characters_and_not_tex() {
                after\n\\end{document}\n";
     let got = text(src);
     assert!(got.contains("\\fINAME"), "the backslash survives: {got:?}");
-    assert!(got.contains("100% raw"), "a per cent is not a comment: {got:?}");
+    assert!(
+        got.contains("100% raw"),
+        "a per cent is not a comment: {got:?}"
+    );
     assert!(got.contains("after"), "and the document continues: {got:?}");
 }
 
@@ -116,8 +123,14 @@ fn pandoc_highlighting_expands_rather_than_passing_through() {
                \\begin{Highlighting}\n\\NormalTok{let x = 1;}\n\\end{Highlighting}\n\
                \\end{document}\n";
     let got = text(src);
-    assert!(got.contains("let x = 1;"), "the code, not the markup: {got:?}");
-    assert!(!got.contains("NormalTok"), "markup must not survive: {got:?}");
+    assert!(
+        got.contains("let x = 1;"),
+        "the code, not the markup: {got:?}"
+    );
+    assert!(
+        !got.contains("NormalTok"),
+        "markup must not survive: {got:?}"
+    );
 }
 
 #[test]
