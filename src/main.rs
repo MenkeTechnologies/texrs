@@ -84,6 +84,7 @@ const USAGE: &str = "\
   -X dvi A.dvi B.dvi      // Say whether two files are the same document
   -X bib FILE.bib         // Read a bibliography database
   -X bib FILE.aux         // Say what a document cites, and what is missing
+  -X bst FILE.bst         // Read a bibliography style, and check its names
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -494,6 +495,24 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "bst" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X bst` needs a .bst file");
+            };
+            match texrs::bst::Style::open(file) {
+                Ok(style) => {
+                    print!("{}", style.summary());
+                    // A style that calls a name nothing defines fails at run
+                    // time, one name per bibtex run; saying so here is the
+                    // point of reading it.
+                    match style.undefined().is_empty() && style.warnings.is_empty() {
+                        true => ExitCode::SUCCESS,
+                        false => ExitCode::from(1),
+                    }
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "dvi" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X dvi` needs a .dvi file");
@@ -547,6 +566,14 @@ fn run_document(args: &[String]) -> ExitCode {
                         Some(ms) => interval = std::time::Duration::from_millis(ms),
                         None => return fail("--interval needs a number of milliseconds"),
                     },
+                    // `-X build --help` asks what the command takes, which is
+                    // in the usage text with everything else. Reporting it as
+                    // an unknown argument is the one answer that is never what
+                    // someone typing it wanted.
+                    "-h" | "--help" => {
+                        print!("{USAGE}");
+                        return ExitCode::SUCCESS;
+                    }
                     other => return fail(&format!("unknown argument: {other}")),
                 }
             }

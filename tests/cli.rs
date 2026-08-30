@@ -121,6 +121,90 @@ fn the_completion_offers_every_option_the_binary_takes() {
     }
 }
 
+/// The `-X` commands, read from the usage text the same way the options are.
+/// `-X` is two characters, so `options_from_usage` skips it and its commands
+/// went uncompleted and half-documented until this asked.
+fn subcommands_from_usage() -> Vec<String> {
+    let usage = stdout_of(texrs().arg("--help"));
+    let mut out: Vec<String> = Vec::new();
+    for line in usage.lines() {
+        let Some(at) = line.find("-X ") else { continue };
+        let name: String = line[at + 3..]
+            .chars()
+            .take_while(|c| c.is_ascii_lowercase())
+            .collect();
+        if !name.is_empty() {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[test]
+fn the_completion_and_the_man_page_know_every_x_command() {
+    let completion = std::fs::read_to_string(repo("completions/_texrs")).expect("completions");
+    let man = std::fs::read_to_string(repo("man/man1/texrs.1")).expect("man page");
+    let plain = man.replace("\\-", "-");
+
+    // The names the completion offers after `-X`, from its own value list.
+    let at = completion.find("'-X[").expect("the completion offers -X");
+    let list = completion[at..]
+        .split(":command:(")
+        .nth(1)
+        .expect("a value list");
+    let offered: Vec<&str> = list[..list.find(')').expect("closed")]
+        .split_whitespace()
+        .collect();
+
+    let commands = subcommands_from_usage();
+    // The guard is worth nothing if the usage text stopped listing commands.
+    assert!(
+        commands.len() >= 8,
+        "the usage text lists only {commands:?}"
+    );
+    for name in &commands {
+        assert!(
+            offered.contains(&name.as_str()),
+            "the zsh completion does not offer -X {name}, only {offered:?}"
+        );
+        assert!(
+            plain.contains(&format!("-X {name}")) || plain.contains(&format!("-X \" {name}")),
+            "the man page does not document -X {name}"
+        );
+    }
+    // And nothing is offered that the usage text does not list, which is the
+    // drift that leaves a completion promising a command that was renamed.
+    for name in &offered {
+        assert!(
+            commands.iter().any(|c| c == name),
+            "the completion offers -X {name}, which the binary does not list"
+        );
+    }
+
+    // Each one is a command the binary knows. Run from a scratch directory
+    // because two of them write there. `watch` is left out on purpose: it is
+    // the one that does not return.
+    let dir = scratch_cache("x_commands");
+    for name in commands.iter().filter(|c| *c != "watch") {
+        let said = String::from_utf8_lossy(
+            &texrs()
+                .current_dir(&dir)
+                .arg("-X")
+                .arg(name)
+                .output()
+                .expect("run")
+                .stderr,
+        )
+        .to_string();
+        assert!(
+            !said.contains("unknown document command"),
+            "-X {name} is listed but the binary does not know it"
+        );
+    }
+}
+
 #[test]
 fn the_man_page_documents_every_option_the_binary_takes() {
     let man = std::fs::read_to_string(repo("man/man1/texrs.1")).expect("man page");
@@ -746,4 +830,93 @@ fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
         "a prompt reading from a closed stdin prints nothing: {:?}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+/// `-X bst` reads a style and names what nothing defines.
+///
+/// The value of the command is the second half: bibtex reports an undefined
+/// name at run time, one per run, so a style with three of them costs three
+/// builds to find. This asks once.
+#[test]
+fn the_bst_reader_reads_a_style_and_names_what_nothing_defines() {
+    let dir = scratch_cache("bst");
+
+    // A style the standard ones are shaped like, small enough to read.
+    std::fs::write(
+        dir.join("mine.bst"),
+        "% a style\n\
+         ENTRY { author title year } { } { label }\n\
+         INTEGERS { state }\n\
+         MACRO {jan} {\"January\"}\n\
+         FUNCTION {output} { title write$ newline$ }\n\
+         READ\n SORT\n ITERATE {output}\n",
+    )
+    .unwrap();
+    let out = texrs()
+        .args(["-X", "bst", "mine.bst"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("fields     author title year"), "{text}");
+    assert!(text.contains("macros     jan"), "{text}");
+    assert!(text.contains("functions  1"), "{text}");
+    assert!(text.contains("ITERATE    output"), "{text}");
+
+    // One that calls a name nothing defines says which, and fails.
+    std::fs::write(
+        dir.join("broken.bst"),
+        "FUNCTION {a} { format.title write$ }\nITERATE {a}\n",
+    )
+    .unwrap();
+    let out = texrs()
+        .args(["-X", "bst", "broken.bst"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!out.status.success(), "an undefined name is a failure");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("UNDEFINED  format.title"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // And a style that is not there names itself.
+    let missing = texrs()
+        .args(["-X", "bst", "absent.bst"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("absent.bst"));
+
+    // The one that matters: the style every plain document uses, read whole
+    // with nothing undefined in it.
+    if let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("plain.bst")
+        .output()
+    {
+        let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+        if !path.is_empty() {
+            let out = texrs()
+                .args(["-X", "bst", &path])
+                .output()
+                .expect("run texrs");
+            assert!(
+                out.status.success(),
+                "plain.bst: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(text.contains("ITERATE    call.type$"), "{text}");
+            assert!(text.contains("READ"), "{text}");
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -8,6 +8,18 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `-X bst FILE.bst` reads a BibTeX style: the fields an entry may carry, the
+  `MACRO` abbreviations, the functions, and the `READ`/`SORT`/`ITERATE` that say
+  what it does. It also names every function the style calls that nothing
+  defines. bibtex reports those one per run, at run time, so a style with three
+  gaps costs three builds to find; this asks once and exits non-zero. Read
+  against the styles TeX Live ships (`plain`, `unsrt`, `abbrv`, `alpha`), which
+  parse whole with nothing undefined. The interpreter is deliberately not here:
+  it needs `width$`, which measures a string in a font and so needs a `.tfm`.
+- `tests/cli.rs` now holds the `-X` commands to the same drift guard the options
+  have: every command the usage text lists must be offered by the zsh completion
+  and documented in the man page, and the completion may offer none the binary
+  does not list.
 - Bytecode cache: what a document compiled to is kept in an rkyv shard keyed by
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,

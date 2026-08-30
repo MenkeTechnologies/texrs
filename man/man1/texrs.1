@@ -236,6 +236,43 @@ files LaTeX writes for each
 are read with it: a reader that stopped at the top would miss every chapter of a
 book, and one that is not there yet is not an error.
 .TP
+.BI \-X " bst \fIFILE\fR.bst"
+Read a bibliography style and print what it declares: the fields an entry may
+carry, the
+.B MACRO
+abbreviations a database's month names mean, how many functions it defines, and
+the commands that say what it does \(em
+.BR READ ,
+.BR SORT ,
+.BR ITERATE .
+.PP
+A
+.I .bst
+is a program in a stack language, and its one common failure is a name nothing
+defines.  bibtex reports that at run time, one name per run, in the middle of a
+build; this reads the whole style and prints every such name as
+.B UNDEFINED
+in one pass, exiting non-zero when there is one.  A name counts as defined when
+it is a builtin, a
+.BR FUNCTION ,
+a
+.BR MACRO ,
+an
+.B ENTRY
+field or string, or an
+.B INTEGERS
+or
+.B STRINGS
+variable \(em and a function may be called before the line that defines it, as
+the standard styles do.
+.PP
+The interpreter is not this: it needs
+.BR width$ ,
+which measures a string in a font and so needs a
+.IR .tfm .
+An interpreter that was right for the styles avoiding that and quietly wrong for
+the rest would be worse than none.
+.TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
 .PP
