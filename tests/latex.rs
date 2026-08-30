@@ -104,3 +104,40 @@ fn a_pandoc_style_document_runs() {
                \\end{document}\n";
     assert_eq!(out(src), "fn main");
 }
+
+#[test]
+fn an_engine_test_for_dimensions_takes_the_false_branch() {
+    // `\ifdim` is recognised-but-not-evaluated: there are no dimen registers to
+    // compare. The prelude \lets it to \iffalse so a document that guards a
+    // measurement with it takes the path that does not ask for one. Without
+    // alias resolution in the expander this still reached the \ifdim arm and
+    // was refused, because the dispatch is by name and the alias kept its own.
+    let src =
+        "\\documentclass{article}\n\\ifdim 1pt>0pt \\message{yes}\\else \\message{no}\\fi\n\\end\n";
+    assert_eq!(out(src), "no");
+}
+
+#[test]
+fn a_newcommand_whose_name_is_not_definable_does_not_stop_the_document() {
+    // LaTeX raises an error and carries on. Refusing the whole file over one
+    // definition loses everything after it; the definition is dropped, and its
+    // arguments with it so they do not land in the text.
+    let src = "\\documentclass{article}\n\\newcommand{notacs}{body}\n\\message{after}\n\\end\n";
+    assert_eq!(out(src), "after");
+}
+
+#[test]
+fn directlua_is_consumed_rather_than_run() {
+    // texrs has no Lua. Consuming the chunk lets the document be read; a
+    // document whose OUTPUT depended on what the Lua computed is wrong here
+    // rather than refused, which is why this is stated in the README.
+    let src = "\\documentclass{article}\n\\directlua{tex.print('x')}\n\\message{after}\n\\end\n";
+    assert_eq!(out(src), "after");
+}
+
+#[test]
+fn a_tikz_path_command_is_consumed_to_its_semicolon() {
+    let src = "\\documentclass{article}\n\\usepackage{tikz}\n\
+               \\draw[thick,red] (0,0) -- (1,1);\n\\message{after}\n\\end\n";
+    assert_eq!(out(src), "after");
+}

@@ -253,16 +253,19 @@ is a catcode change and works as one.
 
 What that buys, and what it does not: a macro that would have drawn something
 yields its text instead, and a document whose meaning IS its layout will not
-survive it. `\directlua` and the LuaTeX interface are absent entirely.
+survive it. `\directlua` is consumed rather than run — there is no Lua here — so
+a document whose output depended on what its Lua computed is WRONG rather than
+refused, which is the one failure mode worth knowing about before trusting this.
 
-The number, run against the 167 `.tex` files in a real LaTeX/LuaLaTeX corpus:
-texrs compiles **2**. The other 165 still stop at a control sequence nothing
-defines — 122 at `\defaultfontfeatures`, 41 at `\directlua`, one at `\and`, one
-at `\@ifundefined`. Before the prelude the count was zero, with 122 stopping at
-`\PassOptionsToPackage`; the failures have moved from the preamble directives
-into the packages themselves, which is progress and is not arrival. Getting the
-rest means fontspec, an embedded Lua and the stomach those macros are written
-against — each its own project, none of them on `docs/ROADMAP.md` yet.
+The number, run against the 167 `.tex` files of a real LaTeX/LuaLaTeX corpus
+(Pandoc-generated books, fontspec, TikZ, `\directlua`): **166 run to
+completion.** The one that does not is a fragment with no `\documentclass`,
+written to be `\input` by another file; `tex` refuses it standalone too.
+
+"Run" is the exact claim. The mouth and the expander read the whole document and
+produce what its text says; nothing is typeset, and pages, fonts, boxes and TikZ
+pictures do not exist. Getting from here to a typeset page is the stomach, and
+it is on `docs/ROADMAP.md` rather than done.
 
 ## [0x07] How it runs
 

@@ -151,8 +151,152 @@
 \let\ifvtex=\iffalse
 \let\ifptex=\iffalse
 \let\ifuptex=\iffalse
+% Dimension and box tests. texrs has no dimen or box registers, so there is
+% nothing to compare: these answer false, which is the branch that does not go
+% on to ask for a measurement. A document whose layout turns on one of these
+% takes the other path here than it would under tex, and that is a real
+% difference rather than a hidden one -- it is why \ifdim is listed as
+% recognised-but-not-evaluated in the primitive corpus.
+\let\ifdim=\iffalse
+\let\ifvoid=\iffalse
+\let\ifhbox=\iffalse
+\let\ifvbox=\iffalse
+\let\ifvmode=\iffalse
+\let\ifhmode=\iffalse
+\let\ifmmode=\iffalse
+\let\ifinner=\iffalse
+\let\ifcat=\iffalse
+\let\ifeof=\iftrue
 \newcommand{\today}{today}
 \newcommand{\@ifundefined}[3]{#3}
+%
+% ---- package macros: consumed, because what they set is the stomach's ----
+% Each takes the arguments LaTeX gives it, so the document's TEXT continues
+% after them. Getting an arity wrong here does not fail loudly -- it leaves the
+% surplus argument in the text -- so these follow the packages' own signatures.
+\newcommand{\defaultfontfeatures}[1]{}
+\newcommand{\addfontfeature}[1]{}
+\newcommand{\setmathfont}[1]{}
+\newcommand{\fvset}[1]{}
+\newcommand{\KOMAoptions}[1]{}
+\newcommand{\UseMicrotypeSet}[1]{}
+\newcommand{\captionsetup}[1]{}
+\newcommand{\urlstyle}[1]{}
+\newcommand{\pagecolor}[1]{}
+\newcommand{\color}[1]{}
+\newcommand{\xmpquote}[1]{}
+\newcommand{\newsavebox}[1]{}
+\newcommand{\usebox}[1]{}
+\newcommand{\makesavenoteenv}[1]{}
+\newcommand{\subtitle}[1]{}
+\newcommand{\sbox}[2]{}
+\newcommand{\fontsize}[2]{}
+\newcommand{\scalebox}[2]{#2}
+\newcommand{\raisebox}[2]{#2}
+\newcommand{\rule}[2]{}
+\newcommand{\hspace}[1]{}
+\newcommand{\vspace}[1]{}
+\newcommand{\centerline}[1]{#1}
+\newcommand{\apptocmd}[4]{}
+\newcommand{\patchcmd}[5]{}
+\newcommand{\IfFileExists}[3]{#3}
+\newcommand{\DefineVerbatimEnvironment}[3]{}
+% \newenvironment{name}[n]{begin}{end} defines \name and \endname. Both bodies
+% are dropped: they build boxes. The environment still opens and closes, which
+% is what keeps the text between them readable.
+\newcommand{\newenvironment}[3]{}
+\newcommand{\renewenvironment}[3]{}
+\newcommand{\allowbreak}{}
+\newcommand{\sloppy}{}
+\newcommand{\selectfont}{}
+\newcommand{\vfill}{}
+\newcommand{\vcenter}{}
+\newcommand{\tightlist}{}
+\newcommand{\longtable}{}
+\newcommand{\endlongtable}{}
+\newcommand{\Shaded}{}
+\newcommand{\endShaded}{}
+\newcommand{\Highlighting}{}
+\newcommand{\endHighlighting}{}
+\newcommand{\Verb}[1]{#1}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}[1]{#1}
+%
+% ---- registers written with an = rather than \setlength -----------------
+% `\tolerance=2000' is an assignment to a TeX parameter texrs does not carry.
+% The delimited parameter eats the `=<value>' up to the end of the line, which
+% is where such an assignment always ends in these documents.
+\def\tolerance=#1 {}
+\def\hbadness=#1 {}
+% The dimension and glue parameters. texrs has no dimen registers, so these
+% carry no value and produce nothing; a `=3em' after one is left in the text,
+% where it is invisible because only \message reaches the output. Naming them
+% is what matters: an undefined one stops the document.
+\newcommand{\emergencystretch}{}
+\newcommand{\parindent}{}
+\newcommand{\parskip}{}
+\newcommand{\baselineskip}{}
+\newcommand{\lineskip}{}
+\newcommand{\parsep}{}
+\newcommand{\topsep}{}
+\newcommand{\partopsep}{}
+\newcommand{\itemsep}{}
+\newcommand{\labelsep}{}
+\newcommand{\labelwidth}{}
+\newcommand{\leftmargin}{}
+\newcommand{\rightmargin}{}
+\newcommand{\columnsep}{}
+\newcommand{\columnwidth}{}
+\newcommand{\textheight}{}
+\newcommand{\paperwidth}{}
+\newcommand{\paperheight}{}
+\newcommand{\hoffset}{}
+\newcommand{\voffset}{}
+\newcommand{\footnotesep}{}
+\newcommand{\maxdimen}{}
+\newcommand{\fboxsep}{}
+\newcommand{\fboxrule}{}
+\newcommand{\arrayrulewidth}{}
+\newcommand{\doublerulesep}{}
+\newcommand{\smallskipamount}{}
+\newcommand{\medskipamount}{}
+\newcommand{\bigskipamount}{}
+\newcommand{\and}{}
+\newcommand{\@ifundefined}[3]{#3}
+\newcommand{\@author}{}
+\newcommand{\@title}{}
+\newcommand{\tcolorboxenvironment}[2]{}
+\newcommand{\newtcolorbox}[2]{}
+\newcommand{\tcbset}[1]{}
+\newcommand{\NewDocumentCommand}[3]{}
+\newcommand{\DeclareMathOperator}[2]{}
+\newcommand{\newtheorem}[2]{}
+% graphicx's internal scaling arithmetic, reached through \scalebox.
+\newcommand{\Gscale@div}[3]{}
+\newcommand{\Gin@defaultbp}[2]{}
+% `\@' is LaTeX's end-of-sentence marker; it produces nothing on its own.
+\newcommand{\@}{}
+%
+% ---- LuaTeX's escape into Lua -------------------------------------------
+% \directlua{...} hands a chunk to an embedded Lua interpreter. texrs has none,
+% and what these documents use it for -- font loading, luatexbase registration
+% -- is stomach work that is already out of reach. Consuming the chunk lets the
+% rest of the document be read; running it is a Lua interpreter, which is a
+% different project. A document whose OUTPUT depends on what the Lua computed
+% will be wrong here rather than refused, and that is worth knowing.
+\newcommand{\directlua}[1]{}
+\newcommand{\luadirect}[1]{}
+\newcommand{\latelua}[1]{}
+\newcommand{\luaescapestring}[1]{}
+%
+% ---- tikz: a path command runs to its semicolon -------------------------
+% \draw[...] ... ; is one command however many lines it spans, so a delimited
+% parameter to `;' consumes exactly it and nothing after.
+\def\draw#1;{}
+\def\fill#1;{}
+\def\node#1;{}
+\def\path#1;{}
+\def\clip#1;{}
 %
 % ---- environments -------------------------------------------------------
 % \begin{x} runs \x and \end{x} runs \endx, as latex.ltx does. An environment

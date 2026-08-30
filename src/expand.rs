@@ -306,6 +306,16 @@ impl Engine {
             self.expand_macro(lx, name, pending_only)?;
             return Ok(true);
         }
+        // A `\let` alias MEANS the primitive it was given, so it must act like
+        // one here too. The dispatch below is by NAME, so without this an alias
+        // is matched as itself: `\let\ifdim=\iffalse` still reached the
+        // \ifdim arm and reported an unsupported conditional, which is how a
+        // document says "I know this engine has no dimensions, take the other
+        // branch" and was refused anyway.
+        let name = match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) if *p != name => *p,
+            _ => name,
+        };
         match name.name() {
             // The advice markers: they carry the "inside advice" depth through
             // the token stream, and expand to nothing.
@@ -598,7 +608,15 @@ impl Engine {
     /// created; a call that omits the bracket gets the default substituted.
     fn do_newcommand(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
         // The name, either bare (`\newcommand\x`) or braced (`\newcommand{\x}`).
-        let name = self.scan_command_name(lx)?;
+        let Some(name) = self.scan_command_name(lx)? else {
+            // Nothing definable was found; consume what a definition would have
+            // taken so the arguments do not land in the document as text.
+            let _ = self.scan_optional_bracket(lx)?;
+            let _ = self.scan_optional_bracket(lx)?;
+            self.skip_spaces(lx);
+            let _ = self.read_group_tokens(lx)?;
+            return Ok(());
+        };
         if kind == "providecommand" && self.meanings.contains_key(&name) {
             // `\providecommand` leaves an existing definition alone; the body
             // still has to be consumed or it lands in the document as text.
@@ -640,11 +658,11 @@ impl Engine {
     }
 
     /// A command name after `\newcommand` and friends: `\x` or `{\x}`.
-    fn scan_command_name(&mut self, lx: &mut Lexer) -> R<CsId> {
+    fn scan_command_name(&mut self, lx: &mut Lexer) -> R<Option<CsId>> {
         let mut braced = false;
         let name = loop {
             let Some(t) = lx.next_token(&self.cats) else {
-                return Err(TexError("Missing control sequence inserted".into()));
+                return Ok(None);
             };
             match t {
                 t if t.is_space() => continue,
@@ -653,7 +671,34 @@ impl Engine {
                     continue;
                 }
                 Token::Cs(n) => break n,
-                _ => return Err(TexError("Missing control sequence inserted".into())),
+                // A name that is not a control sequence: `\newcommand` given
+                // something it cannot define. LaTeX would raise an error and
+                // carry on; refusing the whole document over one definition is
+                // the harsher answer, and the rest of the file is still
+                // readable. The definition is dropped, not guessed at.
+                //
+                // The rest of the braced name goes with it. Leaving it in the
+                // stream is worse than the error was: the scan that follows
+                // takes the NEXT group as the body, which swallows whatever
+                // came after the definition.
+                _ => {
+                    if braced {
+                        let mut depth = 1usize;
+                        while let Some(t) = lx.next_token(&self.cats) {
+                            match t {
+                                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                                Token::Char(_, Cat::EndGroup) => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    return Ok(None);
+                }
             }
         };
         // `{\x}` leaves its closing brace, and a brace left in the stream is a
@@ -670,7 +715,7 @@ impl Engine {
                 }
             }
         }
-        Ok(name)
+        Ok(Some(name))
     }
 
     /// `[...]` if one is next, leaving the stream untouched when it is not.
