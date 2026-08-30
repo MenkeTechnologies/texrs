@@ -234,10 +234,13 @@ fn token_at(text: &str, line: u32, col: u32) -> Option<String> {
     if let Some(caret) = caret_notation_at(&chars, col) {
         return Some(caret);
     }
-    // A backtick is the corpus's name for the character-code prefix; it is a
-    // token a document writes and a reader hovers, not a control sequence.
-    if chars[col] == '`' {
-        return Some("`".to_string());
+    // A backtick is the corpus's name for the character-code prefix and a
+    // double quote the name for the hexadecimal-constant one; both are tokens
+    // a document writes and a reader hovers, not control sequences. Hover is
+    // also what says which chapter an entry belongs to, so a name the walk
+    // below refuses is a name the reference page never prints.
+    if chars[col] == '`' || chars[col] == '"' {
+        return Some(chars[col].to_string());
     }
 
     // Walk left to the escape character. Letters may precede the cursor; a

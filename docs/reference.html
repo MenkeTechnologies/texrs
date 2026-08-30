@@ -249,6 +249,8 @@
             <tr><td><code>\delcode</code></td><td>A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. INITEX gives -1 everywhere, meaning "not a delimiter", except the period, whose code is 0.</td><td><pre>\delcode`\(="161361</pre></td></tr>
             <tr><td><code>\mathchardef</code></td><td>Define a control sequence standing for a math code, as <code>\chardef</code> does for a character code. The range runs to "7FFF and a wider value is <code>! Bad mathchar (N).</code>.</td><td><pre>\mathchardef\half="2201
 \mathcode`\y=\half</pre></td></tr>
+            <tr><td><code>"</code></td><td>A hexadecimal constant, and <code>'</code> an octal one (tex.web \u{a7}445). The hex digits are UPPERCASE: <code>"FF</code> is 255 and <code>"ff</code> is an error -- the opposite of <code>^^</code> notation, which takes lowercase. plain.tex writes every <code>\mathcode</code> as a hexadecimal constant.</td><td><pre>\count1="FF   % 255
+\count2='777  % 511</pre></td></tr>
           </tbody>
         </table>
       </section>
