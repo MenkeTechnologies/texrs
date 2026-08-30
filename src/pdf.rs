@@ -493,7 +493,10 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
         ("Subtype".to_string(), Object::name("Image")),
         ("Width".to_string(), Object::Integer(image.width as i64)),
         ("Height".to_string(), Object::Integer(image.height as i64)),
-        ("BitsPerComponent".to_string(), Object::Integer(image.bits as i64)),
+        (
+            "BitsPerComponent".to_string(),
+            Object::Integer(image.bits as i64),
+        ),
         ("ColorSpace".to_string(), space),
     ]);
     match image.compression {
@@ -508,14 +511,8 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
                 "DecodeParms".to_string(),
                 Object::dict([
                     ("Predictor", Object::Integer(15)),
-                    (
-                        "Colors",
-                        Object::Integer(image.colours.components() as i64),
-                    ),
-                    (
-                        "BitsPerComponent",
-                        Object::Integer(image.bits as i64),
-                    ),
+                    ("Colors", Object::Integer(image.colours.components() as i64)),
+                    ("BitsPerComponent", Object::Integer(image.bits as i64)),
                     ("Columns", Object::Integer(image.width as i64)),
                 ]),
             );
