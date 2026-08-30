@@ -238,7 +238,7 @@ pub fn dimension(text: &str) -> Option<i64> {
 
     // §452 `round_decimals`: the digits are folded in from the right, so the
     // fraction is the nearest sixteen-bit one rather than a truncation.
-    let f = crate::dimen::round_decimals(&fraction);
+    let f = crate::dimen::round_decimals(fraction);
     let scaled = whole.checked_mul(65536)?.checked_add(f)?;
 
     // §458: the unit's ratio, applied to the scaled value, truncating. The
