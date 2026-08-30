@@ -12,6 +12,23 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- `--build` compiles a document into the bytecode cache and stops. A build step
+  that runs it leaves the run that follows starting from bytecode: on a hit the
+  mouth, the expander and the lowerer are skipped entirely. Nothing the document
+  does at RUN time happens, because none of that is compilation.
+- `tests/opcodes.rs` guards the builtin id space. The ids are a wire format,
+  not an internal detail: a cached chunk and an `--aot` object both call
+  builtins by number, so renumbering one does not fail to compile — it makes
+  every artefact written before the change call the wrong function. The gate
+  fails on a duplicate id, a declared-but-unregistered op, a double
+  registration, a call written as a bare number, and any movement of the five
+  ids already on disk.
+- `tests/embed.rs` pins the library API from an embedder's side: output comes
+  back as values rather than going to the terminal, a failure is a `Result`
+  rather than a panic or an exit, and one run leaves nothing behind for the
+  next — no macro, no register, no catcode, no message buffer, no fault. The
+  binary runs one document and exits, so a leak between runs is invisible to
+  it; these are what say so out loud.
 - The command line is `tex`'s. A bare name gets `.tex`; a first argument
   beginning with `\` makes the whole list a line of input with no file; further
   arguments after a file are input read after it — unless the file's own `\end`

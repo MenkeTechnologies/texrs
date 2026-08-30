@@ -191,3 +191,36 @@ fn texs_own_flags_do_not_stop_a_run() {
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("FROMFILE"));
 }
+
+#[test]
+fn build_compiles_into_the_cache_without_running() {
+    let dir = documents();
+    let out = Command::new(env!("CARGO_BIN_EXE_texrs"))
+        .args(["--build", "ended.tex"])
+        .current_dir(dir.path())
+        .output()
+        .expect("run texrs --build");
+    assert!(
+        out.status.success(),
+        "--build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        said.contains("built"),
+        "said nothing about what it built: {said:?}"
+    );
+    assert!(
+        !said.contains("FROMFILE"),
+        "a build ran the document: {said:?}"
+    );
+
+    // And the run after it prints what an ordinary run prints -- the cache is a
+    // way of skipping the front of the pipeline, never of changing the answer.
+    let run = Command::new(env!("CARGO_BIN_EXE_texrs"))
+        .arg("ended.tex")
+        .current_dir(dir.path())
+        .output()
+        .expect("run texrs");
+    assert!(String::from_utf8_lossy(&run.stdout).contains("FROMFILE"));
+}
