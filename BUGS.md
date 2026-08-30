@@ -28,8 +28,10 @@ the harness enforces rather than a note.
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
-- **`\futurelet`, `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`,
-  `\meaning`, `\jobname`, `\input`.**
+- **`\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`, `\meaning`,
+  `\jobname`, `\input`.** Each stops the run with `! Undefined control
+  sequence`. `\futurelet` was on this list and is no longer missing: it is in
+  `src/expand.rs`, documented in the corpus, and pinned by `tests/futurelet.rs`.
 - **`#{` parameter text.** A parameter delimited by the left brace, which tex
   then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs
   refuses the definition. Until `cargo fuzz run lower` found it, the argument
