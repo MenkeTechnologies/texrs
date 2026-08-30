@@ -109,13 +109,15 @@ fn ops_carry_the_line_they_came_from() {
 
     // The register prologue is emitted before any line directive, so it carries
     // line 0; everything after it must carry a real line.
-    let body: Vec<u32> = chunk
-        .ops
-        .iter()
-        .enumerate()
-        .skip(512)
-        .map(|(i, _)| chunk.lines[i])
-        .collect();
+    //
+    // Its length is MEASURED rather than written here. It was a hardcoded 512,
+    // which was two ops for each of 256 count registers -- and when dimension
+    // registers were added the bank became 512 and the skip landed inside the
+    // prologue, failing on ops that were never the document's. Taking the
+    // leading run of line-0 ops keeps the check itself exactly as strong: a
+    // zero anywhere AFTER the prologue is still a failure.
+    let prologue = chunk.lines.iter().take_while(|l| **l == 0).count();
+    let body: Vec<u32> = chunk.lines.iter().copied().skip(prologue).collect();
     assert!(!body.is_empty(), "no document ops after the prologue");
     assert!(
         body.iter().all(|l| *l >= 2),

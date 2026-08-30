@@ -176,6 +176,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- The lowering test's register prologue is measured rather than written down.
+  It skipped a hardcoded 512 ops -- two for each of 256 count registers -- and
+  when dimension registers took the bank to 512 that skip landed inside the
+  prologue, so the test failed on ops that were never the document's. It takes
+  the leading run of line-0 ops now, which keeps the check as strong: a zero
+  anywhere after the prologue is still a failure.
+
 - Long file names in a tar bundle. A path too long for a header's hundred bytes
   is written as an extra entry before the real one, and the tars disagree on
   which: GNU tar writes an `L` block whose data is the path, bsdtar a pax `x`
