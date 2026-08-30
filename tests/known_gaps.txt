@@ -46,13 +46,6 @@ group_restores_count.tex
 #                  registers it assigns -- so the two group forms disagree,
 #                  which is the bug. Found by writing examples/globals.tex,
 #                  which is why that example is not in examples/.
-expandafter_toplevel.tex
-#                  `\expandafter' outside an expansion context is not
-#                  expandable: lower.rs dispatches top-level control sequences
-#                  and has no arm for it, so `\expandafter\def\csname...' is
-#                  reported as an undefined control sequence. The expander
-#                  implements it (expand.rs do_expandafter); nothing routes a
-#                  top-level occurrence through it.
 expandafter_brace_arg.tex
 #                  `\expandafter\wrap\expandafter{\inner}' expands `\inner'
 #                  but loses the brace group: texrs prints `[]{INNER}' where tex

@@ -302,6 +302,24 @@ impl Lowerer {
                         self.eng.expand_macro_file(lx, name)?;
                         continue;
                     }
+                    // Expandable primitives reach the top level too: TeX's
+                    // expander handles `\expandafter`, `\csname` and friends
+                    // wherever they occur, not only inside a macro body. Whatever
+                    // they leave behind goes back through this loop.
+                    if self.eng.expand_in_text(lx, name)? {
+                        continue;
+                    }
+                    // `\let\g=\message` makes `\g` MEAN the primitive, and a
+                    // primitive is dispatched by name here, so the alias has to
+                    // resolve to the name before the match runs or `\g` reads as
+                    // undefined while `\message` works.
+                    if let Some(Meaning::Primitive(p)) = self.eng.meanings.get(&name) {
+                        let p = *p;
+                        if p != name {
+                            lx.push_back(&[Token::Cs(p)]);
+                            continue;
+                        }
+                    }
                     return Err(TexError(format!("Undefined control sequence \\{other}")));
                 }
             }

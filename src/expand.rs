@@ -377,7 +377,13 @@ impl Engine {
         match &next {
             Token::Cs(n) => {
                 let n = *n;
-                if !self.try_expand(lx, n, true)? {
+                // Expand in the SAME context `\expandafter` was read in. Forcing
+                // pending-only here meant the one-step expansion could not reach
+                // the file, so `\expandafter\def\csname foo\endcsname{...}` at
+                // the top of a document had `\csname` scanning an empty pending
+                // list and reporting a missing `\endcsname` that was sitting in
+                // the source a token away.
+                if !self.try_expand(lx, n, pending_only)? {
                     lx.push_back(&[next]);
                 }
             }
@@ -1141,6 +1147,20 @@ impl Engine {
 
     pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
         self.expand_macro(lx, name, false)
+    }
+
+    /// Try to expand `name` as an EXPANDABLE primitive in running text.
+    ///
+    /// Returns whether it was one. `\expandafter`, `\csname`, `\noexpand` and
+    /// the conditionals are expandable: `tex.web` §366 has the expander handle
+    /// them wherever they appear, including at the outermost level of a file.
+    /// The lowerer dispatches top-level control sequences itself and so had no
+    /// arm for them, which made `\expandafter\def\csname foo\endcsname{...}`
+    /// -- the idiom LaTeX's own `\newcommand` is built out of -- an undefined
+    /// control sequence at the top of a document while working perfectly inside
+    /// a macro body. This is the door back into the expander for that case.
+    pub fn expand_in_text(&mut self, lx: &mut Lexer, name: CsId) -> R<bool> {
+        self.try_expand(lx, name, false)
     }
 
     pub fn expand_macro_pending(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
