@@ -98,30 +98,13 @@ const HEAD: &str = "<!DOCTYPE html>
     <main class=\"tutorial-main\">
       <h2 class=\"tutorial-title\"><span class=\"step-hash\">&gt;_</span>PRIMITIVE REFERENCE</h2>
       <p class=\"tutorial-subtitle\">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href=\"https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md\">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
+__TEXRS_STATS__
 
 ";
 
-/// The chrome below them: the command-line table, the links, and the closing
-/// tags. Not corpus-driven — the flags are the binary's, not the language's.
+/// The chrome below the generated sections: the links and the closing tags.
+/// The command-line tables above it are generated from `cli::USAGE`.
 const FOOT: &str = "      <section class=\"tutorial-section\">
-        <h2>Command line</h2>
-        <table class=\"file-table\">
-          <thead><tr><th>Invocation</th><th>What it does</th></tr></thead>
-          <tbody>
-            <tr><td><code>texrs FILE.tex</code></td><td>Run the file and print its <code>\\message</code> stream as <code>(./FILE.tex … )</code>.</td></tr>
-            <tr><td><code>texrs --dump-tokens FILE</code></td><td>Print the mouth's token stream and exit. No expansion happens.</td></tr>
-            <tr><td><code>texrs --disasm FILE</code></td><td>Print the lowered fusevm bytecode and exit.</td></tr>\n            <tr><td><code>texrs --tiers FILE</code></td><td>Run it, then report which fusevm tier took its bytecode, asked of fusevm's own eligibility and cache predicates.</td></tr>\n            <tr><td><code>texrs --aot FILE</code></td><td>Compile the document to a standalone native executable beside it. Requires a C toolchain for the link.</td></tr>\n            <tr><td><code>texrs --repl</code></td><td>Start the interactive prompt: a line is read with every line before it still in effect.</td></tr>\n            <tr><td><code>texrs --lsp</code></td><td>Speak the Language Server Protocol over stdio: completion and hover from this page's own corpus, diagnostics from the engine's lowerer.</td></tr>\n            <tr><td><code>texrs --dap</code></td><td>Speak the Debug Adapter Protocol over stdio: source-line breakpoints, stepping, and the count registers as the variables scope.</td></tr>
-            <tr><td><code>texrs --no-cache FILE</code></td><td>Compile this run rather than reading the bytecode cache. The result is identical either way.</td></tr>
-            <tr><td><code>texrs --cache-stats</code></td><td>Print where the bytecode cache is, how many documents it holds and how large it is.</td></tr>
-            <tr><td><code>texrs --cache-clear</code></td><td>Delete the bytecode cache. Every document compiles again on its next run.</td></tr>
-            <tr><td><code>texrs --help</code></td><td>Print the option grammar.</td></tr>
-            <tr><td><code>texrs --version</code></td><td>Print the version banner.</td></tr>
-          </tbody>
-        </table>
-        <p>Errors go to stderr as <code>! &lt;reason&gt;.</code>, the way tex writes them, and the exit status is 1. <code>TEXRS_CACHE=0</code> (or <code>false</code>, or <code>no</code>) turns the bytecode cache off for a run without deleting it.</p>
-      </section>
-
-      <section class=\"tutorial-section\">
         <h2>Links</h2>
         <ul>
           <li><strong>Documentation</strong> — <a href=\"index.html\">index.html</a></li>
@@ -140,12 +123,163 @@ const FOOT: &str = "      <section class=\"tutorial-section\">
 /// The full `docs/reference.html` page.
 pub fn reference_html() -> String {
     format!(
-        "{head}{body}{foot}",
-        head = HEAD.replace("__TEXRS_VERSION__", env!("CARGO_PKG_VERSION")),
-        body = chapters(CORPUS),
+        "{head}{cli}{foot}",
+        head = HEAD
+            .replace("__TEXRS_VERSION__", env!("CARGO_PKG_VERSION"))
+            .replace("__TEXRS_STATS__", &stats(crate::cli::USAGE))
+            + &chapters(CORPUS),
+        cli = command_line(crate::cli::USAGE),
         foot = FOOT,
     )
 }
+
+/// One row of the option grammar: how it is spelled, and what it does.
+#[derive(Debug, PartialEq, Eq)]
+pub struct UsageRow {
+    /// The spelling, exactly as `--help` prints it (`-jobname=NAME`, `-X tfm FILE.tfm [C]`).
+    pub option: String,
+    /// The `//` note that follows it, with the marker stripped.
+    pub note: String,
+}
+
+/// One `── SECTION ──` of the option grammar and the rows under it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct UsageSection {
+    /// The rule's label, title-cased as `--help` prints it (`TEX OPTIONS`).
+    pub title: String,
+    /// The options in the order the grammar lists them.
+    pub rows: Vec<UsageRow>,
+}
+
+/// Lift the option grammar out of `cli::USAGE`.
+///
+/// `--help`, the man page and this reference all have to name the same flags,
+/// and the way that stops being true is three hand-maintained lists. So the
+/// page is generated from the one the binary prints, and `tests/cli.rs` holds
+/// the completion and the man page to it separately.
+///
+/// The grammar is three shapes: a section rule `  ── NAME ──…`, an option on
+/// its own line whose note is indented under it, and an option with its note
+/// inline after `//` — the `-X` block is written that way.
+pub fn usage_sections(usage: &str) -> Vec<UsageSection> {
+    let mut sections: Vec<UsageSection> = Vec::new();
+    for line in usage.lines() {
+        let trimmed = line.trim_end();
+        if let Some(title) = section_title(trimmed) {
+            sections.push(UsageSection { title, rows: Vec::new() });
+            continue;
+        }
+        let Some(current) = sections.last_mut() else {
+            // The synopsis above the first rule is rendered separately.
+            continue;
+        };
+        // A note indented under the option it describes.
+        if let Some(note) = trimmed.trim_start().strip_prefix("// ") {
+            if trimmed.starts_with("          ") {
+                if let Some(row) = current.rows.last_mut() {
+                    if row.note.is_empty() {
+                        row.note = note.trim().to_string();
+                    }
+                }
+                continue;
+            }
+        }
+        if !trimmed.starts_with("  ") || trimmed.trim().is_empty() {
+            continue;
+        }
+        let body = trimmed.trim();
+        // `-X tfm FILE.tfm [C]      // Read a font's metrics` — one line, both halves.
+        let (option, note) = match body.split_once("//") {
+            Some((opt, note)) => (opt.trim(), note.trim()),
+            None => (body, ""),
+        };
+        current.rows.push(UsageRow {
+            option: option.to_string(),
+            note: note.to_string(),
+        });
+    }
+    sections.retain(|s| !s.rows.is_empty());
+    sections
+}
+
+/// `  ── TEX OPTIONS ─────` → `TEX OPTIONS`.
+fn section_title(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("──")?;
+    let title = rest.trim_matches(|c: char| c == '─' || c.is_whitespace());
+    (!title.is_empty()).then(|| title.to_string())
+}
+
+/// The synopsis lines above the first section rule — the three invocation
+/// forms plus the bare-prompt one.
+fn synopsis(usage: &str) -> Vec<String> {
+    let lines: Vec<&str> = usage
+        .lines()
+        .take_while(|l| section_title(l.trim_end()).is_none())
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    // Dedent by the shallowest line rather than trimming each one: the forms
+    // are column-aligned under `USAGE:` and that alignment is the point.
+    let indent = lines
+        .iter()
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines.iter().map(|l| l[indent..].to_string()).collect()
+}
+
+/// The command-line half of the page: the synopsis, then one `<section>` per
+/// group of the option grammar.
+fn command_line(usage: &str) -> String {
+    let mut out = String::new();
+    out.push_str("      <section class=\"tutorial-section\" id=\"cli-invocation\">\n        <h2>Invocation</h2>\n        <pre>");
+    for line in synopsis(usage) {
+        let _ = writeln!(out, "{}", escape(&line));
+    }
+    out.push_str("</pre>\n      </section>\n\n");
+
+    for section in usage_sections(usage) {
+        let _ = write!(
+            out,
+            "      <section class=\"tutorial-section\" id=\"cli-{anchor}\">\n        <h2>{title}</h2>\n        <table class=\"file-table\">\n          <thead><tr><th>Option</th><th>What it does</th></tr></thead>\n          <tbody>\n",
+            anchor = anchor(&section.title),
+            title = escape(&section.title),
+        );
+        for row in &section.rows {
+            let _ = writeln!(
+                out,
+                "            <tr><td><code>{option}</code></td><td>{note}</td></tr>",
+                option = escape(&row.option),
+                note = escape(&row.note),
+            );
+        }
+        out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
+    }
+    out
+}
+
+/// The four figures the banner prints, as the page's own header strip: they are
+/// counted from the corpus and the compiler rather than typed, so a chapter
+/// added to `CHAPTERS` moves the number here too.
+fn stats(usage: &str) -> String {
+    let options: usize = usage_sections(usage).iter().map(|s| s.rows.len()).sum();
+    let cards = [
+        (CORPUS.len().to_string(), "Primitives"),
+        (CHAPTERS.len().to_string(), "Chapters"),
+        (crate::compiler::COUNT_SLOTS.to_string(), "Count registers"),
+        (options.to_string(), "Command-line options"),
+    ];
+    let mut out = String::from("        <div class=\"stat-grid\">\n");
+    for (value, label) in cards {
+        let _ = write!(
+            out,
+            "          <div class=\"stat-card\">\n            <div class=\"stat-val\">{value}</div>\n            <div class=\"stat-label\">{label}</div>\n          </div>\n",
+        );
+    }
+    out.push_str("        </div>");
+    out
+}
+
 
 /// One `<section>` per chapter in `CHAPTERS` order, each holding one table row
 /// per primitive: the name, what it does, and its syntax with an example.

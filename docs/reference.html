@@ -79,6 +79,24 @@
     <main class="tutorial-main">
       <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>PRIMITIVE REFERENCE</h2>
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-val">69</div>
+            <div class="stat-label">Primitives</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val">9</div>
+            <div class="stat-label">Chapters</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val">256</div>
+            <div class="stat-label">Count registers</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val">41</div>
+            <div class="stat-label">Command-line options</div>
+          </div>
+        </div>
 
       <section class="tutorial-section" id="ch-category-codes">
         <h2>Category codes</h2>
@@ -309,27 +327,117 @@
         </table>
       </section>
 
-      <section class="tutorial-section">
-        <h2>Command line</h2>
+      <section class="tutorial-section" id="cli-invocation">
+        <h2>Invocation</h2>
+        <pre>USAGE: texrs [OPTIONS] [FILE[.tex]]... [COMMANDS]
+       texrs [OPTIONS] \FIRST-LINE      // the arguments are the input
+       texrs [OPTIONS] &amp;FMT ARGS        // with a named format
+       texrs                            // no arguments: the prompt
+</pre>
+      </section>
+
+      <section class="tutorial-section" id="cli-tex-options">
+        <h2>TEX OPTIONS</h2>
         <table class="file-table">
-          <thead><tr><th>Invocation</th><th>What it does</th></tr></thead>
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
           <tbody>
-            <tr><td><code>texrs FILE.tex</code></td><td>Run the file and print its <code>\message</code> stream as <code>(./FILE.tex … )</code>.</td></tr>
-            <tr><td><code>texrs --dump-tokens FILE</code></td><td>Print the mouth's token stream and exit. No expansion happens.</td></tr>
-            <tr><td><code>texrs --disasm FILE</code></td><td>Print the lowered fusevm bytecode and exit.</td></tr>
-            <tr><td><code>texrs --tiers FILE</code></td><td>Run it, then report which fusevm tier took its bytecode, asked of fusevm's own eligibility and cache predicates.</td></tr>
-            <tr><td><code>texrs --aot FILE</code></td><td>Compile the document to a standalone native executable beside it. Requires a C toolchain for the link.</td></tr>
-            <tr><td><code>texrs --repl</code></td><td>Start the interactive prompt: a line is read with every line before it still in effect.</td></tr>
-            <tr><td><code>texrs --lsp</code></td><td>Speak the Language Server Protocol over stdio: completion and hover from this page's own corpus, diagnostics from the engine's lowerer.</td></tr>
-            <tr><td><code>texrs --dap</code></td><td>Speak the Debug Adapter Protocol over stdio: source-line breakpoints, stepping, and the count registers as the variables scope.</td></tr>
-            <tr><td><code>texrs --no-cache FILE</code></td><td>Compile this run rather than reading the bytecode cache. The result is identical either way.</td></tr>
-            <tr><td><code>texrs --cache-stats</code></td><td>Print where the bytecode cache is, how many documents it holds and how large it is.</td></tr>
-            <tr><td><code>texrs --cache-clear</code></td><td>Delete the bytecode cache. Every document compiles again on its next run.</td></tr>
-            <tr><td><code>texrs --help</code></td><td>Print the option grammar.</td></tr>
-            <tr><td><code>texrs --version</code></td><td>Print the version banner.</td></tr>
+            <tr><td><code>-interaction=MODE</code></td><td>batchmode, nonstopmode, scrollmode or errorstopmode</td></tr>
+            <tr><td><code>-jobname=NAME</code></td><td>Set the job name</td></tr>
+            <tr><td><code>-output-directory=DIR</code></td><td>Write files in DIR</td></tr>
+            <tr><td><code>-progname=NAME</code></td><td>Set the program name</td></tr>
+            <tr><td><code>-fmt=NAME</code></td><td>Use a named format</td></tr>
+            <tr><td><code>-ini</code></td><td>Be initex</td></tr>
+            <tr><td><code>-halt-on-error</code></td><td>Stop at the first error</td></tr>
+            <tr><td><code>-file-line-error, -no-file-line-error</code></td><td>file:line:error style messages</td></tr>
+            <tr><td><code>-recorder</code></td><td>Record the files read</td></tr>
+            <tr><td><code>-8bit</code></td><td>Write 8-bit characters as themselves</td></tr>
           </tbody>
         </table>
-        <p>Errors go to stderr as <code>! &lt;reason&gt;.</code>, the way tex writes them, and the exit status is 1. <code>TEXRS_CACHE=0</code> (or <code>false</code>, or <code>no</code>) turns the bytecode cache off for a run without deleting it.</p>
+      </section>
+
+      <section class="tutorial-section" id="cli-running">
+        <h2>RUNNING</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--repl</code></td><td>Start the interactive prompt</td></tr>
+            <tr><td><code>--jobs=N</code></td><td>Compile N documents at once (default: one per core)</td></tr>
+            <tr><td><code>--build</code></td><td>Compile into the bytecode cache and stop, without running</td></tr>
+            <tr><td><code>--no-cache</code></td><td>Compile this run rather than reading the bytecode cache</td></tr>
+            <tr><td><code>--aot</code></td><td>Compile the document to a standalone native executable</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="cli-looking-inside">
+        <h2>LOOKING INSIDE</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--dump-tokens</code></td><td>Print the mouth's token stream and exit</td></tr>
+            <tr><td><code>--disasm</code></td><td>Print the lowered fusevm bytecode and exit</td></tr>
+            <tr><td><code>--tiers</code></td><td>Run it, then report which fusevm tier took its bytecode</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="cli-editors">
+        <h2>EDITORS</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--lsp</code></td><td>Speak the Language Server Protocol over stdio</td></tr>
+            <tr><td><code>--dap</code></td><td>Speak the Debug Adapter Protocol over stdio</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="cli-cache">
+        <h2>CACHE</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--cache-stats</code></td><td>Say what the bytecode cache holds and where</td></tr>
+            <tr><td><code>--cache-clear</code></td><td>Delete it</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="cli-documents">
+        <h2>DOCUMENTS</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>-X new [DIR]</code></td><td>Make one (Texrs.toml + index.tex)</td></tr>
+            <tr><td><code>-X init</code></td><td>Make one here, named after this directory</td></tr>
+            <tr><td><code>-X build [--profile P]</code></td><td>Build the document this directory is in</td></tr>
+            <tr><td><code>-X watch [--profile P]</code></td><td>Rebuild it whenever an input changes</td></tr>
+            <tr><td><code>-X show</code></td><td>Say what the document is and can produce</td></tr>
+            <tr><td><code>-X dump [--profile P]</code></td><td>Build to stdout, writing nothing</td></tr>
+            <tr><td><code>-X bundle fetch URL</code></td><td>Download a bundle into the cache</td></tr>
+            <tr><td><code>-X bundle list</code></td><td>Say which bundles have been fetched</td></tr>
+            <tr><td><code>-X dvi FILE.dvi</code></td><td>Read what real tex shipped for a document</td></tr>
+            <tr><td><code>-X dvi A.dvi B.dvi</code></td><td>Say whether two files are the same document</td></tr>
+            <tr><td><code>-X bib FILE.bib</code></td><td>Read a bibliography database</td></tr>
+            <tr><td><code>-X bib FILE.aux</code></td><td>Say what a document cites, and what is missing</td></tr>
+            <tr><td><code>-X bst FILE.bst</code></td><td>Read a bibliography style, and check its names</td></tr>
+            <tr><td><code>-X bibtex FILE.aux</code></td><td>Run the style: write the .bbl a document reads</td></tr>
+            <tr><td><code>-X tfm FILE.tfm [C]</code></td><td>Read a font's metrics, or one character's</td></tr>
+            <tr><td><code>--profile NAME</code></td><td>Which output to build</td></tr>
+            <tr><td><code>--interval MS</code></td><td>How often -X watch looks (default 250)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="cli-system">
+        <h2>SYSTEM</h2>
+        <table class="file-table">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>-h, --help</code></td><td>Print this</td></tr>
+            <tr><td><code>--version</code></td><td>Print the version banner</td></tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="tutorial-section">

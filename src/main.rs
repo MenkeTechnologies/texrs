@@ -9,91 +9,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// The option grammar, in the fleet's house style: `── SECTION ───` dividers
-/// and `//` descriptions, printed under the logo the way `tp -h` prints its own.
-const USAGE: &str = "\
-\n  USAGE: texrs [OPTIONS] [FILE[.tex]]... [COMMANDS]
-         texrs [OPTIONS] \\FIRST-LINE      // the arguments are the input
-         texrs [OPTIONS] &FMT ARGS        // with a named format
-         texrs                            // no arguments: the prompt
-
-  ── TEX OPTIONS ────────────────────────────────────────
-  -interaction=MODE
-          // batchmode, nonstopmode, scrollmode or errorstopmode
-  -jobname=NAME
-          // Set the job name
-  -output-directory=DIR
-          // Write files in DIR
-  -progname=NAME
-          // Set the program name
-  -fmt=NAME
-          // Use a named format
-  -ini
-          // Be initex
-  -halt-on-error
-          // Stop at the first error
-  -file-line-error, -no-file-line-error
-          // file:line:error style messages
-  -recorder
-          // Record the files read
-  -8bit
-          // Write 8-bit characters as themselves
-
-  ── RUNNING ────────────────────────────────────────────
-  --repl
-          // Start the interactive prompt
-  --jobs=N
-          // Compile N documents at once (default: one per core)
-  --build
-          // Compile into the bytecode cache and stop, without running
-  --no-cache
-          // Compile this run rather than reading the bytecode cache
-  --aot
-          // Compile the document to a standalone native executable
-
-  ── LOOKING INSIDE ─────────────────────────────────────
-  --dump-tokens
-          // Print the mouth's token stream and exit
-  --disasm
-          // Print the lowered fusevm bytecode and exit
-  --tiers
-          // Run it, then report which fusevm tier took its bytecode
-
-  ── EDITORS ────────────────────────────────────────────
-  --lsp
-          // Speak the Language Server Protocol over stdio
-  --dap
-          // Speak the Debug Adapter Protocol over stdio
-
-  ── CACHE ──────────────────────────────────────────────
-  --cache-stats
-          // Say what the bytecode cache holds and where
-  --cache-clear
-          // Delete it
-
-  ── DOCUMENTS ──────────────────────────────────────────
-  -X new [DIR]            // Make one (Texrs.toml + index.tex)
-  -X init                 // Make one here, named after this directory
-  -X build [--profile P]  // Build the document this directory is in
-  -X watch [--profile P]  // Rebuild it whenever an input changes
-  -X show                 // Say what the document is and can produce
-  -X dump [--profile P]   // Build to stdout, writing nothing
-  -X bundle fetch URL     // Download a bundle into the cache
-  -X bundle list          // Say which bundles have been fetched
-  -X dvi FILE.dvi         // Read what real tex shipped for a document
-  -X dvi A.dvi B.dvi      // Say whether two files are the same document
-  -X bib FILE.bib         // Read a bibliography database
-  -X bib FILE.aux         // Say what a document cites, and what is missing
-  -X bst FILE.bst         // Read a bibliography style, and check its names
-  -X bibtex FILE.aux      // Run the style: write the .bbl a document reads
-  -X tfm FILE.tfm [C]     // Read a font's metrics, or one character's
-  --profile NAME          // Which output to build
-  --interval MS           // How often -X watch looks (default 250)
-
-  ── SYSTEM ─────────────────────────────────────────────
-  -h, --help              // Print this
-  --version               // Print the version banner
-";
 
 fn main() -> ExitCode {
     struct Stats;
@@ -128,7 +43,7 @@ fn main() -> ExitCode {
             // a file someone is grepping.
             let colored = texrs::banner::colored_stdout();
             texrs::banner::print_banner(colored);
-            print!("{}", texrs::banner::render_usage(USAGE, colored));
+            print!("{}", texrs::banner::render_usage(texrs::cli::USAGE, colored));
             return ExitCode::SUCCESS;
         }
         texrs::cli::Mode::Version => {
@@ -401,7 +316,7 @@ fn one_document(path: &str, no_cache: bool) -> Result<String, String> {
 /// commands act on the document rather than on a file.
 fn run_document(args: &[String]) -> ExitCode {
     let Some(command) = args.first().map(String::as_str) else {
-        eprint!("{}", texrs::banner::render_usage(USAGE, false));
+        eprint!("{}", texrs::banner::render_usage(texrs::cli::USAGE, false));
         return ExitCode::from(1);
     };
     match command {
@@ -603,7 +518,7 @@ fn run_document(args: &[String]) -> ExitCode {
                     // an unknown argument is the one answer that is never what
                     // someone typing it wanted.
                     "-h" | "--help" => {
-                        print!("{USAGE}");
+                        print!("{}", texrs::cli::USAGE);
                         return ExitCode::SUCCESS;
                     }
                     other => return fail(&format!("unknown argument: {other}")),
@@ -654,7 +569,7 @@ fn run_document(args: &[String]) -> ExitCode {
             Some(code) => code,
             None => {
                 eprintln!("texrs: unknown document command: {other}");
-                eprint!("{}", texrs::banner::render_usage(USAGE, false));
+                eprint!("{}", texrs::banner::render_usage(texrs::cli::USAGE, false));
                 ExitCode::from(1)
             }
         },
