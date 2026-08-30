@@ -32,6 +32,7 @@ pub mod expand;
 pub mod fontmap;
 pub mod format;
 pub mod geturl;
+pub mod image;
 pub mod intercepts;
 pub mod io;
 pub mod ir;

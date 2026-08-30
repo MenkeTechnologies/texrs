@@ -314,6 +314,8 @@ pub struct Page {
     pub height: f64,
     /// The content stream: the operators that draw the page.
     pub content: String,
+    /// The pictures the content names, as `(name in the content, picture)`.
+    pub images: Vec<(String, crate::image::Image)>,
     /// The fonts the content names, as `(name in the content, font)` --
     /// `("F1", Helvetica)`.
     pub fonts: Vec<(String, Font)>,
@@ -327,6 +329,7 @@ impl Page {
             height: 792.0,
             content: String::new(),
             fonts: Vec::new(),
+            images: Vec::new(),
         }
     }
 
@@ -364,6 +367,30 @@ impl Page {
         );
     }
 
+    /// Draw a picture, with its bottom left corner at `(x, y)` and the size
+    /// given in points.
+    ///
+    /// A picture is drawn by a matrix rather than by coordinates: PDF puts an
+    /// image in the unit square and the matrix says where that square lands,
+    /// which is why the width and the height go into the matrix and the
+    /// drawing is one operator.
+    pub fn image(&mut self, image: crate::image::Image, x: f64, y: f64, width: f64, height: f64) {
+        let name = match self.images.iter().find(|(_, used)| used == &image) {
+            Some((existing, _)) => existing.clone(),
+            None => {
+                let name = format!("I{}", self.images.len() + 1);
+                self.images.push((name.clone(), image));
+                name
+            }
+        };
+        // Saved and restored, so the matrix does not follow the picture into
+        // whatever is drawn next.
+        let _ = writeln!(
+            self.content,
+            "q {width} 0 0 {height} {x} {y} cm /{name} Do Q"
+        );
+    }
+
     /// A filled rectangle, which is what a rule is.
     pub fn rule(&mut self, x: f64, y: f64, width: f64, height: f64) {
         let _ = writeln!(self.content, "{x} {y} {width} {height} re f");
@@ -391,7 +418,18 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             .iter()
             .map(|(name, font)| (name.clone(), add_font(&mut pdf, font)))
             .collect();
-        let resources = Object::dict([("Font", Object::Dict(fonts))]);
+        let images: BTreeMap<String, Object> = page
+            .images
+            .iter()
+            .map(|(name, image)| (name.clone(), add_image(&mut pdf, image)))
+            .collect();
+        let resources = match images.is_empty() {
+            true => Object::dict([("Font", Object::Dict(fonts))]),
+            false => Object::dict([
+                ("Font", Object::Dict(fonts)),
+                ("XObject", Object::Dict(images)),
+            ]),
+        };
         kids.push(pdf.add(Object::dict([
             ("Type", Object::name("Page")),
             ("Parent", Object::Reference(tree)),
@@ -425,6 +463,68 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         pdf.set_catalog(number);
     }
     pdf.finish()
+}
+
+/// Add a picture to the file, as `pdf_ximage_load_image` does.
+///
+/// The pixels are not decoded and not recompressed: PDF's own compressions are
+/// PNG's and JPEG's, so a JPEG becomes a `/DCTDecode` stream and a PNG's data
+/// becomes a `/FlateDecode` stream with the predictor PNG filtered its rows
+/// with. What the dictionary says is what the header said.
+fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
+    use crate::image::{Colours, Compression};
+
+    let space = match (image.colours, &image.palette) {
+        (Colours::Indexed, Some(palette)) => Object::Array(vec![
+            Object::name("Indexed"),
+            Object::name("DeviceRGB"),
+            // The highest index the palette defines, which is one less than
+            // the number of colours in it.
+            Object::Integer(palette.len() as i64 / 3 - 1),
+            Object::Str(palette.iter().map(|&b| b as char).collect()),
+        ]),
+        (Colours::Gray, _) => Object::name("DeviceGray"),
+        (Colours::Cmyk, _) => Object::name("DeviceCMYK"),
+        _ => Object::name("DeviceRGB"),
+    };
+
+    let mut dict = BTreeMap::from([
+        ("Type".to_string(), Object::name("XObject")),
+        ("Subtype".to_string(), Object::name("Image")),
+        ("Width".to_string(), Object::Integer(image.width as i64)),
+        ("Height".to_string(), Object::Integer(image.height as i64)),
+        ("BitsPerComponent".to_string(), Object::Integer(image.bits as i64)),
+        ("ColorSpace".to_string(), space),
+    ]);
+    match image.compression {
+        Compression::Dct => {
+            dict.insert("Filter".to_string(), Object::name("DCTDecode"));
+        }
+        Compression::Flate => {
+            dict.insert("Filter".to_string(), Object::name("FlateDecode"));
+            // §7.4.4: predictor 15 is PNG's row filters, which is what is
+            // inside a PNG's data and the reason it can be copied.
+            dict.insert(
+                "DecodeParms".to_string(),
+                Object::dict([
+                    ("Predictor", Object::Integer(15)),
+                    (
+                        "Colors",
+                        Object::Integer(image.colours.components() as i64),
+                    ),
+                    (
+                        "BitsPerComponent",
+                        Object::Integer(image.bits as i64),
+                    ),
+                    ("Columns", Object::Integer(image.width as i64)),
+                ]),
+            );
+        }
+    }
+    pdf.add(Object::Stream {
+        dict,
+        data: image.data.clone(),
+    })
 }
 
 /// Add a font to the file, embedding it when it is not one of the fourteen.

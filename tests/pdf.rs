@@ -413,3 +413,160 @@ fn a_ligature_extracts_as_the_letters_it_stands_for() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A picture put into a PDF is the picture a reader takes out.
+///
+/// Nothing is decoded on the way in -- a JPEG becomes a `/DCTDecode` stream and
+/// a PNG's data a `/FlateDecode` one with PNG's own row filters as the
+/// predictor -- so the test is whether a reader that decodes for real agrees
+/// about what arrived. `pdfimages -list` says what it found; `pdfimages -png`
+/// takes it out again.
+#[test]
+fn a_picture_arrives_as_the_picture_it_was() {
+    let dir = scratch("image");
+
+    // A PNG, made by Ghostscript so the test does not carry one.
+    let made = Command::new("gs")
+        .args([
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-sDEVICE=png16m",
+            "-r36",
+            "-g200x100",
+        ])
+        .arg(format!("-sOutputFile={}", dir.join("in.png").display()))
+        .arg("-c")
+        .arg("0 0 moveto 200 100 lineto 4 setlinewidth stroke showpage")
+        .output();
+    let Ok(made) = made else { return };
+    if !made.status.success() {
+        return;
+    }
+    let png = texrs::image::open(dir.join("in.png")).expect("the png reads");
+    assert_eq!((png.width, png.height), (200, 100));
+
+    let mut page = Page::letter();
+    page.image(png, 72.0, 500.0, 200.0, 100.0);
+    // A JPEG beside it, if the installation has one.
+    let jpeg = texrs::image::open("/usr/local/texlive/2026/texmf-dist/doc/eplain/xhyper.jpg");
+    if let Ok(jpeg) = &jpeg {
+        page.image(jpeg.clone(), 72.0, 300.0, 106.0, 116.0);
+    }
+    let path = write(&dir, &[page]);
+
+    // The file still opens, and nothing had to be repaired.
+    if let Some(report) = info(&path) {
+        assert!(report.contains("Pages:          1"), "{report}");
+    }
+
+    // What a reader finds inside it. `-listonly` is xpdf's spelling: `-list`
+    // alone wants somewhere to write the pictures too.
+    let Ok(listed) = Command::new("pdfimages")
+        .arg("-listonly")
+        .arg(&path)
+        .output()
+    else {
+        return;
+    };
+    let listed = String::from_utf8_lossy(&listed.stdout).to_string();
+    let rows: Vec<&str> = listed
+        .lines()
+        .filter(|line| line.contains("width="))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1 + jpeg.is_ok() as usize,
+        "the reader found {} pictures: {listed}",
+        rows.len()
+    );
+
+    // The PNG, by the numbers its header stated: a reader that had to guess
+    // any of these would report something else.
+    let png_row = rows
+        .iter()
+        .find(|row| row.contains("width=200"))
+        .unwrap_or_else(|| panic!("no 200-wide picture: {listed}"));
+    assert!(png_row.contains("height=100"), "{png_row}");
+    assert!(png_row.contains("colorspace=DeviceRGB"), "{png_row}");
+    assert!(png_row.contains("bpc=8"), "{png_row}");
+    if let Ok(jpeg) = &jpeg {
+        let row = rows
+            .iter()
+            .find(|row| row.contains(&format!("width={}", jpeg.width)))
+            .unwrap_or_else(|| panic!("no {}-wide picture: {listed}", jpeg.width));
+        assert!(row.contains(&format!("height={}", jpeg.height)), "{row}");
+    }
+
+    // And the pictures come out again. A JPEG comes out AS a JPEG, which is
+    // the proof it went in whole rather than being decoded and recompressed.
+    let root = dir.join("out");
+    let taken = Command::new("pdfimages")
+        .arg("-j")
+        .arg(&path)
+        .arg(root.to_string_lossy().as_ref())
+        .output();
+    if let Ok(taken) = taken {
+        assert!(taken.status.success());
+        let written: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .expect("the directory")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("out-"))
+            })
+            .collect();
+        assert!(!written.is_empty(), "the reader wrote no pictures");
+        // Whatever it wrote, one of them is the picture that went in. xpdf
+        // writes anything that is not a JPEG as a PPM, whose header is three
+        // numbers after a magic -- easier to read here than to teach the image
+        // reader a format nothing else needs.
+        let sizes: Vec<(u32, u32)> = written
+            .iter()
+            .filter_map(|path| match texrs::image::open(path) {
+                Ok(image) => Some((image.width, image.height)),
+                Err(_) => {
+                    let bytes = std::fs::read(path).ok()?;
+                    let head = String::from_utf8_lossy(&bytes[..40.min(bytes.len())]).to_string();
+                    let mut words = head.split_ascii_whitespace();
+                    let magic = words.next()?;
+                    if magic != "P6" && magic != "P5" && magic != "P4" {
+                        return None;
+                    }
+                    Some((words.next()?.parse().ok()?, words.next()?.parse().ok()?))
+                }
+            })
+            .collect();
+        assert!(sizes.contains(&(200, 100)), "the reader wrote {sizes:?}");
+
+        // And the PIXELS, not only the size. The picture is a black line on
+        // white, so nearly every byte of it is 0xff -- and a reader that had
+        // been told the wrong predictor or the wrong row width would decode
+        // the row filter bytes as colour and hand back noise, at exactly the
+        // same size. This is the only assertion here that looks past the
+        // dictionary into what the stream actually decodes to.
+        let ppm = written
+            .iter()
+            .find(|path| path.extension().is_some_and(|e| e == "ppm"))
+            .and_then(|path| std::fs::read(path).ok());
+        if let Some(ppm) = ppm {
+            let white = ppm.iter().filter(|&&b| b == 0xff).count();
+            assert!(
+                white * 10 > ppm.len() * 9,
+                "only {white} of {} bytes came out white, so the pixels decoded wrongly",
+                ppm.len()
+            );
+        }
+        if let Ok(jpeg) = &jpeg {
+            assert!(
+                written
+                    .iter()
+                    .any(|path| path.extension().is_some_and(|e| e == "jpg")),
+                "the JPEG did not come out as a JPEG, so it was recompressed"
+            );
+            assert!(sizes.contains(&(jpeg.width, jpeg.height)), "{sizes:?}");
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
