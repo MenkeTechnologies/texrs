@@ -222,6 +222,8 @@ fn run_with(
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
     FAULT.with(|f| *f.borrow_mut() = None);
+    // The decision needs the ops, and `VM::new` takes the chunk by value.
+    let chunk_for_jit = chunk.clone();
     let mut vm = VM::new(chunk);
     register_message_builtins(&mut vm);
     match on_line {
@@ -234,7 +236,16 @@ fn run_with(
         // never switching on. A TeX loop lowers to a rotated conditional back
         // edge, which is the shape fusevm's trace compiler accepts; without
         // this it recorded the trace and had nowhere to install it.
-        None => vm.enable_tracing_jit(),
+        // ... but ONLY for a chunk with a loop in it. A tracing JIT has
+        // nothing to offer a straight-line program, and switching it on for one
+        // is not free: fusevm 0.26.0 SEGVs in native code when three GROWING
+        // loop-free documents run in one thread, which is exactly what the REPL
+        // does at every prompt. `tests/jit_reentry.rs` holds the reproducer and
+        // BUGS.md records it. Gating on the shape the JIT is for keeps every
+        // loop at full speed and takes the crash off the path that could not
+        // have used it anyway.
+        None if crate::tiers::has_loop(&chunk_for_jit) => vm.enable_tracing_jit(),
+        None => {}
     }
     let result = vm.run();
     // A builtin that faulted halted the VM, so the halt has to be read as the

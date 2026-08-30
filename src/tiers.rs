@@ -178,6 +178,15 @@ pub fn inspect_chunk(name: &str, chunk: &Chunk) -> ChunkTiers {
     }
 }
 
+/// Whether `chunk` has a loop in it at all.
+///
+/// This is what decides whether the tracing JIT is switched on for a run: it
+/// exists for hot loops and has nothing to offer a straight-line program. See
+/// `runtime::run_with`.
+pub fn has_loop(chunk: &fusevm::Chunk) -> bool {
+    !loop_anchors(&chunk.ops).is_empty()
+}
+
 /// Every op index a backward branch jumps to — fusevm anchors a trace at each.
 fn loop_anchors(ops: &[Op]) -> Vec<usize> {
     let mut anchors: Vec<usize> = ops

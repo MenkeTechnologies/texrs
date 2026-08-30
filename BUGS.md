@@ -160,6 +160,19 @@ loop does not call the debugger's line marker, so a debug run stays interpreted.
 one piece — and `src/tiers.rs` pins that TeX's loop idiom reaches native code, so
 the recogniser, the rotated lowering and the switch cannot silently be lost.
 
+The JIT is switched on only for a chunk that HAS a loop, which is the shape a
+tracing JIT is for. That is not only an optimisation: under fusevm 0.26.0,
+switching it on for every run makes the third of three GROWING loop-free
+documents fault in JIT-compiled code -- `EXC_BAD_ACCESS` at address 0, a null
+base register in native code with no Rust frame on the stack. A REPL session is
+exactly that shape, because every prompt re-runs the whole accumulated source,
+so `texrs --repl` crashed on the third line that opened a group. Reusing one VM
+per thread through `VM::reset` does NOT avoid it, so the fault is in the trace
+tier rather than in stale slot buffers. `tests/jit_reentry.rs` holds the
+reproducer through the public API. The gate costs nothing measurable -- a
+program with no loop had nothing to gain -- and the 40-million-iteration loop
+still runs in 0.07s.
+
 fusevm's strict numeric mode (`set_numeric_hook` + `set_fixnum_range`) is NOT
 used, though it describes a 32-bit integer type exactly and seven sibling
 frontends use it. It was tried and measured: on a 40-million-iteration
