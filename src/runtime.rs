@@ -19,6 +19,23 @@ thread_local! {
     static BUILDING: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
+thread_local! {
+    /// The document's own text, in the order it was read.
+    static TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Append a run of the document's text.
+fn b_text(vm: &mut VM, _argc: u8) -> Value {
+    let piece = render(&vm.pop());
+    TEXT.with(|t| t.borrow_mut().push_str(&piece));
+    Value::Undef
+}
+
+/// Everything the document said, and clear it for the next run.
+pub fn take_text() -> String {
+    TEXT.with(|t| std::mem::take(&mut *t.borrow_mut()))
+}
+
 /// Append one piece to the message being built.
 fn b_msg_append(vm: &mut VM, _argc: u8) -> Value {
     let piece = render(&vm.pop());
@@ -120,6 +137,7 @@ fn b_ffi_call(vm: &mut VM, argc: u8) -> Value {
 /// must call the same two functions the interpreted one does, or its output
 /// would be a different program's.
 pub fn register_message_builtins(vm: &mut VM) {
+    vm.register_builtin(ops::TEXT, b_text);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);

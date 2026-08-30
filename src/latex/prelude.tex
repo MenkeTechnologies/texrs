@@ -36,6 +36,61 @@
 \newcommand{\textcolor}[2]{#2}
 \newcommand{\colorbox}[2]{#2}
 %
+% ---- the escaped characters and the spacing commands --------------------
+% `\%' is a per cent sign, `\ ' is an interword space, `\,' a thin one. These
+% are control SYMBOLS -- one character each, not words -- so they are defined
+% with \def rather than \newcommand, which expects a name.
+\def\ { }
+\def\,{ }
+\def\;{ }
+\def\:{ }
+\def\!{}
+\def\/{}
+\def\-{}
+% A per cent sign cannot be written in a body while it is the comment
+% character -- it would eat the closing brace. Make it ordinary, define, restore.
+\catcode`\%=12
+\def\%{%}
+\catcode`\%=14
+\def\&{&}
+\def\_{_}
+\def\#{#}
+\def\${$}
+% A brace that is not a grouping brace. The standard TeX way: make [ and ] the
+% grouping pair for the length of the definitions, turn { and } into ordinary
+% characters, define, and let the group restore all four catcodes on exit.
+% \gdef is required -- a \def inside the group would go with it.
+\catcode`\[=1 \catcode`\]=2
+[\catcode`\{=12 \catcode`\}=12
+ \gdef\{[{]
+ \gdef\}[}]
+]
+\catcode`\[=12 \catcode`\]=12
+\def\|{|}
+\def\>{ }
+\def\<{ }
+\def\@{}
+% `\\' is a line break. There are no lines here, so it is a newline in the text.
+\def\\{
+}
+% The accents, as control symbols. texrs cannot compose a glyph, so each yields
+% the letter it was placed over -- which is what a reader of the TEXT wants and
+% is not what a typesetter would do.
+\def\^#1{#1}
+\def\"#1{#1}
+\def\'#1{#1}
+\def\`#1{#1}
+\def\~#1{#1}
+\def\=#1{#1}
+\def\.#1{#1}
+\def\u#1{#1}
+\def\v#1{#1}
+\def\H#1{#1}
+\def\c#1{#1}
+\def\d#1{#1}
+\def\b#1{#1}
+\def\t#1{#1}
+%
 % ---- characters that are spelled as control sequences --------------------
 \newcommand{\textgreater}{>}
 \newcommand{\textless}{<}
@@ -273,6 +328,37 @@
 \newcommand{\newtheorem}[2]{}
 % graphicx's internal scaling arithmetic, reached through \scalebox.
 \newcommand{\Gscale@div}[3]{}
+% Alignment and table primitives: the stomach's, so they carry no text.
+\newcommand{\noalign}[1]{}
+\newcommand{\omit}{}
+\newcommand{\span}{}
+\newcommand{\cr}{}
+\newcommand{\crcr}{}
+\newcommand{\halign}{}
+\newcommand{\valign}{}
+\newcommand{\multicolumn}[3]{#3}
+\newcommand{\multirow}[3]{#3}
+\newcommand{\cline}[1]{}
+\newcommand{\endhead}{}
+\newcommand{\endfirsthead}{}
+\newcommand{\endfoot}{}
+\newcommand{\endlastfoot}{}
+\newcommand{\hfill}{}
+\newcommand{\hfil}{}
+\newcommand{\vfil}{}
+\newcommand{\hss}{}
+\newcommand{\vss}{}
+\newcommand{\kern}{}
+\newcommand{\hskip}{}
+\newcommand{\vskip}{}
+\newcommand{\penalty}{}
+\newcommand{\strut}{}
+\newcommand{\smallskip}{}
+\newcommand{\medskip}{}
+\newcommand{\bigskip}{}
+\newcommand{\break}{}
+\newcommand{\nobreak}{}
+\newcommand{\discretionary}[3]{}
 \newcommand{\Gin@defaultbp}[2]{}
 % `\@' is LaTeX's end-of-sentence marker; it produces nothing on its own.
 \newcommand{\@}{}

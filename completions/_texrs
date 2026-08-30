@@ -29,6 +29,7 @@ _texrs() {
     '--tiers[run it, then report which fusevm tier took its bytecode]' \
     '--jobs=[compile several documents at once: N threads (default: one per core)]:count:' \
     '--build[compile into the bytecode cache and stop, without running]' \
+    '--text[print the document text, not only its message stream]' \
     '--no-cache[compile this run rather than reading the bytecode cache]' \
     '(- *)--cache-stats[say what the bytecode cache holds and where, and exit]' \
     '(- *)--cache-clear[delete the bytecode cache and exit]' \

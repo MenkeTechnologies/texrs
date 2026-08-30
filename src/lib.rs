@@ -62,6 +62,25 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 ///
 /// This is the whole pipeline: mouth -> expander -> command stream -> fusevm
 /// bytecode -> fusevm. Nothing here interprets TeX; the VM runs the program.
+/// Run a document and return the TEXT it produced, not its messages.
+///
+/// This is what `--text` prints. An engine with a mouth and an expander and no
+/// stomach cannot typeset -- there is no line breaking, no page, no font -- but
+/// it can say what the document's words are after every macro has been
+/// expanded, which is the difference between a book compiling to a program that
+/// prints nothing and one that prints the book.
+pub fn run_text(src: &str) -> Result<String, TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
+    if crate::latex::looks_like_latex(&src) {
+        lowerer.preload(crate::latex::PRELUDE)?;
+    }
+    let cmds = lowerer.lower(&src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds);
+    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(crate::runtime::take_text())
+}
+
 pub fn run_messages(src: &str) -> Result<String, TexError> {
     let chunk = compile(src)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;

@@ -33,6 +33,13 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
+    /// Carry the document's own text into the program.
+    ///
+    /// Off by default: the terminal output of a `tex` run is its `\message`
+    /// stream, and the differential suite compares against exactly that. `--text`
+    /// turns it on for a caller who wants what the document SAYS rather than
+    /// what it announced.
+    text_output: bool,
     /// How deep `block` is currently nested.
     ///
     /// Lowering inlines a macro into the stream and lowers through its body, and
@@ -66,6 +73,7 @@ impl Lowerer {
             eng: Engine::new(),
             ended: false,
             next_scratch: 255,
+            text_output: false,
             depth: 0,
         }
     }
@@ -83,6 +91,12 @@ impl Lowerer {
     /// Resume the scratch counter where a captured format left it.
     pub fn set_scratch_mark(&mut self, at: i64) {
         self.next_scratch = at;
+    }
+
+    /// Emit the document's own text as well as its messages.
+    pub fn with_text_output(mut self) -> Self {
+        self.text_output = true;
+        self
     }
 
     /// Compile a whole source to a command stream.
@@ -180,6 +194,12 @@ impl Lowerer {
                     Token::Char(_, Cat::EndGroup) => {
                         return Ok(Self::drop_empty_line_directives(out))
                     }
+                    // The document's own words. Dropping these is why a book
+                    // used to compile to a program that printed nothing.
+                    Token::Char(c, _) if self.text_output => match out.last_mut() {
+                        Some(Cmd::Text(t)) => t.push(*c),
+                        _ => out.push(Cmd::Text(c.to_string())),
+                    },
                     _ => {}
                 }
                 continue;
@@ -190,6 +210,20 @@ impl Lowerer {
                     lx.push_back(&[Token::Cs(name)]);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
+            }
+            // A control sequence MEANS what it was last defined as. The
+            // dispatch below is by NAME, so a document that redefines a
+            // primitive was still getting the primitive. LaTeX redefines `\end`
+            // to close an environment, so a LaTeX document stopped dead at its
+            // first `\end{...}` -- which is why a whole book produced a page of
+            // preamble text and nothing else.
+            if matches!(self.eng.meanings.get(&name), Some(Meaning::Macro(_))) {
+                if let Some(parts) = self.tail_loop(name) {
+                    out.push(self.lower_tail_loop(parts)?);
+                    continue;
+                }
+                self.eng.expand_macro_file(lx, name)?;
+                continue;
             }
             match name.name() {
                 "end" => {
@@ -870,9 +904,9 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
         for c in cmds {
             match c {
-                // Neither a line directive nor a `\rust{ … }` compile writes a
-                // register.
-                Cmd::Line(_) | Cmd::RustCompile(_) => {}
+                // A line directive, a run of the document's text and a
+                // `\rust{ … }` compile all write no register.
+                Cmd::Line(_) | Cmd::Text(_) | Cmd::RustCompile(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

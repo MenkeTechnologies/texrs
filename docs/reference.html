@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">41</div>
+            <div class="stat-val">42</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -364,6 +364,7 @@
             <tr><td><code>DBG_LINE</code></td><td><code>4002</code></td><td>A statement boundary, emitted only under `--dap`. The debug adapter stops here; an ordinary run carries none of these ops.</td></tr>
             <tr><td><code>FFI_COMPILE</code></td><td><code>4003</code></td><td>Compile and register a `\rust{ … }` block: one argument, the base64 body.</td></tr>
             <tr><td><code>FFI_CALL</code></td><td><code>4004</code></td><td>Call a function a block exported: the name, then its arguments.</td></tr>
+            <tr><td><code>TEXT</code></td><td><code>4005</code></td><td>Append a run of the document's own text.</td></tr>
           </tbody>
         </table>
       </section>
@@ -441,6 +442,7 @@
             <tr><td><code>--repl</code></td><td>Start the interactive prompt</td></tr>
             <tr><td><code>--jobs=N</code></td><td>Compile N documents at once (default: one per core)</td></tr>
             <tr><td><code>--build</code></td><td>Compile into the bytecode cache and stop, without running</td></tr>
+            <tr><td><code>--text</code></td><td>Print the document text, not only the message stream</td></tr>
             <tr><td><code>--no-cache</code></td><td>Compile this run rather than reading the bytecode cache</td></tr>
             <tr><td><code>--aot</code></td><td>Compile the document to a standalone native executable</td></tr>
           </tbody>

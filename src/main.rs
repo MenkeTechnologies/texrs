@@ -217,6 +217,17 @@ fn main() -> ExitCode {
 
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
+    if cli.text {
+        // The document's own words, after expansion. Printed as-is: this is not
+        // a typeset page and does not pretend to be one.
+        return match texrs::run_text(&src) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e.0),
+        };
+    }
     let run = match no_cache {
         true => texrs::run_messages(&src),
         false => texrs::run_messages_cached(std::path::Path::new(&path), &src),

@@ -353,6 +353,22 @@ impl Engine {
                 self.do_expandafter(lx, pending_only)?;
                 Ok(true)
             }
+            // `\string` is expandable and reaches running text, not only the
+            // inside of a `\message`. tex.web 262 has the expander produce the
+            // characters of the next token wherever it appears; handling it only
+            // in message context left it undefined in the body of a document.
+            "string" => {
+                if let Some(t) = self.take(lx, pending_only) {
+                    let text = match &t {
+                        Token::Cs(n) => format!("{}{}", self.escape, n.name()),
+                        other => other.to_text(self.escape),
+                    };
+                    let toks: Vec<Token> =
+                        text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
+                    lx.push_back(&toks);
+                }
+                Ok(true)
+            }
             "noexpand" => {
                 // The next token is passed through unexpanded. Reading it and
                 // pushing it back is enough here because nothing re-examines it.

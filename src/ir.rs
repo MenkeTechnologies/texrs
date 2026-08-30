@@ -87,6 +87,16 @@ pub enum Cmd {
     SetCount(i64, Num),
     /// `\advance`/`\multiply`/`\divide` on a count register.
     Arith(Arith, i64, Num),
+    /// A run of the document's own text.
+    ///
+    /// Ordinary characters -- the words of the document, as opposed to what
+    /// `\message` prints -- used to be dropped while lowering, because an
+    /// engine with no stomach has nowhere to put them. That made a 15,000-line
+    /// book compile to a program that printed nothing: it "ran" and produced 66
+    /// bytes. This carries them instead, so `--text` can emit what the document
+    /// says. It is not typesetting: no line breaking, no pages, no fonts. It is
+    /// the text, in order.
+    Text(String),
     /// `\message{...}` — built piece by piece at run time.
     Message(Vec<MsgOp>),
     /// A group: the listed count registers are saved on entry and restored on

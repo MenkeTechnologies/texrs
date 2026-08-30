@@ -14,6 +14,8 @@ use fusevm::{Chunk, ChunkBuilder, Op, Value};
 
 /// Builtin ids this frontend registers on the VM.
 pub mod ops {
+    /// Append a run of the document's own text.
+    pub const TEXT: u16 = 4005;
     /// Append one rendered piece to the message being built.
     pub const MSG_APPEND: u16 = 4000;
     /// Finish the message being built and record it.
@@ -112,6 +114,12 @@ impl Compiler {
                     self.b.emit(Op::TruncInt, self.line);
                 }
                 self.b.emit(Op::SetSlot(slot(*reg)), self.line);
+            }
+            Cmd::Text(t) => {
+                let k = self.b.add_constant(Value::Str(t.clone().into()));
+                self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::CallBuiltin(ops::TEXT, 1), self.line);
+                self.b.emit(Op::Pop, self.line);
             }
             Cmd::Message(msg) => {
                 self.msg_ops(msg);

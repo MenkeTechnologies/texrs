@@ -119,6 +119,8 @@ pub struct Cli {
     pub aot: bool,
     pub build: bool,
     pub no_cache: bool,
+    /// Print the document's own text rather than only its `\message` stream.
+    pub text: bool,
     pub jobs: Option<usize>,
 }
 
@@ -144,6 +146,7 @@ impl Default for Cli {
             aot: false,
             build: false,
             no_cache: false,
+            text: false,
             jobs: None,
         }
     }
@@ -237,6 +240,7 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
             "aot" => cli.aot = true,
             "build" => cli.build = true,
             "no-cache" => cli.no_cache = true,
+            "text" => cli.text = true,
             "jobs" => {
                 let v = value("--jobs")?;
                 match v.parse::<usize>() {
@@ -323,6 +327,8 @@ pub const USAGE: &str = "\
           // Compile N documents at once (default: one per core)
   --build
           // Compile into the bytecode cache and stop, without running
+  --text
+          // Print the document text, not only the message stream
   --no-cache
           // Compile this run rather than reading the bytecode cache
   --aot
