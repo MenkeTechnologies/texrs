@@ -52,7 +52,7 @@
             <span class="sep">/</span>
             <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
           </nav>
-          <p class="docs-build-line">texrs v0.4.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · no interpreter, no DVI yet · a fusevm language host (with zshrs, stryke, rubylang, pythonrs, scalars) · MIT · in active development</p>
+          <p class="docs-build-line">texrs v0.4.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · no interpreter, no DVI output yet (it reads DVI: <code>-X dvi</code>) · a fusevm language host (with zshrs, stryke, rubylang, pythonrs, scalars) · MIT · in active development</p>
         </div>
         <div class="tutorial-toolbar">
           <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
@@ -164,7 +164,7 @@
           <div class="cat-card"><h4>-X bib FILE.bib / FILE.aux</h4><p>Read a bibliography database, or, given an <code>.aux</code>, answer the different question: what this document cites and which of those entries are missing.</p></div>
           <div class="cat-card"><h4>TeX-compatible options</h4><p>The single-dash grammar real <code>tex</code> accepts, so a Makefile does not have to know which binary it is calling: <code>-interaction=MODE</code>, <code>-jobname=NAME</code>, <code>-output-directory=DIR</code>, <code>-progname=NAME</code>, <code>-fmt=NAME</code>, <code>-ini</code>, <code>-halt-on-error</code>, <code>-file-line-error</code> / <code>-no-file-line-error</code>, <code>-recorder</code>. The <code>&amp;FMT</code> and <code>\FIRST-LINE</code> argument forms work too.</p></div>
           <div class="cat-card"><h4>scripts/parity.sh</h4><p>Diff the committed corpus against the real <code>tex</code> binary. No expectation is written by hand.</p></div>
-          <div class="cat-card"><h4>scripts/fuzz_parity.sh</h4><p>Generate seeded random programs in the implemented subset, run both engines, and reduce whatever diverges to a minimal case.</p></div>
+          <div class="cat-card"><h4>the parity-fuzz binary</h4><p>Generate seeded random programs in the implemented subset, run both engines, and reduce whatever diverges to a minimal case.</p></div>
         </div>
       </section>
 
@@ -183,6 +183,10 @@
             <tr><td>Groups scoping macros and registers</td><td><span class="status-pill status-implemented">Implemented</span></td><td>The lowered body is wrapped in save/restore for exactly the registers it assigns.</td></tr>
             <tr><td><code>\count</code> registers and arithmetic</td><td><span class="status-pill status-implemented">Implemented</span></td><td>256 registers on VM slots; <code>\advance</code>/<code>\multiply</code>/<code>\divide</code> with TeX's truncation.</td></tr>
             <tr><td>Differential parity vs real <code>tex</code></td><td><span class="status-pill status-implemented">Implemented</span></td><td>Corpus, examples, a generative reducing fuzzer, and cargo-fuzz targets for panics.</td></tr>
+            <tr><td>The LaTeX layer</td><td>Implemented</td><td>LaTeX is a program written in TeX, so texrs carries it as TeX: <code>src/latex/prelude.tex</code> is 161 lines of <code>\newcommand</code>s compiled into the binary, so a run needs no support files. It covers what lives in the mouth and the expander; a macro that would need the stomach yields its text or consumes its arguments and produces nothing.</td></tr>
+            <tr><td>Reading <code>.dvi</code></td><td>Implemented</td><td>The reading half of the parity contract, ported from tectonic's <code>xdv</code> (<code>src/dvi.rs</code>). texrs writes no DVI &mdash; it stops where the boxes begin &mdash; but the moment it sets a character the reference to compare against is what real <code>tex</code> shipped, and that is a DVI file. <code>-X dvi A.dvi B.dvi</code> compares two as documents rather than as bytes.</td></tr>
+            <tr><td>Font metrics, <code>.tfm</code></td><td>Implemented</td><td>Ported from tectonic's <code>read_font_info</code>, which is <code>tex.web</code> §539&ndash;§576 in C (<code>src/tfm.rs</code>): character widths, heights and depths in design-size units, plus the ligature and kern program. The one format TeX cannot do without.</td></tr>
+            <tr><td>Bibliographies, <code>.bib</code> / <code>.bst</code></td><td>Implemented</td><td><code>-X bib FILE.bib</code> reads a database; given an <code>.aux</code> it answers what a document cites and what is missing. <code>src/bst.rs</code> reads a <code>.bst</code> style &mdash; Patashnik's stack language &mdash; ported from the front of tectonic's <code>engine_bibtex</code>.</td></tr>
             <tr><td>Errors that recover like tex's</td><td><span class="status-pill status-progress">In progress</span></td><td>An undefined control sequence prints its name instead of raising; every other error stops the run.</td></tr>
             <tr><td>Other registers (<code>\dimen</code>, <code>\skip</code>, <code>\toks</code>, <code>\box</code>)</td><td><span class="status-pill status-planned">Planned</span></td><td>Needed before <code>\ifdim</code>, <code>\ifvoid</code>, <code>\ifhbox</code> can be evaluated.</td></tr>
             <tr><td>The stomach: boxes, glue, paragraphs, DVI</td><td><span class="status-pill status-planned">Planned</span></td><td>See <code>docs/ROADMAP.md</code>.</td></tr>
@@ -200,7 +204,7 @@ cargo test
 bash scripts/parity.sh
 
 # random programs in the implemented subset, both engines, reduced on divergence
-bash scripts/fuzz_parity.sh -n 500
+cargo run --bin parity-fuzz -- --programs 500
 
 # coverage-guided fuzzing for panics rather than divergences
 cargo +nightly fuzz run lower -- -timeout=10</pre>
