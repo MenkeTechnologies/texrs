@@ -280,6 +280,75 @@ impl Document {
     }
 }
 
+impl Document {
+    /// The document's shape, as `-X show` prints it: where it is, what it is
+    /// made of, and what it can produce.
+    ///
+    /// Everything here is read from the document file and the inputs
+    /// themselves, so what it prints is what a build would use — not a
+    /// remembered summary that can be out of date.
+    pub fn show(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("name       {}\n", self.file.doc.name));
+        out.push_str(&format!("source     {}\n", self.src_dir.display()));
+        out.push_str(&format!("build      {}\n", self.build_dir.display()));
+        for path in &self.file.doc.extra_paths {
+            out.push_str(&format!("extra path {}\n", path.display()));
+        }
+        out.push_str("\ninputs\n");
+        match self.assemble() {
+            Ok((_, read)) => {
+                for record in read {
+                    // Twelve characters of the digest: enough to tell two
+                    // versions of a file apart at a glance, and not so much
+                    // that the name is pushed off the line.
+                    out.push_str(&format!(
+                        "  {}  {}\n",
+                        &record.digest[..12.min(record.digest.len())],
+                        record.name
+                    ));
+                }
+            }
+            Err(e) => out.push_str(&format!("  (cannot be read: {e})\n")),
+        }
+        out.push_str("\noutputs\n");
+        for output in &self.file.outputs {
+            out.push_str(&format!(
+                "  {:<12} {:?} → {}.{}\n",
+                output.name,
+                output.kind,
+                self.file.doc.name,
+                output.kind.extension()
+            ));
+        }
+        out
+    }
+
+    /// Build a profile and hand back what it produced, writing nothing.
+    ///
+    /// tectonic's `-X dump` exists so an intermediate can be looked at without
+    /// hunting for it in the build directory; this is the same, and it is also
+    /// what a pipeline wants — `texrs -X dump | grep` needs the bytes on
+    /// stdout, not a path to them.
+    pub fn dump(&self, profile: Option<&str>) -> Result<String, String> {
+        let output = self.profile(profile)?.clone();
+        let (source, _) = self.assemble()?;
+        match output.kind {
+            OutputType::Messages => crate::run_messages(&source).map_err(|e| e.0),
+            OutputType::Tokens => {
+                let cats = crate::catcode::CatTable::new();
+                let mut lexer = crate::lexer::Lexer::new(&source);
+                let mut out = String::new();
+                while let Some(token) = lexer.next_token(&cats) {
+                    out.push_str(&format!("{token:?}\n"));
+                }
+                Ok(out)
+            }
+            OutputType::Disasm => Ok(crate::compile(&source).map_err(|e| e.0)?.disassemble()),
+        }
+    }
+}
+
 /// How often [`Document::watch`] looks, when the caller does not say.
 pub const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -556,6 +625,74 @@ mod tests {
         // Each profile writes its own file, so one does not overwrite another.
         assert_ne!(built.path, tokens.path);
         assert_ne!(tokens.path, disasm.path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn showing_a_document_reads_it_rather_than_remembering_it() {
+        let dir = scratch("show");
+        std::fs::write(dir.join("index.tex"), HELLO).unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"shown\"\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n\
+             [[output]]\nname=\"bytes\"\ntype=\"disasm\"\n",
+        )
+        .unwrap();
+
+        let shown = doc.show();
+        assert!(shown.contains("name       shown"), "{shown}");
+        assert!(shown.contains(&dir.display().to_string()), "{shown}");
+        assert!(shown.contains("index.tex"), "{shown}");
+        assert!(
+            shown.contains("default") && shown.contains("bytes"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("shown.disasm"),
+            "the file each profile writes: {shown}"
+        );
+
+        // The digest shown is the file's, so editing it changes what is shown.
+        let before = shown.clone();
+        std::fs::write(dir.join("index.tex"), "\\message{OTHER}\n\\end\n").unwrap();
+        assert_ne!(doc.show(), before, "it reads the input, not a memory of it");
+
+        // A document whose input has gone says so instead of pretending.
+        std::fs::remove_file(dir.join("index.tex")).unwrap();
+        assert!(doc.show().contains("cannot be read"), "{}", doc.show());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dumping_produces_what_a_build_would_write_without_writing_it() {
+        let dir = scratch("dump");
+        std::fs::write(dir.join("index.tex"), HELLO).unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"d\"\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n\
+             [[output]]\nname=\"tok\"\ntype=\"tokens\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(doc.dump(None).unwrap().trim(), "HI");
+        assert!(doc.dump(Some("tok")).unwrap().contains("Cs("));
+        assert!(
+            !dir.join("build").exists(),
+            "a dump writes nothing: the build directory was not made"
+        );
+
+        // What it dumps is what a build writes, so the two cannot disagree.
+        let built = doc.build(None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&built.path).unwrap().trim(),
+            doc.dump(None).unwrap().trim()
+        );
+        assert!(doc
+            .dump(Some("nope"))
+            .unwrap_err()
+            .contains("no output named"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

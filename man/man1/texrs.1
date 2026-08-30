@@ -135,6 +135,25 @@ is used unless
 .B \-\-profile
 says otherwise.
 .TP
+.B \-X init
+Write a document into the current directory, named after it \(em
+.B \-X new .
+under the name tectonic gives it, because "make one here" is what a user reaches
+for in a directory that already exists.
+.TP
+.B \-X show
+Print what the document is: where its source and build directories are, the
+inputs it is made of with the first twelve characters of each one's digest, and
+the outputs it can produce with the file each would write. Everything is read
+from the document and its inputs, so it says what a build would use rather than
+what one used last.
+.TP
+.B \-X dump " [" \-\-profile " \fINAME\fR ]"
+Build a profile to standard output, writing nothing. What it prints is what
+.B \-X build
+would have written, so a pipeline can read a build without hunting for the file
+or leaving one behind.
+.TP
 .B \-X watch " [" \-\-profile " \fINAME\fR ] [" \-\-interval " \fIMS\fR ]"
 Build the document, then build it again whenever an input changes, until
 interrupted. Change is decided by the digest of each input rather than by its
@@ -143,6 +162,16 @@ editor that saves through a temporary file \(em which most do, and which moves
 the mtime while the content stands still. A document that does not compile is
 reported and the watch carries on: that is the normal state of one being
 edited.
+.PP
+A command that is not one of these is looked for on
+.B PATH
+as
+.BI texrs- name
+and run with the remaining arguments, which is how tectonic lets a command be
+added without changing the binary:
+.B texrs \-X lint
+runs
+.BR texrs-lint .
 .SH OPTIONS
 .TP
 .B \-\-repl

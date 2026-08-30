@@ -353,8 +353,65 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
     // src/document.rs, and a background process in this suite would be a
     // flake rather than a check.
 
-    // An unknown document command is refused rather than ignored.
-    assert!(!run(&["-X", "frobnicate"], &dir).status.success());
+    // `-X show` reads the document rather than remembering it: the digest it
+    // prints is the input's.
+    let shown = run(&["-X", "show"], &dir);
+    assert!(shown.status.success());
+    let text = String::from_utf8_lossy(&shown.stdout);
+    assert!(
+        text.contains("index.tex") && text.contains("default"),
+        "{text}"
+    );
+
+    // `-X dump` prints what a build writes and leaves nothing behind.
+    let fresh = scratch_cache("dump_only");
+    assert!(run(&["-X", "init"], &fresh).status.success());
+    let dumped = run(&["-X", "dump"], &fresh);
+    assert!(dumped.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&dumped.stdout).trim(),
+        "hello from texrs"
+    );
+    assert!(
+        !fresh.join("build").exists(),
+        "a dump writes no build directory"
+    );
+
+    // An unknown command is looked for on PATH as `texrs-<name>`; with no such
+    // program the error stands.
+    let unknown = run(&["-X", "frobnicate"], &dir);
+    assert!(!unknown.status.success());
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("unknown document command"),
+        "{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
+
+    // And with one, it runs, taking the arguments after the command name.
+    let helper = dir.join("texrs-hello");
+    std::fs::write(&helper, "#!/bin/sh\necho \"external ran: $*\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = texrs()
+            .args(["-X", "hello", "one", "two"])
+            .current_dir(&dir)
+            .env("PATH", path)
+            .output()
+            .expect("run texrs");
+        assert!(out.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "external ran: one two"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&fresh);
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&bare);

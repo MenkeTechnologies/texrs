@@ -14,6 +14,9 @@ usage: texrs [OPTIONS] FILE.tex
        texrs -X new [DIR]           make a document (Texrs.toml + index.tex)
        texrs -X build [--profile P] build the document this directory is in
        texrs -X watch [--profile P] rebuild it whenever an input changes
+       texrs -X init                make one here, named after this directory
+       texrs -X show                say what the document is and can produce
+       texrs -X dump [--profile P]  build to stdout, writing nothing
 
   --repl          start the interactive prompt
   --lsp           speak the Language Server Protocol over stdio
@@ -32,6 +35,16 @@ usage: texrs [OPTIONS] FILE.tex
 ";
 
 fn main() -> ExitCode {
+    struct Stats;
+    impl Drop for Stats {
+        fn drop(&mut self) {
+            if std::env::var_os("TEXRS_PRELEX_STATS").is_some() {
+                prelex_stats();
+            }
+        }
+    }
+    let _stats = Stats;
+
     // The document commands come first: `-X` takes over the whole invocation,
     // as tectonic's V2 interface does, so nothing below has to know about them.
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -195,11 +208,17 @@ fn run_document(args: &[String]) -> ExitCode {
         return ExitCode::from(1);
     };
     match command {
-        "new" => {
-            let dir = args
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
+        "new" | "init" => {
+            // `new` takes a directory; `init` is `new .` under the name
+            // tectonic gives it, since "make one here" is what a user reaches
+            // for in a directory that already exists.
+            let dir = match command {
+                "init" => PathBuf::from("."),
+                _ => args
+                    .get(1)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+            };
             // The document is named after its directory, which is what the
             // user has already chosen by making one.
             let name = std::fs::canonicalize(&dir)
@@ -216,7 +235,17 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
-        "build" | "watch" => {
+        "show" => {
+            let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            match texrs::document::Document::find_from(here) {
+                Ok(document) => {
+                    print!("{}", document.show());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        "build" | "watch" | "dump" => {
             let mut profile: Option<String> = None;
             let mut interval = texrs::document::WATCH_INTERVAL;
             let mut rest = args[1..].iter();
@@ -238,6 +267,18 @@ fn run_document(args: &[String]) -> ExitCode {
                 Ok(d) => d,
                 Err(e) => return fail(&e),
             };
+            if command == "dump" {
+                return match document.dump(profile.as_deref()) {
+                    Ok(text) => {
+                        print!("{text}");
+                        if !text.ends_with('\n') {
+                            println!();
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(&e),
+                };
+            }
             if command == "build" {
                 return match document.build(profile.as_deref()) {
                     Ok(built) => {
@@ -260,10 +301,37 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
-        other => {
-            eprintln!("texrs: unknown document command: {other}");
-            eprint!("{USAGE}");
-            ExitCode::from(1)
+        // An unknown command is looked for on PATH as `texrs-<name>`, which is
+        // how tectonic lets a command be added without changing the binary.
+        other => match external_command(other, &args[1..]) {
+            Some(code) => code,
+            None => {
+                eprintln!("texrs: unknown document command: {other}");
+                eprint!("{USAGE}");
+                ExitCode::from(1)
+            }
+        },
+    }
+}
+
+/// Run `texrs-<name>` from PATH with `args`, if there is one.
+///
+/// The extension point tectonic has: a command nobody built into the binary is
+/// a program on PATH, so `texrs -X lint` runs `texrs-lint`. `None` means there
+/// is no such program, which is what keeps the unknown-command error reachable.
+fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
+    let program = format!("texrs-{name}");
+    match std::process::Command::new(&program).args(args).status() {
+        Ok(status) => Some(match status.code() {
+            Some(0) => ExitCode::SUCCESS,
+            Some(code) => ExitCode::from(code.min(255) as u8),
+            // Killed by a signal. Any non-zero code beats reporting success.
+            None => ExitCode::from(1),
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            eprintln!("texrs: {program}: {e}");
+            Some(ExitCode::from(1))
         }
     }
 }
@@ -311,4 +379,16 @@ fn cache_clear() -> ExitCode {
 fn fail(reason: &str) -> ExitCode {
     eprintln!("! {reason}.");
     ExitCode::from(1)
+}
+
+/// Print how often the parallel read-ahead ran, for `TEXRS_PRELEX_STATS`.
+pub fn prelex_stats() {
+    use std::sync::atomic::Ordering;
+    eprintln!(
+        "prelex calls={} chars={} drop_gen={} drop_exhaust={}",
+        texrs::parallel::PRELEX_CALLS.load(Ordering::Relaxed),
+        texrs::parallel::PRELEX_CHARS.load(Ordering::Relaxed),
+        texrs::parallel::DROP_GEN.load(Ordering::Relaxed),
+        texrs::parallel::DROP_EXHAUST.load(Ordering::Relaxed)
+    );
 }
