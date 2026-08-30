@@ -1,52 +1,100 @@
-//! A macro that names itself must not take the process down with it.
+//! A macro that names itself: TeX's loop.
 //!
-//! Lowering inlines a macro into the stream and lowers through its body, and it
-//! lowers BOTH arms of a run-time conditional because neither is decided yet.
-//! Those two together mean `\def\r{\ifnum\count0<3 \r \fi}` inlines into its own
-//! arm forever: the recursion is in the LOWERER, not in the program, so it does
-//! not matter which way the test would go at run time or how few iterations the
-//! author intended. Before the depth bound this exhausted the Rust stack and
-//! aborted the process -- no diagnostic, no exit code, nothing a caller could
-//! act on. `tex` runs the same file and prints `3`.
+//! `\def\r{BODY \ifnum A<B \r \fi}` is how TeX writes a loop -- run the body,
+//! test, invoke yourself again. Lowering used to INLINE a macro into the stream
+//! and lower through its body, and it lowers both arms of a run-time conditional
+//! because neither is decided yet. Those together cannot terminate for this
+//! shape: the copy contains the call that gets copied. It exhausted the Rust
+//! stack and aborted the process -- no diagnostic, no exit code.
 //!
-//! These pin the bound itself. The gap they do NOT close is that the file still
-//! fails: making it print `3` needs a recursive macro to lower to a run-time
-//! call instead of an inline copy rather than a bound on the copying.
+//! It now lowers to a real loop: the body once, then a backward jump. That is
+//! finite bytecode, it costs no call frame, and its stack use is constant, which
+//! is why it runs iteration counts real `tex` refuses (tex pushes an input-stack
+//! level per call and gives up at 10000).
+//!
+//! Anything NOT of that exact shape still inlines, and the depth bound in
+//! `lower.rs` keeps that from aborting.
 
-/// The shape that used to abort: self-reference guarded by a conditional.
-const SELF_RECURSIVE: &str = concat!(
-    "\\catcode`\\{=1 \\catcode`\\}=2\n",
-    "\\count0=99\n",
-    "\\def\\r{\\ifnum\\count0<3 \\r \\fi}\n",
-    "\\r \\message{ok}\n",
-    "\\end\n"
-);
+use fusevm::Op;
+
+fn loop_src(n: i64, rel: &str, start: i64) -> String {
+    format!(
+        concat!(
+            "\\catcode`\\{{=1 \\catcode`\\}}=2\n",
+            "\\count0={start}\n",
+            "\\def\\r{{\\advance\\count0 by 1 \\ifnum\\count0{rel}{n} \\r \\fi}}\n",
+            "\\r \\message{{\\the\\count0}}\n",
+            "\\end\n"
+        ),
+        start = start,
+        rel = rel,
+        n = n
+    )
+}
+
+fn message(src: &str) -> String {
+    texrs::run_messages(src).expect("run")
+}
 
 #[test]
-fn a_self_recursive_macro_reports_capacity_rather_than_aborting() {
-    let err = texrs::compile(SELF_RECURSIVE).expect_err("must not compile");
+fn a_tail_recursive_macro_runs_instead_of_aborting() {
+    // The shape that used to take the process down. tex prints 3 for this file.
+    assert_eq!(message(&loop_src(3, "<", 0)), "3");
+}
+
+#[test]
+fn the_loop_counts_the_same_as_tex_does() {
+    // Spot values across the range tex itself can still reach, so the numbers
+    // are checked against a real engine's semantics rather than against a
+    // rewrite of the same arithmetic.
+    assert_eq!(message(&loop_src(1, "<", 0)), "1");
+    assert_eq!(message(&loop_src(100, "<", 0)), "100");
+    assert_eq!(message(&loop_src(9000, "<", 0)), "9000");
+}
+
+#[test]
+fn a_loop_whose_test_fails_first_time_runs_its_body_once() {
+    // `\r` runs its body BEFORE reaching its own conditional, so this is a
+    // do-while, not a while. Getting it backwards would print 0.
+    assert_eq!(message(&loop_src(3, ">", 0)), "1");
+}
+
+#[test]
+fn the_loop_is_a_backward_jump_and_not_an_inlined_copy() {
+    // The point of the change: finite bytecode with a back edge. An inlined
+    // copy would grow the op count with the iteration bound; a loop does not.
+    let ops = |n: i64| {
+        texrs::compile(&loop_src(n, "<", 0))
+            .expect("compile")
+            .ops
+            .len()
+    };
+    let (small, large) = (ops(3), ops(100_000));
+    assert_eq!(
+        small, large,
+        "op count must not depend on the iteration bound: {small} vs {large}"
+    );
+    let chunk = texrs::compile(&loop_src(3, "<", 0)).expect("compile");
     assert!(
-        err.0.contains("capacity exceeded"),
-        "want TeX's own capacity wording, got {:?}",
-        err.0
+        chunk.ops.iter().any(|o| matches!(o, Op::JumpIfTrue(_))),
+        "a loop must close with a conditional back edge"
     );
 }
 
 #[test]
-fn the_bound_does_not_depend_on_which_arm_recurses() {
-    // `\count0=1` makes `>3` false, so the recursive call sits in the arm that
-    // would NOT be taken. It still has to be bounded: the lowerer emits both.
-    let src = SELF_RECURSIVE
-        .replace("\\count0=99", "\\count0=1")
-        .replace("<3", ">3");
-    let err = texrs::compile(&src).expect_err("must not compile");
-    assert!(err.0.contains("capacity exceeded"), "got {:?}", err.0);
+fn it_runs_iteration_counts_real_tex_cannot() {
+    // tex pushes an input-stack level per recursive call and stops at
+    // `[input stack size=10000]`; a loop's stack use is constant. Verified
+    // against TeX Live 2026: 12000 fails there, this does not.
+    assert_eq!(message(&loop_src(12_000, "<", 0)), "12000");
+    assert_eq!(message(&loop_src(1_000_000, "<", 0)), "1000000");
 }
 
 #[test]
-fn mutual_recursion_is_bounded_too() {
-    // Two macros that name each other recurse just as unboundedly, and a guard
-    // that only watched for a macro naming ITSELF would miss this.
+fn mutual_recursion_is_still_bounded_rather_than_aborting() {
+    // Two macros naming each other are not the loop idiom -- the recogniser
+    // requires a SELF call -- so this still inlines, and the depth bound is what
+    // keeps it from being a crash.
     let src = concat!(
         "\\catcode`\\{=1 \\catcode`\\}=2\n",
         "\\count0=99\n",
@@ -60,15 +108,14 @@ fn mutual_recursion_is_bounded_too() {
 }
 
 #[test]
-fn a_non_recursive_macro_in_a_skipped_arm_still_compiles() {
-    // The bound must not catch ordinary nesting. This is the same shape with
-    // the self-reference removed, and it has to keep working.
+fn an_ordinary_macro_still_inlines() {
+    // The recogniser must not swallow a plain macro used inside a conditional.
     let src = concat!(
         "\\catcode`\\{=1 \\catcode`\\}=2\n",
-        "\\count0=99\n",
-        "\\def\\q{\\message{Q}}\n",
+        "\\count0=1\n",
+        "\\def\\q{Q}\n",
         "\\def\\r{\\ifnum\\count0<3 \\q \\fi}\n",
-        "\\r \\message{ok}\n",
+        "\\r \\message{done}\n",
         "\\end\n"
     );
     texrs::compile(src).expect("an ordinary macro in an arm must still lower");
@@ -76,8 +123,7 @@ fn a_non_recursive_macro_in_a_skipped_arm_still_compiles() {
 
 #[test]
 fn deeply_nested_conditionals_stay_under_the_bound() {
-    // A real document nests conditionals nowhere near 256 deep. Thirty levels
-    // must lower cleanly, or the bound is set too low to be safe.
+    // A real document nests nowhere near 256 deep; 30 levels must lower.
     let mut src = String::from("\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=1\n");
     for _ in 0..30 {
         src.push_str("\\ifnum\\count0<9 ");

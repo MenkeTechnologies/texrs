@@ -138,6 +138,30 @@ impl Compiler {
                 );
                 self.branch(then_branch, else_branch);
             }
+            Cmd::Loop {
+                body,
+                left,
+                rel,
+                right,
+            } => {
+                // do-while: the body runs, then the test decides whether to go
+                // round again. `patch_jump` takes an absolute target, so the
+                // back edge is just the position the body started at.
+                let start = self.b.current_pos();
+                self.block(body);
+                self.num(left);
+                self.num(right);
+                self.b.emit(
+                    match rel {
+                        Rel::Less => Op::NumLt,
+                        Rel::Equal => Op::NumEq,
+                        Rel::Greater => Op::NumGt,
+                    },
+                    self.line,
+                );
+                let back = self.b.emit(Op::JumpIfTrue(0), self.line);
+                self.b.patch_jump(back, start);
+            }
             Cmd::IfOdd {
                 value,
                 then_branch,

@@ -235,6 +235,15 @@ impl Lowerer {
                 "global" => self.eng.set_global_prefix(true),
                 "relax" | "par" => {}
                 other => {
+                    // TeX's loop idiom -- a macro whose last act is to call
+                    // itself under a test -- becomes a real loop rather than an
+                    // inline copy. Inlining it cannot terminate: the copy holds
+                    // the call that gets copied.
+                    if let Some(parts) = self.tail_loop(other) {
+                        let cmd = self.lower_tail_loop(parts)?;
+                        out.push(cmd);
+                        continue;
+                    }
                     // A macro expands into the stream and lowering continues
                     // through its body -- expansion is a frontend concern.
                     if matches!(self.eng.meanings.get(other), Some(Meaning::Macro(_))) {
@@ -298,6 +307,75 @@ impl Lowerer {
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
+    /// Recognise `\def\r{BODY \ifnum A<B \r \fi}` -- TeX's loop.
+    ///
+    /// Returns the body tokens and the condition tokens when `name` has exactly
+    /// that shape, and `None` otherwise. Deliberately narrow: the tail call must
+    /// be the last thing before the closing `\fi`, the macro must take no
+    /// arguments, and it must not name itself anywhere else. Anything less
+    /// certain is left to inlining, where the depth bound still catches it --
+    /// a recogniser that guesses would silently compile a DIFFERENT program.
+    fn tail_loop(&self, name: &str) -> Option<TailLoop> {
+        let Some(Meaning::Macro(m)) = self.eng.meanings.get(name) else {
+            return None;
+        };
+        if !m.params.is_empty() {
+            return None;
+        }
+        let is_self = |t: &Token| matches!(t, Token::Cs(n) if n == name);
+        // The tail call sits at the end, before an optional space and `\fi`.
+        let mut end = m.body.len();
+        while end > 0 && m.body[end - 1].is_space() {
+            end -= 1;
+        }
+        if end == 0 || !matches!(&m.body[end - 1], Token::Cs(n) if n == "fi") {
+            return None;
+        }
+        end -= 1;
+        while end > 0 && m.body[end - 1].is_space() {
+            end -= 1;
+        }
+        if end == 0 || !is_self(&m.body[end - 1]) {
+            return None;
+        }
+        end -= 1;
+        // Everything before it splits at the `\ifnum` that guards the call.
+        let guard = m.body[..end]
+            .iter()
+            .rposition(|t| matches!(t, Token::Cs(n) if n == "ifnum"))?;
+        let body = m.body[..guard].to_vec();
+        let cond = m.body[guard + 1..end].to_vec();
+        // One self-reference only: another one elsewhere is a different program
+        // than a loop, and inlining it is the honest answer.
+        if body.iter().chain(cond.iter()).any(is_self) {
+            return None;
+        }
+        Some(TailLoop { body, cond })
+    }
+
+    /// Lower a recognised tail loop: the body as a block, the guard as a test.
+    fn lower_tail_loop(&mut self, parts: TailLoop) -> R<Cmd> {
+        let mut body_lx = Lexer::new("");
+        body_lx.push_back(&parts.body);
+        let body = self.block(&mut body_lx, None)?;
+
+        let mut cond_lx = Lexer::new("");
+        cond_lx.push_back(&parts.cond);
+        let left = self.number(&mut cond_lx)?;
+        let rel = match self.eng.read_relation_file(&mut cond_lx)? {
+            '<' => Rel::Less,
+            '>' => Rel::Greater,
+            _ => Rel::Equal,
+        };
+        let right = self.number(&mut cond_lx)?;
+        Ok(Cmd::Loop {
+            body,
+            left,
+            rel,
+            right,
+        })
+    }
+
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
         let then_branch = self.block(lx, Some(&["else", "fi"]))?;
         let mut else_branch = Vec::new();
@@ -571,6 +649,12 @@ impl Lowerer {
     }
 }
 
+/// The two halves of a recognised tail loop: what runs, and what decides.
+struct TailLoop {
+    body: Vec<Token>,
+    cond: Vec<Token>,
+}
+
 /// Every count register a command block assigns, so a group knows what to save.
 fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     let mut regs = Vec::new();
@@ -597,7 +681,9 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                     walk(then_branch, regs);
                     walk(else_branch, regs);
                 }
-                Cmd::Group { body, .. } => walk(body, regs),
+                // A loop's body assigns exactly what its commands assign; a
+                // group around one still has to save those registers.
+                Cmd::Loop { body, .. } | Cmd::Group { body, .. } => walk(body, regs),
                 Cmd::Message(_) => {}
             }
         }

@@ -83,6 +83,24 @@ pub enum Cmd {
         then_branch: Vec<Cmd>,
         else_branch: Vec<Cmd>,
     },
+    /// A tail-recursive macro, as a run-time loop.
+    ///
+    /// `\def\r{BODY \ifnum A<B \r \fi}` is TeX's loop idiom: run the body,
+    /// test, and invoke yourself again while the test holds. Inlining that is
+    /// what used to run the lowerer out of stack, because the copy contains the
+    /// call that gets copied. As a loop it is finite bytecode AND faster than a
+    /// call would be -- a backward `Jump` with no frame to push, which is a
+    /// shape the JIT already recognises.
+    ///
+    /// The test runs AFTER the body, matching the idiom: the body always
+    /// executes once, exactly as the first `\r` does before reaching its own
+    /// conditional.
+    Loop {
+        body: Vec<Cmd>,
+        left: Num,
+        rel: Rel,
+        right: Num,
+    },
     /// `\ifodd<num>` … `\else` … `\fi`
     IfOdd {
         value: Num,
