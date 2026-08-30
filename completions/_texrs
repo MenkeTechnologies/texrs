@@ -18,7 +18,8 @@ _texrs() {
     '--no-cache[compile this run rather than reading the bytecode cache]' \
     '(- *)--cache-stats[say what the bytecode cache holds and where, and exit]' \
     '(- *)--cache-clear[delete the bytecode cache and exit]' \
-    '--profile[which output of the document to build (with -X build)]:profile:' \
+    '--profile[which output of the document to build (-X build, -X watch)]:profile:' \
+    '--interval[how often -X watch looks for a change, in milliseconds]:milliseconds:' \
     '*:TeX file:_files -g "*.tex"'
 }
 

@@ -8,6 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Flags that are arguments to a `-X` command, not to a run of a file.
+const DOCUMENT_FLAGS: &[&str] = &["--profile", "--interval"];
+
 fn texrs() -> Command {
     Command::new(env!("CARGO_BIN_EXE_texrs"))
 }
@@ -68,9 +71,10 @@ fn the_completion_offers_every_option_the_binary_takes() {
         });
         assert!(offered, "the zsh completion does not offer {opt}");
     }
-    // And offers nothing the binary would refuse. `--profile` belongs to
-    // `-X build` rather than to a plain run, so it is checked there instead —
-    // see a_document_is_made_and_built_from_anywhere_inside_it.
+    // And offers nothing the binary would refuse. The flags in
+    // DOCUMENT_FLAGS belong to the `-X` commands rather than to a plain run,
+    // so they are checked there instead — see
+    // a_document_is_made_and_built_from_anywhere_inside_it.
     for line in completion.lines() {
         let Some(start) = line.find("'--") else {
             continue;
@@ -80,7 +84,7 @@ fn the_completion_offers_every_option_the_binary_takes() {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
-        if flag == "--profile" {
+        if DOCUMENT_FLAGS.contains(&flag.as_str()) {
             continue;
         }
         let out = texrs().arg(&flag).arg("--help").output().expect("run");
@@ -325,6 +329,30 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // Every flag the completion offers for a document command is accepted by
+    // one — the other half of the check the completion test defers here.
+    for flag in DOCUMENT_FLAGS {
+        let value = if *flag == "--interval" {
+            "10"
+        } else {
+            "default"
+        };
+        let out = run(&["-X", "build", flag, value], &dir);
+        assert!(
+            out.status.success(),
+            "{flag} is offered but refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // An interval that is not a number is refused rather than defaulted.
+    let bad = run(&["-X", "build", "--interval", "soon"], &dir);
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("milliseconds"));
+
+    // `-X watch` is not started here: the loop is covered by unit tests in
+    // src/document.rs, and a background process in this suite would be a
+    // flake rather than a check.
+
     // An unknown document command is refused rather than ignored.
     assert!(!run(&["-X", "frobnicate"], &dir).status.success());
 

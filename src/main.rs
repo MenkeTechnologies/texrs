@@ -13,6 +13,7 @@ const USAGE: &str = "\
 usage: texrs [OPTIONS] FILE.tex
        texrs -X new [DIR]           make a document (Texrs.toml + index.tex)
        texrs -X build [--profile P] build the document this directory is in
+       texrs -X watch [--profile P] rebuild it whenever an input changes
 
   --repl          start the interactive prompt
   --lsp           speak the Language Server Protocol over stdio
@@ -21,7 +22,8 @@ usage: texrs [OPTIONS] FILE.tex
   --disasm        print the lowered fusevm bytecode and exit
   --aot           compile the document to a standalone native executable
   --tiers         run it, then report which fusevm tier took its bytecode
-  --profile NAME  which output of the document to build (with -X build)
+  --profile NAME  which output of the document to build (-X build, -X watch)
+  --interval MS   how often -X watch looks for a change (default 250)
   --no-cache      compile this run rather than reading the bytecode cache
   --cache-stats   say what the cache holds and where, and exit
   --cache-clear   delete the cache and exit
@@ -214,14 +216,19 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
-        "build" => {
+        "build" | "watch" => {
             let mut profile: Option<String> = None;
+            let mut interval = texrs::document::WATCH_INTERVAL;
             let mut rest = args[1..].iter();
             while let Some(arg) = rest.next() {
                 match arg.as_str() {
                     "--profile" => match rest.next() {
                         Some(name) => profile = Some(name.clone()),
                         None => return fail("--profile needs a name"),
+                    },
+                    "--interval" => match rest.next().and_then(|ms| ms.parse().ok()) {
+                        Some(ms) => interval = std::time::Duration::from_millis(ms),
+                        None => return fail("--interval needs a number of milliseconds"),
                     },
                     other => return fail(&format!("unknown argument: {other}")),
                 }
@@ -231,16 +238,25 @@ fn run_document(args: &[String]) -> ExitCode {
                 Ok(d) => d,
                 Err(e) => return fail(&e),
             };
-            match document.build(profile.as_deref()) {
-                Ok(built) => {
-                    println!(
-                        "built {} from {} input(s) → {}",
-                        built.profile,
-                        built.inputs.len(),
-                        built.path.display()
-                    );
-                    ExitCode::SUCCESS
-                }
+            if command == "build" {
+                return match document.build(profile.as_deref()) {
+                    Ok(built) => {
+                        println!(
+                            "built {} from {} input(s) → {}",
+                            built.profile,
+                            built.inputs.len(),
+                            built.path.display()
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(&e),
+                };
+            }
+            // Watch until the terminal interrupts it: the loop has no other
+            // ending, which is what a watch is.
+            let mut status = texrs::status::TexStatus::new();
+            match document.watch(profile.as_deref(), interval, &mut status, &|| false) {
+                Ok(_) => ExitCode::SUCCESS,
                 Err(e) => fail(&e),
             }
         }

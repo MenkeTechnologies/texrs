@@ -280,6 +280,78 @@ impl Document {
     }
 }
 
+/// How often [`Document::watch`] looks, when the caller does not say.
+pub const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+impl Document {
+    /// Rebuild whenever an input changes, until `stop` says otherwise.
+    ///
+    /// Change is decided by the digests a build already records, not by mtimes:
+    /// a file touched but not edited is not a rebuild, and an editor that
+    /// writes through a temporary file — which most do, so the mtime jumps
+    /// while the content does not — does not cause one either. The cost is a
+    /// read per input per tick, which for a document is nothing next to
+    /// compiling it.
+    ///
+    /// Polling rather than the operating system's watch API is deliberate:
+    /// a poll is fifty lines that behave the same on every platform, where the
+    /// APIs disagree about directories, renames and network mounts, and the
+    /// crates that paper over them are exactly the kind of dependency that
+    /// stops building three years from now.
+    pub fn watch(
+        &self,
+        profile: Option<&str>,
+        interval: std::time::Duration,
+        status: &mut dyn crate::status::StatusBackend,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<usize, String> {
+        // The profile is resolved once: a name that is not there should fail
+        // now rather than on the first change, when the user has looked away.
+        let profile = self.profile(profile)?.name.clone();
+        let mut builds = 0usize;
+        let mut last: Option<Vec<crate::io::InputRecord>> = None;
+
+        while !stop() {
+            let (_, current) = match self.assemble() {
+                Ok(v) => v,
+                Err(e) => {
+                    // A missing input is a state to wait out, not a reason to
+                    // stop watching: it is what a rename looks like halfway.
+                    status.warning(&e);
+                    std::thread::sleep(interval);
+                    continue;
+                }
+            };
+            let changed = last.as_ref().is_none_or(|previous| {
+                previous.len() != current.len()
+                    || previous
+                        .iter()
+                        .zip(&current)
+                        .any(|(a, b)| a.digest != b.digest || a.name != b.name)
+            });
+            if changed {
+                match self.build(Some(&profile)) {
+                    Ok(built) => {
+                        builds += 1;
+                        status.note(&format!(
+                            "built {} from {} input(s) → {}",
+                            built.profile,
+                            built.inputs.len(),
+                            built.path.display()
+                        ));
+                    }
+                    // A document that does not compile is the normal state of
+                    // one being edited; report it and keep watching.
+                    Err(e) => status.error(&e),
+                }
+                last = Some(current);
+            }
+            std::thread::sleep(interval);
+        }
+        Ok(builds)
+    }
+}
+
 /// Write a new document into `dir`: the file, and an `index.tex` that runs.
 ///
 /// The starting document sets the category codes INITEX leaves ordinary,
@@ -484,6 +556,115 @@ mod tests {
         // Each profile writes its own file, so one does not overwrite another.
         assert_ne!(built.path, tokens.path);
         assert_ne!(tokens.path, disasm.path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watching_rebuilds_when_an_input_changes_and_not_otherwise() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+
+        let dir = scratch("watch");
+        std::fs::write(dir.join("index.tex"), HELLO).unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"w\"\n[[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+
+        // Tick 0 builds (nothing has been built yet); tick 1 sees no change;
+        // tick 2 sees the edit; the fourth tick stops the loop.
+        let ticks = AtomicUsize::new(0);
+        let edited = dir.join("index.tex");
+        let stop = || {
+            let n = ticks.fetch_add(1, Ordering::SeqCst);
+            if n == 2 {
+                std::fs::write(
+                    &edited,
+                    "\\catcode`\\{=1 \\catcode`\\}=2 \\message{EDITED}\n\\end\n",
+                )
+                .unwrap();
+            }
+            n >= 4
+        };
+        let mut status = crate::status::CollectingStatus::new();
+        let builds = doc
+            .watch(None, Duration::from_millis(1), &mut status, &stop)
+            .expect("watches");
+
+        assert_eq!(builds, 2, "the first build, and the one the edit caused");
+        let output = std::fs::read_to_string(dir.join("build/w.txt")).unwrap();
+        assert_eq!(output.trim(), "EDITED", "the rebuild used the new content");
+        assert_eq!(
+            status
+                .messages()
+                .iter()
+                .filter(|(level, _)| *level == crate::status::Level::Note)
+                .count(),
+            2,
+            "one report per build: {:?}",
+            status.messages()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watching_survives_a_document_that_does_not_compile() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+
+        let dir = scratch("watch_broken");
+        std::fs::write(dir.join("index.tex"), "\\undefined@thing\n").unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"w\"\n[[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+
+        let ticks = AtomicUsize::new(0);
+        let fixed = dir.join("index.tex");
+        let stop = || {
+            let n = ticks.fetch_add(1, Ordering::SeqCst);
+            if n == 1 {
+                std::fs::write(&fixed, HELLO).unwrap();
+            }
+            n >= 3
+        };
+        let mut status = crate::status::CollectingStatus::new();
+        doc.watch(None, Duration::from_millis(1), &mut status, &stop)
+            .expect("keeps watching");
+
+        // The broken state was reported and the loop carried on to the fix.
+        assert!(status.had_error(), "the failure is reported");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("build/w.txt"))
+                .unwrap()
+                .trim(),
+            "HI",
+            "and the document that compiles is built"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watching_refuses_a_profile_that_is_not_there_before_it_starts() {
+        let dir = scratch("watch_profile");
+        std::fs::write(dir.join("index.tex"), HELLO).unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"w\"\n[[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+        let mut status = crate::status::SilentStatus;
+        let err = doc
+            .watch(
+                Some("nope"),
+                std::time::Duration::from_millis(1),
+                &mut status,
+                &|| true,
+            )
+            .unwrap_err();
+        assert!(err.contains("no output named"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

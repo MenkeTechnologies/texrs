@@ -134,6 +134,15 @@ called
 is used unless
 .B \-\-profile
 says otherwise.
+.TP
+.B \-X watch " [" \-\-profile " \fINAME\fR ] [" \-\-interval " \fIMS\fR ]"
+Build the document, then build it again whenever an input changes, until
+interrupted. Change is decided by the digest of each input rather than by its
+mtime, so a file touched but not edited does not rebuild, and neither does an
+editor that saves through a temporary file \(em which most do, and which moves
+the mtime while the content stands still. A document that does not compile is
+reported and the watch carries on: that is the normal state of one being
+edited.
 .SH OPTIONS
 .TP
 .B \-\-repl

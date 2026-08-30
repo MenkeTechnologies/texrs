@@ -77,9 +77,13 @@ impl StatusBackend for TexStatus {
         if self.min_level.is_some_and(|min| level < min) {
             return;
         }
-        // tex ends a diagnostic with a full stop and does not repeat one.
-        let body = message.trim_end_matches('.');
-        eprintln!("{}{}.", level.prefix(), body);
+        match level {
+            // A note is progress, not a diagnostic: it goes as written, since
+            // a full stop after a path reads as part of the path.
+            Level::Note => eprintln!("{message}"),
+            // tex ends a diagnostic with a full stop and does not repeat one.
+            _ => eprintln!("{}{}.", level.prefix(), message.trim_end_matches('.')),
+        }
     }
 }
 
@@ -164,6 +168,9 @@ mod tests {
         assert!(status.min_level.is_some_and(|l| l == Level::Error));
         status.note("dropped");
         status.error("kept");
+        // A note is progress and goes as written; a diagnostic is punctuated
+        // the way tex punctuates one.
+        assert_eq!(Level::Warning.prefix(), "Warning: ");
 
         assert!(Level::Note < Level::Warning && Level::Warning < Level::Error);
         assert_eq!(Level::Error.prefix(), "! ");
