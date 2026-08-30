@@ -44,6 +44,8 @@ const USAGE: &str = "\
           // Start the interactive prompt
   --jobs=N
           // Compile N documents at once (default: one per core)
+  --build
+          // Compile into the bytecode cache and stop, without running
   --no-cache
           // Compile this run rather than reading the bytecode cache
   --aot
@@ -81,6 +83,7 @@ const USAGE: &str = "\
   -X dvi FILE.dvi         // Read what real tex shipped for a document
   -X dvi A.dvi B.dvi      // Say whether two files are the same document
   -X bib FILE.bib         // Read a bibliography database
+  -X bib FILE.aux         // Say what a document cites, and what is missing
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -152,7 +155,8 @@ fn main() -> ExitCode {
         texrs::cli::Mode::Run => {}
     }
 
-    let (dump_tokens, disasm, aot, tiers, no_cache, jobs) = (
+    let (build, dump_tokens, disasm, aot, tiers, no_cache, jobs) = (
+        cli.build,
         cli.dump_tokens,
         cli.disasm,
         cli.aot,
@@ -247,6 +251,24 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => fail(&e),
+        };
+    }
+
+    if build {
+        // Compile into the bytecode cache and stop. `\rust{ … }` blocks and
+        // `\message` are RUN-time effects, so a build has neither -- which is
+        // the point: it warms the cache in a build step, and the run that
+        // follows starts from bytecode.
+        return match texrs::compile_cached(std::path::Path::new(&path), &src) {
+            Ok(chunk) => {
+                println!(
+                    "built {path}: {} ops -> {}",
+                    chunk.ops.len(),
+                    texrs::script_cache::default_cache_path().display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e.0),
         };
     }
 
@@ -449,8 +471,16 @@ fn run_document(args: &[String]) -> ExitCode {
         },
         "bib" => {
             let Some(file) = args.get(1) else {
-                return fail("`-X bib` needs a .bib file");
+                return fail("`-X bib` needs a .bib or .aux file");
             };
+            // An `.aux` asks a different question: not "what is in this
+            // database" but "what does this document cite, and is it there".
+            if std::path::Path::new(file)
+                .extension()
+                .is_some_and(|e| e == "aux")
+            {
+                return bib_citations(std::path::Path::new(file));
+            }
             match texrs::bib::Bib::open(file) {
                 Ok(bib) => {
                     print!("{}", bib.summary());
@@ -591,6 +621,50 @@ fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
             eprintln!("texrs: {program}: {e}");
             Some(ExitCode::from(1))
         }
+    }
+}
+
+/// `-X bib FILE.aux`: what a document cites, resolved against the databases its
+/// own `.aux` names.
+fn bib_citations(path: &Path) -> ExitCode {
+    let aux = match texrs::bib::Aux::open(path) {
+        Ok(aux) => aux,
+        Err(e) => return fail(&e),
+    };
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut database = texrs::bib::Bib::default();
+    if aux.databases.is_empty() {
+        return fail(&format!("{}: no \\bibdata", path.display()));
+    }
+    for name in &aux.databases {
+        // `\bibdata` names files without their extension, beside the document.
+        let file = dir.join(format!("{name}.bib"));
+        match texrs::bib::Bib::open(&file) {
+            Ok(part) => {
+                database.entries.extend(part.entries);
+                database.strings.extend(part.strings);
+                database.warnings.extend(part.warnings);
+            }
+            Err(e) => return fail(&e),
+        }
+    }
+
+    let selected = database.select(&aux);
+    for entry in &selected.cited {
+        let title = entry.field("title").unwrap_or("");
+        println!("cited     {:<20} {title}", entry.key);
+    }
+    for key in &selected.missing {
+        println!("MISSING   {key}");
+    }
+    for entry in &selected.uncited {
+        println!("uncited   {}", entry.key);
+    }
+    // A citation nothing defines becomes a `?` in the typeset bibliography, so
+    // it is worth an exit status of its own.
+    match selected.missing.is_empty() {
+        true => ExitCode::SUCCESS,
+        false => ExitCode::from(1),
     }
 }
 

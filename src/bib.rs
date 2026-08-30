@@ -109,6 +109,188 @@ impl Bib {
     }
 }
 
+/// What a document's `.aux` says about its bibliography.
+///
+/// The other file bibtex reads, and the one that says what work there is to do:
+/// TeX writes it while typesetting, recording every `\cite` as a `\citation`,
+/// the databases as `\bibdata`, and the style as `\bibstyle`. Reading it is
+/// how a tool answers "which entries does this document actually use" without
+/// running a `.bst`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Aux {
+    /// The keys cited, in the order TeX met them, without repeats.
+    pub citations: Vec<String>,
+    /// `\citation{*}` — the document asked for every entry in the database.
+    pub all: bool,
+    /// The databases named by `\bibdata`, without the `.bib`.
+    pub databases: Vec<String>,
+    pub style: Option<String>,
+    /// Further `.aux` files, which LaTeX writes for each `\include`d part.
+    pub includes: Vec<String>,
+}
+
+impl Aux {
+    /// Read the `.aux` at `path`, following the `\@input` files beside it.
+    pub fn open(path: impl AsRef<Path>) -> Result<Aux, String> {
+        let path = path.as_ref();
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let mut aux = Aux::parse(&text);
+        // A part's own citations are in its own file; a reader that stopped at
+        // the top would miss every chapter of a book.
+        let dir = path.parent().unwrap_or(Path::new("."));
+        let includes = aux.includes.clone();
+        for include in includes {
+            if let Ok(part) = Aux::open(dir.join(&include)) {
+                aux.absorb(part);
+            }
+        }
+        Ok(aux)
+    }
+
+    /// Parse the text of one `.aux`.
+    pub fn parse(text: &str) -> Aux {
+        let mut aux = Aux::default();
+        for (command, argument) in commands(text) {
+            match command.as_str() {
+                "citation" => {
+                    for key in argument.split(',') {
+                        let key = key.trim();
+                        if key == "*" {
+                            aux.all = true;
+                        } else if !key.is_empty() && !aux.citations.contains(&key.to_string()) {
+                            aux.citations.push(key.to_string());
+                        }
+                    }
+                }
+                "bibdata" => {
+                    for name in argument.split(',') {
+                        let name = name.trim().trim_end_matches(".bib");
+                        if !name.is_empty() && !aux.databases.contains(&name.to_string()) {
+                            aux.databases.push(name.to_string());
+                        }
+                    }
+                }
+                "bibstyle" => aux.style = Some(argument.trim().to_string()),
+                "@input" => aux.includes.push(argument.trim().to_string()),
+                _ => {}
+            }
+        }
+        aux
+    }
+
+    fn absorb(&mut self, other: Aux) {
+        for key in other.citations {
+            if !self.citations.contains(&key) {
+                self.citations.push(key);
+            }
+        }
+        self.all |= other.all;
+        for name in other.databases {
+            if !self.databases.contains(&name) {
+                self.databases.push(name);
+            }
+        }
+        self.style = self.style.take().or(other.style);
+    }
+}
+
+/// `\command{argument}` pairs in `text`, in order.
+///
+/// An `.aux` is TeX's own output, so it is regular: one command per line, its
+/// argument braced. Reading it with a scan rather than a regexp keeps the
+/// brace counting right for an argument that holds braces of its own.
+fn commands(text: &str) -> Vec<(String, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while at < chars.len() {
+        if chars[at] != '\\' {
+            at += 1;
+            continue;
+        }
+        at += 1;
+        let start = at;
+        // `\@input` has an `@` in it, which is a letter to LaTeX while the
+        // file is being written.
+        while at < chars.len() && (chars[at].is_ascii_alphanumeric() || chars[at] == '@') {
+            at += 1;
+        }
+        let command: String = chars[start..at].iter().collect();
+        if at >= chars.len() || chars[at] != '{' {
+            continue;
+        }
+        at += 1;
+        let mut depth = 1usize;
+        let mut argument = String::new();
+        while at < chars.len() {
+            match chars[at] {
+                '{' => {
+                    depth += 1;
+                    argument.push('{');
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        at += 1;
+                        break;
+                    }
+                    argument.push('}');
+                }
+                c => argument.push(c),
+            }
+            at += 1;
+        }
+        out.push((command, argument));
+    }
+    out
+}
+
+/// What a database has to say about what a document cited.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Selection<'a> {
+    /// The entries cited, in citation order — which is the order bibtex hands
+    /// to a style that asks for it.
+    pub cited: Vec<&'a Entry>,
+    /// Keys the document cited that no database has. Every one of these is a
+    /// `?` in the typeset bibliography.
+    pub missing: Vec<String>,
+    /// Entries no citation reached. Not an error — a shared database is
+    /// usually larger than one paper — but worth being able to ask about.
+    pub uncited: Vec<&'a Entry>,
+}
+
+impl Bib {
+    /// Resolve `aux`'s citations against this database.
+    pub fn select<'a>(&'a self, aux: &Aux) -> Selection<'a> {
+        if aux.all {
+            return Selection {
+                cited: self.entries.iter().collect(),
+                missing: Vec::new(),
+                uncited: Vec::new(),
+            };
+        }
+        let mut cited = Vec::new();
+        let mut missing = Vec::new();
+        for key in &aux.citations {
+            match self.entry(key) {
+                Some(entry) => cited.push(entry),
+                None => missing.push(key.clone()),
+            }
+        }
+        let uncited = self
+            .entries
+            .iter()
+            .filter(|entry| !aux.citations.contains(&entry.key))
+            .collect();
+        Selection {
+            cited,
+            missing,
+            uncited,
+        }
+    }
+}
+
 struct Parser {
     chars: Vec<char>,
     at: usize,
@@ -523,6 +705,75 @@ This line is prose between records, which a .bib may carry.
     }
 
     #[test]
+    fn an_aux_says_what_a_document_cited() {
+        let aux = Aux::parse(
+            "\\relax\n\\citation{knuth1984}\n\\citation{texbook,knuth1984}\n\
+             \\bibstyle{plain}\n\\bibdata{refs,more.bib}\n",
+        );
+        // Citation order is the order TeX met them, and a key cited twice is
+        // one citation — which is what bibtex hands to a style.
+        assert_eq!(aux.citations, vec!["knuth1984", "texbook"]);
+        // A `\citation` may carry several keys, and `\bibdata` several files
+        // with or without their extension.
+        assert_eq!(aux.databases, vec!["refs", "more"]);
+        assert_eq!(aux.style.as_deref(), Some("plain"));
+        assert!(!aux.all);
+
+        // `\citation{*}` is the document asking for the whole database.
+        let aux = Aux::parse("\\citation{*}\n\\bibdata{refs}\n");
+        assert!(aux.all);
+        assert!(aux.citations.is_empty(), "the star is not a key");
+    }
+
+    #[test]
+    fn what_a_document_cited_is_matched_against_the_database() {
+        let bib = Bib::parse(DATABASE);
+        let aux = Aux::parse("\\citation{texbook}\n\\citation{nosuchkey}\n");
+        let selected = bib.select(&aux);
+
+        assert_eq!(selected.cited.len(), 1);
+        assert_eq!(selected.cited[0].key, "texbook");
+        // A key nothing defines is what becomes a `?` in the typeset
+        // bibliography, so it is reported rather than skipped.
+        assert_eq!(selected.missing, vec!["nosuchkey"]);
+        // And what the database holds that nobody cited — not an error, but
+        // the question a shared database invites.
+        assert_eq!(selected.uncited.len(), 1);
+        assert_eq!(selected.uncited[0].key, "knuth1984");
+
+        // `\citation{*}` takes everything, in database order.
+        let all = bib.select(&Aux::parse("\\citation{*}"));
+        assert_eq!(all.cited.len(), 2);
+        assert!(all.missing.is_empty() && all.uncited.is_empty());
+    }
+
+    #[test]
+    fn the_parts_of_a_document_are_read_with_it() {
+        // LaTeX writes one .aux per \include, and the top one points at them.
+        // A reader that stopped at the top would miss every chapter.
+        let dir = std::env::temp_dir().join(format!("texrs_aux_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("main.aux"),
+            "\\citation{fromroot}\n\\bibdata{refs}\n\\@input{chapter.aux}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("chapter.aux"), "\\citation{fromchapter}\n").unwrap();
+
+        let aux = Aux::open(dir.join("main.aux")).expect("reads");
+        assert_eq!(aux.citations, vec!["fromroot", "fromchapter"]);
+        assert_eq!(aux.databases, vec!["refs"]);
+
+        // A part that is not there is not fatal: the document may not have been
+        // typeset yet.
+        std::fs::remove_file(dir.join("chapter.aux")).unwrap();
+        let aux = Aux::open(dir.join("main.aux")).expect("still reads");
+        assert_eq!(aux.citations, vec!["fromroot"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn what_this_reads_is_what_bibtex_reads() {
         // The oracle, as the parity harness uses tex: real bibtex is run over
         // the same database and its .bbl has to carry what this parser found.
@@ -574,6 +825,25 @@ This line is prose between records, which a .bib may carry.
         assert!(bbl.contains("TeX Users Group Journal"), "{bbl}");
         assert_eq!(entry.field("year"), Some("1984"));
         assert!(bbl.contains("1984"), "{bbl}");
+
+        // And the selection: bibtex writes one \bibitem per entry it chose, so
+        // the keys in the .bbl are exactly what `select` should have picked.
+        let aux = Aux::open(dir.join("t.aux")).expect("reads the aux");
+        let selected = bib.select(&aux);
+        let chosen: Vec<&str> = selected.cited.iter().map(|e| e.key.as_str()).collect();
+        let from_bbl: Vec<String> = bbl
+            .match_indices("\\bibitem{")
+            .map(|(at, _)| {
+                let rest = &bbl[at + "\\bibitem{".len()..];
+                rest.split('}').next().unwrap_or("").to_string()
+            })
+            .collect();
+        assert_eq!(
+            chosen,
+            from_bbl.iter().map(String::as_str).collect::<Vec<_>>(),
+            "the same entries, in the same order"
+        );
+        assert!(selected.missing.is_empty(), "{:?}", selected.missing);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

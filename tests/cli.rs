@@ -608,6 +608,53 @@ fn the_bib_reader_reads_a_database_and_reports_what_it_could_not() {
     assert!(text.contains("defined twice"), "{text}");
     assert!(text.contains("one"), "and the entry it kept: {text}");
 
+    // An .aux asks the other question: what does this document cite?
+    std::fs::write(
+        dir.join("t.aux"),
+        "\\relax\n\\citation{knuth1984}\n\\citation{nosuch}\n\\bibdata{refs}\n",
+    )
+    .unwrap();
+    let cites = texrs()
+        .args(["-X", "bib", "t.aux"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    let text = String::from_utf8_lossy(&cites.stdout);
+    assert!(text.contains("cited     knuth1984"), "{text}");
+    assert!(text.contains("MISSING   nosuch"), "{text}");
+    assert!(
+        !cites.status.success(),
+        "a citation nothing defines is a non-zero exit"
+    );
+
+    // With nothing missing it succeeds, and says what went uncited.
+    std::fs::write(
+        dir.join("ok.aux"),
+        "\\citation{knuth1984}\n\\bibdata{refs}\n",
+    )
+    .unwrap();
+    let ok = texrs()
+        .args(["-X", "bib", "ok.aux"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
+
+    // An .aux with no \bibdata says so rather than reporting everything as
+    // missing.
+    std::fs::write(dir.join("bare.aux"), "\\citation{k}\n").unwrap();
+    let bare = texrs()
+        .args(["-X", "bib", "bare.aux"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!bare.status.success());
+    assert!(String::from_utf8_lossy(&bare.stderr).contains("bibdata"));
+
     // A file that is not there names itself.
     let missing = texrs()
         .args(["-X", "bib", "absent.bib"])

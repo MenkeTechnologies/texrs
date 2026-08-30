@@ -1,4 +1,4 @@
-.TH TEXRS 1 "2026" "texrs 0.1.0" "User Commands"
+.TH TEXRS 1 "2026-08-29" "texrs 0.3.0" "User Commands"
 .SH NAME
 texrs \- a TeX engine: Knuth's mouth and expander, lowered onto a bytecode VM
 .SH SYNOPSIS
@@ -204,6 +204,37 @@ types and field names are case-insensitive while keys are not, and a key defined
 twice keeps the first as bibtex does.  A record that cannot be read is reported
 and the rest of the file still reads, because a database should not be lost to
 one typo.
+.TP
+.BI \-X " bib \fIFILE\fR.aux"
+Say what a document cites.  The
+.I .aux
+is what TeX writes while typesetting \(em every
+.B \ecite
+as a
+.BR \ecitation ,
+the databases as
+.BR \ebibdata ,
+the style as
+.B \ebibstyle
+\(em so reading it answers "which entries does this document actually use"
+without running a
+.IR .bst .
+Each cited entry is printed with its title, each key no database defines is
+printed as
+.BR MISSING ,
+and each entry nobody cited as
+.BR uncited .
+Exits non-zero when anything is missing, because a citation nothing defines
+becomes a
+.B ?
+in the typeset bibliography.
+.PP
+The
+.B \e@input
+files LaTeX writes for each
+.B \einclude
+are read with it: a reader that stopped at the top would miss every chapter of a
+book, and one that is not there yet is not an error.
 .TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
@@ -425,6 +456,11 @@ tier compiled it, and the ops the block tier refuses with their counts.  The
 answers come from fusevm's own predicates, not from an assumption about them \(em
 enabling the JIT is not the same as being compiled by it.
 .TP
+.B \-\-build
+Compile the document into the bytecode cache and stop, without running it.  What
+a later run would have paid for is paid now, which is what a build step is for:
+the cache is warm before anyone is waiting on it.
+.TP
 .BI \-\-jobs= N
 Compile
 .I N
@@ -434,6 +470,16 @@ because a build log that reorders itself between runs is not one anyone can
 diff, and the exit status is the worst of the runs. A single document is
 compiled by one thread either way \(em this parallelises the batch, not the
 engine.
+.TP
+.B \-\-build
+Compile the document into the bytecode cache and stop, without running it.
+A build step that does this leaves the run that follows starting from bytecode:
+the mouth, the expander and the lowerer are skipped entirely on a hit.  Nothing
+the document does at run time happens \(em no
+.B \emessage
+is written and no
+.B \erust
+block is compiled \(em because none of that is compilation.
 .TP
 .B \-\-no\-cache
 Compile this run rather than reading the bytecode cache.  The result is the
