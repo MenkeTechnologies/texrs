@@ -161,3 +161,53 @@ fn a_missing_fallback_is_not_an_error() {
     assert_eq!(chain.fonts.len(), 1);
     assert!(chain.resolve('a').is_some());
 }
+
+#[test]
+fn colour_reaches_the_dvi_as_a_special() {
+    // DVI has no colour of its own: a driver is told through a `\special`, and
+    // `color push rgb R G B` / `color pop` is the pair dvipdfmx and dvips both
+    // read. dvipdfmx turns them into `1 0 0 rg` around the words.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               plain \\textcolor[rgb]{1.00,0.00,0.00}{RED} plain\n\\end{document}\n";
+    let text = texrs::run_text_marked(src).expect("run");
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    let dvi = to_dvi_chain(&text, &chain, &Layout::default());
+    let s = String::from_utf8_lossy(&dvi);
+    assert!(
+        s.contains("color push rgb 1 0 0"),
+        "no colour push in the file"
+    );
+    assert!(
+        s.contains("color pop"),
+        "a push without a pop leaves the page red"
+    );
+}
+
+#[test]
+fn the_colour_markers_are_not_part_of_the_document_text() {
+    // They are instructions to a driver. A caller asking for the TEXT should
+    // not have to know they exist, and a `--text` run that emitted control
+    // characters would be wrong for every consumer of it.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\textcolor[rgb]{0.25,0.44,0.63}{code}\n\\end{document}\n";
+    let plain = texrs::run_text(src).expect("run");
+    assert_eq!(plain.trim(), "code");
+    assert!(!plain
+        .chars()
+        .any(|c| matches!(c, '\u{1}' | '\u{2}' | '\u{3}')));
+}
+
+#[test]
+fn a_colour_marker_takes_no_space_on_the_line() {
+    // Measured as glyphs they would push words onto the next line for text that
+    // is not there, and every line after would be wrong.
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    let layout = Layout::default();
+    let plain = "word word word";
+    let marked = "\u{1}1,0,0\u{2}word word word\u{3}";
+    assert_eq!(
+        chain.width_of(plain, layout.size),
+        chain.width_of(marked, layout.size),
+        "the markers must measure zero"
+    );
+}

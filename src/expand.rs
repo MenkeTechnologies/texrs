@@ -1560,6 +1560,22 @@ impl Engine {
         self.set_cat('@', cat);
     }
 
+    /// `[...]` if one is next, for a caller outside the expander.
+    pub fn read_optional_bracket(&mut self, lx: &mut Lexer) -> R<Option<Vec<Token>>> {
+        self.scan_optional_bracket(lx)
+    }
+
+    /// A `{...}` group's text, for a caller outside the expander.
+    pub fn read_group_text_pub(&mut self, lx: &mut Lexer) -> R<String> {
+        let toks = self.read_group_tokens(lx)?;
+        Ok(toks.iter().map(|t| t.to_text(self.escape)).collect())
+    }
+
+    /// A `{...}` group's tokens, unexpanded.
+    pub fn read_balanced_group(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        self.read_group_tokens(lx)
+    }
+
     pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {
         self.do_let(lx)
     }

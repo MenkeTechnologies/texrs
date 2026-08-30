@@ -280,6 +280,14 @@ impl Lowerer {
                     }
                 }
             }
+            // Colour, before the prelude's own \textcolor can swallow it. DVI
+            // carries colour as a `\special` a driver reads, so it has to
+            // survive lowering as structure rather than as text.
+            if self.text_output && name.name() == "textcolor" {
+                if self.lower_textcolor(lx, &mut out)? {
+                    continue;
+                }
+            }
             // A control sequence MEANS what it was last defined as. The
             // dispatch below is by NAME, so a document that redefines a
             // primitive was still getting the primitive. LaTeX redefines `\end`
@@ -532,6 +540,65 @@ impl Lowerer {
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
+    /// `\textcolor[model]{spec}{text}`, as markers INSIDE the text run.
+    ///
+    /// Not as a `Cmd::Color` wrapping a block, which is what this did first: a
+    /// colour region splits the text either side of it into separate commands,
+    /// each of which becomes its own string constant, and Pandoc's syntax
+    /// highlighting emits thousands of `\textcolor` calls per book. That
+    /// exhausted fusevm's 65,536-constant pool on five of the larger documents
+    /// -- the same ceiling the braces hit before, reached a different way.
+    ///
+    /// Markers in the stream keep the text coalescing as it did, and the
+    /// typesetter turns them into the DVI `\special` a driver reads. Only the
+    /// `rgb` model is understood, which is what a Pandoc document writes;
+    /// anything else falls through to the ordinary macro path rather than being
+    /// coloured wrongly.
+    fn lower_textcolor(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<bool> {
+        let Some(model) = self.eng.read_optional_bracket(lx)? else {
+            return Ok(false);
+        };
+        let model: String = model.iter().map(|t| t.to_text(self.eng.escape)).collect();
+        if model.trim() != "rgb" {
+            return Ok(false);
+        }
+        let spec = self.eng.read_group_text_pub(lx)?;
+        let parts: Vec<f64> = spec
+            .split(',')
+            .filter_map(|p| p.trim().parse::<f64>().ok())
+            .collect();
+        if parts.len() != 3 {
+            return Ok(false);
+        }
+        self.push_text(
+            out,
+            &format!("\u{1}{},{},{}\u{2}", parts[0], parts[1], parts[2]),
+        );
+        let raw = self.eng.read_balanced_group(lx)?;
+        let mut inner = Lexer::new("");
+        inner.push_back(&raw);
+        for cmd in self.block(&mut inner, None)? {
+            match (&cmd, out.last_mut()) {
+                (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
+                _ => out.push(cmd),
+            }
+        }
+        self.push_text(out, "\u{3}");
+        Ok(true)
+    }
+
+    /// Append text to the run in progress, looking past line directives.
+    fn push_text(&self, out: &mut Vec<Cmd>, text: &str) {
+        let mut at = out.len();
+        while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
+            at -= 1;
+        }
+        match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+            Some(Cmd::Text(t)) => t.push_str(text),
+            _ => out.push(Cmd::Text(text.to_string())),
+        }
+    }
+
     /// The environment name after `\begin`, without consuming it.
     ///
     /// Read as raw characters rather than tokens: the name is needed BEFORE
@@ -1221,7 +1288,9 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 }
                 // A loop's body assigns exactly what its commands assign; a
                 // group around one still has to save those registers.
-                Cmd::Loop { body, .. } | Cmd::Group { body, .. } => walk(body, regs),
+                Cmd::Loop { body, .. } | Cmd::Color { body, .. } | Cmd::Group { body, .. } => {
+                    walk(body, regs)
+                }
                 Cmd::Message(_) => {}
             }
         }

@@ -97,6 +97,18 @@ pub enum Cmd {
     /// says. It is not typesetting: no line breaking, no pages, no fonts. It is
     /// the text, in order.
     Text(String),
+    /// Text set in a colour.
+    ///
+    /// DVI has no colour of its own: a driver is told about it through a
+    /// `\special`, and `color push rgb R G B` / `color pop` is the pair
+    /// dvipdfmx and dvips both understand. The body is nested rather than
+    /// flattened so the pop always matches its push -- colour in TeX is a
+    /// stack, and a document that opens two and closes one should come out
+    /// with the outer one still in force.
+    Color {
+        rgb: (f64, f64, f64),
+        body: Vec<Cmd>,
+    },
     /// `\message{...}` — built piece by piece at run time.
     Message(Vec<MsgOp>),
     /// The `)` that closes an `\input` file, attached to the message before it.
@@ -165,6 +177,11 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
         match cmd {
             Cmd::RustCompile(_) => out.push_str(&format!("{pad}RustCompile <block>\n")),
             Cmd::Line(n) => out.push_str(&format!("{pad}Line {n}\n")),
+            Cmd::Color { rgb, body } => {
+                let (r, g, b) = rgb;
+                out.push_str(&format!("{pad}Color rgb {r} {g} {b}\n"));
+                render_into(body, depth + 1, out);
+            }
             Cmd::SetCount(reg, num) => {
                 out.push_str(&format!("{pad}SetCount \\count{reg} = {}\n", num_text(num)))
             }

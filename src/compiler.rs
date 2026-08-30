@@ -19,6 +19,15 @@ use fusevm::{Chunk, ChunkBuilder, Op, Value};
 pub mod ops {
     /// Append a run of the document's own text.
     pub const TEXT: u16 = 4005;
+    /// Open a colour: three components follow.
+    ///
+    /// 4010 and 4011, not 4006 and 4007: those are ARITH_CHECKED and MSG_CLOSE.
+    /// Registering a builtin twice silently keeps the LAST one, so the colour
+    /// ops were compiled, called, and quietly handled by somebody else's
+    /// function -- the chunk was right and the page had no colour in it.
+    pub const COLOR_PUSH: u16 = 4010;
+    /// Close the innermost colour.
+    pub const COLOR_POP: u16 = 4011;
     /// Append one rendered piece to the message being built.
     pub const MSG_APPEND: u16 = 4000;
     /// Finish the message being built and record it.
@@ -189,6 +198,18 @@ impl Compiler {
             }
             Cmd::FileClose => {
                 self.b.emit(Op::CallBuiltin(ops::MSG_CLOSE, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::Color { rgb, body } => {
+                let (r, g, b) = *rgb;
+                for v in [r, g, b] {
+                    let k = self.b.add_constant(Value::Str(format!("{v}").into()));
+                    self.b.emit(Op::LoadConst(k), self.line);
+                }
+                self.b.emit(Op::CallBuiltin(ops::COLOR_PUSH, 3), self.line);
+                self.b.emit(Op::Pop, self.line);
+                self.block(body)?;
+                self.b.emit(Op::CallBuiltin(ops::COLOR_POP, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Message(msg) => {

@@ -108,7 +108,33 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
 
 /// Put one line's characters down, switching fonts as the chain requires.
 fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, current: &mut usize) {
-    for ch in line.chars() {
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        // Colour arrives in the text stream as U+0001 r,g,b U+0002 ... U+0003,
+        // which the runtime writes where `\textcolor` was. DVI has no colour of
+        // its own; a driver is told through a `\special`, and this pair is the
+        // one dvipdfmx and dvips both read.
+        if ch == '\u{1}' {
+            let mut spec = String::new();
+            for c in chars.by_ref() {
+                if c == '\u{2}' {
+                    break;
+                }
+                spec.push(c);
+            }
+            let parts: Vec<&str> = spec.split(',').collect();
+            if parts.len() == 3 {
+                w.special(&format!(
+                    "color push rgb {} {} {}",
+                    parts[0], parts[1], parts[2]
+                ));
+            }
+            continue;
+        }
+        if ch == '\u{3}' {
+            w.special("color pop");
+            continue;
+        }
         if let Some((f, slot)) = chain.resolve(ch) {
             // A font switch is an op in the file, so it is emitted only when the
             // font actually changes -- one per run of characters, not one per
@@ -395,6 +421,12 @@ impl FontChain {
 
     /// The width of `ch` in points at `size`, however it is being rendered.
     pub fn width(&self, ch: char, size: f64) -> f64 {
+        // The colour markers are instructions to the driver, not glyphs: they
+        // occupy no space on the page, and measuring them would push words onto
+        // the next line for text that is not there.
+        if matches!(ch, '\u{1}' | '\u{2}' | '\u{3}') || ch.is_control() {
+            return 0.0;
+        }
         if let Some((f, slot)) = self.resolve(ch) {
             return self.fonts[f].tfm.char(slot).map(|m| m.width).unwrap_or(0.0) * size;
         }
@@ -405,7 +437,23 @@ impl FontChain {
     }
 
     /// The width of a whole string, resolving each character through the chain.
+    ///
+    /// A colour marker's SPEC -- the `r,g,b` between U+0001 and U+0002 -- is
+    /// skipped whole. Measuring the three control characters as zero is not
+    /// enough: the digits and commas between them are ordinary characters that
+    /// the font does have, so a coloured word measured this way came out wider
+    /// than it sets and every line after it broke short.
     pub fn width_of(&self, text: &str, size: f64) -> f64 {
-        text.chars().map(|c| self.width(c, size)).sum()
+        let mut total = 0.0;
+        let mut in_spec = false;
+        for ch in text.chars() {
+            match ch {
+                '\u{1}' => in_spec = true,
+                '\u{2}' => in_spec = false,
+                _ if in_spec => {}
+                c => total += self.width(c, size),
+            }
+        }
+        total
     }
 }

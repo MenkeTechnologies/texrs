@@ -77,10 +77,39 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 /// it can say what the document's words are after every macro has been
 /// expanded, which is the difference between a book compiling to a program that
 /// prints nothing and one that prints the book.
-pub fn run_text(src: &str) -> Result<String, TexError> {
+/// Strip the colour markers, leaving the words.
+///
+/// The runtime writes them where `\textcolor` was: U+0001 opens (`r,g,b`
+/// follows, closed by U+0002) and U+0003 closes. They are instructions to a DVI
+/// driver, not characters of the document, so they are carried on the
+/// typesetting path and stripped everywhere else -- a caller asking for the
+/// TEXT of a document should not have to know they exist.
+fn without_color_marks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_spec = false;
+    for ch in text.chars() {
+        match ch {
+            '\u{1}' => in_spec = true,
+            '\u{2}' => in_spec = false,
+            '\u{3}' => {}
+            c if in_spec => {
+                let _ = c;
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The document's text WITH the colour markers, for the typesetter.
+pub fn run_text_marked(src: &str) -> Result<String, TexError> {
     let chunk = compile_text(src)?;
     let _ = crate::runtime::run(chunk).map_err(TexError)?;
     Ok(crate::runtime::take_text())
+}
+
+pub fn run_text(src: &str) -> Result<String, TexError> {
+    Ok(without_color_marks(&run_text_marked(src)?))
 }
 
 /// The bytecode [`run_text`] runs: the same pipeline, with the document's own
@@ -110,6 +139,11 @@ pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
 /// an unedited file. Reading the chunk back instead of rebuilding it is the
 /// difference between setting a book in a second and setting it in a tenth.
 pub fn run_text_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
+    Ok(without_color_marks(&run_text_marked_cached(path, src)?))
+}
+
+/// The same, keeping the colour markers, for the typesetter.
+pub fn run_text_marked_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
     let chunk = compile_text_cached(path, src)?;
     let _ = crate::runtime::run(chunk).map_err(TexError)?;
     Ok(crate::runtime::take_text())
@@ -152,9 +186,11 @@ pub fn run_dvi_fallback(
     chain: &crate::typeset::FontChain,
     layout: &crate::typeset::Layout,
 ) -> Result<Vec<u8>, TexError> {
+    // The MARKED text: colour is an instruction to the driver, and this is the
+    // one path that has a driver to instruct.
     let text = match path {
-        Some(p) => run_text_cached(p, src)?,
-        None => run_text(src)?,
+        Some(p) => run_text_marked_cached(p, src)?,
+        None => run_text_marked(src)?,
     };
     Ok(crate::typeset::to_dvi_chain(&text, chain, layout))
 }

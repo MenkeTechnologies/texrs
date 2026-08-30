@@ -31,6 +31,23 @@ fn b_text(vm: &mut VM, _argc: u8) -> Value {
     Value::Undef
 }
 
+/// Open a colour. Recorded in the text stream as a marker the typesetter
+/// turns into a DVI `\special`, because the text is what carries order --
+/// a colour that arrived out of order would paint the wrong words.
+fn b_color_push(vm: &mut VM, _argc: u8) -> Value {
+    let b = render(&vm.pop());
+    let g = render(&vm.pop());
+    let r = render(&vm.pop());
+    TEXT.with(|t| t.borrow_mut().push_str(&format!("\u{1}{r},{g},{b}\u{2}")));
+    Value::Undef
+}
+
+/// Close the innermost colour.
+fn b_color_pop(_vm: &mut VM, _argc: u8) -> Value {
+    TEXT.with(|t| t.borrow_mut().push('\u{3}'));
+    Value::Undef
+}
+
 /// Everything the document said, and clear it for the next run.
 pub fn take_text() -> String {
     TEXT.with(|t| std::mem::take(&mut *t.borrow_mut()))
@@ -180,6 +197,8 @@ fn b_msg_close(_vm: &mut VM, _argc: u8) -> Value {
 /// would be a different program's.
 pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::TEXT, b_text);
+    vm.register_builtin(ops::COLOR_PUSH, b_color_push);
+    vm.register_builtin(ops::COLOR_POP, b_color_pop);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
