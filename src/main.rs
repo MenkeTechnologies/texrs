@@ -446,6 +446,50 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "map" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X map` needs a font map, or a map and a TeX font name");
+            };
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich_named(file),
+            };
+            match texrs::fontmap::FontMap::open(&found) {
+                Ok(map) => match args.get(2) {
+                    // A second argument asks about one TeX font name: what a
+                    // driver would go and read for it.
+                    Some(name) => match map.lookup(name) {
+                        Some(entry) => {
+                            print!("{entry}");
+                            ExitCode::SUCCESS
+                        }
+                        None => fail(&format!("{found}: no entry for {name}")),
+                    },
+                    None => {
+                        print!("{}", map.summary());
+                        ExitCode::SUCCESS
+                    }
+                },
+                Err(e) => fail(&e),
+            }
+        }
+        "enc" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X enc` needs an encoding file");
+            };
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                // An encoding is not on the ordinary search path.
+                false => kpsewhich_format("enc files", file),
+            };
+            match texrs::fontmap::Encoding::open(&found) {
+                Ok(encoding) => {
+                    print!("{}", encoding.summary());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "pfb" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X pfb` needs a Type 1 font");
@@ -724,10 +768,12 @@ fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
 /// on the ordinary search path, because a font is kept in a directory named
 /// after the resolution it was made for.
 fn kpsewhich_format(format: &str, name: &str) -> String {
-    let named = match name.contains("pk") {
-        true => name.to_string(),
-        // `cmr10` at the resolution TeX Live ships Computer Modern at.
-        false => format!("{name}.600pk"),
+    let named = match (format, name.contains('.')) {
+        // A packed font is kept in a directory named after its resolution, so
+        // a bare name needs the one TeX Live ships Computer Modern at.
+        ("pk", false) => format!("{name}.600pk"),
+        ("enc files", false) => format!("{name}.enc"),
+        _ => name.to_string(),
     };
     let found = std::process::Command::new("kpsewhich")
         .arg(format!("-format={format}"))

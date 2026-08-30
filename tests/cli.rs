@@ -1215,3 +1215,58 @@ fn the_pfb_reader_says_what_a_glyph_costs() {
     assert!(a.contains("width 750"), "{a}");
     assert!(a.contains("side bearing 32"), "{a}");
 }
+
+/// `-X map` and `-X enc`: what a TeX font name means, and what a code is
+/// called.
+#[test]
+fn the_map_and_encoding_readers_join_a_name_to_a_font() {
+    let missing = texrs()
+        .args(["-X", "map", "nosuch.map"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("nosuch"));
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("pdftex.map")
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    // The summary counts what the map does, and a real one does all of it.
+    let summary = stdout_of(texrs().args(["-X", "map", &path]));
+    assert!(summary.contains("fonts         "), "{summary}");
+    assert!(summary.contains("re-encoded    "), "{summary}");
+    assert!(
+        !summary.contains("unreadable"),
+        "every line reads: {summary}"
+    );
+
+    // One name: Times as TeX addresses it.
+    let times = stdout_of(texrs().args(["-X", "map", &path, "ptmr8r"]));
+    assert!(times.contains("encoding      8r.enc"), "{times}");
+    assert!(times.contains(".pfb"), "{times}");
+
+    // A name the map does not define is an error rather than an empty answer.
+    let absent = texrs()
+        .args(["-X", "map", &path, "nosuchfontname"])
+        .output()
+        .expect("run");
+    assert!(!absent.status.success());
+
+    // The encoding that name pointed at, looked up by its bare name.
+    let enc = stdout_of(texrs().args(["-X", "enc", "8r"]));
+    assert!(enc.contains("encoding      TeXBase1Encoding"), "{enc}");
+    assert!(enc.contains("names         256"), "{enc}");
+    assert!(enc.contains("65 'A'   A"), "an A is where an A is: {enc}");
+}

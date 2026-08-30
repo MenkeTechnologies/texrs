@@ -27,6 +27,7 @@ pub mod docs;
 pub mod document;
 pub mod dvi;
 pub mod expand;
+pub mod fontmap;
 pub mod format;
 pub mod geturl;
 pub mod intercepts;

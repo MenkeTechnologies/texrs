@@ -56,6 +56,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading font maps and encoding files, ported from `fontmap.c` and
+  `t1_load_enc` in `xdvipdfmx`. This is the join between the other font
+  readers: a `.dvi` names `ptmr8r`, and the map is what turns that into a real
+  file, an encoding to read it through, and the `SlantFont`/`ExtendFont` a
+  document asked for. `-X map FILE.map [NAME]` and `-X enc FILE.enc`. Checked
+  against the installation it describes -- every line of the installation's own
+  46,000-line `pdftex.map` reads, every file a line names is one `kpsewhich`
+  finds, and the whole chain from TeX font name through map, encoding and Type
+  1 font to the `.tfm` agrees about which glyph a code is and how wide.
 - Reading Type 1 fonts, ported from `type1.c` and `t1_char.c` in `xdvipdfmx`:
   PFB segments and PFA hexadecimal, the eexec and charstring decryptions, the
   cleartext header, the font's own encoding, and the `hsbw`/`sbw` at the front

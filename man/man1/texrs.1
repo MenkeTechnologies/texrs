@@ -316,6 +316,47 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " map \fIFILE\fR.map [" \fINAME\fR ]
+Read a font map.  With no
+.I NAME
+this prints how many fonts it defines, how many are re-encoded and how many are
+slanted or extended; with one, what that TeX font name means.
+.PP
+This is the join between everything else.  A
+.I .dvi
+names a font
+.BR ptmr8r ,
+and nothing in the file says what that is: the name is a TeX name, and the map
+is what turns it into a real font file, an encoding to read it through, and
+whatever slanting or extending the document asked for \(em which is how
+.B \etextsl
+gets a slanted Times without a slanted Times existing.  Without the map a driver
+has a font name and no font.
+.PP
+A line is a small grammar with no separators: the first word is the TeX name, a
+second bare word is the font's PostScript name, a
+.B <
+names a file whose kind comes from its extension, and a quoted run is PostScript
+to run before the font is used.
+.TP
+.BI \-X " enc \fIFILE\fR.enc"
+Read an encoding file: a PostScript array of 256 glyph names, which is what
+makes the codes in a
+.I .dvi
+mean something in a font that has never heard of TeX.  Prints each code the
+encoding uses and the glyph it names.
+.PP
+The map and the encodings are checked against the installation they describe:
+every line of the installation's own
+.I pdftex.map
+must read, every file a line names must be one
+.BR kpsewhich (1)
+finds, and the whole chain \(em a TeX font name, its map entry, its encoding,
+its Type 1 font and the
+.I .tfm
+TeX set the document with \(em must agree about which glyph a code is and how
+wide it is.
+.TP
 .BI \-X " pfb \fIFILE\fR.pfb [" \fICHAR\fR ]
 Read a Type 1 font.  With no
 .I CHAR
