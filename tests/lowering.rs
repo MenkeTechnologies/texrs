@@ -108,3 +108,48 @@ fn ops_carry_the_line_they_came_from() {
         "the last op should belong to the \\message on line 4"
     );
 }
+
+/// The constant pool is INTERNED, and a book is why.
+///
+/// A `LoadConst` operand is a u16, so the pool holds 65,536 entries. Coalescing
+/// text runs across the line directives between them took the books under that;
+/// a 4 MB reference still went past it and the compile panicked inside fusevm.
+/// Text repeats -- the same words, the same spacing -- so identical strings are
+/// one constant, and the pool grows with what a document SAYS rather than with
+/// how often it says it.
+#[test]
+fn identical_text_is_one_constant() {
+    let mut src = String::from("\\catcode`\\{=1 \\catcode`\\}=2\n");
+    // Separated by a command, so each is its own run rather than one long one.
+    for _ in 0..1_000 {
+        src.push_str("alpha\\message{.}\nbeta\\message{.}\n");
+    }
+    src.push_str("\\end\n");
+    let chunk = texrs::compile_text(&src).expect("compiles");
+    let strings = chunk
+        .constants
+        .iter()
+        .filter(|v| matches!(v, fusevm::Value::Str(_)))
+        .count();
+    assert!(
+        strings < 20,
+        "2,000 emissions of a handful of strings became {strings} constants; \
+         the pool is not interned and a book will exhaust it"
+    );
+}
+
+/// A document past the pool is REFUSED, not a panic out of the VM.
+#[test]
+fn a_document_past_the_pool_is_refused_with_a_message() {
+    let mut src = String::from("\\catcode`\\{=1 \\catcode`\\}=2\n");
+    for i in 0..70_000 {
+        src.push_str(&format!("\\message{{line {i}}}\n"));
+    }
+    src.push_str("\\end\n");
+    let err = texrs::compile_text(&src).expect_err("the pool cannot hold it");
+    assert!(
+        err.0.contains("distinct strings"),
+        "the refusal says what ran out: {}",
+        err.0
+    );
+}

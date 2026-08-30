@@ -673,7 +673,15 @@ impl Engine {
         Ok(())
     }
 
-    /// A command name after `\newcommand` and friends: `\x` or `{\x}`.
+    /// A command name after `\newcommand` and friends: `\x` or `{\x}`,
+    /// either spelling optionally preceded by the star of `\newcommand*`.
+    ///
+    /// The star asks LaTeX for a command whose arguments may not contain
+    /// `\par`. Nothing here reads that restriction, so the star is skipped
+    /// rather than refused -- and skipping it is not cosmetic: an unrecognised
+    /// star made the scan give up, which DROPPED the definition. That is how
+    /// pandoc's `\newcommand*\pandocbounded[1]{...}` left every use of
+    /// `\pandocbounded` undefined and stopped the document.
     fn scan_command_name(&mut self, lx: &mut Lexer) -> R<Option<CsId>> {
         let mut braced = false;
         let name = loop {
@@ -682,6 +690,7 @@ impl Engine {
             };
             match t {
                 t if t.is_space() => continue,
+                Token::Char('*', _) => continue,
                 Token::Char(_, Cat::BeginGroup) => {
                     braced = true;
                     continue;
@@ -875,7 +884,24 @@ impl Engine {
         let Some(Meaning::Macro(m)) = self.meanings.get(&name).cloned() else {
             return Err(TexError(format!("\\{} is not a macro", name.name())));
         };
-        let args = self.match_params(lx, &m.params, pending_only)?;
+        // `\newcommand{\x}[n][default]` gives the FIRST parameter a default, and
+        // a call may leave it out: `\includegraphics[width=1in]{f}` passes it,
+        // `\includegraphics{f}` takes the default. TeX has no such parameter,
+        // so the macro carries n ordinary ones and the bracket is matched here
+        // -- which is where LaTeX matches it too, in `\@ifnextchar`.
+        let args = match self.optional_defaults.get(&name).cloned() {
+            Some(default) => {
+                let first = self.read_optional(lx, &default, pending_only)?;
+                let mut args = vec![first];
+                args.extend(self.match_params(
+                    lx,
+                    m.params.get(2..).unwrap_or(&[]),
+                    pending_only,
+                )?);
+                args
+            }
+            None => self.match_params(lx, &m.params, pending_only)?,
+        };
         let mut out = Vec::with_capacity(m.body.len());
         let mut i = 0;
         while i < m.body.len() {
@@ -1004,6 +1030,38 @@ impl Engine {
             i += 2 + delim.len();
         }
         Ok(args)
+    }
+
+    /// The `[...]` of a call to a macro whose first parameter has a default,
+    /// or the default itself when the call left the brackets out.
+    fn read_optional(
+        &mut self,
+        lx: &mut Lexer,
+        default: &[Token],
+        pending_only: bool,
+    ) -> R<Vec<Token>> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Ok(default.to_vec());
+            };
+            if t.is_space() {
+                continue;
+            }
+            if !matches!(&t, Token::Char('[', _)) {
+                lx.push_back(&[t]);
+                return Ok(default.to_vec());
+            }
+            let mut inner = Vec::new();
+            loop {
+                let Some(t) = self.take(lx, pending_only) else {
+                    return Err(TexError("Missing ] inserted".into()));
+                };
+                if matches!(&t, Token::Char(']', _)) {
+                    return Ok(inner);
+                }
+                inner.push(t);
+            }
+        }
     }
 
     fn read_undelimited(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Vec<Token>> {
@@ -1380,6 +1438,16 @@ impl Engine {
     /// `\catcode` at compile time, for the same reason.
     pub fn compile_time_catcode(&mut self, lx: &mut Lexer) -> R<()> {
         self.do_catcode(lx)
+    }
+
+    /// Skip the arm of a conditional the frontend decided against, the way
+    /// TeX's `\if` skips: tokens are read and thrown away, nested conditionals
+    /// counted, and nothing in them expands or assigns.
+    ///
+    /// Answers `true` when it stopped at an `\else` and `false` at the `\fi`;
+    /// either way the token it stopped on is consumed.
+    pub fn compile_time_skip_arm(&mut self, lx: &mut Lexer, stop_at_else: bool) -> R<bool> {
+        self.skip_to(lx, stop_at_else, false)
     }
 
     pub fn scan_number_file(&mut self, lx: &mut Lexer) -> R<i64> {

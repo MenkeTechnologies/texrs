@@ -22,6 +22,18 @@
 \def\@ifnextchar#1#2#3{\let\@wantc=#1\def\@yes{#2}\def\@no{#3}%
   \futurelet\@nextc\@ifnch}
 \def\@ifnch{\ifx\@nextc\@wantc \let\@arm=\@yes \else \let\@arm=\@no \fi \@arm}
+% The starred forms rest on the same peek. With the star there,
+% `\@firstoftwo{#1}' takes it as its own second argument and drops it --
+% latex.ltx's trick, kept rather than reinvented. The star follows a control
+% WORD, so the mouth has already skipped any space and the space-token branch
+% latex.ltx carries is not needed here.
+\def\@firstoftwo#1#2{#1}
+\def\@secondoftwo#1#2{#2}
+\def\@ifstar#1#2{\@ifnextchar *{\@firstoftwo{#1}}{#2}}
+% `\long' and `\outer' restrict what a following \def accepts. Nothing here
+% reads either restriction, so they expand to nothing and the \def runs.
+\def\long{}
+\def\outer{}
 %
 % ---- text that survives as its argument ---------------------------------
 \newcommand{\texttt}[1]{#1}
@@ -52,12 +64,16 @@
 % \textcolor is called from inside \NormalTok and its siblings. Pandoc always
 % writes the model, so matching `[...]' directly is both simpler and right for
 % what these documents contain.
-\def\textcolor[#1]#2#3{#3}
-\def\colorbox[#1]#2#3{#3}
-% The same shape, for the ones that produce nothing: eat an optional bracket,
-% then the mandatory arguments.
-\def\@eatopt{\@ifnextchar[{\@eatoptbr}{}}
-\def\@eatoptbr[#1]{}
+% Declared rather than delimited, so `\textcolor{red}{text}' -- the form with
+% no model, which a delimited `[#1]' refuses outright -- still runs.
+\newcommand{\textcolor}[3][]{#3}
+\newcommand{\colorbox}[3][]{#3}
+% A DECLARED optional argument for the ones that produce nothing.
+% `\newcommand{\x}[n][default]' gives the first parameter a default and the
+% bracket is matched at the CALL, which is what an argument shape needs to be:
+% composing a peek in front of the argument macro -- `\def\x{\@eatopt\@xargs}'
+% -- peeks at `\@xargs' rather than at the `[' behind it, and never fires.
+\newcommand{\@gobbleopt}[1][]{}
 %
 % ---- the escaped characters and the spacing commands --------------------
 % `\%' is a per cent sign, `\ ' is an interword space, `\,' a thin one. These
@@ -152,8 +168,7 @@
 \newcommand{\addtolength}[2]{}
 \newcommand{\renewcommandx}[2]{}
 \newcommand{\hypersetup}[1]{}
-\def\definecolor{\@eatopt\@definecolorargs}
-\def\@definecolorargs#1#2#3{}
+\newcommand{\definecolor}[4][]{}
 \newcommand{\geometry}[1]{}
 \newcommand{\pagestyle}[1]{}
 \newcommand{\thispagestyle}[1]{}
@@ -163,15 +178,27 @@
 \newcommand{\newcounter}[1]{}
 \newcommand{\usetikzlibrary}[1]{}
 \newcommand{\tcbuselibrary}[1]{}
-\def\setmainfont{\@eatopt\@setmainfontargs}
-\def\@setmainfontargs#1{}
-\def\setmonofont{\@eatopt\@setmonofontargs}
-\def\@setmonofontargs#1{}
-\def\setsansfont{\@eatopt\@setsansfontargs}
-\def\@setsansfontargs#1{}
-\newcommand{\newfontfamily}[2]{}
-\newcommand{\titleformat}[1]{}
-\newcommand{\titlespacing}[1]{}
+% fontspec takes its features on either side of the font name: both
+% `\setmainfont[features]{Font}' and `\setmainfont{Font}[features]' are
+% written, and these books write the second. The declared optional covers the
+% first, \@gobbleopt after the mandatory one covers the second.
+\newcommand{\setmainfont}[2][]{\@gobbleopt}
+\newcommand{\setmonofont}[2][]{\@gobbleopt}
+\newcommand{\setsansfont}[2][]{\@gobbleopt}
+% `\newfontfamily\f[features]{Font}': the optional argument is the SECOND,
+% which a declared parameter list cannot say, so the command name is taken
+% here and the rest by a helper whose optional one is first.
+\newcommand{\@gobbleoptarg}[2][]{\@gobbleopt}
+\newcommand{\newfontfamily}[1]{\@gobbleoptarg}
+% titlesec. `\titleformat*{\section}{fmt}' is the short form; the plain one is
+% `\titleformat{\chapter}[shape]{fmt}{label}{sep}{before}', whose optional
+% argument follows a mandatory one. `\titlespacing' is always starred here.
+\def\titleformat{\@ifstar\@titleformatstar\@titleformatplain}
+\newcommand{\@titleformatstar}[2]{}
+\newcommand{\@titleformatplain}[1]{\@titleformatrest}
+\newcommand{\@titleformatrest}[5][]{}
+\def\titlespacing{\@ifstar\@titlespacing\@titlespacing}
+\newcommand{\@titlespacing}[4]{}
 \newcommand{\AtBeginDocument}[1]{}
 \newcommand{\AtEndDocument}[1]{}
 \newcommand{\providecolor}[3]{}
@@ -205,7 +232,8 @@
 \newcommand{\ttfamily}{}
 \newcommand{\rmfamily}{}
 \newcommand{\sffamily}{}
-\newcommand{\item}{}
+% `\item[term]' in a description list: the term IS the document's text.
+\newcommand{\item}[1][]{#1}
 \newcommand{\hline}{}
 \newcommand{\toprule}{}
 \newcommand{\midrule}{}
@@ -256,19 +284,15 @@
 % Each takes the arguments LaTeX gives it, so the document's TEXT continues
 % after them. Getting an arity wrong here does not fail loudly -- it leaves the
 % surplus argument in the text -- so these follow the packages' own signatures.
-\newcommand{\defaultfontfeatures}[1]{}
+\newcommand{\defaultfontfeatures}[2][]{\@gobbleopt}
 \newcommand{\addfontfeature}[1]{}
-\def\setmathfont{\@eatopt\@setmathfontargs}
-\def\@setmathfontargs#1{}
+\newcommand{\setmathfont}[2][]{\@gobbleopt}
 \newcommand{\fvset}[1]{}
 \newcommand{\KOMAoptions}[1]{}
-\def\UseMicrotypeSet{\@eatopt\@UseMicrotypeSetargs}
-\def\@UseMicrotypeSetargs#1{}
-\def\captionsetup{\@eatopt\@captionsetupargs}
-\def\@captionsetupargs#1{}
+\newcommand{\UseMicrotypeSet}[2][]{}
+\newcommand{\captionsetup}[2][]{}
 \newcommand{\urlstyle}[1]{}
-\def\pagecolor{\@eatopt\@pagecolorargs}
-\def\@pagecolorargs#1{}
+\newcommand{\pagecolor}[2][]{}
 \newcommand{\color}[1]{}
 \newcommand{\xmpquote}[1]{}
 \newcommand{\newsavebox}[1]{}
@@ -279,9 +303,13 @@
 \newcommand{\fontsize}[2]{}
 \newcommand{\scalebox}[2]{#2}
 \newcommand{\raisebox}[2]{#2}
-\newcommand{\rule}[2]{}
-\newcommand{\hspace}[1]{}
-\newcommand{\vspace}[1]{}
+\newcommand{\rule}[3][]{}
+% `\vspace*{1cm}' keeps the space at a page break. Both forms take one
+% argument and produce nothing here; with the star unrecognised it was the
+% ARGUMENT that reached the text, so every title page printed its own `1cm'.
+\def\hspace{\@ifstar\@gobble\@gobble}
+\def\vspace{\@ifstar\@gobble\@gobble}
+\newcommand{\@gobble}[1]{}
 \newcommand{\centerline}[1]{#1}
 \newcommand{\apptocmd}[4]{}
 \newcommand{\patchcmd}[5]{}
@@ -298,13 +326,31 @@
 \newcommand{\vfill}{}
 \newcommand{\vcenter}{}
 \newcommand{\tightlist}{}
-\newcommand{\longtable}{}
+% An environment that takes options takes them at \begin, so its stub has to
+% declare them or they land in the text -- pandoc opens every code block with
+% `\begin{Highlighting}[]', which put an empty pair of brackets in front of
+% every listing in the book.
+\newcommand{\longtable}[2][]{}
 \newcommand{\endlongtable}{}
 \newcommand{\Shaded}{}
 \newcommand{\endShaded}{}
-\newcommand{\Highlighting}{}
+\newcommand{\Highlighting}[1][]{}
 \newcommand{\endHighlighting}{}
-\newcommand{\Verb}[1]{#1}
+\newcommand{\minipage}[2][]{}
+\newcommand{\endminipage}{}
+\newcommand{\figure}[1][]{}
+\newcommand{\endfigure}{}
+\newcommand{\table}[1][]{}
+\newcommand{\endtable}{}
+\newcommand{\tabular}[2][]{}
+\newcommand{\endtabular}{}
+\newcommand{\tikzpicture}[1][]{}
+\newcommand{\endtikzpicture}{}
+\newcommand{\scope}[1][]{}
+\newcommand{\endscope}{}
+\newcommand{\tcolorbox}[1][]{}
+\newcommand{\endtcolorbox}{}
+\newcommand{\Verb}[2][]{#2}
 \newcommand{\VerbBar}{|}
 \newcommand{\VERB}[1]{#1}
 %
@@ -314,11 +360,11 @@
 % is where such an assignment always ends in these documents.
 \def\tolerance=#1 {}
 \def\hbadness=#1 {}
+\def\emergencystretch=#1 {}
 % The dimension and glue parameters. texrs has no dimen registers, so these
 % carry no value and produce nothing; a `=3em' after one is left in the text,
 % where it is invisible because only \message reaches the output. Naming them
 % is what matters: an undefined one stops the document.
-\newcommand{\emergencystretch}{}
 \newcommand{\parindent}{}
 \newcommand{\parskip}{}
 \newcommand{\baselineskip}{}
@@ -366,7 +412,10 @@
 \newcommand{\textsuperscript}[1]{#1}
 \newcommand{\textsubscript}[1]{#1}
 \newcommand{\pandocbounded}[1]{#1}
-\newcommand{\hyperref}[1]{}
+% `\hyperref[label]{text}': the text IS the document's, the label is a target
+% the stomach would have resolved. Declared with one argument it took the `['
+% and left `label]{text}' in the output.
+\def\hyperref[#1]#2{#2}
 \newcommand{\hyperlink}[2]{#2}
 \newcommand{\hypertarget}[2]{#2}
 \newcommand{\st}[1]{#1}
@@ -375,7 +424,9 @@
 \newcommand{\phantomsection}{}
 \newcommand{\autoref}[1]{}
 \newcommand{\nameref}[1]{}
-\newcommand{\includegraphics}[1]{}
+% `\includegraphics[options]{file}': the image is the one thing on the page
+% that is not text, and the file name is not the document's words either.
+\newcommand{\includegraphics}[2][]{}
 \newcommand{\adjustbox}[2]{#2}
 \newcommand{\pandocbounded@}[1]{#1}
 % Inline and display math, as delimiters rather than as mathematics. There is

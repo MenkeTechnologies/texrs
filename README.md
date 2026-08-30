@@ -258,10 +258,11 @@ survive it. `\directlua` is consumed rather than run â€” there is no Lua here â€
 a document whose output depended on what its Lua computed is WRONG rather than
 refused, which is the one failure mode worth knowing about before trusting this.
 
-The number, run against the 167 `.tex` files of a real LaTeX/LuaLaTeX corpus
-(Pandoc-generated books, fontspec, TikZ, `\directlua`): **166 run to
-completion.** The one that does not is a fragment with no `\documentclass`,
-written to be `\input` by another file; `tex` refuses it standalone too.
+The number, run against the 241 `.tex` files of a real LaTeX/LuaLaTeX corpus
+(Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
+`--include-in-header` fragments): **239 run to completion.** The two that do not
+are fixtures for `#{` parameter text, a gap listed in `BUGS.md` and
+`tests/known_gaps.txt`; they are written to be refused.
 
 "Run" is the exact claim. The mouth and the expander read the whole document and
 produce what its text says; nothing is typeset, and pages, fonts, boxes and TikZ

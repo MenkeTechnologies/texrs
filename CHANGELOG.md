@@ -6,6 +6,54 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `\newcommand*` defines the command. The star asks for a restriction nothing
+  here reads, and an unrecognised one made the name scan give up, which dropped
+  the DEFINITION: Pandoc writes `\newcommand*\pandocbounded[1]{...}`, so every
+  document with a figure in it stopped at an undefined `\pandocbounded`.
+- `\newcommand{\x}[n][default]` matches its optional argument at the CALL. The
+  default was recorded and never read, so the bracket group reached the text and
+  shifted every argument behind it. The bracket is matched where the arguments
+  are matched, so it works from inside an expansion as well -- which is what
+  `\textcolor` needs, called as it is from inside `\NormalTok`, and what lets
+  `\textcolor{red}{text}` run as well as `\textcolor[rgb]{1,0,0}{text}`.
+- Only the taken arm of a decided conditional (`\ifx`, `\iftrue`, `\iffalse`)
+  is lowered. Lowering the other arm EXECUTED the compile-time assignments in
+  it, so `\ifx\a\b\let\x\y\else\let\x\z\fi` ran both `\let`s and the second
+  won whichever way the test went. That is what stopped `\@ifnextchar` from
+  working, and with it every optional argument and every starred form written
+  the way LaTeX writes one; `\@ifstar` is now in the prelude and
+  `\titleformat*`, `\titlespacing*` and `\vspace*` dispatch on the star.
+  `\ifnum` still lowers both arms -- its test is a register read -- as
+  `BUGS.md` records.
+- The constant pool is interned, and a document that outgrows it is refused
+  rather than aborted. Coalescing text runs across line directives took the
+  books under the 65,536 entries a `LoadConst` operand can address; a 4 MB
+  reference still went past it and the compile panicked inside fusevm.
+  Identical strings are now one constant, which bounds the pool by what a
+  document says rather than by how often it says it, and `Compiler::compile`
+  returns a `Result` so the case beyond that is a message rather than a panic.
+- An optional argument composed IN FRONT of the argument macro never fired:
+  `\def\setmainfont{\@eatopt\@setmainfontargs}` peeks at `\@setmainfontargs`,
+  not at the `[` behind it, so `\setmathfont[]{STIX Two Math}` still put
+  `]STIX Two Math` in the text. These are declared optional arguments now, and
+  fontspec's other spelling -- `\setmainfont{Arimo}[Path=...]`, which these
+  books write -- is consumed too.
+- Stubs whose arity did not match the package's signature: `\includegraphics`,
+  `\hyperref`, `\rule`, `\item`, `\Verb`, `\captionsetup`, `\UseMicrotypeSet`,
+  `\definecolor`, `\pagecolor`, `\defaultfontfeatures`, `\newfontfamily`,
+  `\titleformat`, `\titlespacing`, and the environments that take options at
+  `\begin` -- `Highlighting`, `minipage`, `longtable`, `figure`, `tabular`,
+  `tikzpicture`, `scope`, `tcolorbox`. A surplus argument does not fail loudly;
+  it lands in the text, which is how `\begin{Highlighting}[]` put an empty pair
+  of brackets in front of 571 listings in one book and `\vspace*{1cm}` printed
+  its own `1cm` on every title page.
+- A header fragment included with `--include-in-header` is recognised as LaTeX.
+  It has no preamble of its own -- it IS preamble -- so `\makeatletter`,
+  `\newenvironment` and `\begin{document}` join the markers that select the
+  LaTeX layer.
+
 ### Added
 
 - `--dump-ast` prints the command stream the frontend lowered the document to.
@@ -19,9 +67,8 @@ All notable changes to texrs are recorded here. The format follows
   rather than as inlined copies. `texrs::commands()` is the same stage as a
   library call, and `compile()` now goes through it, so the listing cannot drift
   from what the code generator was handed.
-
-### Added
-
+- `texrs::compile_text`, the bytecode `run_text` runs: the same pipeline with
+  the document's own words lowered as well as its messages.
 - Reading `.pk`, the packed bitmap font, ported from `pkfont.c` in
   `xdvipdfmx`. A glyph is stored as the lengths of its runs of black and white
   in a nybble stream with three encodings in it, plus a repeat count that

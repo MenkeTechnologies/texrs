@@ -141,3 +141,130 @@ fn a_tikz_path_command_is_consumed_to_its_semicolon() {
                \\draw[thick,red] (0,0) -- (1,1);\n\\message{after}\n\\end\n";
     assert_eq!(out(src), "after");
 }
+
+/// `\newcommand*` is `\newcommand` with a restriction nothing here reads. The
+/// star used to make the name scan give up, which dropped the DEFINITION --
+/// pandoc writes `\newcommand*\pandocbounded[1]{...}`, so every use of it was
+/// then undefined and the document stopped.
+#[test]
+fn the_starred_newcommand_defines_the_command() {
+    let src = "\\documentclass{article}\n\\newcommand*\\a[1]{[#1]}\n\
+               \\newcommand*{\\b}[1]{<#1>}\n\\message{\\a{x}\\b{y}}\n\\end\n";
+    assert_eq!(out(src), "[x]<y>");
+}
+
+/// `\newcommand{\x}[n][default]` gives the first parameter a default, and a
+/// call may leave the brackets out. The default was recorded and never read, so
+/// the bracket group reached the text and shifted every argument after it.
+#[test]
+fn an_optional_argument_is_matched_at_the_call() {
+    let src = "\\documentclass{article}\n\\newcommand{\\c}[3][def]{(#1|#2|#3)}\n\
+               \\message{\\c[opt]{a}{b} \\c{a}{b}}\n\\end\n";
+    assert_eq!(out(src), "(opt|a|b) (def|a|b)");
+}
+
+/// The two the books rest on: `\textcolor` with and without its colour model,
+/// and `\includegraphics` with its options.
+#[test]
+fn the_optional_argument_forms_the_documents_write() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\textcolor[rgb]{1.00,0.00,0.00}{RED}\\textcolor{blue}{BLUE}\n\
+               \\includegraphics[keepaspectratio]{f.pdf}\\hyperref[lab]{LINK}\n\
+               \\end{document}\n";
+    assert_eq!(
+        texrs::run_text(src)
+            .expect("run")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["REDBLUE", "LINK"]
+    );
+}
+
+/// A colour model reaches `\textcolor` from INSIDE an expansion, because pandoc
+/// calls it from `\NormalTok` and its siblings. The bracket is matched where
+/// the arguments are matched, so the source of the tokens does not matter.
+#[test]
+fn an_optional_argument_is_matched_inside_an_expansion() {
+    let src = "\\documentclass{article}\n\
+               \\newcommand{\\NormalTok}[1]{\\textcolor[rgb]{0.25,0.44,0.63}{#1}}\n\
+               \\begin{document}\n\\NormalTok{code}\n\\end{document}\n";
+    assert_eq!(texrs::run_text(src).expect("run").trim(), "code");
+}
+
+/// A decided conditional runs the assignments of the arm it took, and only
+/// those. Lowering both arms ran both `\let`s and the second won whichever way
+/// the test went, which is what stopped LaTeX's `\@ifnextchar` from working --
+/// and with it every optional argument written the way LaTeX writes one.
+/// `\ifnum` still lowers both arms; its test is a register read.
+#[test]
+fn only_the_taken_arm_of_a_decided_conditional_assigns() {
+    let same = "\\documentclass{article}\n\\def\\a{A}\\def\\b{A}\n\
+                \\ifx\\a\\b\\def\\r{TAKEN}\\else\\def\\r{SKIPPED}\\fi\n\\message{\\r}\n\\end\n";
+    assert_eq!(out(same), "TAKEN");
+    let differ = "\\documentclass{article}\n\\def\\a{A}\\def\\b{B}\n\
+                  \\ifx\\a\\b\\def\\r{TAKEN}\\else\\def\\r{SKIPPED}\\fi\n\\message{\\r}\n\\end\n";
+    assert_eq!(out(differ), "SKIPPED");
+}
+
+/// `\@ifnextchar` is what every optional argument in LaTeX is written on, and
+/// `\@ifstar` is the peek for a starred form. Both are in the prelude, and both
+/// need the arm that did not run to have made no assignment.
+#[test]
+fn a_starred_form_dispatches_on_the_star() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\def\\x{\\@ifstar\\xstar\\xplain}\n\
+               \\def\\xstar#1{[STAR #1]}\\def\\xplain#1{[PLAIN #1]}\n\
+               \\begin{document}\n\\x*{a}\\x{b}\n\\end{document}\n";
+    assert_eq!(
+        texrs::run_text(src)
+            .expect("run")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["[STAR", "a][PLAIN", "b]"]
+    );
+}
+
+/// An environment that takes options takes them at `\begin`. pandoc opens every
+/// code block with `\begin{Highlighting}[]` -- which is NOT a verbatim
+/// environment, because its body is `\NormalTok` and siblings that have to
+/// expand -- and an argumentless stub left the brackets in the text.
+#[test]
+fn an_environment_takes_its_options_at_begin() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{Shaded}\\begin{Highlighting}[]\ncode\n\
+               \\end{Highlighting}\\end{Shaded}\n\
+               \\begin{minipage}[b]{0.5\\linewidth}mini\\end{minipage}\n\\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    assert!(!got.contains('['), "no options reached the text: {got:?}");
+    assert!(got.contains("code") && got.contains("mini"), "{got:?}");
+}
+
+/// A header fragment included with `--include-in-header` has no preamble of its
+/// own -- it IS preamble -- so the LaTeX layer has to recognise it by the names
+/// it uses. Read as plain TeX, its `\@ifundefined` stopped it.
+#[test]
+fn a_header_fragment_is_recognised_as_latex() {
+    let src = "\\makeatletter\n\\@ifundefined{Shaded}{\\newenvironment{Shaded}{}{}}{}\n\
+               \\makeatother\n\\message{after}\n\\end\n";
+    assert_eq!(out(src), "after");
+}
+
+/// fontspec takes its features on either side of the font name, and these books
+/// write `\setmainfont{Arimo}[Path=...]`. A peek composed IN FRONT of the
+/// argument macro looks at that macro rather than at the bracket behind it, so
+/// the trailing group was text; the optional argument is declared instead.
+#[test]
+fn a_font_declaration_consumes_features_on_either_side() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\setmainfont{Arimo}[Path=/fonts/,Extension=.ttf]\n\
+               \\setsansfont[Scale=1]{Orbitron}\\setmathfont[]{STIX Two Math}\n\
+               \\vspace*{1cm}\\titlespacing*{\\chapter}{0pt}{20pt}{20pt}\nWORDS\n\
+               \\end{document}\n";
+    assert_eq!(
+        texrs::run_text(src)
+            .expect("run")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["WORDS"]
+    );
+}

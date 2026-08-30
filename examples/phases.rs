@@ -26,7 +26,9 @@ fn main() {
         front = front.min(t.elapsed().as_secs_f64());
 
         let t = Instant::now();
-        let chunk = texrs::compiler::Compiler::new().compile(&cmds);
+        let chunk = texrs::compiler::Compiler::new()
+            .compile(&cmds)
+            .expect("compile");
         codegen = codegen.min(t.elapsed().as_secs_f64());
         std::hint::black_box(chunk.ops.len());
 

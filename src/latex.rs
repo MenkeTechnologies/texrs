@@ -24,11 +24,18 @@ pub const PRELUDE: &str = include_str!("latex/prelude.tex");
 /// and is unaffected, which matters: the prelude redefines names like
 /// `\section` that a plain document may have defined for itself.
 pub fn looks_like_latex(src: &str) -> bool {
-    const MARKERS: [&str; 4] = [
+    const MARKERS: [&str; 7] = [
         "\\documentclass",
         "\\usepackage",
         "\\PassOptionsToPackage",
         "\\RequirePackage",
+        // A header fragment included into a document with
+        // `--include-in-header` has no preamble of its own -- it IS preamble --
+        // and the three below are names LaTeX defines and plain TeX has none
+        // of, so a file containing one is LaTeX by the same reading.
+        "\\makeatletter",
+        "\\newenvironment",
+        "\\begin{document}",
     ];
     MARKERS.iter().any(|m| src.contains(m))
 }

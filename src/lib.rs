@@ -72,15 +72,21 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 /// expanded, which is the difference between a book compiling to a program that
 /// prints nothing and one that prints the book.
 pub fn run_text(src: &str) -> Result<String, TexError> {
+    let chunk = compile_text(src)?;
+    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(crate::runtime::take_text())
+}
+
+/// The bytecode [`run_text`] runs: the same pipeline, with the document's own
+/// words lowered as well as its messages.
+pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src) {
         lowerer.preload(crate::latex::PRELUDE)?;
     }
     let cmds = lowerer.lower(&src)?;
-    let chunk = crate::compiler::Compiler::new().compile(&cmds);
-    let _ = crate::runtime::run(chunk).map_err(TexError)?;
-    Ok(crate::runtime::take_text())
+    crate::compiler::Compiler::new().compile(&cmds)
 }
 
 pub fn run_messages(src: &str) -> Result<String, TexError> {
@@ -119,7 +125,7 @@ pub fn compile_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk
 /// see that a construct really lowered rather than being folded away.
 pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
     let cmds = commands(src)?;
-    Ok(crate::compiler::Compiler::new().compile(&cmds))
+    crate::compiler::Compiler::new().compile(&cmds)
 }
 
 /// The command stream `src` lowers to, for `--dump-ast` and for tests that want
@@ -161,7 +167,11 @@ pub fn compile_located(src: &str) -> Result<fusevm::Chunk, (TexError, u32)> {
     // `\rust{ … }` block still lands on the line the author wrote it on.
     let src = crate::rust_ffi::desugar(src);
     let cmds = crate::lower::Lowerer::new().lower_located(&src)?;
-    Ok(crate::compiler::Compiler::new().compile(&cmds))
+    // A pool the chunk cannot address is not a position in the source, so the
+    // diagnostic carries no line rather than a wrong one.
+    crate::compiler::Compiler::new()
+        .compile(&cmds)
+        .map_err(|e| (e, 0))
 }
 
 /// Compile `src` with the `--dap` statement markers in it.
@@ -171,7 +181,7 @@ pub fn compile_located(src: &str) -> Result<fusevm::Chunk, (TexError, u32)> {
 pub fn compile_debug(src: &str) -> Result<fusevm::Chunk, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let cmds = crate::lower::Lowerer::new().lower(&src)?;
-    Ok(crate::compiler::Compiler::new_debug().compile(&cmds))
+    crate::compiler::Compiler::new_debug().compile(&cmds)
 }
 
 /// Run a document under the debug adapter: markers installed, no tracing JIT.

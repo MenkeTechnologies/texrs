@@ -354,13 +354,13 @@ impl Lowerer {
                 // would be dishonest bytecode -- there is nothing to test.
                 "iftrue" | "iffalse" => {
                     let taken = name.name() == "iftrue";
-                    let (t, e) = self.arms(lx)?;
-                    out.extend(if taken { t } else { e });
+                    let cmds = self.decided_arms(lx, taken)?;
+                    out.extend(cmds);
                 }
                 "ifx" => {
                     let same = self.eng.ifx_equal(lx)?;
-                    let (t, e) = self.arms(lx)?;
-                    out.extend(if same { t } else { e });
+                    let cmds = self.decided_arms(lx, same)?;
+                    out.extend(cmds);
                 }
                 "let" => self.eng.compile_time_let(lx)?,
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
@@ -605,6 +605,46 @@ impl Lowerer {
             rel,
             right,
         })
+    }
+
+    /// The one arm a DECIDED conditional keeps, with the other skipped rather
+    /// than lowered.
+    ///
+    /// [`Lowerer::arms`] lowers both and throws one away, which is what
+    /// `\ifnum` needs: its test is a register read, so both arms have to reach
+    /// the bytecode. For a conditional the frontend has already decided,
+    /// lowering the losing arm is not merely wasted work -- lowering EXECUTES
+    /// the compile-time assignments in it. `\ifx\a\b\let\x\y\else\let\x\z\fi`
+    /// ran both `\let`s and the second one won, whichever way the test went.
+    /// That is what stopped LaTeX's own `\@ifnextchar` from working here, and
+    /// with it every optional argument and every starred form in the language.
+    fn decided_arms(&mut self, lx: &mut Lexer, taken: bool) -> R<Vec<Cmd>> {
+        if !taken {
+            // Nothing of the true arm is read; if it ends at `\else` the false
+            // arm is the one that lowers.
+            return match self.eng.compile_time_skip_arm(lx, true)? {
+                false => Ok(Vec::new()),
+                true => {
+                    let out = self.block(lx, Some(&["fi"]))?;
+                    let _ = lx.next_token(&self.eng.cats);
+                    Ok(out)
+                }
+            };
+        }
+        let out = self.block(lx, Some(&["fi", "else"]))?;
+        match lx.next_token(&self.eng.cats) {
+            Some(Token::Cs(n)) if n.name() == "else" => {
+                self.eng.compile_time_skip_arm(lx, false)?;
+            }
+            Some(Token::Cs(n)) if n.name() == "fi" => {}
+            other => {
+                if let Some(t) = other {
+                    lx.push_back(&[t]);
+                }
+                return Err(TexError("Incomplete \\ifx; missing \\fi".into()));
+            }
+        }
+        Ok(out)
     }
 
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {

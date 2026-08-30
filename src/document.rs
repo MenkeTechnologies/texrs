@@ -508,7 +508,9 @@ impl Document {
         }
 
         let commands = lowerer.lower(source).map_err(|e| e.0)?;
-        Ok(crate::compiler::Compiler::new().compile(&commands))
+        crate::compiler::Compiler::new()
+            .compile(&commands)
+            .map_err(|e| e.0)
     }
 }
 
