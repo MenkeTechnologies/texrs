@@ -158,10 +158,10 @@ fn the_ligature_program_of_cmr10_is_the_one_tftopl_prints() {
     let mut active: Vec<(u8, std::collections::HashSet<u8>)> = Vec::new();
     let mut pairs = 0usize;
     let check = |right: u8,
-                     want: Option<u8>,
-                     kern: Option<f64>,
-                     active: &mut Vec<(u8, std::collections::HashSet<u8>)>,
-                     pairs: &mut usize| {
+                 want: Option<u8>,
+                 kern: Option<f64>,
+                 active: &mut Vec<(u8, std::collections::HashSet<u8>)>,
+                 pairs: &mut usize| {
         for (left, seen) in active.iter_mut() {
             if !seen.insert(right) {
                 continue; // an earlier step already claimed this pair
