@@ -217,7 +217,9 @@ impl Lowerer {
             // to close an environment, so a LaTeX document stopped dead at its
             // first `\end{...}` -- which is why a whole book produced a page of
             // preamble text and nothing else.
-            if matches!(self.eng.meanings.get(&name), Some(Meaning::Macro(_))) {
+            if matches!(self.eng.meanings.get(&name), Some(Meaning::Macro(_)))
+                && self.meaning_wins(lx, name)
+            {
                 if let Some(parts) = self.tail_loop(name) {
                     out.push(self.lower_tail_loop(parts)?);
                     continue;
@@ -449,6 +451,33 @@ impl Lowerer {
     /// arguments, and it must not name itself anywhere else. Anything less
     /// certain is left to inlining, where the depth bound still catches it --
     /// a recogniser that guesses would silently compile a DIFFERENT program.
+    /// Whether a redefined control sequence's macro meaning should win over the
+    /// primitive of the same name.
+    ///
+    /// It normally should: a document means what it last defined. `\end` is the
+    /// one that cannot be decided by name alone, because it is two things at
+    /// once. The LaTeX prelude defines `\end#1` so `\end{itemize}` runs
+    /// `\enditemize`, and TeX's own `\end` is how EVERY document stops --
+    /// including every LaTeX one, which stops at `\end` with nothing after it
+    /// once `\end{document}` has been read. Letting the macro win outright made
+    /// a bare `\end` scan for an argument that is not there and die with
+    /// "Paragraph ended before argument was complete".
+    ///
+    /// So the group decides, which is what the two spellings already differ by:
+    /// a `{` following means the environment closer, anything else means the
+    /// terminator.
+    fn meaning_wins(&mut self, lx: &mut Lexer, name: CsId) -> bool {
+        if name.name() != "end" {
+            return true;
+        }
+        let Some(next) = lx.next_token(&self.eng.cats) else {
+            return false;
+        };
+        let is_group = matches!(next, Token::Char(_, Cat::BeginGroup));
+        lx.push_back(&[next]);
+        is_group
+    }
+
     fn tail_loop(&self, name: CsId) -> Option<TailLoop> {
         let Some(Meaning::Macro(m)) = self.eng.meanings.get(&name) else {
             return None;
