@@ -227,6 +227,14 @@ binary.  No expectation is written by hand \(em the reference is produced by
 running tex at test time \(em so a case cannot be made to pass by changing
 texrs.
 .TP
+.B cargo run \-\-bin parity \-\- \-\-freeze
+Record what the reference engine prints for every case into
+.IR tests/data/parity_expected.txt ,
+which
+.I tests/parity.rs
+replays with no TeX installed \(em which is how CI, where there is none,
+verifies the corpus at all.
+.TP
 .B cargo test
 Runs the differential corpus, the example programs, the bytecode assertions,
 and the fuzz smoke and mass\-replay harnesses.

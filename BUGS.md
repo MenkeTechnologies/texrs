@@ -102,7 +102,8 @@ Four harnesses, in increasing order of how much they cost to run:
 
 | harness | what it does | how to run |
 | --- | --- | --- |
-| `tests/differential.rs` | every committed case against real `tex`, no hand-written expectations | `cargo test` |
+| `tests/differential.rs` | every committed case against real `tex`, no hand-written expectations | `cargo test` (skips where there is no tex) |
+| `tests/parity.rs` | the same corpus against the outputs `--freeze` recorded, so CI verifies it with no TeX installed | `cargo test` |
 | `tests/fuzz_smoke.rs`, `tests/fuzz_mass_replay.rs` | replays the fuzz targets on the seed corpus and on generated mutations of every `.tex` in the tree | `cargo test` |
 | `the parity-fuzz binary` | generates random programs in the implemented subset and diffs both engines, reducing whatever diverges | `cargo run --bin parity-fuzz -- --programs 200` |
 | `fuzz/` (cargo-fuzz) | coverage-guided, looking for panics rather than divergences | `cargo +nightly fuzz run lower -- -timeout=10` |

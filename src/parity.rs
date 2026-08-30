@@ -157,6 +157,60 @@ pub fn verdict(oracle: &Oracle, case: &Path, known: &[String]) -> Verdict {
     }
 }
 
+/// The separator between blocks in the frozen expectations file.
+///
+/// A line of its own, followed by the case's name, so the file diffs one case
+/// at a time and a reviewer can see which case a changed block belongs to.
+pub const FREEZE_SEP: &str = "#==# ";
+
+/// Render the frozen-expectations file for `cases`.
+///
+/// What this buys: CI has no TeX installation, so `tests/differential.rs` skips
+/// there and the corpus goes unverified on every push. Freezing what the oracle
+/// said lets `tests/parity.rs` replay the same comparison with no tex at all —
+/// the oracle is consulted once, by a person, and its answers are reviewed in
+/// the diff like any other expectation.
+///
+/// It is not a substitute for the live comparison. A frozen file can only say
+/// "texrs still prints what tex printed when this was frozen"; only running tex
+/// says "and that is still what tex prints". Both run: the live one where there
+/// is a tex, this one everywhere.
+pub fn freeze(oracle: &Oracle, cases: &[std::path::PathBuf]) -> String {
+    let mut out = format!(
+        "# Frozen output of tex {}, written by `cargo run --bin parity -- --freeze`.\n\
+         # One block per case in tests/cases; tests/parity.rs replays these with\n\
+         # no TeX installed. Regenerate when a case changes, and read the diff:\n\
+         # a changed block is a changed claim about what the reference engine does.\n",
+        oracle.version
+    );
+    for case in cases {
+        let name = case
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "{FREEZE_SEP}{name}\n{}\n",
+            reference(oracle, case)
+        ));
+    }
+    out
+}
+
+/// Parse a frozen file into `(case name, expected output)` pairs.
+pub fn thawed(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in text.split(FREEZE_SEP).skip(1) {
+        let Some((name, body)) = block.split_once('\n') else {
+            continue;
+        };
+        out.push((
+            name.trim().to_string(),
+            body.strip_suffix('\n').unwrap_or(body).to_string(),
+        ));
+    }
+    out
+}
+
 /// The cases `tests/known_gaps.txt` names, comments stripped.
 pub fn known_gaps(repo: &Path) -> Vec<String> {
     std::fs::read_to_string(repo.join("tests/known_gaps.txt"))

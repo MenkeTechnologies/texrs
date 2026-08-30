@@ -12,6 +12,7 @@
 //!
 //! ```sh
 //! cargo run --bin parity                 # the corpus in tests/cases
+//! cargo run --bin parity -- --freeze     # record what tex says, for CI
 //! cargo run --bin parity -- examples     # any directory of .tex files
 //! cargo run --bin parity -- doc.tex      # one file
 //! ```
@@ -31,7 +32,28 @@ fn main() -> ExitCode {
         }
     };
 
-    let arg = std::env::args().nth(1);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--freeze") {
+        let cases = parity::cases_in(&repo.join("tests/cases"));
+        let out = repo.join("tests/data/parity_expected.txt");
+        if let Some(dir) = out.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let text = parity::freeze(&oracle, &cases);
+        if let Err(e) = std::fs::write(&out, &text) {
+            eprintln!("parity: cannot write {}: {e}", out.display());
+            return ExitCode::from(2);
+        }
+        println!(
+            "froze {} case(s) of tex {} -> {}",
+            cases.len(),
+            oracle.version,
+            out.display()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    let arg = args.into_iter().next();
     let cases: Vec<PathBuf> = match arg.as_deref() {
         None => parity::cases_in(&repo.join("tests/cases")),
         Some(p) if Path::new(p).is_dir() => parity::cases_in(Path::new(p)),

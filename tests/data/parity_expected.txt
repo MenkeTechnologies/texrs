@@ -1,0 +1,80 @@
+# Frozen output of tex 3.141592653, written by `cargo run --bin parity -- --freeze`.
+# One block per case in tests/cases; tests/parity.rs replays these with
+# no TeX installed. Regenerate when a case changes, and read the diff:
+# a changed block is a changed claim about what the reference engine does.
+#==# backtick_codes.tex
+65-66
+#==# catcode_midfile.tex
+AT
+#==# cond_ifcase.tex
+TWO
+#==# cond_ifnum.tex
+BIG SMALL EQ
+#==# cond_ifodd.tex
+ODDEVEN
+#==# cond_iftrue_false.tex
+YES-NO
+#==# cond_ifx.tex
+SAME-DIFF
+#==# cond_nested.tex
+ABD
+#==# count_arith.tex
+count=18
+#==# count_group_restore.tex
+in=99 out=1
+#==# csname.tex
+XY
+#==# csname_from_macro.tex
+VALUE
+#==# def_in_conditional_arm.tex
+<a>
+#==# delimited_params.tex
+[alpha|beta]
+#==# edef_expands_now.tex
+4-9
+#==# edef_freezes_conditional.tex
+ZERO
+#==# edef_with_parameters.tex
+[A|B|7]
+#==# expandafter.tex
+\b
+#==# expandafter_brace_arg.tex
+[INNER]
+#==# expandafter_toplevel.tex
+BUILT
+#==# gdef_survives_group.tex
+GLOBAL
+#==# group_in_message.tex
+(a{b}c)
+#==# group_restores.tex
+OUT IN OUT
+#==# group_restores_count.tex
+inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
+#==# hash_hash.tex
+[A|B]
+#==# ifx_after_edef_conditional.tex
+SAME
+#==# let_alias.tex
+[q]
+#==# let_char_token.tex
+<\bgroup >INSIDE\egroup
+#==# macro_basic.tex
+HELLO-WORLD
+#==# multi_message.tex
+one two
+#==# negative_and_nested_count.tex
+-5/15
+#==# nested_macros.tex
+<zz>
+#==# number_prim.tex
+42--17
+#==# param_brace_delim.tex
+[X]{Y}
+#==# plain_count0.tex
+[1]
+#==# space_after_cs.tex
+[Xy]
+#==# string_and_cs.tex
+\foo\!
+#==# undefined_cs.tex
+! Undefined control sequence.l.2 \message{A\undefinedxx                           B}AB )(see the transcript file for additional information

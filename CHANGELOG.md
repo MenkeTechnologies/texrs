@@ -83,6 +83,15 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- Frozen parity, ported from the siblings: `cargo run --bin parity -- --freeze`
+  records what the oracle said into `tests/data/parity_expected.txt`, and
+  `tests/parity.rs` replays it with no TeX installed. CI has none, so the live
+  differential test has been skipping there on every push — the corpus was
+  verified only on a machine with tex. The two are not redundant: the frozen
+  replay catches a regression in texrs, the live comparison catches a wrong
+  belief about tex. Gates come with it — a case with no frozen block fails, a
+  frozen block whose case was deleted fails, and the file has to name the engine
+  version it came from.
 - The oracle is one implementation, in `src/parity.rs`, shared by the
   differential tests, the new `parity` binary and `parity-fuzz`. Two harnesses
   that extract the message stream differently are asking the oracle two
