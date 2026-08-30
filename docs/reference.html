@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">42</div>
+            <div class="stat-val">45</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -455,6 +455,7 @@
           <thead><tr><th>Option</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>--dump-tokens</code></td><td>Print the mouth's token stream and exit</td></tr>
+            <tr><td><code>--dump-ast</code></td><td>Print the command stream the frontend lowered to, and exit</td></tr>
             <tr><td><code>--disasm</code></td><td>Print the lowered fusevm bytecode and exit</td></tr>
             <tr><td><code>--tiers</code></td><td>Run it, then report which fusevm tier took its bytecode</td></tr>
           </tbody>
@@ -503,6 +504,8 @@
             <tr><td><code>-X bst FILE.bst</code></td><td>Read a bibliography style, and check its names</td></tr>
             <tr><td><code>-X bibtex FILE.aux</code></td><td>Run the style: write the .bbl a document reads</td></tr>
             <tr><td><code>-X tfm FILE.tfm [C]</code></td><td>Read a font's metrics, or one character's</td></tr>
+            <tr><td><code>-X vf FILE.vf [C]</code></td><td>Read a virtual font: what it really sets</td></tr>
+            <tr><td><code>-X pk FILE.pk [C]</code></td><td>Read a packed bitmap font, and draw a character</td></tr>
             <tr><td><code>--profile NAME</code></td><td>Which output to build</td></tr>
             <tr><td><code>--interval MS</code></td><td>How often -X watch looks (default 250)</td></tr>
           </tbody>

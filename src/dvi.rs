@@ -872,7 +872,15 @@ mod tests {
     /// It is Knuth's own reader and it validates as it goes, so it is the
     /// oracle for a file this wrote.
     fn dvitype(bytes: &[u8]) -> Option<String> {
-        let dir = std::env::temp_dir().join(format!("texrs_dvitype_{}", std::process::id()));
+        // Per CALL, not per process: two tests in this binary run on two
+        // threads of one pid, and the `remove_dir_all` below would delete the
+        // directory the other one is still reading `w.dvi` out of.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "texrs_dvitype_{}_{seq}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).ok()?;
         let file = dir.join("w.dvi");

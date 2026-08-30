@@ -143,6 +143,7 @@ texrs --repl               # interactive prompt; state carries across lines
 texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dap                # Debug Adapter Protocol over stdio: breakpoints, stepping
 texrs --dump-tokens file   # the mouth's token stream, no expansion
+texrs --dump-ast file      # the command stream the frontend lowered to
 texrs --disasm file        # the lowered fusevm bytecode
 texrs --tiers file         # run it, then say which fusevm tier took it
 texrs --build file         # compile into the bytecode cache and stop

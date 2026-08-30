@@ -8,6 +8,20 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `--dump-ast` prints the command stream the frontend lowered the document to.
+  TeX has no expression grammar to parse into a tree; the mouth and the expander
+  hand the stomach a flat run of primitive commands, and that run is this
+  frontend's AST (`src/ir.rs`). It is the stage the other two listings straddle:
+  `--dump-tokens` runs before expansion, so a macro is still a control sequence,
+  and `--disasm` runs after code generation, so a conditional is already a jump.
+  In between, a macro shows as what it expanded to, a conditional still has two
+  named branches, and a tail-recursive macro shows as the loop it lowered to
+  rather than as inlined copies. `texrs::commands()` is the same stage as a
+  library call, and `compile()` now goes through it, so the listing cannot drift
+  from what the code generator was handed.
+
+### Added
+
 - Reading `.pk`, the packed bitmap font, ported from `pkfont.c` in
   `xdvipdfmx`. A glyph is stored as the lengths of its runs of black and white
   in a nybble stream with three encodings in it, plus a repeat count that

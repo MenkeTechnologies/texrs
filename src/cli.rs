@@ -114,6 +114,7 @@ pub struct Cli {
 
     // ---- texrs's own ------------------------------------------------------
     pub dump_tokens: bool,
+    pub dump_ast: bool,
     pub disasm: bool,
     pub tiers: bool,
     pub aot: bool,
@@ -141,6 +142,7 @@ impl Default for Cli {
             recorder: false,
             eight_bit: false,
             dump_tokens: false,
+            dump_ast: false,
             disasm: false,
             tiers: false,
             aot: false,
@@ -235,6 +237,7 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
 
             // ---- texrs's own ---------------------------------------------
             "dump-tokens" => cli.dump_tokens = true,
+            "dump-ast" => cli.dump_ast = true,
             "disasm" => cli.disasm = true,
             "tiers" => cli.tiers = true,
             "aot" => cli.aot = true,
@@ -337,6 +340,8 @@ pub const USAGE: &str = "\
   ── LOOKING INSIDE ─────────────────────────────────────
   --dump-tokens
           // Print the mouth's token stream and exit
+  --dump-ast
+          // Print the command stream the frontend lowered to, and exit
   --disasm
           // Print the lowered fusevm bytecode and exit
   --tiers

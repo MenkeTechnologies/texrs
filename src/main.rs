@@ -109,7 +109,7 @@ fn main() -> ExitCode {
     // nothing but the on-disk bytecode cache, so running them together is a
     // straight fan-out. `tex` cannot do this at all: one process compiles one
     // file, and a user wanting more reaches for `make -j`.
-    if paths.len() > 1 && !dump_tokens && !disasm && !tiers {
+    if paths.len() > 1 && !dump_tokens && !cli.dump_ast && !disasm && !tiers {
         return run_many(&paths, no_cache, jobs);
     }
     let path = paths.remove(0);
@@ -132,6 +132,21 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    if cli.dump_ast {
+        // The stage between the two that already print: the mouth's tokens are
+        // before expansion, the disassembly is after code generation, and this
+        // is what the frontend actually produced -- expansion done, nothing
+        // lowered to bytecode yet. It does NOT go to the bytecode cache,
+        // because it never reaches the code generator.
+        return match texrs::commands(&src) {
+            Ok(cmds) => {
+                print!("{}", texrs::ir::render(&cmds));
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e.0),
+        };
+    }
 
     if dump_tokens {
         // The mouth alone: no expansion, so what prints is what the category

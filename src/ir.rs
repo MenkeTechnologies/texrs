@@ -136,3 +136,154 @@ pub enum Cmd {
         else_branch: Vec<Cmd>,
     },
 }
+
+/// The command stream as an indented tree, for `--dump-ast`.
+///
+/// `{:#?}` would also print it, but as Rust: field names, `Some(...)`, a line
+/// per brace. This prints the shape a reader of the DOCUMENT is looking for --
+/// one node per line, children indented under the construct that owns them --
+/// so a `\ifnum` shows its two branches and a tail-recursive macro shows the
+/// loop it lowered to rather than the call it was written as.
+pub fn render(cmds: &[Cmd]) -> String {
+    let mut out = String::new();
+    render_into(cmds, 0, &mut out);
+    out
+}
+
+fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
+    for cmd in cmds {
+        let pad = "  ".repeat(depth);
+        match cmd {
+            Cmd::RustCompile(_) => out.push_str(&format!("{pad}RustCompile <block>\n")),
+            Cmd::Line(n) => out.push_str(&format!("{pad}Line {n}\n")),
+            Cmd::SetCount(reg, num) => {
+                out.push_str(&format!("{pad}SetCount \\count{reg} = {}\n", num_text(num)))
+            }
+            Cmd::Arith(op, reg, num) => {
+                out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
+            }
+            Cmd::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
+            Cmd::Message(ops) => {
+                out.push_str(&format!("{pad}Message\n"));
+                render_msg(ops, depth + 1, out);
+            }
+            Cmd::Group { saves, body } => {
+                out.push_str(&format!("{pad}Group saves={saves:?}\n"));
+                render_into(body, depth + 1, out);
+            }
+            Cmd::IfNum {
+                left,
+                rel,
+                right,
+                then_branch,
+                else_branch,
+            } => {
+                out.push_str(&format!(
+                    "{pad}IfNum {} {} {}\n",
+                    num_text(left),
+                    rel_text(*rel),
+                    num_text(right)
+                ));
+                render_branches(then_branch, else_branch, depth, out);
+            }
+            Cmd::IfOdd {
+                value,
+                then_branch,
+                else_branch,
+            } => {
+                out.push_str(&format!("{pad}IfOdd {}\n", num_text(value)));
+                render_branches(then_branch, else_branch, depth, out);
+            }
+            Cmd::Loop {
+                body,
+                left,
+                rel,
+                right,
+            } => {
+                // The test prints after the body because that is when it runs:
+                // the body always executes once, as the first call does before
+                // reaching its own conditional.
+                out.push_str(&format!("{pad}Loop\n"));
+                render_into(body, depth + 1, out);
+                out.push_str(&format!(
+                    "{pad}  while {} {} {}\n",
+                    num_text(left),
+                    rel_text(*rel),
+                    num_text(right)
+                ));
+            }
+        }
+    }
+}
+
+/// The two arms of a conditional, each named, and an empty one said to be empty
+/// rather than left out -- `\ifnum` with no `\else` and `\ifnum` whose `\else`
+/// lowered to nothing are different documents.
+fn render_branches(then_branch: &[Cmd], else_branch: &[Cmd], depth: usize, out: &mut String) {
+    let pad = "  ".repeat(depth + 1);
+    out.push_str(&format!("{pad}then\n"));
+    render_into(then_branch, depth + 2, out);
+    out.push_str(&format!("{pad}else\n"));
+    render_into(else_branch, depth + 2, out);
+}
+
+fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
+    for op in ops {
+        let pad = "  ".repeat(depth);
+        match op {
+            MsgOp::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
+            MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
+            MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
+            MsgOp::If {
+                left,
+                rel,
+                right,
+                then_ops,
+                else_ops,
+            } => {
+                out.push_str(&format!(
+                    "{pad}IfNum {} {} {}\n",
+                    num_text(left),
+                    rel_text(*rel),
+                    num_text(right)
+                ));
+                out.push_str(&format!("{pad}  then\n"));
+                render_msg(then_ops, depth + 2, out);
+                out.push_str(&format!("{pad}  else\n"));
+                render_msg(else_ops, depth + 2, out);
+            }
+            MsgOp::IfOdd {
+                value,
+                then_ops,
+                else_ops,
+            } => {
+                out.push_str(&format!("{pad}IfOdd {}\n", num_text(value)));
+                out.push_str(&format!("{pad}  then\n"));
+                render_msg(then_ops, depth + 2, out);
+                out.push_str(&format!("{pad}  else\n"));
+                render_msg(else_ops, depth + 2, out);
+            }
+        }
+    }
+}
+
+/// A number written the way the document wrote it: a literal as itself, a
+/// register as `\count<n>`, a call as its name and arguments.
+fn num_text(num: &Num) -> String {
+    match num {
+        Num::Literal(v) => v.to_string(),
+        Num::Count(n) => format!("\\count{n}"),
+        Num::Rust { name, args } => {
+            let args: Vec<String> = args.iter().map(num_text).collect();
+            format!("\\rustcall {name} {}", args.join(" "))
+        }
+    }
+}
+
+fn rel_text(rel: Rel) -> &'static str {
+    match rel {
+        Rel::Less => "<",
+        Rel::Equal => "=",
+        Rel::Greater => ">",
+    }
+}

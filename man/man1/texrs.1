@@ -592,6 +592,18 @@ the tracing JIT would compile the markers away.
 Print the mouth's token stream for the file and exit.  No expansion happens,
 so what prints is what the category codes made of the bytes.
 .TP
+.B \-\-dump\-ast
+Print the command stream the frontend lowered the document to, and exit.  TeX
+has no expression grammar to parse into a tree \(em the mouth and the expander
+hand the stomach a flat run of primitive commands, and that run IS this
+frontend's AST.  It is the stage between the other two listings: expansion has
+happened, so a macro appears as what it expanded to, and code generation has
+not, so a
+.B \eifnum
+is still a conditional with two branches rather than a jump.  A tail-recursive
+macro shows as the loop it lowered to.  Nothing is written to the bytecode
+cache, because nothing reached the code generator.
+.TP
 .B \-\-disasm
 Print the lowered fusevm bytecode disassembly and exit.  A
 .B \ecount

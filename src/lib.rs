@@ -118,13 +118,24 @@ pub fn compile_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk
 /// The bytecode `src` compiles to, for `--disasm` and for tests that want to
 /// see that a construct really lowered rather than being folded away.
 pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
+    let cmds = commands(src)?;
+    Ok(crate::compiler::Compiler::new().compile(&cmds))
+}
+
+/// The command stream `src` lowers to, for `--dump-ast` and for tests that want
+/// to read the frontend's output before the code generator touches it.
+///
+/// This is the stage `compile` hands to the code generator, produced the same
+/// way — desugared, with the LaTeX prelude preloaded when the document asks for
+/// it — so what `--dump-ast` prints is what `--disasm` was generated from and
+/// not a second, more agreeable pipeline.
+pub fn commands(src: &str) -> Result<Vec<crate::ir::Cmd>, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new();
     if crate::latex::looks_like_latex(&src) {
         lowerer.preload(crate::latex::PRELUDE)?;
     }
-    let cmds = lowerer.lower(&src)?;
-    Ok(crate::compiler::Compiler::new().compile(&cmds))
+    lowerer.lower(&src)
 }
 
 /// Whether an `\end` in `src` stops the run, rather than the source merely
