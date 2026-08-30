@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">45</div>
+            <div class="stat-val">46</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -365,6 +365,7 @@
             <tr><td><code>FFI_COMPILE</code></td><td><code>4003</code></td><td>Compile and register a `\rust{ … }` block: one argument, the base64 body.</td></tr>
             <tr><td><code>FFI_CALL</code></td><td><code>4004</code></td><td>Call a function a block exported: the name, then its arguments.</td></tr>
             <tr><td><code>TEXT</code></td><td><code>4005</code></td><td>Append a run of the document's own text.</td></tr>
+            <tr><td><code>ARITH_CHECKED</code></td><td><code>4006</code></td><td>`\multiply` / `\divide` under TeX's overflow rule: the old value, the operand, and 0 for multiply or 1 for divide.</td></tr>
           </tbody>
         </table>
       </section>
@@ -402,6 +403,7 @@
             <tr><td><code>let_char_token.tex</code></td><td>`\let\egroup=}' copies a CHARACTER token, and printing one through \message must print the character. texrs prints the name with the trailing space a multi-letter control word gets (tex.web 294's print_cs), so the stream ends `INSIDE\egroup ' where tex ends `INSIDE\egroup'. The meaning-copy half of \let is in parity; this is the char-token half.</td></tr>
             <tr><td><code>def_in_conditional_arm.tex</code></td><td>A `\def' inside an arm of a RUN-TIME conditional is executed while lowering, and lowering emits both arms because neither is decided yet -- so the else arm's definition overwrites the then arm's and the losing branch wins. tex interprets and runs only the arm it took: it prints `&lt;a&gt;' where texrs prints `[a]'. This is a miscompile rather than a refusal, which is what makes it worth a case: nothing errors, the answer is just wrong. It blocks LaTeX's `\newcommand{\x}[n]{...}', whose argument-count dispatch is exactly a chain of `\ifnum...\def...\else'. Fixing it needs the macro table to be run-time state, or the conditional to be decidable while lowering; neither is a small change.</td></tr>
             <tr><td><code>cond_ifcase_negative.tex</code></td><td>A NEGATIVE `\ifcase' selector takes case 0 instead of the `\else' branch. tex.web 509 skips n cases and takes the (n+1)th, so a selector below zero or past the last `\or' matches nothing and `\else' runs; do_ifcase counts down with `while remaining &gt; 0', which a negative n never enters, so it falls straight through to case 0. tex prints DEFAULT where texrs prints ZERO. Like def_in_conditional_arm.tex this is a wrong answer rather than a refusal: nothing errors. Found by writing the reference manual's conditionals chapter.</td></tr>
+            <tr><td><code>multiply_overflow.tex</code></td><td>Both engines raise `Arithmetic overflow` for a \multiply past the 32-bit range and leave the register alone -- the divergence is what happens NEXT. tex reports and carries on, so it still prints the message; texrs stops, which is the error model recorded above ("Errors"). Fixing the recovery fixes this case; the arithmetic itself already matches.</td></tr>
           </tbody>
         </table>
       </section>
@@ -506,6 +508,7 @@
             <tr><td><code>-X tfm FILE.tfm [C]</code></td><td>Read a font's metrics, or one character's</td></tr>
             <tr><td><code>-X vf FILE.vf [C]</code></td><td>Read a virtual font: what it really sets</td></tr>
             <tr><td><code>-X pk FILE.pk [C]</code></td><td>Read a packed bitmap font, and draw a character</td></tr>
+            <tr><td><code>-X otf FILE.otf [C]</code></td><td>Read an OpenType font: its tables and its cmap</td></tr>
             <tr><td><code>--profile NAME</code></td><td>Which output to build</td></tr>
             <tr><td><code>--interval MS</code></td><td>How often -X watch looks (default 250)</td></tr>
           </tbody>

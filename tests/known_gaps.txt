@@ -86,3 +86,10 @@ cond_ifcase_negative.tex
 #                  this is a wrong answer rather than a refusal: nothing
 #                  errors. Found by writing the reference manual's
 #                  conditionals chapter.
+multiply_overflow.tex
+#                  Both engines raise `Arithmetic overflow` for a \multiply
+#                  past the 32-bit range and leave the register alone -- the
+#                  divergence is what happens NEXT. tex reports and carries on,
+#                  so it still prints the message; texrs stops, which is the
+#                  error model recorded above ("Errors"). Fixing the recovery
+#                  fixes this case; the arithmetic itself already matches.

@@ -190,6 +190,17 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- A `\count` register is 32 bits, as TeX's is. `\advance` wraps
+  (`2147483647 + 1` is `-2147483648`, measured, no error), and `\multiply` and
+  `\divide` check and raise `Arithmetic overflow` rather than growing into an
+  i64 answer tex would never print — including a division by zero, which used to
+  produce an infinity. The wrap is branch-free and stays JIT-eligible, because
+  `\advance` is what a TeX loop does on every turn.
+- `Chunk::set_builtin_argc_is_arity`, which unlocked the AOT path for a builtin
+  whose RESULT is used. Without it the checked arithmetic gave the right answer
+  in the interpreter and a wrong one in an `--aot` binary — fusevm cannot reason
+  about a builtin's stack effect unless the frontend states that `argc` is the
+  arity, and in texrs it always was: every handler pops exactly its argc.
 - The tracing JIT is switched on. It was compiled in, measured by `--tiers`, and
   described in the README — and never enabled on the run path, so every document
   ran interpreted while `--tiers` reported `trace-eligible=true traced=false` on

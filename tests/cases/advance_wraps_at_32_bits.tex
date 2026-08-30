@@ -1,0 +1,11 @@
+% TeX's count registers are 32-bit words: \advance wraps rather than
+% growing, which a frontend holding them in an i64 gets silently wrong.
+% Measured against tex 3.141592653.
+\catcode`\{=1 \catcode`\}=2
+\count1=2147483647
+\advance\count1 by 1
+\message{[\the\count1]}
+\count2=-2147483647
+\advance\count2 by -2
+\message{[\the\count2]}
+\end

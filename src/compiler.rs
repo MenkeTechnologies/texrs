@@ -27,6 +27,9 @@ pub mod ops {
     pub const FFI_COMPILE: u16 = 4003;
     /// Call a function a block exported: the name, then its arguments.
     pub const FFI_CALL: u16 = 4004;
+    /// `\multiply` / `\divide` under TeX's overflow rule: the old value, the
+    /// operand, and 0 for multiply or 1 for divide.
+    pub const ARITH_CHECKED: u16 = 4006;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -58,8 +61,16 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
+        let mut b = ChunkBuilder::new();
+        // Every handler in `runtime.rs` pops exactly the `argc` its call site
+        // encodes -- checked one by one, and `tests/opcodes.rs` is what keeps
+        // that true. Saying so lets fusevm's AOT and native paths reason about
+        // a builtin's stack effect instead of refusing to; without it a builtin
+        // whose RESULT is used (rather than dropped) silently produced the
+        // wrong value in an `--aot` binary while the interpreter was right.
+        b.set_builtin_argc_is_arity(true);
         Self {
-            b: ChunkBuilder::new(),
+            b,
             debug: false,
             line: 0,
             strings: HashMap::new(),
@@ -139,17 +150,30 @@ impl Compiler {
             Cmd::Arith(op, reg, n) => {
                 self.b.emit(Op::GetSlot(slot(*reg)), self.line);
                 self.num(n)?;
-                let native = match op {
-                    Arith::Add => Op::Add,
-                    Arith::Mul => Op::Mul,
-                    Arith::Div => Op::Div,
-                };
-                self.b.emit(native, self.line);
-                // TeX's `\divide` is INTEGER division truncating toward zero
-                // (tex.web §1236); fusevm's `Div` is the numeric one and yields a
-                // float, which printed `count=Float(18.0)` where tex prints 18.
-                if matches!(op, Arith::Div) {
-                    self.b.emit(Op::TruncInt, self.line);
+                match op {
+                    // `\advance` wraps. A count register is 32 bits, and TeX
+                    // adds into that word without checking: 2147483647 + 1 is
+                    // -2147483648 in tex, measured, with no error. Wrapping
+                    // branch-free keeps the op stream JIT-eligible, which
+                    // matters because `\advance` is what a TeX loop does on
+                    // every turn.
+                    Arith::Add => {
+                        self.b.emit(Op::Add, self.line);
+                        self.wrap_to_32_bits();
+                    }
+                    // `\multiply` and `\divide` do check (tex.web §1236), and
+                    // raise `Arithmetic overflow` rather than wrapping -- so
+                    // they go through a host builtin that applies TeX's rule
+                    // and can raise. Neither is what a hot loop is made of.
+                    Arith::Mul | Arith::Div => {
+                        let which = match op {
+                            Arith::Mul => 0,
+                            _ => 1,
+                        };
+                        self.b.emit(Op::LoadInt(which), self.line);
+                        self.b
+                            .emit(Op::CallBuiltin(ops::ARITH_CHECKED, 3), self.line);
+                    }
                 }
                 self.b.emit(Op::SetSlot(slot(*reg)), self.line);
             }
@@ -235,6 +259,25 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// Truncate the value on the stack to 32 bits, two's complement.
+    ///
+    /// `((v + 2^31) & 0xFFFFFFFF) - 2^31`, which is branch-free and made of ops
+    /// the JIT accepts. A count register is a 32-bit word in TeX
+    /// (`tex.web` §236), and a frontend holding it in an i64 silently answers
+    /// differently the moment a document runs past the edge -- which real
+    /// documents do, because wrapping is how TeX's own `\maxdimen` arithmetic
+    /// behaves.
+    fn wrap_to_32_bits(&mut self) {
+        const SIGN_BIT: i64 = 1 << 31;
+        const MASK: i64 = 0xFFFF_FFFF;
+        self.b.emit(Op::LoadInt(SIGN_BIT), self.line);
+        self.b.emit(Op::Add, self.line);
+        self.b.emit(Op::LoadInt(MASK), self.line);
+        self.b.emit(Op::BitAnd, self.line);
+        self.b.emit(Op::LoadInt(SIGN_BIT), self.line);
+        self.b.emit(Op::Sub, self.line);
     }
 
     /// Emit the steps that build a message, appending each piece as it goes.

@@ -131,6 +131,32 @@ fn b_ffi_call(vm: &mut VM, argc: u8) -> Value {
     }
 }
 
+/// `\multiply` and `\divide`, under TeX's rule rather than the machine's.
+///
+/// `tex.web` §1236 checks both: a product or quotient outside the 32-bit range
+/// raises `Arithmetic overflow` and LEAVES THE REGISTER ALONE, and so does a
+/// division by zero. Measured against tex 3.141592653: `\count1=2000000000
+/// \multiply\count1 by 2` raises and the register still reads 2000000000.
+///
+/// texrs stops the run where tex reports and carries on -- its error model, and
+/// the one difference recorded in BUGS.md rather than papered over.
+fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
+    let which = vm.pop().to_int();
+    let operand = vm.pop().to_int();
+    let old = vm.pop().to_int();
+    let result = match which {
+        0 => old.checked_mul(operand),
+        _ => match operand {
+            0 => None,
+            d => old.checked_div(d),
+        },
+    };
+    match result {
+        Some(v) if (i32::MIN as i64..=i32::MAX as i64).contains(&v) => Value::Int(v),
+        _ => fault(vm, "Arithmetic overflow"),
+    }
+}
+
 /// Install the `\message` builtins on `vm`.
 ///
 /// Shared by the interpreted path and the AOT runtime hook: a compiled document
@@ -140,6 +166,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::TEXT, b_text);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
 }

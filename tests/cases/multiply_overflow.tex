@@ -1,0 +1,9 @@
+% \multiply past the 32-bit range: tex reports "! Arithmetic overflow.",
+% leaves the register alone and CARRIES ON; texrs reports the same and stops,
+% which is its error model (see BUGS.md). The value before the overflow is
+% what both agree on.
+\catcode`\{=1 \catcode`\}=2
+\count1=2000000000
+\multiply\count1 by 2
+\message{[\the\count1]}
+\end

@@ -2,6 +2,8 @@
 # One block per case in tests/cases; tests/parity.rs replays these with
 # no TeX installed. Regenerate when a case changes, and read the diff:
 # a changed block is a changed claim about what the reference engine does.
+#==# advance_wraps_at_32_bits.tex
+[-2147483648] [2147483647]
 #==# backtick_codes.tex
 65-66
 #==# catcode_midfile.tex
@@ -64,6 +66,8 @@ SAME
 HELLO-WORLD
 #==# multi_message.tex
 one two
+#==# multiply_overflow.tex
+! Arithmetic overflow.l.7 \multiply\count1 by 2                         [2000000000] )(see the transcript file for additional information
 #==# negative_and_nested_count.tex
 -5/15
 #==# nested_macros.tex

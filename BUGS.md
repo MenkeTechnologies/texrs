@@ -98,6 +98,20 @@ the harness enforces rather than a note.
   compile stops the run with rustc's own diagnostic rather than failing later at
   the call.
 
+## Arithmetic
+
+A `\count` register is a 32-bit word (`tex.web` §236), and texrs now holds it as
+one. Measured against tex 3.141592653:
+
+- `\advance` past the range WRAPS, silently, as tex does: `2147483647 + 1` is
+  `-2147483648`. It is not an error in either engine.
+- `\multiply` and `\divide` CHECK (`tex.web` §1236) and raise
+  `Arithmetic overflow`, leaving the register alone. So does a division by zero.
+
+The one divergence left is the recovery, not the arithmetic: tex reports the
+overflow and carries on, texrs stops, which is the error model recorded under
+"Not implemented". `tests/cases/multiply_overflow.tex` pins it.
+
 ## The JIT
 
 The tracing JIT is enabled for an ordinary run, and NOT for `--dap`: a compiled

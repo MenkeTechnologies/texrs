@@ -34,10 +34,34 @@ fn count_arithmetic_lowers_to_native_ops() {
 
 #[test]
 fn divide_truncates_to_an_integer() {
+    // The property, not the mechanism. `\divide` used to lower to fusevm's
+    // numeric `Div` plus a `TruncInt`; it now goes through the checked builtin,
+    // because TeX raises `Arithmetic overflow` on a division by zero rather
+    // than producing an infinity (tex.web §1236). What must stay true either
+    // way is that the answer is TeX's integer one -- and that no bare numeric
+    // `Div`, whose result is a float, reaches the register.
     let got = ops("\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=7 \\divide\\count0 by 2\n\\end\n");
     assert!(
-        got.contains(&Op::TruncInt),
-        "TeX's \\divide is integer division; got {got:?}"
+        !got.contains(&Op::Div),
+        "a float division reaches the register; got {got:?}"
+    );
+    assert_eq!(
+        texrs::run_messages(
+            "\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=7 \\divide\\count0 by 2\n\
+             \\message{\\the\\count0 }\n\\end\n"
+        )
+        .expect("runs"),
+        "3",
+        "7/2 truncates to 3, as tex prints it"
+    );
+    assert_eq!(
+        texrs::run_messages(
+            "\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=-7 \\divide\\count0 by 2\n\
+             \\message{\\the\\count0 }\n\\end\n"
+        )
+        .expect("runs"),
+        "-3",
+        "truncation is toward zero, not floor"
     );
 }
 
