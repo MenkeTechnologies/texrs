@@ -5,11 +5,57 @@
 //! the `(./file.tex … )` line. Anything less and "compiled" would mean "behaves
 //! differently", which is not a compiler.
 //!
-//! Skipped, loudly, when there is no C toolchain to link with — the object is
-//! fusevm's, but the executable is `cc`'s.
+//! Skipped, loudly, in two cases: when there is no C toolchain to link with (the
+//! object is fusevm's, but the executable is `cc`'s), and when the run-time
+//! staticlib has not been built. `cargo test` builds the rlib the tests link
+//! against but not the `staticlib` artifact `--aot` links the object against, so
+//! in a fresh worktree the first `cargo build` is a precondition. CI runs one
+//! before `cargo test`, which is why the test is exercised there.
 
 use std::path::Path;
 use std::process::Command;
+
+/// Whether `libtexrs.a` exists to link against.
+///
+/// Mirrors the search in `src/aot.rs` rather than calling it, because the point
+/// is to say WHY the test is skipping before `--aot` fails with the same
+/// reason as an error.
+fn have_staticlib() -> bool {
+    if let Ok(p) = std::env::var("TEXRS_STATICLIB") {
+        return Path::new(&p).is_file();
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(deps) = exe.parent() else {
+        return false;
+    };
+    // The test binary lives in target/<profile>/deps.
+    let profile = deps.parent().unwrap_or(deps);
+    [
+        profile.join("libtexrs.a"),
+        profile.join("../release/libtexrs.a"),
+        profile.join("../debug/libtexrs.a"),
+    ]
+    .iter()
+    .any(|p| p.is_file())
+}
+
+/// Both preconditions, with the reason printed for whichever is missing.
+fn can_link() -> bool {
+    if !have_cc() {
+        eprintln!("skipping: no `cc` to link with");
+        return false;
+    }
+    if !have_staticlib() {
+        eprintln!(
+            "skipping: no libtexrs.a to link against -- run `cargo build` first, \
+             or set TEXRS_STATICLIB"
+        );
+        return false;
+    }
+    true
+}
 
 fn have_cc() -> bool {
     Command::new("cc")
@@ -65,8 +111,7 @@ fn interpreted_output(dir: &Path, name: &str) -> String {
 
 #[test]
 fn a_compiled_document_prints_what_the_interpreted_one_prints() {
-    if !have_cc() {
-        eprintln!("skipping: no `cc` to link with");
+    if !can_link() {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");
@@ -99,8 +144,7 @@ fn a_compiled_document_prints_what_the_interpreted_one_prints() {
 
 #[test]
 fn the_compiler_does_not_leave_its_intermediates_behind() {
-    if !have_cc() {
-        eprintln!("skipping: no `cc` to link with");
+    if !can_link() {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");

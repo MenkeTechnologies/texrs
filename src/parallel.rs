@@ -15,8 +15,10 @@
 //!
 //! What that does NOT survive is a `\catcode` assignment part way through the
 //! file: everything after it was lexed under the wrong table. The caller is
-//! responsible for noticing (see [`lex_parallel_checked`]) and re-lexing the
-//! tail. A document sets its catcodes in a preamble and leaves them alone, so
+//! responsible for noticing and re-lexing the tail: [`crate::catcode::CatTable`]
+//! carries a generation counter, and `Lexer::next_token` drops its read-ahead
+//! (counting the drop in [`DROP_GEN`]) the moment the table it was lexed under
+//! is superseded. A document sets its catcodes in a preamble and leaves them alone, so
 //! the speculation is right for the bulk of real input and wrong only where it
 //! is cheap to find out.
 //!
