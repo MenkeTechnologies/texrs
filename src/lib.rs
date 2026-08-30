@@ -40,6 +40,7 @@ pub mod lower;
 pub mod lsp;
 pub mod parallel;
 pub mod parity;
+pub mod pdf;
 pub mod pk;
 pub mod repl;
 pub mod runtime;

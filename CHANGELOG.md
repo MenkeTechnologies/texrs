@@ -8,6 +8,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Writing PDF (`pdf::Pdf`, `pdf::document`), ported from `pdfobj.c` and
+  `pdfdoc.c` in `xdvipdfmx`: the object model, the writer with its
+  cross-reference table, and enough document structure to make a page --
+  catalogue, page tree, content stream, resources. This is the far end of the
+  chain the font readers built, and what the stomach will write when there is
+  one. Held against three readers that had no part in writing it: `pdfinfo`
+  reads the trailer and the page tree, `pdftotext` reads the content streams,
+  and Ghostscript interprets the whole file -- all three with a quiet stderr,
+  because a reader repairs a broken table and says so rather than refusing.
 - `\input FILE`, which reads another file sharing every piece of state with it,
   so a macro it defines is defined afterwards and a `\catcode` it sets stays
   set. The name is scanned per `tex.web` §537 and `.tex` supplied when it has no
