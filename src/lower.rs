@@ -90,6 +90,16 @@ impl Lowerer {
         self.lower_located(src).map_err(|(e, _line)| e)
     }
 
+    /// Run the LaTeX prelude through this lowerer, keeping its definitions and
+    /// discarding whatever commands it emitted.
+    ///
+    /// The prelude is all definitions, so there is nothing to keep: what
+    /// matters is the macro table it leaves behind on `self.eng`, which the
+    /// document is then lowered against.
+    pub fn preload(&mut self, src: &str) -> R<()> {
+        self.lower_located(src).map(|_| ()).map_err(|(e, _)| e)
+    }
+
     /// The same, reporting the line the mouth had reached when it stopped.
     ///
     /// A `TexError` carries a reason and no position, which is all a terminal
@@ -274,6 +284,20 @@ impl Lowerer {
                     out.extend(if same { t } else { e });
                 }
                 "let" => self.eng.compile_time_let(lx)?,
+                "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
+                    self.eng.compile_time_newcommand(lx, name.name())?
+                }
+                // Preamble directives naming files texrs cannot load. Their
+                // arguments are consumed so the body of the document is still
+                // read; see compile_time_preamble_directive.
+                "documentclass" | "usepackage" | "RequirePackage" => {
+                    self.eng.compile_time_preamble_directive(lx, 1)?
+                }
+                "PassOptionsToPackage" | "PassOptionsToClass" => {
+                    self.eng.compile_time_preamble_directive(lx, 2)?
+                }
+                "makeatletter" => self.eng.compile_time_set_at_letter(true),
+                "makeatother" => self.eng.compile_time_set_at_letter(false),
                 "futurelet" => self.eng.compile_time_futurelet(lx)?,
                 // Advice registration is a compile-time act: it changes what
                 // the macros after it expand to.

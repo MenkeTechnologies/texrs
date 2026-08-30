@@ -57,6 +57,8 @@ pub struct Engine {
     /// that cheap. `tex.web` reaches `eqtb` the same way, by the pointer the
     /// hash table already produced.
     pub meanings: HashMap<CsId, Meaning>,
+    /// Default values recorded by `\newcommand{\x}[n][default]`.
+    optional_defaults: HashMap<CsId, Vec<Token>>,
     pub count: HashMap<i64, i64>,
     pub messages: Vec<String>,
     pub escape: char,
@@ -137,6 +139,7 @@ impl Engine {
         Self {
             cats: CatTable::new(),
             meanings: HashMap::new(),
+            optional_defaults: HashMap::new(),
             count: HashMap::new(),
             messages: Vec::new(),
             escape: '\\',
@@ -257,6 +260,9 @@ impl Engine {
         match name.name() {
             "end" => return Ok(true),
             kind @ ("def" | "gdef" | "edef" | "xdef") => self.do_def(lx, kind)?,
+            "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
+                self.do_newcommand(lx, name.name())?
+            }
             "let" => self.do_let(lx)?,
             "futurelet" => self.do_futurelet(lx, false)?,
             "global" => {
@@ -572,6 +578,154 @@ impl Engine {
         self.set_meaning(name, Meaning::Macro(Macro { params, body }));
         self.global = was;
         Ok(())
+    }
+
+    /// `\newcommand{\x}{body}`, `\newcommand{\x}[n]{body}`,
+    /// `\newcommand{\x}[n][default]{body}`.
+    ///
+    /// LaTeX writes this in TeX, as a chain of `\ifnum...\def...\else` that
+    /// dispatches on the argument count. That chain cannot run here: a `\def`
+    /// inside an arm of a run-time conditional is executed while lowering, and
+    /// lowering emits BOTH arms, so the losing branch's definition wins
+    /// (`tests/cases/def_in_conditional_arm.tex`). Doing the dispatch natively
+    /// sidesteps it entirely, and the observable behaviour is the same one
+    /// latex.ltx specifies — which is what a port has to preserve, not the
+    /// particular macros it was written with.
+    ///
+    /// The optional-argument form defines a macro whose FIRST parameter has a
+    /// default. TeX has no such thing, so it is built the way LaTeX builds it:
+    /// the macro takes `n` ordinary parameters and a separate `\\x` is not
+    /// created; a call that omits the bracket gets the default substituted.
+    fn do_newcommand(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        // The name, either bare (`\newcommand\x`) or braced (`\newcommand{\x}`).
+        let name = self.scan_command_name(lx)?;
+        if kind == "providecommand" && self.meanings.contains_key(&name) {
+            // `\providecommand` leaves an existing definition alone; the body
+            // still has to be consumed or it lands in the document as text.
+            let _ = self.scan_optional_bracket(lx)?;
+            let _ = self.scan_optional_bracket(lx)?;
+            self.skip_spaces(lx);
+            let _ = self.read_group_tokens(lx)?;
+            return Ok(());
+        }
+        let argc = match self.scan_optional_bracket(lx)? {
+            Some(toks) => {
+                let text: String = toks.iter().map(|t| t.to_text(self.escape)).collect();
+                text.trim().parse::<usize>().unwrap_or(0).min(9)
+            }
+            None => 0,
+        };
+        // A second bracket is the default for the first argument.
+        let default = self.scan_optional_bracket(lx)?;
+        self.skip_spaces(lx);
+        let body = self.read_group_tokens(lx)?;
+
+        let mut params = Vec::new();
+        for i in 1..=argc {
+            params.push(Token::Char('#', Cat::Param));
+            params.push(Token::Char(
+                char::from_digit(i as u32, 10).unwrap_or('1'),
+                Cat::Other,
+            ));
+        }
+        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        // The default is recorded but not yet honoured: a call that omits the
+        // bracket would need the same peek `\@ifnextchar` does, at every use
+        // site rather than at the definition. Recorded here so the definition
+        // does not silently drop it.
+        if let Some(d) = default {
+            self.optional_defaults.insert(name, d);
+        }
+        Ok(())
+    }
+
+    /// A command name after `\newcommand` and friends: `\x` or `{\x}`.
+    fn scan_command_name(&mut self, lx: &mut Lexer) -> R<CsId> {
+        let mut braced = false;
+        let name = loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                return Err(TexError("Missing control sequence inserted".into()));
+            };
+            match t {
+                t if t.is_space() => continue,
+                Token::Char(_, Cat::BeginGroup) => {
+                    braced = true;
+                    continue;
+                }
+                Token::Cs(n) => break n,
+                _ => return Err(TexError("Missing control sequence inserted".into())),
+            }
+        };
+        // `{\x}` leaves its closing brace, and a brace left in the stream is a
+        // group the document never opened -- it swallowed the definition body
+        // and printed as text.
+        if braced {
+            while let Some(t) = lx.next_token(&self.cats) {
+                if matches!(t, Token::Char(_, Cat::EndGroup)) {
+                    break;
+                }
+                if !t.is_space() {
+                    lx.push_back(&[t]);
+                    break;
+                }
+            }
+        }
+        Ok(name)
+    }
+
+    /// `[...]` if one is next, leaving the stream untouched when it is not.
+    fn scan_optional_bracket(&mut self, lx: &mut Lexer) -> R<Option<Vec<Token>>> {
+        let mut skipped = Vec::new();
+        loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                lx.push_back(&skipped);
+                return Ok(None);
+            };
+            if t.is_space() {
+                skipped.push(t);
+                continue;
+            }
+            if !matches!(&t, Token::Char('[', _)) {
+                lx.push_back(&[t]);
+                return Ok(None);
+            }
+            let mut inner = Vec::new();
+            loop {
+                let Some(t) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Missing ] inserted".into()));
+                };
+                if matches!(&t, Token::Char(']', _)) {
+                    return Ok(Some(inner));
+                }
+                inner.push(t);
+            }
+        }
+    }
+
+    fn skip_spaces(&mut self, lx: &mut Lexer) {
+        while let Some(t) = lx.next_token(&self.cats) {
+            if !t.is_space() {
+                lx.push_back(&[t]);
+                return;
+            }
+        }
+    }
+
+    /// A `{...}` group's tokens, with the braces removed.
+    fn read_group_tokens(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                return Err(TexError("Runaway argument".into()));
+            };
+            if t.is_space() {
+                continue;
+            }
+            if matches!(t, Token::Char(_, Cat::BeginGroup)) {
+                return self.read_balanced(lx);
+            }
+            // A single token stands in for a group, as TeX's argument scan does.
+            return Ok(vec![t]);
+        }
     }
 
     /// `\let\a=\b` — `\a` takes `\b`'s CURRENT meaning, not a reference to it.
@@ -1235,6 +1389,40 @@ impl Engine {
     /// exactly as `\let` is.
     pub fn compile_time_futurelet(&mut self, lx: &mut Lexer) -> R<()> {
         self.do_futurelet(lx, false)
+    }
+
+    /// `\newcommand` and friends while lowering, exactly as `\def` is: a macro
+    /// definition is a frontend fact.
+    pub fn compile_time_newcommand(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        self.do_newcommand(lx, kind)
+    }
+
+    /// Consume a LaTeX preamble directive that takes `[options]{arguments}` and
+    /// produces nothing here.
+    ///
+    /// `\documentclass`, `\usepackage` and `\PassOptionsToPackage` load files
+    /// texrs has no way to run -- a package is TeX that builds boxes, and there
+    /// is no stomach to build them in. Consuming the arguments rather than
+    /// failing on them lets the REST of a document be read, which is the
+    /// difference between "cannot open this file at all" and "read it, minus
+    /// what the packages would have drawn".
+    pub fn compile_time_preamble_directive(&mut self, lx: &mut Lexer, args: usize) -> R<()> {
+        let _ = self.scan_optional_bracket(lx)?;
+        for _ in 0..args {
+            self.skip_spaces(lx);
+            let _ = self.read_group_tokens(lx)?;
+        }
+        Ok(())
+    }
+
+    /// `\makeatletter` / `\makeatother`: @ becomes a letter, or stops being
+    /// one. LaTeX's internal names are only spellable while it is.
+    pub fn compile_time_set_at_letter(&mut self, on: bool) {
+        let cat = match on {
+            true => Cat::Letter,
+            false => Cat::Other,
+        };
+        self.set_cat('@', cat);
     }
 
     pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {

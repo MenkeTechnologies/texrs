@@ -1,0 +1,161 @@
+% The LaTeX layer texrs can honour, written in TeX.
+%
+% LaTeX is itself a program in TeX, so the faithful way to carry it is to define
+% these AS TeX macros. What is here is the part that lives in the mouth and the
+% expander; anything needing the stomach -- boxes, glue, fonts, output routines
+% -- is absent because texrs has no stomach.
+%
+% A macro that draws something becomes a macro that yields its text, and a macro
+% that sets state the stomach would read becomes one that consumes its arguments
+% and produces nothing. That is the honest reading of "run this document" for an
+% engine with a mouth and an expander: what the text says, minus what the
+% packages would have drawn.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\[=12 \catcode`\]=12
+\catcode`\@=11
+%
+% ---- text that survives as its argument ---------------------------------
+\newcommand{\texttt}[1]{#1}
+\newcommand{\textbf}[1]{#1}
+\newcommand{\textit}[1]{#1}
+\newcommand{\textrm}[1]{#1}
+\newcommand{\textsf}[1]{#1}
+\newcommand{\textsc}[1]{#1}
+\newcommand{\textsl}[1]{#1}
+\newcommand{\textnormal}[1]{#1}
+\newcommand{\emph}[1]{#1}
+\newcommand{\underline}[1]{#1}
+\newcommand{\mbox}[1]{#1}
+\newcommand{\hbox}[1]{#1}
+\newcommand{\text}[1]{#1}
+\newcommand{\mathrm}[1]{#1}
+\newcommand{\texorpdfstring}[2]{#1}
+\newcommand{\href}[2]{#2}
+\newcommand{\url}[1]{#1}
+\newcommand{\footnote}[1]{#1}
+\newcommand{\caption}[1]{#1}
+\newcommand{\textcolor}[2]{#2}
+\newcommand{\colorbox}[2]{#2}
+%
+% ---- characters that are spelled as control sequences --------------------
+\newcommand{\textgreater}{>}
+\newcommand{\textless}{<}
+\newcommand{\textbackslash}{\string\\}
+\newcommand{\textbar}{|}
+\newcommand{\textasciitilde}{~}
+\newcommand{\textasciicircum}{^}
+\newcommand{\textquotesingle}{'}
+\newcommand{\textquotedbl}{"}
+\newcommand{\textasciigrave}{`}
+\newcommand{\textunderscore}{_}
+\newcommand{\ldots}{...}
+\newcommand{\dots}{...}
+%
+% ---- structure: the title is text, the numbering is the stomach's -------
+\newcommand{\section}[1]{#1}
+\newcommand{\subsection}[1]{#1}
+\newcommand{\subsubsection}[1]{#1}
+\newcommand{\paragraph}[1]{#1}
+\newcommand{\subparagraph}[1]{#1}
+\newcommand{\chapter}[1]{#1}
+\newcommand{\part}[1]{#1}
+\newcommand{\title}[1]{#1}
+\newcommand{\author}[1]{#1}
+\newcommand{\date}[1]{#1}
+%
+% ---- state the stomach would have read: consumed, nothing produced ------
+\newcommand{\label}[1]{}
+\newcommand{\ref}[1]{}
+\newcommand{\pageref}[1]{}
+\newcommand{\cite}[1]{}
+\newcommand{\index}[1]{}
+\newcommand{\setcounter}[2]{}
+\newcommand{\addtocounter}[2]{}
+\newcommand{\setlength}[2]{}
+\newcommand{\addtolength}[2]{}
+\newcommand{\renewcommandx}[2]{}
+\newcommand{\hypersetup}[1]{}
+\newcommand{\definecolor}[3]{}
+\newcommand{\geometry}[1]{}
+\newcommand{\pagestyle}[1]{}
+\newcommand{\thispagestyle}[1]{}
+\newcommand{\bibliographystyle}[1]{}
+\newcommand{\bibliography}[1]{}
+\newcommand{\newlength}[1]{}
+\newcommand{\newcounter}[1]{}
+\newcommand{\usetikzlibrary}[1]{}
+\newcommand{\tcbuselibrary}[1]{}
+\newcommand{\setmainfont}[1]{}
+\newcommand{\setmonofont}[1]{}
+\newcommand{\setsansfont}[1]{}
+\newcommand{\newfontfamily}[2]{}
+\newcommand{\titleformat}[1]{}
+\newcommand{\titlespacing}[1]{}
+\newcommand{\AtBeginDocument}[1]{}
+\newcommand{\AtEndDocument}[1]{}
+\newcommand{\providecolor}[3]{}
+%
+% ---- things that are simply nothing here --------------------------------
+\newcommand{\maketitle}{}
+\newcommand{\tableofcontents}{}
+\newcommand{\listoffigures}{}
+\newcommand{\listoftables}{}
+\newcommand{\newpage}{}
+\newcommand{\clearpage}{}
+\newcommand{\pagebreak}{}
+\newcommand{\linebreak}{}
+\newcommand{\noindent}{}
+\newcommand{\centering}{}
+\newcommand{\raggedright}{}
+\newcommand{\raggedleft}{}
+\newcommand{\normalfont}{}
+\newcommand{\normalsize}{}
+\newcommand{\small}{}
+\newcommand{\footnotesize}{}
+\newcommand{\scriptsize}{}
+\newcommand{\tiny}{}
+\newcommand{\large}{}
+\newcommand{\Large}{}
+\newcommand{\LARGE}{}
+\newcommand{\huge}{}
+\newcommand{\Huge}{}
+\newcommand{\bfseries}{}
+\newcommand{\itshape}{}
+\newcommand{\ttfamily}{}
+\newcommand{\rmfamily}{}
+\newcommand{\sffamily}{}
+\newcommand{\item}{}
+\newcommand{\hline}{}
+\newcommand{\toprule}{}
+\newcommand{\midrule}{}
+\newcommand{\bottomrule}{}
+\newcommand{\arraybackslash}{}
+\newcommand{\linewidth}{}
+\newcommand{\textwidth}{}
+\newcommand{\tabcolsep}{}
+\newcommand{\real}[1]{#1}
+\newcommand{\LaTeX}{LaTeX}
+\newcommand{\TeX}{TeX}
+%
+% ---- engine tests (the iftex package) ----------------------------------
+% These say which engine is running. texrs is none of them: it is not pdfTeX,
+% not LuaTeX, not XeTeX, and has no \pdfoutput. Answering false is both true
+% and the branch a document is most likely to survive, since the alternatives
+% call primitives that only those engines have.
+\let\ifPDFTeX=\iffalse
+\let\ifpdftex=\iffalse
+\let\ifLuaTeX=\iffalse
+\let\ifluatex=\iffalse
+\let\ifXeTeX=\iffalse
+\let\ifxetex=\iffalse
+\let\ifPDF=\iffalse
+\let\ifvtex=\iffalse
+\let\ifptex=\iffalse
+\let\ifuptex=\iffalse
+\newcommand{\today}{today}
+\newcommand{\@ifundefined}[3]{#3}
+%
+% ---- environments -------------------------------------------------------
+% \begin{x} runs \x and \end{x} runs \endx, as latex.ltx does. An environment
+% nobody defined is a no-op: the text inside it is still the document's text.
+\def\begin#1{\csname #1\endcsname}
+\def\end#1{\csname end#1\endcsname}

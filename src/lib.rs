@@ -31,6 +31,7 @@ pub mod geturl;
 pub mod intercepts;
 pub mod io;
 pub mod ir;
+pub mod latex;
 pub mod lexer;
 pub mod lower;
 pub mod lsp;
@@ -94,7 +95,11 @@ pub fn compile_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk
 /// see that a construct really lowered rather than being folded away.
 pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
     let src = crate::rust_ffi::desugar(src);
-    let cmds = crate::lower::Lowerer::new().lower(&src)?;
+    let mut lowerer = crate::lower::Lowerer::new();
+    if crate::latex::looks_like_latex(&src) {
+        lowerer.preload(crate::latex::PRELUDE)?;
+    }
+    let cmds = lowerer.lower(&src)?;
     Ok(crate::compiler::Compiler::new().compile(&cmds))
 }
 
