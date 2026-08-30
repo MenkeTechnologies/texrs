@@ -492,6 +492,14 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "special" => {
+            let text = args[1..].join(" ");
+            if text.trim().is_empty() {
+                return fail("`-X special` needs the text of a \\special");
+            }
+            println!("{}", texrs::special::parse(&text));
+            ExitCode::SUCCESS
+        }
         "itar" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X itar` needs a .tar bundle");

@@ -345,6 +345,30 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " special \fITEXT\fR"
+Say what a
+.B \especial
+means to a driver: which colour, which paper size, which figure, which
+destination or link.
+.PP
+A
+.B \especial
+is TeX's escape hatch \(em whatever is inside it goes into the DVI untouched,
+and what it means is between the document and the driver.  That is how colour,
+graphics, hyperlinks and page size all reach a page in an engine that knows
+about none of them, and it is why a driver needs a parser rather than a lookup:
+one file may carry dvips's spelling, dvipdfmx's, HTML from a converter nobody
+remembers, and a raw PostScript fragment.  Anything not recognised is printed as
+it was, because a driver that dropped an unknown special would silently lose a
+document's links or its colours.
+.PP
+Dimensions are read in TeX's own arithmetic rather than the obvious one: a
+dimension is scanned as an integer and a fraction, turned into scaled points,
+and only then multiplied by the unit's ratio, with the division truncated and
+the result clamped to the largest dimension TeX can hold.  The test suite asks
+.BR tex (1)
+for eighty-one dimensions and compares.
+.TP
 .BI \-X " itar \fIFILE\fR.tar [" \fINAME\fR ]
 Index a tar bundle, or read one file out of one.  With no
 .I NAME

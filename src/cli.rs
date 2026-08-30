@@ -394,6 +394,7 @@ pub const USAGE: &str = "\
   -X map FILE.map [NAME]  // Read a font map: what a TeX font name means
   -X enc FILE.enc         // Read an encoding: what each code is called
   -X itar FILE.tar [NAME] // Index a tar bundle, or read one file out of it
+  -X special TEXT         // Say what a \\special means to a driver
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 

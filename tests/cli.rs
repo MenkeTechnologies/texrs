@@ -1328,3 +1328,45 @@ fn the_itar_reader_indexes_a_bundle_and_reads_from_it() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `-X special` says what a `\special` means to a driver.
+#[test]
+fn the_special_reader_says_what_a_special_means() {
+    let colour = stdout_of(texrs().args(["-X", "special", "color push rgb 1 0 0"]));
+    assert!(colour.contains("colour push"), "{colour}");
+    assert!(colour.contains("rgb 1 0 0"), "{colour}");
+
+    // A paper size in TeX's own scaled points: A4 is 39158276 by 55380990,
+    // which is what tex computes for 210mm by 297mm.
+    let paper = stdout_of(texrs().args(["-X", "special", "papersize=210mm,297mm"]));
+    assert!(paper.contains("39158276 by 55380990"), "{paper}");
+
+    // The arguments are joined, so a special with spaces in it need not be
+    // quoted as one word.
+    let figure = stdout_of(texrs().args([
+        "-X",
+        "special",
+        "PSfile=\"fig.eps\"",
+        "llx=0",
+        "lly=0",
+        "urx=100",
+        "ury=50",
+        "rwi=1000",
+    ]));
+    assert!(figure.contains("figure        fig.eps"), "{figure}");
+    assert!(
+        figure.contains("width 100pt"),
+        "dvips counts in tenths: {figure}"
+    );
+
+    // Something no driver knows comes back as it was rather than being dropped.
+    let unknown = stdout_of(texrs().args(["-X", "special", "ps: gsave 0 0 moveto"]));
+    assert!(
+        unknown.contains("not read      ps: gsave 0 0 moveto"),
+        "{unknown}"
+    );
+
+    // And nothing at all is an error rather than an empty answer.
+    let empty = texrs().args(["-X", "special", ""]).output().expect("run");
+    assert!(!empty.status.success());
+}
