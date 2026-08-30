@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">74</div>
+            <div class="stat-val">78</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -340,6 +340,14 @@
 \PassOptionsToPackage{dvipsnames}{xcolor}</pre></td></tr>
             <tr><td><code>\PassOptionsToClass</code></td><td>Consumed with both of its arguments, producing nothing. The class counterpart of <code>\PassOptionsToPackage</code>.</td><td><pre>\PassOptionsToClass{OPTIONS}{CLASS}
 \PassOptionsToClass{a4paper}{article}</pre></td></tr>
+            <tr><td><code>\setmainfont</code></td><td>Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names <code>.tfm</code> fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed.</td><td><pre>\setmainfont[OPTIONS]{FAMILY}[OPTIONS]
+\setmainfont{Arimo}   % embedded if Arimo is installed, else Helvetica's metrics</pre></td></tr>
+            <tr><td><code>\setromanfont</code></td><td>The older fontspec spelling of <code>\setmainfont</code>, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps.</td><td><pre>\setromanfont[OPTIONS]{FAMILY}
+\setromanfont{Arimo}   % identical in effect to \setmainfont{Arimo}</pre></td></tr>
+            <tr><td><code>\setsansfont</code></td><td>Record the document's sans-serif family. The name is read and kept and its bracketed options are consumed, but no backend selects it yet: the PDF page is set in the main family throughout, so this records an intention rather than changing the output. Documented because a preamble writes it and the engine resolves it.</td><td><pre>\setsansfont[OPTIONS]{FAMILY}[OPTIONS]
+\setsansfont{Arimo}</pre></td></tr>
+            <tr><td><code>\setmonofont</code></td><td>Record the document's monospace family, the counterpart of <code>\setsansfont</code>. Read and kept, its options consumed, and likewise not yet selected by either backend — the PDF page is set in the main family throughout.</td><td><pre>\setmonofont[OPTIONS]{FAMILY}[OPTIONS]
+\setmonofont{Cousine}</pre></td></tr>
             <tr><td><code>\makeatletter</code></td><td>Make <code>@</code> a letter (category code 11), so LaTeX's internal names like <code>\@ifnextchar</code> become spellable as single control sequences. This is a catcode change, so it takes effect at COMPILE time, exactly as <code>\catcode</code>\@=11<code> does.</code></td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
             <tr><td><code>\makeatother</code></td><td>Make <code>@</code> an ordinary character again (category code 12), closing a <code>\makeatletter</code> region. After it, <code>\@x</code> is the control sequence <code>\</code> followed by the characters <code>@x</code> rather than one name.</td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
           </tbody>

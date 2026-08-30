@@ -85,6 +85,10 @@
     "\\RequirePackage"
     "\\PassOptionsToPackage"
     "\\PassOptionsToClass"
+    "\\setmainfont"
+    "\\setromanfont"
+    "\\setsansfont"
+    "\\setmonofont"
     "\\makeatletter"
     "\\makeatother")
   "Every primitive texrs resolves, for completion at point.")
@@ -163,6 +167,10 @@
     (puthash "\\RequirePackage" "\\RequirePackage  —  Consumed with its optional arguments, producing nothing. [LaTeX]" table)
     (puthash "\\PassOptionsToPackage" "\\PassOptionsToPackage  —  Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded. [LaTeX]" table)
     (puthash "\\PassOptionsToClass" "\\PassOptionsToClass  —  Consumed with both of its arguments, producing nothing. [LaTeX]" table)
+    (puthash "\\setmainfont" "\\setmainfont  —  Record the document's body typeface, and keep the name rather than dropping it. [LaTeX]" table)
+    (puthash "\\setromanfont" "\\setromanfont  —  The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps. [LaTeX]" table)
+    (puthash "\\setsansfont" "\\setsansfont  —  Record the document's sans-serif family. [LaTeX]" table)
+    (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`. [LaTeX]" table)
     (puthash "\\makeatletter" "\\makeatletter  —  Make `@` a letter (category code 11), so LaTeX's internal names like `\\@ifnextchar` become spellable as single control sequences. [LaTeX]" table)
     (puthash "\\makeatother" "\\makeatother  —  Make `@` an ordinary character again (category code 12), closing a `\\makeatletter` region. [LaTeX]" table)
     table)

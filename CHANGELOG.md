@@ -8,6 +8,18 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The four fontspec family directives in the reference. `\setmainfont`,
+  `\setromanfont`, `\setsansfont` and `\setmonofont` were dispatched but
+  documented nowhere, so editor completion did not offer them and the reference
+  page did not describe them. The coverage gate caught two of the four; the
+  other two escaped it because a `k @ (...)` binding hid the first and last
+  name in the arm from the scanner that lifts dispatch literals. The arm now
+  matches the names directly and reads the name it took, so all four are
+  visible to the gate, and all four carry an entry saying what the engine
+  really does with them -- `\setmainfont` and `\setromanfont` fill the family
+  the PDF backend embeds or maps, while `\setsansfont` and `\setmonofont` are
+  recorded and not yet selected by either backend.
+
 - The font a document names. `\setmainfont{Georgia}` was read and then ignored:
   every document came out in Computer Modern whatever it asked for, because
   nothing resolved the family and the page had only cmr10 to set in. The family

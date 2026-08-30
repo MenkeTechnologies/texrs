@@ -477,7 +477,8 @@ impl Lowerer {
                 // read; see compile_time_preamble_directive.
                 // The font the document asked for. Its argument is consumed
                 // either way; the difference is that the name is kept.
-                k @ ("setmainfont" | "setsansfont" | "setmonofont" | "setromanfont") => {
+                "setmainfont" | "setsansfont" | "setmonofont" | "setromanfont" => {
+                    let k = name.name();
                     let _ = self.eng.read_optional_bracket(lx)?;
                     let name = self.eng.read_group_text_pub(lx)?;
                     let _ = self.eng.read_optional_bracket(lx)?;

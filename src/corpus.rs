@@ -487,6 +487,30 @@ pub const CORPUS: &[Entry] = &[
         "\\PassOptionsToClass{OPTIONS}{CLASS}\n\\PassOptionsToClass{a4paper}{article}",
     ),
     (
+        "\\setmainfont",
+        "LaTeX",
+        "Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names `.tfm` fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed.",
+        "\\setmainfont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmainfont{Arimo}   % embedded if Arimo is installed, else Helvetica's metrics",
+    ),
+    (
+        "\\setromanfont",
+        "LaTeX",
+        "The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps.",
+        "\\setromanfont[OPTIONS]{FAMILY}\n\\setromanfont{Arimo}   % identical in effect to \\setmainfont{Arimo}",
+    ),
+    (
+        "\\setsansfont",
+        "LaTeX",
+        "Record the document's sans-serif family. The name is read and kept and its bracketed options are consumed, but no backend selects it yet: the PDF page is set in the main family throughout, so this records an intention rather than changing the output. Documented because a preamble writes it and the engine resolves it.",
+        "\\setsansfont[OPTIONS]{FAMILY}[OPTIONS]\n\\setsansfont{Arimo}",
+    ),
+    (
+        "\\setmonofont",
+        "LaTeX",
+        "Record the document's monospace family, the counterpart of `\\setsansfont`. Read and kept, its options consumed, and likewise not yet selected by either backend — the PDF page is set in the main family throughout.",
+        "\\setmonofont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmonofont{Cousine}",
+    ),
+    (
         "\\makeatletter",
         "LaTeX",
         "Make `@` a letter (category code 11), so LaTeX's internal names like `\\@ifnextchar` become spellable as single control sequences. This is a catcode change, so it takes effect at COMPILE time, exactly as `\\catcode`\\@=11` does.",
