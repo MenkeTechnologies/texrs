@@ -196,10 +196,24 @@ impl Lowerer {
                     }
                     // The document's own words. Dropping these is why a book
                     // used to compile to a program that printed nothing.
-                    Token::Char(c, _) if self.text_output => match out.last_mut() {
-                        Some(Cmd::Text(t)) => t.push(*c),
-                        _ => out.push(Cmd::Text(c.to_string())),
-                    },
+                    Token::Char(c, _) if self.text_output => {
+                        // Append to the run in progress, looking PAST any line
+                        // directives: they generate no code, but one is emitted
+                        // per line, so treating them as breaks makes every line
+                        // its own constant. A 4 MB book then exhausts fusevm's
+                        // 65,536-entry constant pool -- which a u16 operand
+                        // cannot address past -- and the compile panics.
+                        // Coalescing keeps one constant per stretch of text
+                        // between real commands.
+                        let mut at = out.len();
+                        while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
+                            at -= 1;
+                        }
+                        match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+                            Some(Cmd::Text(t)) => t.push(*c),
+                            _ => out.push(Cmd::Text(c.to_string())),
+                        }
+                    }
                     _ => {}
                 }
                 continue;
@@ -209,6 +223,35 @@ impl Lowerer {
                 if stops.contains(&name.name()) {
                     lx.push_back(&[Token::Cs(name)]);
                     return Ok(Self::drop_empty_line_directives(out));
+                }
+            }
+            // A verbatim environment suspends the catcodes: everything up to
+            // its \end is characters, not TeX. It has to be caught HERE,
+            // before `\begin` expands, because expanding is exactly what must
+            // not happen to the body -- a code listing is full of backslashes
+            // that are not control sequences, and reading them as control
+            // sequences is why a book of code samples could not be read.
+            if name.name() == "begin" {
+                if let Some(env) = self.peek_environment_name(lx) {
+                    if VERBATIM_ENVIRONMENTS.contains(&env.as_str()) {
+                        // Consume the `{name}` that was only peeked at, or it
+                        // lands in the output ahead of the body.
+                        while let Some(t) = lx.next_token(&self.eng.cats) {
+                            if matches!(t, Token::Char(_, Cat::EndGroup)) {
+                                break;
+                            }
+                        }
+                        let end = format!("\\end{{{env}}}");
+                        let Some(body) = lx.read_raw_until(&end) else {
+                            return Err(TexError(format!(
+                                "Runaway argument: \\begin{{{env}}} never ends"
+                            )));
+                        };
+                        if self.text_output {
+                            out.push(Cmd::Text(body));
+                        }
+                        continue;
+                    }
                 }
             }
             // A control sequence MEANS what it was last defined as. The
@@ -443,6 +486,31 @@ impl Lowerer {
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
+    /// The environment name after `\begin`, without consuming it.
+    ///
+    /// Read as raw characters rather than tokens: the name is needed BEFORE
+    /// deciding whether the body is TeX at all, so tokenising it would be
+    /// deciding the question by answering it.
+    fn peek_environment_name(&self, lx: &Lexer) -> Option<String> {
+        let chars = lx.chars();
+        let mut i = lx.pos();
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= chars.len() || chars[i] != '{' {
+            return None;
+        }
+        i += 1;
+        let start = i;
+        while i < chars.len() && chars[i] != '}' {
+            i += 1;
+        }
+        match i < chars.len() {
+            true => Some(chars[start..i].iter().collect()),
+            false => None,
+        }
+    }
+
     /// Recognise `\def\r{BODY \ifnum A<B \r \fi}` -- TeX's loop.
     ///
     /// Returns the body tokens and the condition tokens when `name` has exactly
@@ -926,6 +994,30 @@ struct TailLoop {
     body: Vec<Token>,
     cond: Vec<Token>,
 }
+
+/// The environments whose bodies are characters rather than TeX.
+///
+/// LaTeX's own `verbatim` and `Verbatim`, the fancyvrb and listings families,
+/// and `alltt`.
+///
+/// Pandoc's `Highlighting` and `Shaded` are deliberately NOT here. They look
+/// like code environments and are not: Pandoc fills them with `\NormalTok{…}`
+/// and friends, which are macros that have to expand for the code to come out
+/// as code. Treating them as verbatim emits the markup instead of the program.
+const VERBATIM_ENVIRONMENTS: &[&str] = &[
+    "verbatim",
+    "verbatim*",
+    "Verbatim",
+    "Verbatim*",
+    "BVerbatim",
+    "LVerbatim",
+    "SaveVerbatim",
+    "lstlisting",
+    "minted",
+    "alltt",
+    "filecontents",
+    "filecontents*",
+];
 
 /// Every count register a command block assigns, so a group knows what to save.
 fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {

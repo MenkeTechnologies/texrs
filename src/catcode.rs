@@ -129,11 +129,15 @@ impl CatTable {
 
     pub fn get(&self, c: char) -> Cat {
         match u32::from(c) {
-            // Outside Latin-1 TeX82 has no opinion; treat as a letter so a
-            // UTF-8 source at least tokenises rather than aborting. Recorded in
-            // BUGS.md: real TeX reads bytes, so `é` is two `Other` characters
-            // there and one Letter here.
-            n if n > 255 => Cat::Letter,
+            // Outside Latin-1, `Other`. TeX82 reads BYTES, so a character up
+            // there is a run of `Other` bytes to it and never part of a control
+            // word. Calling them Letters here made them part of one: in a UTF-8
+            // document `\textgreater→key` lexed as a single control sequence
+            // named `textgreater→key`, so a real document full of arrows and
+            // dashes failed on names that do not exist. `Other` is both closer
+            // to what tex does and the only choice that ends a control word
+            // where tex ends it.
+            n if n > 255 => Cat::Other,
             n => self.codes[n as usize],
         }
     }

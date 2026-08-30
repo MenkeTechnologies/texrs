@@ -13,6 +13,16 @@
 \catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\[=12 \catcode`\]=12
 \catcode`\@=11
 %
+% ---- \@ifnextchar: the peek every optional argument rests on -------------
+% latex.ltx builds this with \futurelet. Note the shape: it does NOT branch
+% straight into the arm. It \lets a macro to the arm inside the conditional and
+% calls it AFTER the \fi, because an arm expanded while the conditional is still
+% open leaves the \fi to be found by whatever the arm reads next -- written the
+% other way it swallows the \fi and every optional argument breaks.
+\def\@ifnextchar#1#2#3{\let\@wantc=#1\def\@yes{#2}\def\@no{#3}%
+  \futurelet\@nextc\@ifnch}
+\def\@ifnch{\ifx\@nextc\@wantc \let\@arm=\@yes \else \let\@arm=\@no \fi \@arm}
+%
 % ---- text that survives as its argument ---------------------------------
 \newcommand{\texttt}[1]{#1}
 \newcommand{\textbf}[1]{#1}
@@ -33,8 +43,21 @@
 \newcommand{\url}[1]{#1}
 \newcommand{\footnote}[1]{#1}
 \newcommand{\caption}[1]{#1}
-\newcommand{\textcolor}[2]{#2}
-\newcommand{\colorbox}[2]{#2}
+% \textcolor takes an OPTIONAL colour model: \textcolor[rgb]{0,0,0}{text} as
+% well as \textcolor{red}{text}. Declaring two mandatory arguments made the
+% model leak into the output and shifted the rest, which is what put
+% `rgb]0.40,0.40,0.40' through the middle of every highlighted listing.
+% A DELIMITED parameter rather than \@ifnextchar: the peek needs \futurelet,
+% which is an assignment and so is not reachable from inside an expansion, and
+% \textcolor is called from inside \NormalTok and its siblings. Pandoc always
+% writes the model, so matching `[...]' directly is both simpler and right for
+% what these documents contain.
+\def\textcolor[#1]#2#3{#3}
+\def\colorbox[#1]#2#3{#3}
+% The same shape, for the ones that produce nothing: eat an optional bracket,
+% then the mandatory arguments.
+\def\@eatopt{\@ifnextchar[{\@eatoptbr}{}}
+\def\@eatoptbr[#1]{}
 %
 % ---- the escaped characters and the spacing commands --------------------
 % `\%' is a per cent sign, `\ ' is an interword space, `\,' a thin one. These
@@ -129,7 +152,8 @@
 \newcommand{\addtolength}[2]{}
 \newcommand{\renewcommandx}[2]{}
 \newcommand{\hypersetup}[1]{}
-\newcommand{\definecolor}[3]{}
+\def\definecolor{\@eatopt\@definecolorargs}
+\def\@definecolorargs#1#2#3{}
 \newcommand{\geometry}[1]{}
 \newcommand{\pagestyle}[1]{}
 \newcommand{\thispagestyle}[1]{}
@@ -139,9 +163,12 @@
 \newcommand{\newcounter}[1]{}
 \newcommand{\usetikzlibrary}[1]{}
 \newcommand{\tcbuselibrary}[1]{}
-\newcommand{\setmainfont}[1]{}
-\newcommand{\setmonofont}[1]{}
-\newcommand{\setsansfont}[1]{}
+\def\setmainfont{\@eatopt\@setmainfontargs}
+\def\@setmainfontargs#1{}
+\def\setmonofont{\@eatopt\@setmonofontargs}
+\def\@setmonofontargs#1{}
+\def\setsansfont{\@eatopt\@setsansfontargs}
+\def\@setsansfontargs#1{}
 \newcommand{\newfontfamily}[2]{}
 \newcommand{\titleformat}[1]{}
 \newcommand{\titlespacing}[1]{}
@@ -231,13 +258,17 @@
 % surplus argument in the text -- so these follow the packages' own signatures.
 \newcommand{\defaultfontfeatures}[1]{}
 \newcommand{\addfontfeature}[1]{}
-\newcommand{\setmathfont}[1]{}
+\def\setmathfont{\@eatopt\@setmathfontargs}
+\def\@setmathfontargs#1{}
 \newcommand{\fvset}[1]{}
 \newcommand{\KOMAoptions}[1]{}
-\newcommand{\UseMicrotypeSet}[1]{}
-\newcommand{\captionsetup}[1]{}
+\def\UseMicrotypeSet{\@eatopt\@UseMicrotypeSetargs}
+\def\@UseMicrotypeSetargs#1{}
+\def\captionsetup{\@eatopt\@captionsetupargs}
+\def\@captionsetupargs#1{}
 \newcommand{\urlstyle}[1]{}
-\newcommand{\pagecolor}[1]{}
+\def\pagecolor{\@eatopt\@pagecolorargs}
+\def\@pagecolorargs#1{}
 \newcommand{\color}[1]{}
 \newcommand{\xmpquote}[1]{}
 \newcommand{\newsavebox}[1]{}
@@ -328,6 +359,31 @@
 \newcommand{\newtheorem}[2]{}
 % graphicx's internal scaling arithmetic, reached through \scalebox.
 \newcommand{\Gscale@div}[3]{}
+% \protect is LaTeX's guard for fragile commands in moving arguments. Nothing
+% here moves -- there is no page to move onto -- so it is simply nothing, and
+% what follows it expands as it would have anyway.
+\newcommand{\protect}{}
+\newcommand{\textsuperscript}[1]{#1}
+\newcommand{\textsubscript}[1]{#1}
+\newcommand{\pandocbounded}[1]{#1}
+\newcommand{\hyperref}[1]{}
+\newcommand{\hyperlink}[2]{#2}
+\newcommand{\hypertarget}[2]{#2}
+\newcommand{\st}[1]{#1}
+\newcommand{\sout}[1]{#1}
+\newcommand{\uline}[1]{#1}
+\newcommand{\phantomsection}{}
+\newcommand{\autoref}[1]{}
+\newcommand{\nameref}[1]{}
+\newcommand{\includegraphics}[1]{}
+\newcommand{\adjustbox}[2]{#2}
+\newcommand{\pandocbounded@}[1]{#1}
+% Inline and display math, as delimiters rather than as mathematics. There is
+% no math list here; the content between them is text like any other.
+\def\({}
+\def\){}
+\def\[{}
+\def\]{}
 % Alignment and table primitives: the stomach's, so they carry no text.
 \newcommand{\noalign}[1]{}
 \newcommand{\omit}{}

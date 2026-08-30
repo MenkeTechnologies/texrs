@@ -98,6 +98,33 @@ impl Lexer {
         }
     }
 
+    /// Read raw characters up to `marker`, consuming it, with no tokenising.
+    ///
+    /// A verbatim environment suspends the category codes: inside
+    /// `\begin{verbatim}` a backslash is a backslash and a brace is a brace,
+    /// because the point of the environment is to show TeX rather than run it.
+    /// `tex.web` has no such thing -- LaTeX builds it by setting every catcode
+    /// to 12 and reading a line at a time -- but the effect is a raw scan to the
+    /// closing marker, which is what this is.
+    ///
+    /// Returns the text between here and the marker, or `None` when the marker
+    /// never comes, in which case nothing is consumed and the caller can report
+    /// a runaway environment rather than silently eating the rest of the file.
+    pub fn read_raw_until(&mut self, marker: &str) -> Option<String> {
+        let want: Vec<char> = marker.chars().collect();
+        let mut i = self.pos;
+        while i + want.len() <= self.chars.len() {
+            if self.chars[i..i + want.len()] == want[..] {
+                let text: String = self.chars[self.pos..i].iter().collect();
+                self.pos = i + want.len();
+                self.state = State::MidLine;
+                return Some(text);
+            }
+            i += 1;
+        }
+        None
+    }
+
     /// How far the mouth has read, as an index into the characters.
     ///
     /// The pre-lexer records this after each token so a cached stream can be
