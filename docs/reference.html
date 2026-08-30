@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">78</div>
+            <div class="stat-val">85</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -242,6 +242,13 @@
             <tr><td><code>\countdef</code></td><td>Give a count register a name, usable in every position the register itself is: assignment, <code>\advance</code> and <code>\the</code> all reach the same register through either spelling. plain.tex's <code>\pageno</code> is <code>\countdef\pageno=0</code>. The register number is 0..255 and a wider one is <code>! Bad register code (N).</code>.</td><td><pre>\countdef\pageno=0
 \pageno=7
 \advance\pageno by 1</pre></td></tr>
+            <tr><td><code>\mathcode</code></td><td>How a character is set in math mode, as a 15-bit code: class, family and position. INITEX gives a letter §7100+c, a digit §7000+c and everything else its own code, so <code>\mathcode</code>\A<code> is "7141 and </code>\mathcode<code>\+</code> is 43. Written and read like <code>\catcode</code>, and restored at the end of a group the same way.</td><td><pre>\mathcode`\x="2201</pre></td></tr>
+            <tr><td><code>\lccode</code></td><td>A character's lowercase form, which is what <code>\lowercase</code> consults. INITEX sets it for the letters and leaves it 0 for everything else -- a character with no case is not lowercased to a null, it is left alone.</td><td><pre>\lccode`\A=`\a</pre></td></tr>
+            <tr><td><code>\uccode</code></td><td>The same for uppercase, consulted by <code>\uppercase</code>. Also 0 for a character with no case.</td><td><pre>\uccode`\a=`\A</pre></td></tr>
+            <tr><td><code>\sfcode</code></td><td>The space factor a character leaves behind, which stretches the space after it. INITEX gives every character 1000 except an uppercase letter, which gets 999 -- that is what stops a sentence appearing to end at the full stops in "N.A.S.A.".</td><td><pre>\sfcode`\A=999</pre></td></tr>
+            <tr><td><code>\delcode</code></td><td>A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. INITEX gives -1 everywhere, meaning "not a delimiter", except the period, whose code is 0.</td><td><pre>\delcode`\(="161361</pre></td></tr>
+            <tr><td><code>\mathchardef</code></td><td>Define a control sequence standing for a math code, as <code>\chardef</code> does for a character code. The range runs to "7FFF and a wider value is <code>! Bad mathchar (N).</code>.</td><td><pre>\mathchardef\half="2201
+\mathcode`\y=\half</pre></td></tr>
           </tbody>
         </table>
       </section>

@@ -334,6 +334,16 @@ impl Lowerer {
                 // Compile-time: these change how the REST of the file reads.
                 "def" | "gdef" => self.eng.compile_time_def(lx, name.name())?,
                 "catcode" => self.eng.compile_time_catcode(lx)?,
+                // The other per-character tables. Like `\catcode` they change
+                // how the rest of the file reads, so they are compile-time.
+                // Named one by one rather than through a guard: the corpus
+                // gate reads the dispatch to check that everything documented
+                // is really reachable, and a guard hides the names from it.
+                "mathcode" | "lccode" | "uccode" | "sfcode" | "delcode" => {
+                    let t = crate::charcodes::Table::from_name(name.name())
+                        .expect("one of the five just matched");
+                    self.eng.compile_time_charcode(lx, t)?
+                }
                 "count" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
@@ -468,7 +478,9 @@ impl Lowerer {
                 // Both define a control sequence that stands for a number, and
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
-                "chardef" | "countdef" => self.eng.compile_time_numeric_def(lx, name.name())?,
+                "chardef" | "countdef" | "mathchardef" => {
+                    self.eng.compile_time_numeric_def(lx, name.name())?
+                }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
                     self.eng.compile_time_newcommand(lx, name.name())?
                 }
@@ -1021,6 +1033,17 @@ impl Lowerer {
                             // for, and `\the\active` is the constant itself --
                             // known already, so it is rendered here rather than
                             // asked of the run.
+                            // `\the\mathcode`\x` and its siblings read a table
+                            // the lowerer owns, so the answer is known now.
+                            Some(Token::Cs(w))
+                                if crate::charcodes::Table::from_name(w.name()).is_some() =>
+                            {
+                                let t = crate::charcodes::Table::from_name(w.name())
+                                    .expect("just matched");
+                                let v = self.eng.charcode_value(work, t)?;
+                                text.push_str(&v.to_string());
+                                continue;
+                            }
                             Some(Token::Cs(w)) => match self.eng.numeric_cs(w) {
                                 Some(crate::expand::NumericCs::Register(r)) => {
                                     out.push(MsgOp::Number(Num::Count(r)));

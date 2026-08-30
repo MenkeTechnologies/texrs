@@ -67,6 +67,13 @@
     "\\countdef"
     "\\long"
     "\\outer"
+    "\\mathcode"
+    "\\lccode"
+    "\\uccode"
+    "\\sfcode"
+    "\\delcode"
+    "\\mathchardef"
+    "\""
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -149,6 +156,13 @@
     (puthash "\\countdef" "\\countdef  —  Give a count register a name, usable in every position the register itself is: assignment, `\\advance` and `\\the` all reach the same register through either spelling. [Registers]" table)
     (puthash "\\long" "\\long  —  A definition prefix: the macro's arguments may contain `\\par`. [Macro definition]" table)
     (puthash "\\outer" "\\outer  —  A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. [Macro definition]" table)
+    (puthash "\\mathcode" "\\mathcode  —  How a character is set in math mode, as a 15-bit code: class, family and position. [Registers]" table)
+    (puthash "\\lccode" "\\lccode  —  A character's lowercase form, which is what `\\lowercase` consults. [Registers]" table)
+    (puthash "\\uccode" "\\uccode  —  The same for uppercase, consulted by `\\uppercase`. [Registers]" table)
+    (puthash "\\sfcode" "\\sfcode  —  The space factor a character leaves behind, which stretches the space after it. [Registers]" table)
+    (puthash "\\delcode" "\\delcode  —  A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. [Registers]" table)
+    (puthash "\\mathchardef" "\\mathchardef  —  Define a control sequence standing for a math code, as `\\chardef` does for a character code. [Registers]" table)
+    (puthash "\"" "\"  —  A hexadecimal constant, and `'` an octal one (tex.web \\u{a7}445). [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

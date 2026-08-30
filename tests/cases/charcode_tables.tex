@@ -1,0 +1,14 @@
+% The per-character tables besides \catcode, with the defaults TeX starts from
+% and the group scoping they share with the category codes. The constants are
+% written `+ rather than `\+ deliberately: `\+ NAMES the control sequence, and
+% plain makes \+ an \outer macro, which tex then forbids inside \message.
+% \mathcode`+ is not asked for: INITEX gives 43 and plain overrides it to "202B,
+% so it measures the format rather than the table (see plain_count0.tex).
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\lccode`\A][\the\uccode`\a][\the\sfcode`\A][\the\mathcode`\A]}
+\message{[\the\lccode`\a][\the\sfcode`+][\the\delcode`.]}
+\message{[\the\mathcode`0][\the\lccode`\Z][\the\uccode`\z]}
+\sfcode`\A=555
+{\sfcode`\A=777 \message{[\the\sfcode`\A]}}
+\message{[\the\sfcode`\A]}
+\end

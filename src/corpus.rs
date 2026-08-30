@@ -374,6 +374,48 @@ pub const CORPUS: &[Entry] = &[
         "A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. It is an error-detection feature -- plain.tex marks its sectioning macros `\\outer` so a missing brace is caught at the next section rather than at the end of the file. texrs records the prefix and does not police the restriction, so a use tex forbids is accepted here; `tests/cases/outer_forbidden_use.tex` pins the difference. Prefixes are part of the meaning, so `\\ifx` tells a prefixed definition from a bare one.",
         "\\outer\\def\\chapter{...}",
     ),
+    (
+        "\\mathcode",
+        "Registers",
+        "How a character is set in math mode, as a 15-bit code: class, family and position. INITEX gives a letter \u{a7}7100+c, a digit \u{a7}7000+c and everything else its own code, so `\\mathcode`\\A` is \"7141 and `\\mathcode`\\+` is 43. Written and read like `\\catcode`, and restored at the end of a group the same way.",
+        "\\mathcode`\\x=\"2201",
+    ),
+    (
+        "\\lccode",
+        "Registers",
+        "A character's lowercase form, which is what `\\lowercase` consults. INITEX sets it for the letters and leaves it 0 for everything else -- a character with no case is not lowercased to a null, it is left alone.",
+        "\\lccode`\\A=`\\a",
+    ),
+    (
+        "\\uccode",
+        "Registers",
+        "The same for uppercase, consulted by `\\uppercase`. Also 0 for a character with no case.",
+        "\\uccode`\\a=`\\A",
+    ),
+    (
+        "\\sfcode",
+        "Registers",
+        "The space factor a character leaves behind, which stretches the space after it. INITEX gives every character 1000 except an uppercase letter, which gets 999 -- that is what stops a sentence appearing to end at the full stops in \"N.A.S.A.\".",
+        "\\sfcode`\\A=999",
+    ),
+    (
+        "\\delcode",
+        "Registers",
+        "A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. INITEX gives -1 everywhere, meaning \"not a delimiter\", except the period, whose code is 0.",
+        "\\delcode`\\(=\"161361",
+    ),
+    (
+        "\\mathchardef",
+        "Registers",
+        "Define a control sequence standing for a math code, as `\\chardef` does for a character code. The range runs to \"7FFF and a wider value is `! Bad mathchar (N).`.",
+        "\\mathchardef\\half=\"2201\n\\mathcode`\\y=\\half",
+    ),
+    (
+        "\"",
+        "Registers",
+        "A hexadecimal constant, and `'` an octal one (tex.web \\u{a7}445). The hex digits are UPPERCASE: `\"FF` is 255 and `\"ff` is an error -- the opposite of `^^` notation, which takes lowercase. plain.tex writes every `\\mathcode` as a hexadecimal constant.",
+        "\\count1=\"FF   % 255\n\\count2='777  % 511",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

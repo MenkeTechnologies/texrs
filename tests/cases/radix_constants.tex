@@ -1,0 +1,12 @@
+% A constant may be octal or hexadecimal (tex.web §445). The hex digits are
+% UPPERCASE, which is the opposite of ^^ notation's lowercase -- so `"FF' is
+% 255 while `"ff' is an error. plain.tex writes every \mathcode this way.
+\catcode`\{=1 \catcode`\}=2
+\count1="FF
+\count2='777
+\count3="2201
+\message{[\the\count1][\the\count2][\the\count3]}
+\mathchardef\half="2201
+\mathcode`\y=\half
+\message{[\the\mathcode`\y]}
+\end

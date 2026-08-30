@@ -63,6 +63,10 @@ pub enum NumericCs {
 /// affordable; the same choice is made here.
 enum Save {
     Cat(char, Cat),
+    /// One entry of one character-code table, as it stood before a group
+    /// changed it. The tables are scoped exactly as the category codes are --
+    /// measured: 777 inside the group, 555 outside.
+    CharCode(crate::charcodes::Table, char, i64),
     Count(i64, Option<i64>),
     Meaning(CsId, Option<Meaning>),
     /// The whole intercept registry as it stood before a registration inside
@@ -92,6 +96,8 @@ pub struct Engine {
     /// Open conditionals, so `\else`/`\fi` know what they close.
     conds: Vec<CondState>,
     /// Set by `\global`, cleared by the assignment it prefixes.
+    /// `\mathcode`, `\lccode`, `\uccode`, `\sfcode`, `\delcode`.
+    pub charcodes: crate::charcodes::CharCodes,
     global: bool,
     /// Whether a `\long` prefix is in force for the definition being read.
     long: bool,
@@ -174,6 +180,7 @@ impl Engine {
             escape: '\\',
             groups: Vec::new(),
             conds: Vec::new(),
+            charcodes: crate::charcodes::CharCodes::default(),
             global: false,
             long: false,
             outer: false,
@@ -206,6 +213,9 @@ impl Engine {
         for save in frame.into_iter().rev() {
             match save {
                 Save::Cat(c, cat) => self.cats.set(c, cat),
+                Save::CharCode(t, c, v) => {
+                    let _ = self.charcodes.set(t, c, v);
+                }
                 Save::Count(reg, old) => match old {
                     Some(v) => {
                         self.count.insert(reg, v);
@@ -327,6 +337,11 @@ impl Engine {
             "begingroup" => self.begin_group(),
             "endgroup" => self.end_group()?,
             "catcode" => self.do_catcode(lx)?,
+            "mathcode" | "lccode" | "uccode" | "sfcode" | "delcode" => {
+                let t = crate::charcodes::Table::from_name(name.name())
+                    .expect("one of the five just matched");
+                self.do_charcode(lx, t)?
+            }
             "count" => self.do_count_assign(lx)?,
             "advance" => self.do_arith(lx, Arith::Add)?,
             "multiply" => self.do_arith(lx, Arith::Mul)?,
@@ -917,15 +932,21 @@ impl Engine {
         // each: `! Bad character code (256).` against `! Bad register code
         // (256).`. Measured, and worth keeping apart -- the message is how a
         // document author finds which of the two they got wrong.
-        if !(0..=255).contains(&v) {
-            let what = match kind {
-                "chardef" => "character",
-                _ => "register",
-            };
-            return Err(TexError(format!("Bad {what} code ({v})")));
+        // Each has its own limit and its own message, all measured: a mathchar
+        // runs to "7FFF and is reported as `Bad mathchar', while the other two
+        // stop at 255 and name the table they overran.
+        let (limit, what) = match kind {
+            "mathchardef" => (32767, "mathchar"),
+            "chardef" => (255, "character code"),
+            _ => (255, "register code"),
+        };
+        if !(0..=limit).contains(&v) {
+            return Err(TexError(format!("Bad {what} ({v})")));
         }
         let meaning = match kind {
-            "chardef" => Meaning::CharDef(v),
+            // A mathchar is a constant like a chardef: what differs is the
+            // range it may hold, not what it then does.
+            "chardef" | "mathchardef" => Meaning::CharDef(v),
             _ => Meaning::CountDef(v),
         };
         self.set_meaning(name, meaning);
@@ -1275,6 +1296,39 @@ impl Engine {
         Ok(())
     }
 
+    /// `\mathcode`\x=N` and its three siblings, which read and write exactly as
+    /// `\catcode` does and are scoped by a group the same way.
+    fn do_charcode(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<()> {
+        let ch = self.scan_number(lx, false)?;
+        self.skip_equals(lx)?;
+        let val = self.scan_number(lx, false)?;
+        let Some(c) = char::from_u32(ch as u32) else {
+            return Err(TexError("Invalid code".into()));
+        };
+        self.save(Save::CharCode(table, c, self.charcodes.get(table, c)));
+        self.charcodes
+            .set(table, c, val)
+            .map_err(|e| TexError(e.to_string()))
+    }
+
+    /// The same, for a caller that is lowering rather than expanding.
+    pub fn compile_time_charcode(
+        &mut self,
+        lx: &mut Lexer,
+        table: crate::charcodes::Table,
+    ) -> R<()> {
+        self.do_charcode(lx, table)
+    }
+
+    /// What one of the tables says about a character, for `\the`.
+    pub fn charcode_value(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<i64> {
+        let ch = self.scan_number(lx, false)?;
+        let Some(c) = char::from_u32(ch as u32) else {
+            return Err(TexError("Invalid code".into()));
+        };
+        Ok(self.charcodes.get(table, c))
+    }
+
     fn do_count_assign(&mut self, lx: &mut Lexer) -> R<()> {
         let reg = self.scan_number(lx, false)?;
         self.skip_equals(lx)?;
@@ -1395,6 +1449,40 @@ impl Engine {
                 return Ok(sign * self.scan_number(lx, pending_only)?);
             }
             return Err(TexError(format!("Missing number, found \\{}", name.name())));
+        }
+        // A constant may be octal or hexadecimal as well as decimal
+        // (tex.web §445). The hex digits are UPPERCASE -- the opposite of `^^`
+        // notation, which takes lowercase -- so `"FF` is 255 and `"ff` is an
+        // error. Measured against tex -ini, not assumed from the symmetry.
+        let radix = match &cur {
+            Token::Char('\'', _) => Some(8u32),
+            Token::Char('"', _) => Some(16u32),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            let ok = |c: char| match radix {
+                8 => ('0'..='7').contains(&c),
+                _ => c.is_ascii_digit() || ('A'..='F').contains(&c),
+            };
+            let mut digits = String::new();
+            while let Some(t) = self.take(lx, pending_only) {
+                match &t {
+                    Token::Char(c, _) if ok(*c) => digits.push(*c),
+                    other if other.is_space() && !digits.is_empty() => break,
+                    other => {
+                        lx.push_back(std::slice::from_ref(other));
+                        break;
+                    }
+                }
+            }
+            if digits.is_empty() {
+                return Err(TexError("Missing number, treated as zero".into()));
+            }
+            const INFINITY: i64 = 2147483647;
+            return match i64::from_str_radix(&digits, radix) {
+                Ok(n) if n <= INFINITY => Ok(sign * n),
+                _ => Err(TexError("Number too big".into())),
+            };
         }
         let mut digits = String::new();
         loop {

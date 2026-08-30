@@ -21,6 +21,7 @@ pub mod bstvm;
 pub mod bundle;
 pub mod catcode;
 pub mod cff;
+pub mod charcodes;
 pub mod cli;
 pub mod compiler;
 pub mod corpus;

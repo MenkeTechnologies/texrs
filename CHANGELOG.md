@@ -8,6 +8,18 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The per-character tables besides `\catcode`: `\mathcode`, `\lccode`,
+  `\uccode`, `\sfcode` and `\delcode`, read and written the same way and scoped
+  by a group the same way. INITEX's defaults are measured against `tex -ini`,
+  which is the only correct oracle for a default — plain `tex` has loaded a
+  format that changes several of them.
+- Octal and hexadecimal constants (`'777`, `"FF`). The hex digits are
+  UPPERCASE, the opposite of `^^` notation's lowercase, so `"FF` is 255 and
+  `"ff` is an error — measured, not inferred from the symmetry. plain.tex
+  writes every `\mathcode` as a hexadecimal constant, so nothing above worked
+  without this.
+- `\mathchardef`, which is `\chardef` with a wider range (to "7FFF) and its own
+  message, `! Bad mathchar (N).`.
 - The four fontspec family directives in the reference. `\setmainfont`,
   `\setromanfont`, `\setsansfont` and `\setmonofont` were dispatched but
   documented nowhere, so editor completion did not offer them and the reference
