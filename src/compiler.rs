@@ -30,6 +30,10 @@ pub mod ops {
     /// `\multiply` / `\divide` under TeX's overflow rule: the old value, the
     /// operand, and 0 for multiply or 1 for divide.
     pub const ARITH_CHECKED: u16 = 4006;
+    /// Close an `\input` file: append `)` to the message already recorded,
+    /// rather than record one, because tex writes the paren hard against what
+    /// came before it while the stream is joined with spaces. No arguments.
+    pub const MSG_CLOSE: u16 = 4007;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -181,6 +185,10 @@ impl Compiler {
                 let k = self.str_const(t)?;
                 self.b.emit(Op::LoadConst(k), self.line);
                 self.b.emit(Op::CallBuiltin(ops::TEXT, 1), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::FileClose => {
+                self.b.emit(Op::CallBuiltin(ops::MSG_CLOSE, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Message(msg) => {

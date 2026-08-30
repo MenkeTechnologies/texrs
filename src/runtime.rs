@@ -157,6 +157,22 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     }
 }
 
+/// Close an `\input` file: append `)` to the message already written.
+///
+/// Not a message of its own, because the stream is joined with spaces and tex
+/// writes the paren hard against what came before it. With nothing written yet
+/// the open paren IS the last message, so an empty file closes correctly too.
+fn b_msg_close(_vm: &mut VM, _argc: u8) -> Value {
+    MESSAGES.with(|m| {
+        let mut m = m.borrow_mut();
+        match m.last_mut() {
+            Some(last) => last.push(')'),
+            None => m.push(")".to_string()),
+        }
+    });
+    Value::Int(0)
+}
+
 /// Install the `\message` builtins on `vm`.
 ///
 /// Shared by the interpreted path and the AOT runtime hook: a compiled document
@@ -166,6 +182,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::TEXT, b_text);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);

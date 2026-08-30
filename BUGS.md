@@ -29,9 +29,11 @@ passing, so the list is a claim the harness enforces rather than a note.
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
 - **`\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`, `\meaning`,
-  `\jobname`, `\input`.** Each stops the run with `! Undefined control
-  sequence`. `\futurelet` was on this list and is no longer missing: it is in
+  `\jobname`.** Each stops the run with `! Undefined control sequence`.
+  `\futurelet` was on this list and is no longer missing: it is in
   `src/expand.rs`, documented in the corpus, and pinned by `tests/futurelet.rs`.
+  So was `\input`, which is now in `src/lower.rs` and pinned differentially by
+  `tests/input.rs` — see "Finding files" below for what it does differently.
 - **`#{` parameter text.** A parameter delimited by the left brace, which tex
   then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs
   refuses the definition. Until `cargo fuzz run lower` found it, the argument
@@ -84,6 +86,25 @@ passing, so the list is a claim the harness enforces rather than a note.
   store this milestone has. texrs takes them from the top (255 downward), so a
   document that both uses `\edef` and reads a high register can see a value real
   tex would not put there. Low registers are untouched.
+
+## Finding files
+
+`\input` reads a file, and TeX finds one through kpathsea: a search path built
+from `texmf.cnf`, the TEXMF trees and `TEXINPUTS`. texrs searches the working
+directory and then `TEXINPUTS`, and deliberately does NOT shell out to
+`kpsewhich` — a document that runs today would otherwise stop running on a
+machine with no TeX Live installed, which is the opposite of what a
+self-contained engine is for.
+
+The consequence to know: `\input plain` finds nothing unless the TeX tree is on
+`TEXINPUTS`, while `\input chapter1` beside the document always works. Fifteen
+text input levels are allowed counting the document's own, which is tex's own
+limit, reported in tex's own words (`! TeX capacity exceeded, sorry [text input
+levels=15].`) — measured, not assumed.
+
+A file that cannot be found stops the run naming it, where tex prompts for a
+replacement. That is the error model recorded under "Not implemented" rather
+than anything specific to files.
 
 ## Inline Rust
 

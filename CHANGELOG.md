@@ -6,6 +6,19 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `\input FILE`, which reads another file sharing every piece of state with it,
+  so a macro it defines is defined afterwards and a `\catcode` it sets stays
+  set. The name is scanned per `tex.web` §537 and `.tex` supplied when it has no
+  extension; the file gets its own nested paren group in the terminal output,
+  closed hard against the last message the way tex writes it. Files are found in
+  the working directory and on `TEXINPUTS` — never via `kpsewhich`, so a
+  document does not need TeX Live installed to run. Fifteen text input levels
+  are allowed, tex's own limit and wording. Until this existed no real document
+  could run at all, because a real document's first line loads a format or a
+  package. `tests/input.rs` compares all of it against real tex.
+
 ### Fixed
 
 - A numeric constant is limited to TeX's 2147483647, not the host `i64`. The

@@ -40,6 +40,9 @@ pub struct Lowerer {
     /// turns it on for a caller who wants what the document SAYS rather than
     /// what it announced.
     text_output: bool,
+    /// How many `\input` files are open above this one, so a file that inputs
+    /// itself stops with a diagnostic instead of exhausting the host stack.
+    input_depth: usize,
     /// How deep `block` is currently nested.
     ///
     /// Lowering inlines a macro into the stream and lowers through its body, and
@@ -70,6 +73,7 @@ const MAX_LOWER_DEPTH: usize = 100;
 impl Lowerer {
     pub fn new() -> Self {
         Self {
+            input_depth: 0,
             eng: Engine::new(),
             ended: false,
             next_scratch: 255,
@@ -326,6 +330,26 @@ impl Lowerer {
                 "message" => {
                     let parts = self.message_parts(lx)?;
                     out.push(Cmd::Message(parts));
+                }
+                // `\input FILE` reads another file HERE, sharing every piece of
+                // state: a macro it defines is defined afterwards, a `\catcode`
+                // it sets stays set. That is the whole point of it -- a real
+                // document's first line loads a format or a package, and until
+                // this existed no real document could run at all.
+                "input" => {
+                    let name = self.scan_file_name(lx)?;
+                    let (shown, src) = self.open_input(&name)?;
+                    out.push(Cmd::Message(vec![MsgOp::Text(format!("({shown}"))]));
+                    self.input_depth += 1;
+                    let inner = self.input_pass(&src);
+                    self.input_depth -= 1;
+                    out.extend(inner?);
+                    out.push(Cmd::FileClose);
+                    // `\end` inside the file stops the whole run, not just the
+                    // file: tex closes every open paren and finishes.
+                    if self.ended {
+                        break;
+                    }
                 }
                 // `\rustcompile <base64>\endrust`, which is what a `\rust{ … }`
                 // block desugared to before the mouth ever read the file.
@@ -1081,15 +1105,102 @@ const VERBATIM_ENVIRONMENTS: &[&str] = &[
     "filecontents*",
 ];
 
+impl Lowerer {
+    /// The file name after `\input`, per `tex.web` §537: leading spaces are
+    /// skipped and the name runs to the first space or end of line.
+    ///
+    /// A control sequence ends it too and is put back — `\input foo\relax` names
+    /// `foo`.
+    fn scan_file_name(&mut self, lx: &mut Lexer) -> R<String> {
+        let mut name = String::new();
+        while let Some(t) = lx.next_token(&self.eng.cats) {
+            match &t {
+                t if t.is_space() => {
+                    if name.is_empty() {
+                        continue;
+                    }
+                    break;
+                }
+                Token::Char(c, _) => name.push(*c),
+                Token::Cs(_) => {
+                    lx.push_back(std::slice::from_ref(&t));
+                    break;
+                }
+            }
+        }
+        match name.is_empty() {
+            true => Err(TexError("Missing file name".into())),
+            false => Ok(name),
+        }
+    }
+
+    /// Find `name`, read it, and say what to print for it.
+    ///
+    /// TeX resolves a file name through kpathsea; texrs searches the working
+    /// directory and then `TEXINPUTS`, and deliberately does NOT shell out to
+    /// `kpsewhich` — that would make running a document depend on a TeX Live
+    /// installation. `.tex` is supplied when the name carries no extension, as
+    /// tex does.
+    fn open_input(&self, name: &str) -> R<(String, String)> {
+        // tex's own bound, measured: a file that inputs itself opens 14 more
+        // levels above the document's own and refuses the 15th with
+        // `! TeX capacity exceeded, sorry [text input levels=15].`. Matching
+        // the number AND the wording makes a runaway `\\input` agree with tex
+        // rather than merely stopping, and it keeps the lowerer -- which
+        // recurses on the host stack for a nested file -- inside a bound it can
+        // survive.
+        const MAX_LEVELS: usize = 15;
+        if self.input_depth + 1 >= MAX_LEVELS {
+            return Err(TexError(format!(
+                "TeX capacity exceeded, sorry [text input levels={MAX_LEVELS}]"
+            )));
+        }
+        let candidates = match std::path::Path::new(name).extension().is_some() {
+            true => vec![name.to_string()],
+            false => vec![format!("{name}.tex"), name.to_string()],
+        };
+        let mut dirs = vec![std::path::PathBuf::from(".")];
+        if let Ok(paths) = std::env::var("TEXINPUTS") {
+            dirs.extend(std::env::split_paths(&paths));
+        }
+        for dir in &dirs {
+            for cand in &candidates {
+                let full = dir.join(cand);
+                if let Ok(src) = std::fs::read_to_string(&full) {
+                    // tex prints the path it opened, and writes the working
+                    // directory as `./` rather than as nothing.
+                    let shown = match full.strip_prefix(".") {
+                        Ok(rest) => format!("./{}", rest.display()),
+                        Err(_) => full.display().to_string(),
+                    };
+                    return Ok((shown, src));
+                }
+            }
+        }
+        Err(TexError(format!("I can't find file `{name}'")))
+    }
+
+    /// Lower an `\input` file into the stream, sharing the Lowerer's state.
+    ///
+    /// The same nested pass `preload` runs for the LaTeX prelude, except that
+    /// the commands are kept: a preload only wants the definitions, while an
+    /// `\input` file can also print.
+    fn input_pass(&mut self, src: &str) -> R<Vec<Cmd>> {
+        let mut lx = Lexer::new(src);
+        self.block(&mut lx, None)
+    }
+}
+
 /// Every count register a command block assigns, so a group knows what to save.
 fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     let mut regs = Vec::new();
     fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
         for c in cmds {
             match c {
-                // A line directive, a run of the document's text and a
-                // `\rust{ … }` compile all write no register.
-                Cmd::Line(_) | Cmd::Text(_) | Cmd::RustCompile(_) => {}
+                // A line directive, a run of the document's text, a
+                // `\rust{ … }` compile and a file's closing paren all write no
+                // register.
+                Cmd::Line(_) | Cmd::Text(_) | Cmd::RustCompile(_) | Cmd::FileClose => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

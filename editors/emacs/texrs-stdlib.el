@@ -63,6 +63,7 @@
     "\\divide"
     "\\intercept"
     "\\proceed"
+    "\\input"
     "\\rust"
     "\\rustcall"
     "\\rustcompile"
@@ -136,6 +137,7 @@
     (puthash "\\divide" "\\divide  —  Divide a register, truncating toward zero as TeX's does. [Registers]" table)
     (puthash "\\intercept" "\\intercept  —  Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. [Intercepts]" table)
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
+    (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)
     (puthash "\\rustcompile" "\\rustcompile  —  What a `\\rust{ … }` block becomes: compile and register the block whose base64 body follows, up to `\\endrust`. [Inline Rust]" table)

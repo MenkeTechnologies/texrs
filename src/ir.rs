@@ -99,6 +99,15 @@ pub enum Cmd {
     Text(String),
     /// `\message{...}` — built piece by piece at run time.
     Message(Vec<MsgOp>),
+    /// The `)` that closes an `\input` file, attached to the message before it.
+    ///
+    /// tex writes `(./inner.tex [msg])` with no space in front of the paren,
+    /// while it puts one before every message. The message stream here is a list
+    /// joined by spaces, so the paren cannot be a message of its own -- it has to
+    /// be appended to the one already there, which is what this asks the runtime
+    /// to do. A file that printed nothing closes its own open paren the same way,
+    /// giving `(./inner.tex)`.
+    FileClose,
     /// A group: the listed count registers are saved on entry and restored on
     /// exit, which is what `{\count0=99}` needs and the macro table alone
     /// cannot give — a register lives in a VM slot, not in the frontend.
@@ -163,6 +172,7 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
             }
             Cmd::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
+            Cmd::FileClose => out.push_str(&format!("{pad}FileClose\n")),
             Cmd::Message(ops) => {
                 out.push_str(&format!("{pad}Message\n"));
                 render_msg(ops, depth + 1, out);

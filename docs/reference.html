@@ -81,11 +81,11 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">69</div>
+            <div class="stat-val">70</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">9</div>
+            <div class="stat-val">10</div>
             <div class="stat-label">Chapters</div>
           </div>
           <div class="stat-card">
@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">46</div>
+            <div class="stat-val">51</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -291,6 +291,17 @@
         </table>
       </section>
 
+      <section class="tutorial-section" id="ch-files">
+        <h2>Files</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\input</code></td><td>Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a <code>\catcode</code> it sets stays set. The name runs to the first space or end of line (tex.web §537) and <code>.tex</code> is supplied when it carries no extension. texrs searches the working directory and then <code>TEXINPUTS</code>, and does not shell out to <code>kpsewhich</code>, so running a document never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.</td><td><pre>\input macros
+\input chapters/one.tex</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
       <section class="tutorial-section" id="ch-latex">
         <h2>LaTeX</h2>
         <table class="file-table">
@@ -366,6 +377,7 @@
             <tr><td><code>FFI_CALL</code></td><td><code>4004</code></td><td>Call a function a block exported: the name, then its arguments.</td></tr>
             <tr><td><code>TEXT</code></td><td><code>4005</code></td><td>Append a run of the document's own text.</td></tr>
             <tr><td><code>ARITH_CHECKED</code></td><td><code>4006</code></td><td>`\multiply` / `\divide` under TeX's overflow rule: the old value, the operand, and 0 for multiply or 1 for divide.</td></tr>
+            <tr><td><code>MSG_CLOSE</code></td><td><code>4007</code></td><td>Close an `\input` file: append `)` to the message already recorded, rather than record one, because tex writes the paren hard against what came before it while the stream is joined with spaces. No arguments.</td></tr>
           </tbody>
         </table>
       </section>
@@ -404,6 +416,7 @@
             <tr><td><code>def_in_conditional_arm.tex</code></td><td>A `\def' inside an arm of a RUN-TIME conditional is executed while lowering, and lowering emits both arms because neither is decided yet -- so the else arm's definition overwrites the then arm's and the losing branch wins. tex interprets and runs only the arm it took: it prints `&lt;a&gt;' where texrs prints `[a]'. This is a miscompile rather than a refusal, which is what makes it worth a case: nothing errors, the answer is just wrong. It blocks LaTeX's `\newcommand{\x}[n]{...}', whose argument-count dispatch is exactly a chain of `\ifnum...\def...\else'. Fixing it needs the macro table to be run-time state, or the conditional to be decidable while lowering; neither is a small change.</td></tr>
             <tr><td><code>cond_ifcase_negative.tex</code></td><td>A NEGATIVE `\ifcase' selector takes case 0 instead of the `\else' branch. tex.web 509 skips n cases and takes the (n+1)th, so a selector below zero or past the last `\or' matches nothing and `\else' runs; do_ifcase counts down with `while remaining &gt; 0', which a negative n never enters, so it falls straight through to case 0. tex prints DEFAULT where texrs prints ZERO. Like def_in_conditional_arm.tex this is a wrong answer rather than a refusal: nothing errors. Found by writing the reference manual's conditionals chapter.</td></tr>
             <tr><td><code>multiply_overflow.tex</code></td><td>Both engines raise `Arithmetic overflow` for a \multiply past the 32-bit range and leave the register alone -- the divergence is what happens NEXT. tex reports and carries on, so it still prints the message; texrs stops, which is the error model recorded above ("Errors"). Fixing the recovery fixes this case; the arithmetic itself already matches.</td></tr>
+            <tr><td><code>number_too_big.tex</code></td><td>Both engines reject a constant above 2147483647 with `Number too big` (tex.web §445); the divergence is the recovery, exactly as in multiply_overflow.tex. tex clamps to 2147483647 and carries on, so it still prints the message; texrs stops. The limit and the rejection point already match -- before this case, texrs checked only for i64 overflow and accepted 99999999999 outright.</td></tr>
           </tbody>
         </table>
       </section>
@@ -445,6 +458,7 @@
             <tr><td><code>--jobs=N</code></td><td>Compile N documents at once (default: one per core)</td></tr>
             <tr><td><code>--build</code></td><td>Compile into the bytecode cache and stop, without running</td></tr>
             <tr><td><code>--text</code></td><td>Print the document text, not only the message stream</td></tr>
+            <tr><td><code>--dvi</code></td><td>Typeset to FILE.dvi -- first-fit lines, no hyphenation</td></tr>
             <tr><td><code>--no-cache</code></td><td>Compile this run rather than reading the bytecode cache</td></tr>
             <tr><td><code>--aot</code></td><td>Compile the document to a standalone native executable</td></tr>
           </tbody>
@@ -509,6 +523,10 @@
             <tr><td><code>-X vf FILE.vf [C]</code></td><td>Read a virtual font: what it really sets</td></tr>
             <tr><td><code>-X pk FILE.pk [C]</code></td><td>Read a packed bitmap font, and draw a character</td></tr>
             <tr><td><code>-X otf FILE.otf [C]</code></td><td>Read an OpenType font: its tables and its cmap</td></tr>
+            <tr><td><code>-X pfb FILE.pfb [C]</code></td><td>Read a Type 1 font: its glyphs and their widths</td></tr>
+            <tr><td><code>-X map FILE.map [NAME]</code></td><td>Read a font map: what a TeX font name means</td></tr>
+            <tr><td><code>-X enc FILE.enc</code></td><td>Read an encoding: what each code is called</td></tr>
+            <tr><td><code>-X itar FILE.tar [NAME]</code></td><td>Index a tar bundle, or read one file out of it</td></tr>
             <tr><td><code>--profile NAME</code></td><td>Which output to build</td></tr>
             <tr><td><code>--interval MS</code></td><td>How often -X watch looks (default 250)</td></tr>
           </tbody>

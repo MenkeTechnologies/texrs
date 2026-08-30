@@ -38,6 +38,7 @@ pub const CHAPTERS: &[&str] = &[
     "Grouping",
     "Intercepts",
     "Inline Rust",
+    "Files",
     "LaTeX",
 ];
 
@@ -348,6 +349,13 @@ pub const CORPUS: &[Entry] = &[
         "Intercepts",
         "Inside an `around` handler, what the intercepted macro would have expanded to. A handler with no `\\proceed` replaces the call outright, which is how advice suppresses one. Outside an `around` handler it means nothing.",
         "\\def\\loud{<<\\proceed>>}\n\\intercept{around}{greet}{\\loud}\n\\message{\\greet{WORLD}}   % => <<HELLO-WORLD>>",
+    ),
+    // ══ Files — lower::open_input ═════════════════════════════════════════
+    (
+        "\\input",
+        "Files",
+        "Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. The name runs to the first space or end of line (tex.web \u{a7}537) and `.tex` is supplied when it carries no extension. texrs searches the working directory and then `TEXINPUTS`, and does not shell out to `kpsewhich`, so running a document never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.",
+        "\\input macros\n\\input chapters/one.tex",
     ),
     // ══ Inline Rust — rust_ffi.rs, fusevm::ffi ════════════════════════════
     (
