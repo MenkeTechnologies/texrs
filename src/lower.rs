@@ -21,6 +21,14 @@ type R<T> = Result<T, TexError>;
 
 pub struct Lowerer {
     pub eng: Engine,
+    /// Whether an `\end` in the source stopped the run.
+    ///
+    /// tex closes the file's paren differently depending on this: `\end` inside
+    /// the file prints `(./doc.tex MSGS )` and stops reading, while a file that
+    /// merely runs out prints `(./doc.tex MSGS)` and keeps reading — from the
+    /// command line, if there is more there. `src/main.rs` needs to know which
+    /// happened; nothing else does.
+    pub ended: bool,
     /// Next hidden count register. `\edef` freezing `\the\count0` needs somewhere
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
@@ -59,6 +67,21 @@ impl Lowerer {
             next_scratch: 255,
             depth: 0,
         }
+    }
+
+    /// Where the hidden scratch registers have got to.
+    ///
+    /// A format (`crate::format`) captures the engine after a preamble and
+    /// applies it to a later run, and the scratch counter has to travel with
+    /// it: a body that started again from 255 would write over a value the
+    /// preamble's `\edef` had already frozen there.
+    pub fn scratch_mark(&self) -> i64 {
+        self.next_scratch
+    }
+
+    /// Resume the scratch counter where a captured format left it.
+    pub fn set_scratch_mark(&mut self, at: i64) {
+        self.next_scratch = at;
     }
 
     /// Compile a whole source to a command stream.
@@ -158,7 +181,10 @@ impl Lowerer {
                 }
             }
             match name.name() {
-                "end" => break,
+                "end" => {
+                    self.ended = true;
+                    break;
+                }
                 // Compile-time: these change how the REST of the file reads.
                 "def" | "gdef" => self.eng.compile_time_def(lx, name.name())?,
                 "catcode" => self.eng.compile_time_catcode(lx)?,

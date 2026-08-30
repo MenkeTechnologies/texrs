@@ -96,6 +96,24 @@ type = "messages"
 .fi
 .RE
 .PP
+A
+.B preamble
+key names files read before the inputs and kept as a FORMAT: a macro file is
+compiled once and every later build starts from what it left, which is what
+.BR tex (1)
+does with
+.B \edump
+and why LaTeX starts in milliseconds rather than seconds.  A preamble may only
+DEFINE \(em category codes, macros,
+.B \elet
+\(em because a format holds state and has nowhere to keep work.  One that does
+something (a
+.BR \emessage ,
+a
+.B \ecount
+assignment) is not made into a format and the document is compiled whole
+instead, since dropping what it did would change what the document means.
+.PP
 The inputs are read in order and compiled as one document, and what each of them
 hashed to is recorded, so a build says exactly what it read. An output
 .B type

@@ -77,6 +77,15 @@ pub struct Output {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DocSection {
     pub name: String,
+    /// Files read before the inputs and dumped as a format: a macro file
+    /// compiles once and every later build starts from what it left.
+    ///
+    /// A preamble may only DEFINE. If lowering it produces run-time commands —
+    /// a `\message`, a `\count` assignment — there is nothing in a format to
+    /// put them in, so the build compiles the whole document instead and says
+    /// so. Silently dropping them would be the worst of the three.
+    #[serde(default)]
+    pub preamble: Vec<String>,
     /// The files that make up the document, in the order they are read.
     #[serde(default = "default_inputs")]
     pub inputs: Vec<String>,
@@ -208,12 +217,36 @@ impl Document {
         }
     }
 
+    /// Where the format for `digests` lives: one file per distinct preamble,
+    /// beside the bytecode cache.
+    fn format_path(&self, digests: &[String]) -> Option<PathBuf> {
+        let key = crate::script_cache::document_key(digests, "preamble");
+        let cache = crate::script_cache::default_cache_path();
+        let dir = cache.parent()?.join("formats");
+        Some(dir.join(format!("{}.fmt", key.trim_start_matches("doc:"))))
+    }
+
     /// Read every input in order, and say what was read.
     ///
     /// The inputs are concatenated with a newline between them, because a file
     /// that does not end in one would otherwise join the next file's first line
     /// — and in TeX that changes what the line means.
     pub fn assemble(&self) -> Result<(String, Vec<crate::io::InputRecord>), String> {
+        self.read(&self.file.doc.inputs)
+    }
+
+    /// The preamble's sources, if the document has one.
+    pub fn assemble_preamble(
+        &self,
+    ) -> Result<Option<(String, Vec<crate::io::InputRecord>)>, String> {
+        if self.file.doc.preamble.is_empty() {
+            return Ok(None);
+        }
+        self.read(&self.file.doc.preamble).map(Some)
+    }
+
+    /// Read `names` in order through the provider stack.
+    fn read(&self, names: &[String]) -> Result<(String, Vec<crate::io::InputRecord>), String> {
         let mut roots = vec![self.src_dir.clone()];
         roots.extend(self.file.doc.extra_paths.iter().map(|p| {
             if p.is_absolute() {
@@ -226,7 +259,7 @@ impl Document {
         stack.push(Box::new(crate::io::FilesystemProvider::with_roots(roots)));
 
         let mut source = String::new();
-        for name in &self.file.doc.inputs {
+        for name in names {
             match stack.input_open(name) {
                 OpenResult::Ok(input) => {
                     source.push_str(&input.content);
@@ -358,7 +391,7 @@ impl Document {
         let chunk = match crate::script_cache::try_load_keyed(&key) {
             Some(chunk) => chunk,
             None => {
-                let chunk = crate::compile(source).map_err(|e| e.0)?;
+                let chunk = self.compile_with_format(source)?;
                 crate::script_cache::store_keyed(&key, &chunk);
                 chunk
             }
@@ -369,6 +402,58 @@ impl Document {
             // front of it is what the cache saved.
             _ => Ok(crate::runtime::run(chunk)?.join(" ")),
         }
+    }
+}
+
+impl Document {
+    /// Compile `source`, starting from the document's format when it has one.
+    ///
+    /// The preamble is lowered once and what it left is dumped; every later
+    /// build applies the dump instead of reading the macro file again. That is
+    /// what a TeX format is for, and it is why LaTeX starts in milliseconds
+    /// rather than seconds.
+    ///
+    /// A preamble that produces run-time commands cannot be a format — there is
+    /// nowhere in one to keep them — so the document is compiled whole instead.
+    /// Dropping them would change what the document means.
+    pub fn compile_with_format(&self, source: &str) -> Result<fusevm::Chunk, String> {
+        let Some((preamble_source, preamble_inputs)) = self.assemble_preamble()? else {
+            return crate::compile(source).map_err(|e| e.0);
+        };
+        let digests: Vec<String> = preamble_inputs.iter().map(|r| r.digest.clone()).collect();
+        let path = self.format_path(&digests);
+
+        let mut lowerer = crate::lower::Lowerer::new();
+        let loaded = path
+            .as_deref()
+            .and_then(crate::format::Format::load)
+            .map(|format| {
+                let mark = format.apply(&mut lowerer.eng);
+                lowerer.set_scratch_mark(mark);
+            })
+            .is_some();
+
+        if !loaded {
+            let commands = lowerer
+                .lower(&preamble_source)
+                .map_err(|e| format!("preamble: {}", e.0))?;
+            if !commands.is_empty() {
+                // It does something, so it is not a preamble: compile the whole
+                // document, which is what the document means.
+                let whole = format!("{preamble_source}{source}");
+                return crate::compile(&whole).map_err(|e| e.0);
+            }
+            if let Some(path) = &path {
+                let mark = lowerer.scratch_mark();
+                let format = crate::format::Format::capture(&lowerer.eng, mark);
+                // A format that cannot be written costs a compile next time
+                // and nothing else.
+                let _ = format.save(path);
+            }
+        }
+
+        let commands = lowerer.lower(source).map_err(|e| e.0)?;
+        Ok(crate::compiler::Compiler::new().compile(&commands))
     }
 }
 
@@ -662,6 +747,81 @@ mod tests {
         // Each profile writes its own file, so one does not overwrite another.
         assert_ne!(built.path, tokens.path);
         assert_ne!(tokens.path, disasm.path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_preamble_is_compiled_once_and_applied_from_the_format_after() {
+        let dir = scratch("format");
+        std::fs::write(
+            dir.join("macros.tex"),
+            "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n\\def\\greet#1{HELLO-#1}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("index.tex"), "\\message{\\greet{WORLD}}\n\\end\n").unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"f\"\npreamble=[\"macros.tex\"]\ninputs=[\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+
+        // The body alone would not compile: the macro and the catcodes it
+        // needs are in the preamble.
+        assert!(crate::compile("\\message{\\greet{WORLD}}\n\\end\n").is_err());
+
+        let built = doc.build(None).expect("builds with the preamble");
+        assert_eq!(
+            std::fs::read_to_string(&built.path).unwrap().trim(),
+            "HELLO-WORLD"
+        );
+
+        // The format was written, and a second build gives the same answer
+        // through it rather than by reading the macro file again.
+        let (_, preamble_inputs) = doc.assemble_preamble().unwrap().unwrap();
+        let digests: Vec<String> = preamble_inputs.iter().map(|r| r.digest.clone()).collect();
+        let format_path = doc.format_path(&digests).expect("a cache directory");
+        assert!(
+            format_path.is_file(),
+            "the format was dumped: {format_path:?}"
+        );
+        assert!(crate::format::Format::load(&format_path).is_some());
+
+        let again = doc.dump(None).expect("builds from the format");
+        assert_eq!(again.trim(), "HELLO-WORLD");
+        let _ = std::fs::remove_file(&format_path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_preamble_that_does_something_is_not_made_into_a_format() {
+        let dir = scratch("format_runtime");
+        // `\message` is work, not a definition: it cannot live in a format.
+        std::fs::write(
+            dir.join("macros.tex"),
+            "\\catcode`\\{=1 \\catcode`\\}=2\n\\message{FROM-PREAMBLE}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("index.tex"), "\\message{FROM-BODY}\n\\end\n").unwrap();
+        let doc = Document::parse(
+            &dir,
+            "[doc]\nname=\"r\"\npreamble=[\"macros.tex\"]\ninputs=[\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+
+        // What the preamble does still happens: the document is compiled whole
+        // rather than having its first half dropped into a format that cannot
+        // hold it.
+        let built = doc.build(None).expect("builds");
+        let output = std::fs::read_to_string(&built.path).unwrap();
+        assert!(output.contains("FROM-PREAMBLE"), "{output}");
+        assert!(output.contains("FROM-BODY"), "{output}");
+
+        let (_, inputs) = doc.assemble_preamble().unwrap().unwrap();
+        let digests: Vec<String> = inputs.iter().map(|r| r.digest.clone()).collect();
+        let path = doc.format_path(&digests).expect("a cache directory");
+        assert!(!path.exists(), "and nothing was dumped: {path:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
