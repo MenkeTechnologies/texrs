@@ -273,6 +273,17 @@ fn a_font_carried_in_the_file_is_one_a_reader_accepts() {
             columns.contains(&"yes"),
             "the font is not embedded: {line:?}"
         );
+        // pdffonts' `uni` column says whether the file tells a reader what
+        // each code MEANS rather than only which glyph to draw. It is `no`
+        // without a ToUnicode map, and `no` again if the map's values are
+        // malformed -- writing the codepoints three hex digits wide turns it
+        // back off -- so this is the reader saying it read the map.
+        let uni = columns.get(columns.len() - 3);
+        assert_eq!(
+            uni,
+            Some(&"yes"),
+            "the font carries no usable ToUnicode map: {line:?}"
+        );
     }
 
     // What the text comes back as, through two engines that share no code:
@@ -359,4 +370,46 @@ fn the_widths_and_the_encoding_are_the_fonts_own() {
     }
     // Symbolic, because a TeX font is in none of the standard encodings.
     assert!(text.contains("/Flags 4"), "the font is not marked symbolic");
+}
+
+/// Text set through a ligature comes back as the letters it stands for.
+///
+/// A TeX font puts `ff` at code 11, where nobody else has a printable
+/// character at all. Copying that out of a PDF means knowing that the glyph
+/// called `ff` is two f's, which is what the ToUnicode map written beside the
+/// font says.
+#[test]
+fn a_ligature_extracts_as_the_letters_it_stands_for() {
+    let Ok(found) = Command::new("kpsewhich").arg("cmr10.pfb").output() else {
+        return;
+    };
+    let pfb = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if pfb.is_empty() {
+        return;
+    }
+    let cmr10 = texrs::type1::Type1::open(&pfb).expect("the font reads");
+
+    let dir = scratch("ligature");
+    let mut page = Page::letter();
+    // As TeX sets it: o, the ff ligature, i, c, e.
+    page.text_in(
+        Font::Embedded(Box::new(cmr10)),
+        24.0,
+        72.0,
+        700.0,
+        "o\u{b}ice",
+    );
+    let path = write(&dir, &[page]);
+
+    if let Some(text) = extracted(&path) {
+        let word: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        // Either spelling is right: the map says U+FB00, and a reader may hand
+        // that back or the two letters it stands for.
+        assert!(
+            word.starts_with("office") || word.starts_with("o\u{fb00}ice"),
+            "the ligature came out as {word:?}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

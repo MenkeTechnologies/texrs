@@ -628,12 +628,44 @@ impl Engine {
     // ── definitions ──────────────────────────────────────────────────────
 
     /// `\def`, `\gdef`, `\edef`, `\xdef` — the last two expand the body now.
+    /// The control sequence an ACTIVE CHARACTER stands for.
+    ///
+    /// An active `~` and the control sequence `\~` are different things in TeX
+    /// -- `\def~{[a]}\def\~{[b]}` gives `[a][b]`, measured -- so they cannot
+    /// share a name. A name the lexer produces is either a run of letters or
+    /// exactly one character, so `active:~` is a name no source can spell, and
+    /// interning under it keeps the two apart with no second table.
+    pub fn active_cs(c: char) -> CsId {
+        CsId::intern(&format!("active:{c}"))
+    }
+
+    /// The control sequence an active character stands for, if it HAS a
+    /// meaning.
+    ///
+    /// One with no meaning is left alone rather than reported: an undefined
+    /// control sequence is not an error in this engine either (see BUGS.md), so
+    /// an undefined active character behaves the same way instead of being the
+    /// one construct that stops a run.
+    pub fn active_meaning(&self, c: char) -> Option<CsId> {
+        let id = Self::active_cs(c);
+        self.meanings.contains_key(&id).then_some(id)
+    }
+
+    /// The token a definition names: a control sequence, or an active
+    /// character, which TeX's `get_r_token` accepts in the same position
+    /// (`tex.web` §1215).
+    fn scan_defined_name(&mut self, lx: &mut Lexer) -> R<CsId> {
+        match lx.next_token(&self.cats) {
+            Some(Token::Cs(name)) => Ok(name),
+            Some(Token::Char(c, Cat::Active)) => Ok(Self::active_cs(c)),
+            _ => Err(TexError("Missing control sequence inserted".into())),
+        }
+    }
+
     fn do_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
         let global = matches!(kind, "gdef" | "xdef") || self.global;
         let expand_body = matches!(kind, "edef" | "xdef");
-        let Some(Token::Cs(name)) = lx.next_token(&self.cats) else {
-            return Err(TexError("Missing control sequence inserted".into()));
-        };
+        let name = self.scan_defined_name(lx)?;
         let mut params = Vec::new();
         loop {
             let Some(t) = lx.next_token(&self.cats) else {
@@ -924,9 +956,7 @@ impl Engine {
     }
 
     fn do_let(&mut self, lx: &mut Lexer) -> R<()> {
-        let Some(Token::Cs(name)) = lx.next_token(&self.cats) else {
-            return Err(TexError("Missing control sequence inserted".into()));
-        };
+        let name = self.scan_defined_name(lx)?;
         // An optional `=` and one optional space, then the source token.
         let mut src = None;
         while let Some(t) = lx.next_token(&self.cats) {

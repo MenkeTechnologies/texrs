@@ -2,6 +2,8 @@
 # One block per case in tests/cases; tests/parity.rs replays these with
 # no TeX installed. Regenerate when a case changes, and read the diff:
 # a changed block is a changed claim about what the reference engine does.
+#==# active_character.tex
+[tie] [A] [a][b]
 #==# advance_wraps_at_32_bits.tex
 [-2147483648] [2147483647]
 #==# backtick_codes.tex

@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Glyph names to Unicode (`agl`), ported from `agl.c` in `xdvipdfmx`, and the
+  `/ToUnicode` map an embedded font is written with. A PDF says which glyph to
+  draw and never which character it is, so a reader asked to copy a paragraph
+  out has a glyph called `ff` and no idea it is two f's. Names that say their
+  own value (`uni0041`, `u1D400`, `a.sc`, `f_f_i`) are worked out by rule and
+  the rest come from the installation's `glyphlist.txt`. `pdffonts` now reports
+  a font texrs embeds as carrying a usable map, where it reported none before.
 - `\long` and `\outer`, the two definition prefixes texrs did not have (it had
   `\global`). Both attach to the definition that follows and are spent by it,
   and all three chain in any order. They are part of the MEANING, not

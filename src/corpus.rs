@@ -67,7 +67,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\def",
         "Macro definition",
-        "Define a macro. Parameters may be undelimited (`#1`) or delimited (`\\def\\pair#1,#2.{...}`, where the argument is whatever precedes the delimiter), and `##` is a literal parameter character. The parameter text is validated as tex.web \u{a7}476 validates it: every `#` must be followed by a digit, and the digits must run consecutively. Takes effect at COMPILE time.",
+        "Define a macro. Parameters may be undelimited (`#1`) or delimited (`\\def\\pair#1,#2.{...}`, where the argument is whatever precedes the delimiter), and `##` is a literal parameter character. The parameter text is validated as tex.web \u{a7}476 validates it: every `#` must be followed by a digit, and the digits must run consecutively. Takes effect at COMPILE time. The name may be an ACTIVE CHARACTER as well as a control sequence (`tex.web` \u{a7}1215): `\\catcode`\\~=13 \\def~{...}` defines `~` itself, and an active `~` and the control sequence `\\~` stay different things.",
         "\\def\\name<parameter text>{<body>}\n\\def\\greet#1{HELLO-#1}\n\\def\\pair#1,#2.{[#1|#2]}\n\\message{\\greet{WORLD}}   % => HELLO-WORLD\n\\message{\\pair 1,2.}      % => [1|2]",
     ),
     (

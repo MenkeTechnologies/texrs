@@ -1,0 +1,13 @@
+% A character of category 13 is a command, not text: it is looked up in the
+% same table a control sequence is, and it can take parameters. The pair at the
+% end is the point -- an active `~' and the control sequence `\~' are DIFFERENT
+% things, so they cannot share a name.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\catcode`\~=13
+\def~{[tie]}
+\message{~}
+\def~#1{[#1]}
+\message{~{A}}
+\def~{[a]}\def\~{[b]}
+\message{~\~}
+\end

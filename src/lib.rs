@@ -11,6 +11,7 @@
 //! this milestone is the `\message` stream, compared byte-for-byte against real
 //! `tex` by `cargo run --bin parity`.
 
+pub mod agl;
 pub mod aot;
 pub mod aot_runtime;
 pub mod banner;

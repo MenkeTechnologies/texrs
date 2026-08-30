@@ -504,6 +504,22 @@ fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
         })
         .collect();
 
+    // What each code MEANS, as against which glyph it draws. A PDF says only
+    // the second, so a reader asked to copy a paragraph out has a glyph called
+    // `ff` and no idea it is two f's. Some readers guess from the name; this
+    // says, which is what `xdvipdfmx` writes and what makes a TeX document's
+    // text searchable rather than nearly searchable.
+    let meanings: Vec<(u8, String)> = (first..=last)
+        .filter_map(|code| {
+            let glyph = type1.encoded(code as u8)?;
+            Some((code as u8, crate::agl::unicode(&glyph.name)?))
+        })
+        .collect();
+    let to_unicode = pdf.add(Object::Stream {
+        dict: BTreeMap::new(),
+        data: crate::agl::to_unicode(&type1.font_name, &meanings).into_bytes(),
+    });
+
     pdf.add(Object::dict([
         ("Type", Object::name("Font")),
         ("Subtype", Object::name("Type1")),
@@ -512,6 +528,7 @@ fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
         ("LastChar", Object::Integer(last as i64)),
         ("Widths", Object::Array(widths)),
         ("Encoding", encoding),
+        ("ToUnicode", to_unicode),
         ("FontDescriptor", descriptor),
     ]))
 }

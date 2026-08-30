@@ -190,6 +190,18 @@ impl Lowerer {
                 out.push(Cmd::Line(line));
                 marked = line;
             }
+            // An ACTIVE character is a command, not text: it is looked up in
+            // the same table a control sequence is. Rewriting it to that
+            // control sequence here means everything below -- expansion, the
+            // tail-loop recogniser, `\ifx` -- sees one kind of token and needs
+            // no second case for it.
+            let tok = match &tok {
+                Token::Char(c, Cat::Active) => match self.eng.active_meaning(*c) {
+                    Some(id) => Token::Cs(id),
+                    None => tok,
+                },
+                _ => tok,
+            };
             let Token::Cs(name) = &tok else {
                 // Braces group the macro table while lowering, so a `\def`
                 // inside them is undone at the `}` exactly as TeX undoes it.
@@ -980,6 +992,14 @@ impl Lowerer {
             };
         }
         while let Some(t) = work.pending.pop() {
+            // Active characters are commands here too: `\message{~}` runs `~`.
+            let t = match &t {
+                Token::Char(c, Cat::Active) => match self.eng.active_meaning(*c) {
+                    Some(id) => Token::Cs(id),
+                    None => t,
+                },
+                _ => t,
+            };
             let Token::Cs(n) = &t else {
                 text.push_str(&t.to_text(self.eng.escape));
                 continue;
