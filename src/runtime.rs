@@ -198,6 +198,18 @@ fn b_msg_dimen(vm: &mut VM, _argc: u8) -> Value {
     Value::Int(0)
 }
 
+/// Append a glue the way TeX writes one.
+fn b_msg_glue(vm: &mut VM, _argc: u8) -> Value {
+    // Pushed natural, stretch, shrink, orders -- so they come back reversed.
+    let orders = vm.pop().to_int();
+    let shrink = vm.pop().to_int();
+    let stretch = vm.pop().to_int();
+    let natural = vm.pop().to_int();
+    let text = crate::glue::print_glue(natural, stretch, orders / 4, shrink, orders % 4);
+    BUILDING.with(|b| b.borrow_mut().push_str(&text));
+    Value::Int(0)
+}
+
 /// Install the `\message` builtins on `vm`.
 ///
 /// Shared by the interpreted path and the AOT runtime hook: a compiled document
@@ -211,6 +223,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
+    vm.register_builtin(ops::MSG_GLUE, b_msg_glue);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);

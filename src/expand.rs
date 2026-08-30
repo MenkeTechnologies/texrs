@@ -647,7 +647,10 @@ impl Engine {
     /// (`tex.web` §448-453). The result is scaled points, which is the only
     /// form a dimension ever has -- `pt` is not privileged, it is just the unit
     /// whose ratio is one.
-    pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+    /// The number in front of a unit: a sign, an integer part, and a fraction
+    /// already scaled to 65536ths. Shared by the finite scanner and the one
+    /// that also accepts `fil`, so the two cannot drift.
+    fn scan_dimen_number(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64, i64)> {
         let mut sign = 1i64;
         let mut cur = loop {
             let Some(t) = self.take(lx, pending_only) else {
@@ -684,7 +687,14 @@ impl Engine {
                 None => break,
             }
         }
-        // Then the unit, which is two letters, after optional spaces.
+        let int: i64 = whole.parse().unwrap_or(0);
+        Ok((sign, int, crate::dimen::round_decimals(&fraction)))
+    }
+
+    /// A dimension: the number, then a unit (`tex.web` §448-453). The result is
+    /// scaled points, which is the only form a dimension ever has.
+    pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
         let mut unit = String::new();
         while unit.len() < 2 {
             let Some(t) = self.take(lx, pending_only) else {
@@ -699,8 +709,6 @@ impl Engine {
                 }
             }
         }
-        let int: i64 = whole.parse().unwrap_or(0);
-        let frac = crate::dimen::round_decimals(&fraction);
         let Some(sp) = crate::dimen::to_scaled(int, frac, &unit) else {
             return Err(TexError("Illegal unit of measure (pt inserted)".into()));
         };
@@ -711,6 +719,119 @@ impl Engine {
             }
         }
         Ok((sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN))
+    }
+
+    /// A dimension that may be infinite: the same number, but with `fil`,
+    /// `fill` or `filll` accepted as its unit. Returns the value and its order,
+    /// 0 being an ordinary finite dimension.
+    pub fn scan_dimen_or_fil(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64)> {
+        let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
+        // Up to five letters, because `filll` is five; whatever is not part of
+        // the unit goes back, so `1pt x` still leaves the `x` in the document.
+        let mut letters = String::new();
+        let mut extra = Vec::new();
+        while letters.len() < 5 {
+            let Some(t) = self.take(lx, pending_only) else {
+                break;
+            };
+            match &t {
+                t if t.is_space() && letters.is_empty() => continue,
+                Token::Char(c, _) if c.is_ascii_alphabetic() => {
+                    letters.push(c.to_ascii_lowercase());
+                    extra.push(t);
+                }
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    break;
+                }
+            }
+        }
+        // Longest match wins, so `filll` is not read as `fil` with two letters
+        // left over.
+        let mut order = 0;
+        let mut taken = 0;
+        for n in (2..=letters.len()).rev() {
+            let candidate = &letters[..n];
+            if let Some(o) = crate::glue::order_of(candidate) {
+                order = o;
+                taken = n;
+                break;
+            }
+            if crate::dimen::unit_ratio(candidate).is_some() && n == 2 {
+                taken = 2;
+                break;
+            }
+        }
+        if taken == 0 {
+            return Err(TexError("Illegal unit of measure (pt inserted)".into()));
+        }
+        // Letters past the unit were never part of it.
+        for t in extra[taken..].iter().rev() {
+            lx.push_back(std::slice::from_ref(t));
+        }
+        let unit = &letters[..taken];
+        let sp = match order {
+            // An infinite component's number is not converted: `1fil` is one,
+            // in the same 65536ths a point uses, at a different order.
+            0 => crate::dimen::to_scaled(int, frac, unit)
+                .ok_or_else(|| TexError("Illegal unit of measure (pt inserted)".into()))?,
+            _ => int * crate::dimen::UNITY + frac,
+        };
+        if let Some(t) = self.take(lx, pending_only) {
+            if !t.is_space() {
+                lx.push_back(std::slice::from_ref(&t));
+            }
+        }
+        Ok((
+            (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+            order,
+        ))
+    }
+
+    /// Whether the next tokens spell `word`, consuming them if they do.
+    ///
+    /// TeX's keyword scan (`tex.web` §407): letters match either case, and
+    /// nothing is consumed when the word is not there.
+    pub fn scan_keyword(&mut self, lx: &mut Lexer, word: &str, pending_only: bool) -> bool {
+        let mut seen = Vec::new();
+        for want in word.chars() {
+            loop {
+                let Some(t) = self.take(lx, pending_only) else {
+                    for t in seen.iter().rev() {
+                        lx.push_back(std::slice::from_ref(t));
+                    }
+                    return false;
+                };
+                if t.is_space() && seen.is_empty() {
+                    continue;
+                }
+                let matched = matches!(&t, Token::Char(c, _)
+                    if c.eq_ignore_ascii_case(&want));
+                seen.push(t);
+                if !matched {
+                    for t in seen.iter().rev() {
+                        lx.push_back(std::slice::from_ref(t));
+                    }
+                    return false;
+                }
+                break;
+            }
+        }
+        true
+    }
+
+    /// `<dimen> [plus <dimen|fil>] [minus <dimen|fil>]` — a glue.
+    pub fn scan_glue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
+        let natural = self.scan_dimen(lx, false)?;
+        let (stretch, stretch_order) = match self.scan_keyword(lx, "plus", false) {
+            true => self.scan_dimen_or_fil(lx, false)?,
+            false => (0, 0),
+        };
+        let (shrink, shrink_order) = match self.scan_keyword(lx, "minus", false) {
+            true => self.scan_dimen_or_fil(lx, false)?,
+            false => (0, 0),
+        };
+        Ok((natural, stretch, stretch_order, shrink, shrink_order))
     }
 
     /// The same, for a caller that is lowering.
@@ -1012,7 +1133,7 @@ impl Engine {
         // stop at 255 and name the table they overran.
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
-            "dimendef" => (255, "register code"),
+            "dimendef" | "skipdef" => (255, "register code"),
             "chardef" => (255, "character code"),
             _ => (255, "register code"),
         };
@@ -1026,6 +1147,9 @@ impl Engine {
             // A dimension register is a register: the name stands for the slot,
             // and the slot is the one the dimensions live in.
             "dimendef" => Meaning::CountDef(crate::compiler::DIMEN_BASE + v),
+            "skipdef" => {
+                Meaning::CountDef(crate::compiler::SKIP_BASE + v * crate::compiler::SKIP_STRIDE)
+            }
             _ => Meaning::CountDef(v),
         };
         self.set_meaning(name, meaning);

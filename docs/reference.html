@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">93</div>
+            <div class="stat-val">95</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -255,6 +255,10 @@
 \message{\the\dimen0}   % =&gt; 72.26999pt</pre></td></tr>
             <tr><td><code>\dimendef</code></td><td>Give a dimension register a name, as <code>\countdef</code> does for a count. The name behaves as the register does on both sides: an assignment through it reads a dimension, and <code>\the</code> through it writes one.</td><td><pre>\dimendef\dimen@=0
 \dimen@=2pt</pre></td></tr>
+            <tr><td><code>\skip</code></td><td>A glue register: a natural dimension that can stretch and shrink. The stretch and shrink may be infinite -- <code>fil</code>, <code>fill</code>, <code>filll</code> -- and an infinite component beats any finite one however large, which is what <code>\hfil</code> is made of. <code>\the</code> writes the components back with <code>plus</code> and <code>minus</code>, omitting a zero one, and <code>\number</code> gives the natural component alone.</td><td><pre>\skip0=1pt plus 2pt minus 3pt
+\skip1=0pt plus 1fil</pre></td></tr>
+            <tr><td><code>\skipdef</code></td><td>Give a glue register a name, as <code>\countdef</code> and <code>\dimendef</code> do for theirs. An assignment through the name reads a whole glue, not the dimension at the front of one.</td><td><pre>\skipdef\skip@=0
+\skip@=1pt plus 2pt</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -424,6 +428,7 @@
             <tr><td><code>ARITH_CHECKED</code></td><td><code>4006</code></td><td>`\multiply` / `\divide` under TeX's overflow rule: the old value, the operand, and 0 for multiply or 1 for divide.</td></tr>
             <tr><td><code>MSG_CLOSE</code></td><td><code>4007</code></td><td>Close an `\input` file: append `)` to the message already recorded, rather than record one, because tex writes the paren hard against what came before it while the stream is joined with spaces. No arguments.</td></tr>
             <tr><td><code>MSG_DIMEN</code></td><td><code>4008</code></td><td>Append a dimension, written as TeX writes one: one argument, the value in scaled points.</td></tr>
+            <tr><td><code>MSG_GLUE</code></td><td><code>4009</code></td><td>Append a glue, written as TeX writes one: four arguments -- natural, stretch, shrink, and the packed orders.</td></tr>
             <tr><td><code>COLOR_PUSH</code></td><td><code>4010</code></td><td>Open a colour: three components follow. 4010 and 4011, not 4006 and 4007: those are ARITH_CHECKED and MSG_CLOSE. Registering a builtin twice silently keeps the LAST one, so the colour ops were compiled, called, and quietly handled by somebody else's function -- the chunk was right and the page had no colour in it.</td></tr>
             <tr><td><code>COLOR_POP</code></td><td><code>4011</code></td><td>Close the innermost colour.</td></tr>
           </tbody>

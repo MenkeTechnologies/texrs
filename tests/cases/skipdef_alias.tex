@@ -1,0 +1,8 @@
+% A \skipdef name is the glue register, so an assignment through it reads a
+% WHOLE glue rather than the dimension at the front of one -- reading a
+% dimension there would store 1pt and leave "plus 2pt" in the document.
+\catcode`\{=1 \catcode`\}=2
+\skipdef\skipA=0
+\skipA=1pt plus 2pt
+\message{[\the\skip0][\the\skipA]}
+\end

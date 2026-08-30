@@ -8,6 +8,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Glue: `\skip` registers, `\skipdef`, and the infinite orders. A glue is three
+  dimensions and two orders, and an infinite stretch (`fil`, `fill`, `filll`)
+  beats any finite one however large. `\the` writes the components back with
+  `plus` and `minus`, omitting a zero one; `\number` gives the natural
+  component alone. Measured against `tex -ini`.
 - Colour, and the font a document ships with itself -- the two reasons a book
   whose preamble is a palette and a `\setmainfont` came out black and in the
   wrong face.

@@ -428,6 +428,18 @@ pub const CORPUS: &[Entry] = &[
         "Give a dimension register a name, as `\\countdef` does for a count. The name behaves as the register does on both sides: an assignment through it reads a dimension, and `\\the` through it writes one.",
         "\\dimendef\\dimen@=0\n\\dimen@=2pt",
     ),
+    (
+        "\\skip",
+        "Registers",
+        "A glue register: a natural dimension that can stretch and shrink. The stretch and shrink may be infinite -- `fil`, `fill`, `filll` -- and an infinite component beats any finite one however large, which is what `\\hfil` is made of. `\\the` writes the components back with `plus` and `minus`, omitting a zero one, and `\\number` gives the natural component alone.",
+        "\\skip0=1pt plus 2pt minus 3pt\n\\skip1=0pt plus 1fil",
+    ),
+    (
+        "\\skipdef",
+        "Registers",
+        "Give a glue register a name, as `\\countdef` and `\\dimendef` do for theirs. An assignment through the name reads a whole glue, not the dimension at the front of one.",
+        "\\skipdef\\skip@=0\n\\skip@=1pt plus 2pt",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

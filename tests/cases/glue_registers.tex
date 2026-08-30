@@ -1,0 +1,14 @@
+% A glue is three dimensions and two orders. The orders are what make it more
+% than a triple of lengths: 1fil is infinitely more stretch than any number of
+% points, and tex writes the unit back as it was given. A zero component is
+% not written at all, which is why the first line is just "1.0pt".
+\catcode`\{=1 \catcode`\}=2
+\skip0=1pt
+\skip1=1pt plus 2pt
+\skip2=1pt plus 2pt minus 3pt
+\message{[\the\skip0][\the\skip1][\the\skip2]}
+\skip3=0pt plus 1fil
+\skip4=0pt plus 1fill minus 2filll
+\message{[\the\skip3][\the\skip4]}
+\message{[\number\skip1]}
+\end

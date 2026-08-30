@@ -76,6 +76,8 @@
     "\""
     "\\dimen"
     "\\dimendef"
+    "\\skip"
+    "\\skipdef"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -173,6 +175,8 @@
     (puthash "\"" "\"  —  A hexadecimal constant, and `'` an octal one (tex.web \\u{a7}445). [Registers]" table)
     (puthash "\\dimen" "\\dimen  —  A dimension register. [Registers]" table)
     (puthash "\\dimendef" "\\dimendef  —  Give a dimension register a name, as `\\countdef` does for a count. [Registers]" table)
+    (puthash "\\skip" "\\skip  —  A glue register: a natural dimension that can stretch and shrink. [Registers]" table)
+    (puthash "\\skipdef" "\\skipdef  —  Give a glue register a name, as `\\countdef` and `\\dimendef` do for theirs. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

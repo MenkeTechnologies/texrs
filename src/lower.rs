@@ -373,6 +373,17 @@ impl Lowerer {
                 // slot file as the counts, offset past them, so everything that
                 // already works for a count -- assignment, a group's save and
                 // restore -- works for it with no second mechanism.
+                // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
+                // together, so the whole glue is one assignment.
+                "skip" => {
+                    let reg = self.eng.scan_number_file(lx)?;
+                    self.eng.skip_equals_file(lx)?;
+                    let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+                    let base = crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE;
+                    for (i, v) in [nat, st, sh, sto * 4 + sho].into_iter().enumerate() {
+                        out.push(Cmd::SetCount(base + i as i64, Num::Literal(v)));
+                    }
+                }
                 "dimen" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
@@ -399,11 +410,23 @@ impl Lowerer {
                     // dimension register takes a dimension, and reading a bare
                     // number there would store `2pt` as two scaled points and
                     // leave the `pt` behind in the document.
-                    let v = match reg >= crate::compiler::DIMEN_BASE {
-                        true => Num::Literal(self.eng.scan_dimen_file(lx)?),
-                        false => self.number(lx)?,
-                    };
-                    out.push(Cmd::SetCount(reg, v));
+                    // Which register it is decides what follows the `=`, and
+                    // there are three kinds now: a glue takes a whole glue, a
+                    // dimension a dimension, a count a number. Reading the
+                    // wrong one stores a prefix of the value and leaves the
+                    // rest in the document.
+                    if reg >= crate::compiler::SKIP_BASE {
+                        let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+                        for (i, v) in [nat, st, sh, sto * 4 + sho].into_iter().enumerate() {
+                            out.push(Cmd::SetCount(reg + i as i64, Num::Literal(v)));
+                        }
+                    } else {
+                        let v = match reg >= crate::compiler::DIMEN_BASE {
+                            true => Num::Literal(self.eng.scan_dimen_file(lx)?),
+                            false => self.number(lx)?,
+                        };
+                        out.push(Cmd::SetCount(reg, v));
+                    }
                 }
                 "advance" | "multiply" | "divide" => {
                     let op = match name.name() {
@@ -517,7 +540,7 @@ impl Lowerer {
                 // Both define a control sequence that stands for a number, and
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
-                "chardef" | "countdef" | "mathchardef" | "dimendef" => {
+                "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" => {
                     self.eng.compile_time_numeric_def(lx, name.name())?
                 }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
@@ -1156,6 +1179,18 @@ impl Lowerer {
                             // `\the\dimen0` is written as a DIMENSION -- 1.0pt,
                             // not 65536 -- which is the whole difference
                             // between the two registers at this level.
+                            Some(Token::Cs(w)) if w.name() == "skip" => {
+                                let reg = self.eng.scan_number_pending(work)?;
+                                let base =
+                                    crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE;
+                                out.push(MsgOp::Glue([
+                                    Num::Count(base),
+                                    Num::Count(base + 1),
+                                    Num::Count(base + 2),
+                                    Num::Count(base + 3),
+                                ]));
+                                continue;
+                            }
                             Some(Token::Cs(w)) if w.name() == "dimen" => {
                                 let reg = self.eng.scan_number_pending(work)?;
                                 out.push(MsgOp::Dimen(Num::Count(
@@ -1183,9 +1218,17 @@ impl Lowerer {
                                 Some(crate::expand::NumericCs::Register(r)) => {
                                     // A `\dimendef` name is a dimension
                                     // register, so `\the` writes it as one.
-                                    out.push(match r >= crate::compiler::DIMEN_BASE {
-                                        true => MsgOp::Dimen(Num::Count(r)),
-                                        false => MsgOp::Number(Num::Count(r)),
+                                    out.push(if r >= crate::compiler::SKIP_BASE {
+                                        MsgOp::Glue([
+                                            Num::Count(r),
+                                            Num::Count(r + 1),
+                                            Num::Count(r + 2),
+                                            Num::Count(r + 3),
+                                        ])
+                                    } else if r >= crate::compiler::DIMEN_BASE {
+                                        MsgOp::Dimen(Num::Count(r))
+                                    } else {
+                                        MsgOp::Number(Num::Count(r))
                                     });
                                     continue;
                                 }
@@ -1202,6 +1245,15 @@ impl Lowerer {
                         continue;
                     }
                     // `\number` takes either a register or a literal.
+                    // `\number\skip0` gives the natural component only.
+                    if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "skip") {
+                        let _ = work.pending.pop();
+                        let reg = self.eng.scan_number_pending(work)?;
+                        out.push(MsgOp::Number(Num::Count(
+                            crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
+                        )));
+                        continue;
+                    }
                     // `\number\dimen0` gives the scaled points, unrendered.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "dimen") {
                         let _ = work.pending.pop();

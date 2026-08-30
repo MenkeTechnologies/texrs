@@ -68,6 +68,8 @@ ZERO
 BUILT
 #==# gdef_survives_group.tex
 GLOBAL
+#==# glue_registers.tex
+[1.0pt][1.0pt plus 2.0pt][1.0pt plus 2.0pt minus 3.0pt] [0.0pt plus 1.0fil][0.0pt plus 1.0fill minus 2.0filll] [65536]
 #==# group_in_message.tex
 (a{b}c)
 #==# group_restores.tex
@@ -104,6 +106,8 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 [1]
 #==# radix_constants.tex
 [255][511][8705] [8705]
+#==# skipdef_alias.tex
+[1.0pt plus 2.0pt][1.0pt plus 2.0pt]
 #==# space_after_cs.tex
 [Xy]
 #==# string_and_cs.tex

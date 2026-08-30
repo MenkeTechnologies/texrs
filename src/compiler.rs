@@ -46,6 +46,9 @@ pub mod ops {
     /// Append a dimension, written as TeX writes one: one argument, the value
     /// in scaled points.
     pub const MSG_DIMEN: u16 = 4008;
+    /// Append a glue, written as TeX writes one: four arguments -- natural,
+    /// stretch, shrink, and the packed orders.
+    pub const MSG_GLUE: u16 = 4009;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -57,6 +60,13 @@ pub const COUNT_SLOTS: u16 = 256;
 /// counts are -- assigned, read and restored by a group -- so they are slots in
 /// the same file rather than a second store with its own rules.
 pub const DIMEN_BASE: i64 = 256;
+/// Where the glue registers start. A glue is FOUR slots -- natural, stretch,
+/// shrink, and the two orders packed together -- because a register that a
+/// group has to save and restore is easiest to keep as slots like every other
+/// register, rather than as a fifth kind of store.
+pub const SKIP_BASE: i64 = 512;
+/// How many slots one glue register occupies.
+pub const SKIP_STRIDE: i64 = 4;
 
 pub struct Compiler {
     b: ChunkBuilder,
@@ -335,6 +345,13 @@ impl Compiler {
                     self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
+                MsgOp::Glue(parts) => {
+                    for n in parts.iter() {
+                        self.num(n)?;
+                    }
+                    self.b.emit(Op::CallBuiltin(ops::MSG_GLUE, 4), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
                 MsgOp::Dimen(n) => {
                     self.num(n)?;
                     self.b.emit(Op::CallBuiltin(ops::MSG_DIMEN, 1), self.line);
@@ -432,7 +449,7 @@ fn slot(reg: i64) -> u16 {
 }
 
 /// Counts and dimensions together.
-pub const TOTAL_SLOTS: u16 = 512;
+pub const TOTAL_SLOTS: u16 = 1536;
 
 impl Default for Compiler {
     fn default() -> Self {
