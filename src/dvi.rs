@@ -89,6 +89,13 @@ impl Dvi {
     pub fn parse(bytes: &[u8]) -> Result<Dvi, String> {
         let mut at = 0usize;
         let mut ops = Vec::new();
+        // The four movement registers. A DVI file spends most of its bytes on
+        // movement, so it keeps the last horizontal distance in `w` and `x` and
+        // the last vertical one in `y` and `z`, and repeats a movement with a
+        // single opcode. A reader that took `w0` for a movement of zero would
+        // stack a line of text on one spot.
+        let (mut w, mut x, mut y, mut z) = (0i32, 0i32, 0i32, 0i32);
+        let mut saved: Vec<(i32, i32, i32, i32)> = Vec::new();
         while at < bytes.len() {
             let opcode = bytes[at];
             at += 1;
@@ -122,23 +129,57 @@ impl Dvi {
                     // The pointer to the previous page, which a sequential read
                     // does not need.
                     let _previous = read_signed(bytes, &mut at, 4)?;
+                    // A page begins with everything at zero.
+                    w = 0;
+                    x = 0;
+                    y = 0;
+                    z = 0;
+                    saved.clear();
                     Op::BeginPage { counts }
                 }
                 140 => Op::EndPage,
-                141 => Op::Push,
-                142 => Op::Pop,
-                // right1..4, w0, w1..4, x0, x1..4 — all horizontal.
+                141 => {
+                    saved.push((w, x, y, z));
+                    Op::Push
+                }
+                142 => {
+                    // §  : push and pop save and restore the movement
+                    // registers along with the position.
+                    if let Some((sw, sx, sy, sz)) = saved.pop() {
+                        w = sw;
+                        x = sx;
+                        y = sy;
+                        z = sz;
+                    }
+                    Op::Pop
+                }
+                // right1..4 move without remembering how far.
                 143..=146 => Op::Right(read_signed(bytes, &mut at, (opcode - 142) as usize)?),
-                147 => Op::Right(0),
-                148..=151 => Op::Right(read_signed(bytes, &mut at, (opcode - 147) as usize)?),
-                152 => Op::Right(0),
-                153..=156 => Op::Right(read_signed(bytes, &mut at, (opcode - 152) as usize)?),
-                // down1..4, y0, y1..4, z0, z1..4 — all vertical.
+                // §  : w0 moves by w, the last distance a w-instruction set --
+                // which is how a file sets a line of text in one font without
+                // repeating the same operand between every pair of letters.
+                // The same for x, and for y and z going down.
+                147 => Op::Right(w),
+                148..=151 => {
+                    w = read_signed(bytes, &mut at, (opcode - 147) as usize)?;
+                    Op::Right(w)
+                }
+                152 => Op::Right(x),
+                153..=156 => {
+                    x = read_signed(bytes, &mut at, (opcode - 152) as usize)?;
+                    Op::Right(x)
+                }
                 157..=160 => Op::Down(read_signed(bytes, &mut at, (opcode - 156) as usize)?),
-                161 => Op::Down(0),
-                162..=165 => Op::Down(read_signed(bytes, &mut at, (opcode - 161) as usize)?),
-                166 => Op::Down(0),
-                167..=170 => Op::Down(read_signed(bytes, &mut at, (opcode - 166) as usize)?),
+                161 => Op::Down(y),
+                162..=165 => {
+                    y = read_signed(bytes, &mut at, (opcode - 161) as usize)?;
+                    Op::Down(y)
+                }
+                166 => Op::Down(z),
+                167..=170 => {
+                    z = read_signed(bytes, &mut at, (opcode - 166) as usize)?;
+                    Op::Down(z)
+                }
                 // §586: the font number is in the opcode, as the character is.
                 171..=234 => Op::Font((opcode - 171) as u32),
                 235..=238 => {
@@ -1007,6 +1048,61 @@ mod tests {
             number(previous as usize + 41, 4),
             0xffff_ffff,
             "the first points at nothing"
+        );
+    }
+
+    /// `w0` moves by the last distance a `w` instruction set, not by nothing.
+    ///
+    /// This is how a DVI file sets a line of text without repeating the same
+    /// operand between every pair of letters, and reading it as a movement of
+    /// zero stacks the line on one spot. The virtual fonts caught this: their
+    /// packets use `w0` where a character is set twice the same distance
+    /// apart, and `vftovp` prints the distance both times.
+    #[test]
+    fn the_movement_registers_repeat_the_last_distance() {
+        // w3 100, w0, x3 7, x0, then y3 40, y0 -- each register its own.
+        let page = [
+            150, 0, 0, 100, // w3 100
+            147, // w0
+            155, 0, 0, 7,   // x3 7
+            152, // x0
+            164, 0, 0, 40,  // y3 40
+            161, // y0
+        ];
+        let ops = Dvi::parse(&page).expect("parses").ops;
+        assert_eq!(
+            ops,
+            vec![
+                Op::Right(100),
+                Op::Right(100),
+                Op::Right(7),
+                Op::Right(7),
+                Op::Down(40),
+                Op::Down(40),
+            ]
+        );
+
+        // §  : push and pop save and restore the registers with the position,
+        // so a movement set inside a group is forgotten when it ends.
+        let page = [
+            150, 0, 0, 100, // w3 100
+            141, // push
+            150, 0, 0, 5,   // w3 5
+            147, // w0 -- 5
+            142, // pop
+            147, // w0 -- 100 again
+        ];
+        let ops = Dvi::parse(&page).expect("parses").ops;
+        assert_eq!(
+            ops,
+            vec![
+                Op::Right(100),
+                Op::Push,
+                Op::Right(5),
+                Op::Right(5),
+                Op::Pop,
+                Op::Right(100),
+            ]
         );
     }
 

@@ -431,6 +431,31 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "vf" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X vf` needs a .vf file");
+            };
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich_named(&match file.ends_with(".vf") {
+                    true => file.to_string(),
+                    false => format!("{file}.vf"),
+                }),
+            };
+            match texrs::vf::Vf::open(&found) {
+                Ok(vf) => {
+                    match args.get(2).and_then(|c| c.chars().next()) {
+                        // A second argument asks about one character: what it
+                        // really sets, and where.
+                        Some(c) if c.is_ascii() => print!("{}", vf.describe(c as u32)),
+                        Some(c) => return fail(&format!("{c} is not an 8-bit character")),
+                        None => print!("{}", vf.summary()),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "tfm" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X tfm` needs a .tfm file");

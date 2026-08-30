@@ -1038,3 +1038,45 @@ fn the_bibtex_command_writes_what_bibtex_writes() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `-X vf` reads a virtual font, by name or by path.
+#[test]
+fn the_vf_reader_says_what_a_virtual_character_really_sets() {
+    let missing = texrs()
+        .args(["-X", "vf", "nosuchfont"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("nosuchfont"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("ptmr7t.vf")
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    let by_path = stdout_of(texrs().args(["-X", "vf", &path]));
+    let by_name = stdout_of(texrs().args(["-X", "vf", "ptmr7t"]));
+    assert_eq!(by_path, by_name, "a name is looked up, not read as a path");
+    // It sets everything in the real Times, in that font's own encoding.
+    assert!(by_path.contains("font 0        ptmr8r"), "{by_path}");
+    assert!(by_path.contains("designsize    10.000000pt"), "{by_path}");
+
+    // The ff ligature is two f's moved together: a character TeX has and the
+    // real font does not.
+    let ff = stdout_of(texrs().args(["-X", "vf", "ptmr7t", "\u{b}"]));
+    assert!(ff.contains("set 0o146"), "{ff}");
+    assert!(
+        ff.contains("right -0.025000"),
+        "the kern between them: {ff}"
+    );
+}

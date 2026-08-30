@@ -8,6 +8,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading `.vf`, the virtual font, ported from the VF half of `xdvipdfmx`
+  (`vftovp.web` in C). A virtual font has no glyphs: each character is a little
+  DVI program saying what to set in some other font, which is how TeX's
+  encodings were carried onto PostScript fonts laid out differently, and a
+  `.dvi` naming one cannot be read without it. The packets are DVI, so they go
+  through the DVI reader rather than a second copy of it. `-X vf FILE.vf
+  [CHAR]`. Held against `vftovp` for every character of `ptmr7t`, `phvr7t`,
+  `pcrr7t` and `ptmri7t` -- width and program, step for step.
 - Writing DVI (`dvi::Writer`), the other half of the format ported from
   tectonic's `xdv`. It is what the stomach will call: a DVI file is a linked
   list read backwards -- every page points at the one before it, the postamble

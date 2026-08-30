@@ -316,6 +316,40 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " vf \fIFILE\fR.vf [" \fICHAR\fR ]
+Read a virtual font.  With no
+.I CHAR
+this prints its design size, its checksum, how many characters it defines and
+the real fonts it sets them in; with one, that character's width and the program
+that draws it.
+.PP
+A virtual font has no glyphs.  Each of its characters is a little DVI program
+saying what to set in some
+.I other
+font: in
+.BR ptmr7t ,
+an
+.B A
+is one glyph of the real Times, the
+.B fi
+ligature is an
+.B f
+and an
+.B i
+moved together, and a character Times has no glyph for is a rule and a
+.B \especial
+saying so \(em which is what a driver prints instead of leaving a silent gap.
+This is how TeX's own encodings were carried onto fonts laid out differently,
+and a
+.I .dvi
+that names such a font cannot be read without it.
+.PP
+The packets are DVI, so they are read with the DVI reader rather than a second
+copy of it.  Every character of four of the fonts TeX Live ships is compared
+with
+.BR vftovp (1)
+in the test suite.
+.TP
 .BI \-X " tfm \fIFILE\fR.tfm ["" \fICHAR\fR ]
 Read a font's metrics.  With no
 .I CHAR
