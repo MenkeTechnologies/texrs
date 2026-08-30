@@ -16,6 +16,7 @@ usage: texrs [OPTIONS] FILE.tex
   --dap           speak the Debug Adapter Protocol over stdio
   --dump-tokens   print the mouth's token stream and exit
   --disasm        print the lowered fusevm bytecode and exit
+  --aot           compile the document to a standalone native executable
   --tiers         run it, then report which fusevm tier took its bytecode
   --no-cache      compile this run rather than reading the bytecode cache
   --cache-stats   say what the cache holds and where, and exit
@@ -28,6 +29,7 @@ fn main() -> ExitCode {
     let mut path: Option<String> = None;
     let mut dump_tokens = false;
     let mut disasm = false;
+    let mut aot = false;
     let mut tiers = false;
     let mut no_cache = false;
 
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
             }
             "--dump-tokens" => dump_tokens = true,
             "--disasm" => disasm = true,
+            "--aot" => aot = true,
             "--tiers" => tiers = true,
             "--no-cache" => no_cache = true,
             "--cache-stats" => return cache_stats(),
@@ -77,9 +80,21 @@ fn main() -> ExitCode {
         eprint!("{USAGE}");
         return ExitCode::from(1);
     };
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) => {
+    // The document is opened through the provider stack rather than read
+    // directly: the stack is what `\input` will search, and opening the primary
+    // through it means the run's record of what it read starts with the
+    // document itself.
+    let mut inputs = texrs::io::ProviderStack::new();
+    inputs.push(Box::new(
+        texrs::io::FilesystemProvider::with_roots(Vec::new()).with_primary(&path),
+    ));
+    let src = match texrs::io::InputProvider::input_open_primary(&mut inputs) {
+        texrs::io::OpenResult::Ok(input) => input.content,
+        texrs::io::OpenResult::NotAvailable => {
+            eprintln!("texrs: {path}: no such file");
+            return ExitCode::from(1);
+        }
+        texrs::io::OpenResult::Err(e) => {
             eprintln!("texrs: {path}: {e}");
             return ExitCode::from(1);
         }
@@ -110,6 +125,19 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => fail(&e.0),
+        };
+    }
+
+    if aot {
+        // The executable sits beside the document, named after it: `doc.tex`
+        // compiles to `doc`, the way a C file compiles to a program.
+        let out = std::path::Path::new(&path).with_extension("");
+        return match texrs::aot::compile_executable(&path, &out) {
+            Ok(p) => {
+                println!("{}", p.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e),
         };
     }
 

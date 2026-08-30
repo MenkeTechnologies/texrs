@@ -242,6 +242,7 @@
             <tr><td><code>texrs --dump-tokens FILE</code></td><td>Print the mouth's token stream and exit. No expansion happens.</td></tr>
             <tr><td><code>texrs --disasm FILE</code></td><td>Print the lowered fusevm bytecode and exit.</td></tr>
             <tr><td><code>texrs --tiers FILE</code></td><td>Run it, then report which fusevm tier took its bytecode, asked of fusevm's own eligibility and cache predicates.</td></tr>
+            <tr><td><code>texrs --aot FILE</code></td><td>Compile the document to a standalone native executable beside it. Requires a C toolchain for the link.</td></tr>
             <tr><td><code>texrs --repl</code></td><td>Start the interactive prompt: a line is read with every line before it still in effect.</td></tr>
             <tr><td><code>texrs --lsp</code></td><td>Speak the Language Server Protocol over stdio: completion and hover from this page's own corpus, diagnostics from the engine's lowerer.</td></tr>
             <tr><td><code>texrs --dap</code></td><td>Speak the Debug Adapter Protocol over stdio: source-line breakpoints, stepping, and the count registers as the variables scope.</td></tr>

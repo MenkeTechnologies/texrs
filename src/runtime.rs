@@ -60,6 +60,24 @@ pub fn run_debug(
     run_with(chunk, Some(on_line))
 }
 
+/// Install the `\message` builtins on `vm`.
+///
+/// Shared by the interpreted path and the AOT runtime hook: a compiled document
+/// must call the same two functions the interpreted one does, or its output
+/// would be a different program's.
+pub fn register_message_builtins(vm: &mut VM) {
+    vm.register_builtin(ops::MSG_APPEND, b_msg_append);
+    vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+}
+
+/// Take what `\message` has written so far, clearing the buffer.
+///
+/// The AOT entry needs this: fusevm runs the chunk and hands back an exit code,
+/// not the messages, which live in this module's thread-local.
+pub fn take_messages() -> Vec<String> {
+    MESSAGES.with(|m| std::mem::take(&mut *m.borrow_mut()))
+}
+
 fn run_with(
     chunk: fusevm::Chunk,
     on_line: Option<fn(&mut VM, u8) -> Value>,
@@ -67,8 +85,7 @@ fn run_with(
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
     let mut vm = VM::new(chunk);
-    vm.register_builtin(ops::MSG_APPEND, b_msg_append);
-    vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    register_message_builtins(&mut vm);
     if let Some(f) = on_line {
         vm.register_builtin(ops::DBG_LINE, f);
     }

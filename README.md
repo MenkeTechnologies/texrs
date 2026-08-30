@@ -93,6 +93,7 @@ texrs --dap                # Debug Adapter Protocol over stdio: breakpoints, ste
 texrs --dump-tokens file   # the mouth's token stream, no expansion
 texrs --disasm file        # the lowered fusevm bytecode
 texrs --tiers file         # run it, then say which fusevm tier took it
+texrs --aot file           # compile it to a standalone native executable
 texrs --no-cache file      # compile this run instead of reading the cache
 texrs --cache-stats        # what the bytecode cache holds, and where
 texrs --cache-clear        # delete it; it holds only what can be recompiled

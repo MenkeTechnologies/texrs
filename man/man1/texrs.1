@@ -123,6 +123,20 @@ register is a VM slot, so
 reads as
 .BR "GetSlot / LoadInt / Add / SetSlot" .
 .TP
+.B \-\-aot
+Compile the document to a standalone native executable beside it \(em
+.I doc.tex
+becomes
+.IR doc ,
+the way a C file becomes a program.  The chunk is emitted as a relocatable
+object through fusevm's ahead\-of\-time compiler and linked against the texrs
+runtime, so the result runs with no interpreter dispatch loop and needs no texrs
+on the machine.  It prints exactly what an ordinary run prints.
+.IP
+Requires a C toolchain for the link step.
+.B TEXRS_STATICLIB
+names the runtime library to link against when it is not beside the binary.
+.TP
 .B \-\-tiers
 Run the document, then report what fusevm's tiers did with its bytecode: how
 many ops the chunk holds, whether the block tier accepts and has compiled it,

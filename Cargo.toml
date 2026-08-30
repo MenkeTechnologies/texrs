@@ -35,9 +35,13 @@ path = "src/bin/gen_docs.rs"
 [lib]
 name = "texrs"
 path = "src/lib.rs"
+# staticlib so an AOT object can be linked against the texrs runtime (the
+# `fusevm_aot_register_builtins` hook in src/aot_runtime.rs plus fusevm's AOT
+# runtime) into a standalone native executable via `texrs --aot`.
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache"] }
+fusevm = { version = "0.26.0", features = ["jit", "jit-disk-cache", "aot"] }
 
 # LSP (`texrs --lsp`) over stdio, the same pair every sibling frontend speaks it
 # with. libc is the orphan guard: a language server whose editor died must exit

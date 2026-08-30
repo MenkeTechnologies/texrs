@@ -11,6 +11,8 @@
 //! this milestone is the `\message` stream, compared byte-for-byte against real
 //! `tex` by `scripts/parity.sh`.
 
+pub mod aot;
+pub mod aot_runtime;
 pub mod banner;
 pub mod catcode;
 pub mod compiler;
@@ -18,6 +20,7 @@ pub mod corpus;
 pub mod dap;
 pub mod docs;
 pub mod expand;
+pub mod io;
 pub mod ir;
 pub mod lexer;
 pub mod lower;
@@ -25,6 +28,7 @@ pub mod lsp;
 pub mod repl;
 pub mod runtime;
 pub mod script_cache;
+pub mod status;
 pub mod tiers;
 pub mod token;
 
