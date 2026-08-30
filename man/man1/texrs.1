@@ -316,6 +316,38 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " otf \fIFILE\fR.otf [" \fICHAR\fR ]
+Read an OpenType or TrueType font.  With no
+.I CHAR
+this prints its names, what it is measured in, how many glyphs and characters it
+holds, and its table directory; with one, which glyph that character becomes,
+what the font calls it, and how wide it is.
+.PP
+This is the modern half of the font problem.  A
+.I .tfm
+says how wide a character is and a
+.I .pk
+says what its pixels are, but a document set in an OpenType font names the file
+itself, and everything a driver needs is inside it.  The container is a
+directory of tables; the ones read here are the ones a driver reads before it
+can place a glyph \(em
+.BR head ,
+.BR hhea ,
+.BR maxp ,
+.BR hmtx ,
+.BR name ,
+.B cmap
+and
+.BR post .
+The outlines are not: a driver embeds those rather than interpreting them.
+.PP
+A font collection is read as its first font.  Every table, every name, every
+character of the
+.B cmap
+and every glyph name of four fonts is compared with
+.BR otfinfo (1)
+in the test suite.
+.TP
 .BI \-X " pk \fIFILE\fR.pk [" \fICHAR\fR ]
 Read a packed bitmap font.  With no
 .I CHAR

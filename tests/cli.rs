@@ -1128,3 +1128,46 @@ fn the_pk_reader_draws_a_character() {
         rows[rows.len() / 2]
     );
 }
+
+/// `-X otf` reads an OpenType font, by name or by path.
+#[test]
+fn the_otf_reader_says_which_glyph_a_character_becomes() {
+    let missing = texrs()
+        .args(["-X", "otf", "nosuchfont.otf"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("nosuchfont"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("lmroman10-regular.otf")
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    let by_path = stdout_of(texrs().args(["-X", "otf", &path]));
+    let by_name = stdout_of(texrs().args(["-X", "otf", "lmroman10-regular.otf"]));
+    assert_eq!(by_path, by_name, "a name is looked up, not read as a path");
+    assert!(by_path.contains("family        LM Roman 10"), "{by_path}");
+    assert!(by_path.contains("outlines      CFF"), "{by_path}");
+    assert!(by_path.contains("units per em  1000"), "{by_path}");
+    // The table directory is listed, with the tag that carries a trailing
+    // space spelled as the font spells it.
+    assert!(by_path.contains("CFF "), "{by_path}");
+    assert!(by_path.contains("cmap"), "{by_path}");
+
+    // Latin Modern is Computer Modern, so an A is 0.75 em here as it is in
+    // cmr10.tfm -- the same number by a different road.
+    let a = stdout_of(texrs().args(["-X", "otf", "lmroman10-regular.otf", "A"]));
+    assert!(a.contains("width 750 of 1000"), "{a}");
+    assert!(a.contains("0.7500 em"), "{a}");
+}

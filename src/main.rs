@@ -446,6 +446,27 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "otf" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X otf` needs an OpenType or TrueType font");
+            };
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich_named(file),
+            };
+            match texrs::sfnt::Sfnt::open(&found) {
+                Ok(font) => {
+                    match args.get(2).and_then(|c| c.chars().next()) {
+                        // A second argument asks what one character becomes:
+                        // which glyph, called what, and how wide.
+                        Some(c) => print!("{}", font.describe(c as u32)),
+                        None => print!("{}", font.summary()),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "pk" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X pk` needs a .pk file");

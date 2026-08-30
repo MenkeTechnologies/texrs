@@ -43,6 +43,7 @@ pub mod repl;
 pub mod runtime;
 pub mod rust_ffi;
 pub mod script_cache;
+pub mod sfnt;
 pub mod status;
 pub mod tfm;
 pub mod tiers;
