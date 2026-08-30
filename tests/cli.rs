@@ -1080,3 +1080,51 @@ fn the_vf_reader_says_what_a_virtual_character_really_sets() {
         "the kern between them: {ff}"
     );
 }
+
+/// `-X pk` reads a packed font and draws a character.
+#[test]
+fn the_pk_reader_draws_a_character() {
+    let missing = texrs()
+        .args(["-X", "pk", "nosuchfont"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("nosuchfont"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .args(["-format=pk", "cmr10.600pk"])
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    let by_path = stdout_of(texrs().args(["-X", "pk", &path]));
+    let by_name = stdout_of(texrs().args(["-X", "pk", "cmr10"]));
+    assert_eq!(by_path, by_name, "a name is looked up at the shipped size");
+    assert!(by_path.contains("resolution    600 dpi"), "{by_path}");
+    assert!(by_path.contains("characters    128"), "{by_path}");
+    // The packed font carries the same checksum as the metrics, which is how a
+    // driver tells that the two belong to each other.
+    assert!(by_path.contains("checksum      0o11374260171"), "{by_path}");
+
+    // A drawn T: a bar across the top, and a stem down the middle that is
+    // narrower than the bar.
+    let t = stdout_of(texrs().args(["-X", "pk", "cmr10", "T"]));
+    let rows: Vec<&str> = t.lines().skip(1).collect();
+    assert!(t.starts_with("'T'  53x57 pixels"), "{t}");
+    let ink = |row: &str| row.chars().filter(|&c| c == '*').count();
+    assert!(ink(rows[0]) > 45, "the bar across the top: {:?}", rows[0]);
+    assert!(
+        ink(rows[rows.len() / 2]) < 15,
+        "the stem is narrower: {:?}",
+        rows[rows.len() / 2]
+    );
+}

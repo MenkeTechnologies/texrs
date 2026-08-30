@@ -431,6 +431,29 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "pk" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X pk` needs a .pk file");
+            };
+            // A packed font is made for one resolution, so a bare name needs
+            // one: `cmr10.600pk` is how kpsewhich knows which to hand back.
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich_format("pk", file),
+            };
+            match texrs::pk::Pk::open(&found) {
+                Ok(pk) => {
+                    match args.get(2).and_then(|c| c.chars().next()) {
+                        // A second argument draws one character.
+                        Some(c) if c.is_ascii() => print!("{}", pk.describe(c as u32)),
+                        Some(c) => return fail(&format!("{c} is not an 8-bit character")),
+                        None => print!("{}", pk.summary()),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "vf" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X vf` needs a .vf file");
@@ -633,6 +656,31 @@ fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
             eprintln!("texrs: {program}: {e}");
             Some(ExitCode::from(1))
         }
+    }
+}
+
+/// The same, for a file whose kind `kpsewhich` needs telling: a `.pk` is not
+/// on the ordinary search path, because a font is kept in a directory named
+/// after the resolution it was made for.
+fn kpsewhich_format(format: &str, name: &str) -> String {
+    let named = match name.contains("pk") {
+        true => name.to_string(),
+        // `cmr10` at the resolution TeX Live ships Computer Modern at.
+        false => format!("{name}.600pk"),
+    };
+    let found = std::process::Command::new("kpsewhich")
+        .arg(format!("-format={format}"))
+        .arg(&named)
+        .output();
+    match found {
+        Ok(out) => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match path.is_empty() {
+                true => name.to_string(),
+                false => path,
+            }
+        }
+        Err(_) => name.to_string(),
     }
 }
 

@@ -371,6 +371,7 @@ pub const USAGE: &str = "\
   -X bibtex FILE.aux      // Run the style: write the .bbl a document reads
   -X tfm FILE.tfm [C]     // Read a font's metrics, or one character's
   -X vf FILE.vf [C]       // Read a virtual font: what it really sets
+  -X pk FILE.pk [C]       // Read a packed bitmap font, and draw a character
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 

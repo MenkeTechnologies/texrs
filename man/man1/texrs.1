@@ -316,6 +316,30 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " pk \fIFILE\fR.pk [" \fICHAR\fR ]
+Read a packed bitmap font.  With no
+.I CHAR
+this prints its design size, checksum, resolution and how many characters it
+holds; with one, it draws that character.
+.PP
+A
+.I .pk
+holds what a
+.I .tfm
+does not: the pixels.  It is what a driver drew Computer Modern from for twenty
+years, and it is still what
+.BR xdvipdfmx (1)
+falls back to for a font with no outline.  The format is a compression scheme
+rather than a layout: a glyph is the lengths of its runs of black and white, and
+those lengths are a stream of nybbles whose meaning depends on a per-character
+parameter chosen when the font was packed \(em small numbers take one nybble,
+middling ones two, large ones a run of zeros saying how many follow, and a row
+that repeats says so once.  Getting any of that slightly wrong gives a glyph
+that is plausible and not the one in the file, so every pixel of four of the
+fonts TeX Live ships is compared with
+.BR gftype (1)
+in the test suite.
+.TP
 .BI \-X " vf \fIFILE\fR.vf [" \fICHAR\fR ]
 Read a virtual font.  With no
 .I CHAR

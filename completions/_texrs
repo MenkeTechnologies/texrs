@@ -16,7 +16,7 @@ _texrs() {
     '(-no-file-line-error)-file-line-error[file:line:error style messages]' \
     '(-file-line-error)-no-file-line-error[plain error messages]' \
     '-recorder[record the files read]' \
-    '-X[run a texrs subcommand]:command:(new init build watch show dump bundle dvi bib bst tfm vf bibtex)' \
+    '-X[run a texrs subcommand]:command:(new init build watch show dump bundle dvi bib bst tfm vf pk bibtex)' \
     '-8bit[write 8-bit characters as themselves]' \
     '(- *)--repl[start the interactive prompt]' \
     '(- *)--lsp[speak the Language Server Protocol over stdio]' \

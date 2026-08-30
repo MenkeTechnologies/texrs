@@ -8,6 +8,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading `.pk`, the packed bitmap font, ported from `pkfont.c` in
+  `xdvipdfmx`. A glyph is stored as the lengths of its runs of black and white
+  in a nybble stream with three encodings in it, plus a repeat count that
+  arrives mid-row and applies when the row ends. `-X pk FILE.pk [CHAR]` draws
+  one. Held against `gftype`'s own picture of the same font, pixel for pixel,
+  for every character of `cmr10`, `cmti10`, `cmsy10` and `cmtt10` at 600 dpi --
+  and the widths are checked against the `.tfm`'s, which is what lets a driver
+  mix a bitmap font with an outline one.
 - Reading `.vf`, the virtual font, ported from the VF half of `xdvipdfmx`
   (`vftovp.web` in C). A virtual font has no glyphs: each character is a little
   DVI program saying what to set in some other font, which is how TeX's
