@@ -41,23 +41,67 @@ fn crate_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Every version SLOT in `text`: the branded `texrs vX.Y.Z` form a build line
-/// or a stat card uses.
+/// Every version SLOT in `text`, of the two shapes this project uses.
 ///
 /// Deliberately not "every version-shaped string". Prose dates changes, and a
 /// gate that read those as claims would demand they be falsified — which is
 /// also how a careless stamp turns `0.0.0.0` in an IP address into `0.18.1.0`.
+///
+/// Nor is it "every stat card holding a version". A sibling's page carries
+/// htop's 3.5.1 and another carries Tcl's 9.0.4, both correct, both describing
+/// the tool being ported rather than the crate — a slot rule that ignored WHAT
+/// the number is about would flag those forever. So a slot is either branded
+/// with the crate name, or labelled `version` by the card it sits in. Both say
+/// "this is what THIS build is"; an unlabelled number does not.
 fn slots_in(text: &str) -> Vec<String> {
+    let mut out = branded(text);
+    out.extend(version_cards(text));
+    out
+}
+
+/// `texrs vX.Y.Z` — the build line's form.
+fn branded(text: &str) -> Vec<String> {
     text.match_indices("texrs v")
-        .map(|(at, _)| {
-            let rest = &text[at + "texrs v".len()..];
-            let end = rest
-                .find(|c: char| !c.is_ascii_digit() && c != '.')
-                .unwrap_or(rest.len());
-            rest[..end].trim_end_matches('.').to_string()
-        })
+        .map(|(at, _)| version_at(&text[at + "texrs v".len()..]))
         .filter(|v| v.split('.').count() == 3)
         .collect()
+}
+
+/// `<div class="stat-val">vX.Y.Z</div><div class="stat-label">version</div>` —
+/// a stat card that says of itself that it holds a version.
+///
+/// This is the shape `scripts/bump.sh` used to leave behind: it stamped the
+/// branded build line and not this card, so the card would have gone stale at
+/// the next bump with nothing to notice.
+fn version_cards(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (at, _) in text.match_indices("stat-val") {
+        let rest = &text[at..];
+        let Some(open) = rest.find('>') else { continue };
+        let value = version_at(rest[open + 1..].trim_start_matches('v'));
+        if value.split('.').count() != 3 {
+            continue;
+        }
+        // The label follows the value, and is what says the card is about a
+        // version at all.
+        let label_says_version = rest
+            .find("stat-label")
+            .and_then(|l| rest[l..].find('>').map(|o| &rest[l + o + 1..]))
+            .map(|after| after.trim_start().starts_with("version"))
+            .unwrap_or(false);
+        if label_says_version {
+            out.push(value);
+        }
+    }
+    out
+}
+
+/// The `X.Y.Z` at the start of `rest`, however it ends.
+fn version_at(rest: &str) -> String {
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(rest.len());
+    rest[..end].trim_end_matches('.').to_string()
 }
 
 #[test]
@@ -73,6 +117,19 @@ fn a_version_in_prose_is_not_a_slot() {
 
     let slot = "<p class=\"docs-build-line\">texrs v9.9.9 · TeX on fusevm</p>";
     assert_eq!(slots_in(slot), vec!["9.9.9".to_string()]);
+
+    // A stat card labelled `version` is a slot; one holding the version of the
+    // thing being ported is not, which is what keeps a sibling's htop 3.5.1 and
+    // Tcl 9.0.4 cards from being flagged forever.
+    let card = "<div class=\"stat-card\"><div class=\"stat-val\">v9.9.9</div>\
+                <div class=\"stat-label\">version</div></div>";
+    assert_eq!(slots_in(card), vec!["9.9.9".to_string()]);
+    let upstream = "<div class=\"stat-card\"><div class=\"stat-val\">3.5.1</div>\
+                    <div class=\"stat-label\">htop being ported</div></div>";
+    assert!(
+        slots_in(upstream).is_empty(),
+        "the ported tool's version was read as a claim about this build"
+    );
 
     // Both at once: the slot is checked, the sentence is left alone.
     let both = format!("{slot}{prose}");

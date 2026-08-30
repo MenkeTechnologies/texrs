@@ -60,6 +60,12 @@ perl -i -pe "s/^version = \"\Q$CURRENT\E\"/version = \"$NEW\"/" Cargo.toml
 # split from the other side.
 for f in docs/index.html docs/report.html; do
   perl -i -pe "s/texrs v\Q$CURRENT\E/texrs v$NEW/g" "$f"
+  # And the stat card that says of itself that it holds a version. It is a slot
+  # without the brand, so it needs its own pattern -- and it is anchored on the
+  # `version` LABEL, because a card holding the version of the thing being
+  # ported (a sibling's page carries htop's 3.5.1) must not be stamped with this
+  # crate's number.
+  perl -i -0pe "s{(stat-val\">)v\Q$CURRENT\E(</div>\s*<div class=\"stat-label\">version)}{\${1}v$NEW\${2}}g" "$f"
 done
 
 # The man pages carry `.TH NAME 1 "DATE" "texrs X.Y.Z" "User Commands"`. The
