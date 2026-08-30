@@ -15,7 +15,7 @@ use crate::catcode::Cat;
 use crate::expand::{Engine, Macro, Meaning, TexError};
 use crate::ir::{Arith, Cmd, MsgOp, Num, Rel};
 use crate::lexer::Lexer;
-use crate::token::Token;
+use crate::token::{CsId, Token};
 
 type R<T> = Result<T, TexError>;
 
@@ -42,11 +42,15 @@ pub struct Lowerer {
 
 /// The nesting `block` refuses to go past.
 ///
-/// Chosen to sit far above any real document -- a hand-written file nests
-/// groups and conditionals a few dozen deep at the very most -- while still
-/// tripping long before the stack does. Matches the spirit of the expander's
-/// 200_000-step ceiling: bound the runaway, name it the way TeX names it.
-const MAX_LOWER_DEPTH: usize = 256;
+/// Sits far above any real document -- a hand-written file nests groups and
+/// conditionals a few dozen deep at the very most -- and below what the stack
+/// can take. The ceiling is MEASURED, not guessed, and measured on a SPAWNED
+/// thread rather than main: a spawned stack is a fraction of main's, and both
+/// the test harness and any future worker pool run there. In a debug build on
+/// such a thread 128 levels still lower and 192 abort, so the bound is set
+/// under the smaller of those with room to spare. Matches the spirit of the
+/// expander's 200_000-step ceiling: bound the runaway, name it as TeX names it.
+const MAX_LOWER_DEPTH: usize = 100;
 
 impl Lowerer {
     pub fn new() -> Self {
@@ -105,7 +109,7 @@ impl Lowerer {
         if self.depth > MAX_LOWER_DEPTH {
             self.depth -= 1;
             return Err(TexError(
-                "TeX capacity exceeded, sorry [input stack size=256]".into(),
+                "TeX capacity exceeded, sorry [input stack size=100]".into(),
             ));
         }
         let out = self.block_inner(lx, stop);
@@ -146,17 +150,17 @@ impl Lowerer {
                 }
                 continue;
             };
-            let name = name.clone();
+            let name = *name;
             if let Some(stops) = stop {
-                if stops.contains(&name.as_str()) {
+                if stops.contains(&name.name()) {
                     lx.push_back(&[Token::Cs(name)]);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
             }
-            match name.as_str() {
+            match name.name() {
                 "end" => break,
                 // Compile-time: these change how the REST of the file reads.
-                "def" | "gdef" => self.eng.compile_time_def(lx, &name)?,
+                "def" | "gdef" => self.eng.compile_time_def(lx, name.name())?,
                 "catcode" => self.eng.compile_time_catcode(lx)?,
                 "count" => {
                     let reg = self.eng.scan_number_file(lx)?;
@@ -165,7 +169,7 @@ impl Lowerer {
                     out.push(Cmd::SetCount(reg, v));
                 }
                 "advance" | "multiply" | "divide" => {
-                    let op = match name.as_str() {
+                    let op = match name.name() {
                         "advance" => Arith::Add,
                         "multiply" => Arith::Mul,
                         _ => Arith::Div,
@@ -173,8 +177,8 @@ impl Lowerer {
                     let Some(Token::Cs(what)) = lx.next_token(&self.eng.cats) else {
                         return Err(TexError("You can't use this after \\advance".into()));
                     };
-                    if what != "count" {
-                        return Err(TexError(format!("Unsupported register \\{what}")));
+                    if what.name() != "count" {
+                        return Err(TexError(format!("Unsupported register \\{}", what.name())));
                     }
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_by_file(lx)?;
@@ -191,11 +195,17 @@ impl Lowerer {
                     let b64 = self.rust_blob(lx)?;
                     out.push(Cmd::RustCompile(b64));
                 }
-                // A bare `\rustcall` in running text: called for its effect,
-                // with the value dropped.
+                // A bare `\rustcall` in running text: the value is discarded,
+                // which is how a document calls a Rust function for its effect.
                 n if n == crate::rust_ffi::CALL_CS => {
                     let call = self.rust_call(lx, false)?;
-                    out.push(Cmd::Message(vec![MsgOp::Discard(call)]));
+                    out.push(Cmd::Message(vec![]));
+                    // The call has to reach the VM, and a message with no
+                    // pieces emits nothing but the flush -- so put the call in
+                    // it and drop the rendered text by flushing an empty build.
+                    if let Some(Cmd::Message(parts)) = out.last_mut() {
+                        parts.push(MsgOp::Discard(call));
+                    }
                 }
                 "ifnum" => {
                     let left = self.number(lx)?;
@@ -227,7 +237,7 @@ impl Lowerer {
                 // table, which is a frontend fact. Emitting a branch for it
                 // would be dishonest bytecode -- there is nothing to test.
                 "iftrue" | "iffalse" => {
-                    let taken = name == "iftrue";
+                    let taken = name.name() == "iftrue";
                     let (t, e) = self.arms(lx)?;
                     out.extend(if taken { t } else { e });
                 }
@@ -251,15 +261,15 @@ impl Lowerer {
                     // itself under a test -- becomes a real loop rather than an
                     // inline copy. Inlining it cannot terminate: the copy holds
                     // the call that gets copied.
-                    if let Some(parts) = self.tail_loop(other) {
+                    if let Some(parts) = self.tail_loop(name) {
                         let cmd = self.lower_tail_loop(parts)?;
                         out.push(cmd);
                         continue;
                     }
                     // A macro expands into the stream and lowering continues
                     // through its body -- expansion is a frontend concern.
-                    if matches!(self.eng.meanings.get(other), Some(Meaning::Macro(_))) {
-                        self.eng.expand_macro_file(lx, other)?;
+                    if matches!(self.eng.meanings.get(&name), Some(Meaning::Macro(_))) {
+                        self.eng.expand_macro_file(lx, name)?;
                         continue;
                     }
                     return Err(TexError(format!("Undefined control sequence \\{other}")));
@@ -296,22 +306,22 @@ impl Lowerer {
         let mut cmd = None;
         while let Some(t) = work.pending.pop() {
             match &t {
-                Token::Cs(n) if n == "the" => {
+                Token::Cs(n) if n.name() == "the" => {
                     match work.pending.pop() {
-                        Some(Token::Cs(w)) if w == "count" => {}
+                        Some(Token::Cs(w)) if w.name() == "count" => {}
                         _ => return Err(TexError("Unsupported \\edef body".into())),
                     }
                     let reg = self.eng.scan_number_pending(&mut work)?;
                     let scratch = self.next_scratch;
                     self.next_scratch -= 1;
                     cmd = Some(Cmd::SetCount(scratch, Num::Count(reg)));
-                    new_body.push(Token::Cs("the".into()));
-                    new_body.push(Token::Cs("count".into()));
+                    new_body.push(Token::cs("the"));
+                    new_body.push(Token::cs("count"));
                     for ch in scratch.to_string().chars() {
                         new_body.push(Token::Char(ch, Cat::Other));
                     }
                 }
-                other => new_body.push(other.clone()),
+                other => new_body.push(*other),
             }
         }
         self.eng.define_macro(name, new_body);
@@ -327,20 +337,20 @@ impl Lowerer {
     /// arguments, and it must not name itself anywhere else. Anything less
     /// certain is left to inlining, where the depth bound still catches it --
     /// a recogniser that guesses would silently compile a DIFFERENT program.
-    fn tail_loop(&self, name: &str) -> Option<TailLoop> {
-        let Some(Meaning::Macro(m)) = self.eng.meanings.get(name) else {
+    fn tail_loop(&self, name: CsId) -> Option<TailLoop> {
+        let Some(Meaning::Macro(m)) = self.eng.meanings.get(&name) else {
             return None;
         };
         if !m.params.is_empty() {
             return None;
         }
-        let is_self = |t: &Token| matches!(t, Token::Cs(n) if n == name);
+        let is_self = |t: &Token| matches!(t, Token::Cs(n) if *n == name);
         // The tail call sits at the end, before an optional space and `\fi`.
         let mut end = m.body.len();
         while end > 0 && m.body[end - 1].is_space() {
             end -= 1;
         }
-        if end == 0 || !matches!(&m.body[end - 1], Token::Cs(n) if n == "fi") {
+        if end == 0 || !matches!(&m.body[end - 1], Token::Cs(n) if n.name() == "fi") {
             return None;
         }
         end -= 1;
@@ -354,7 +364,7 @@ impl Lowerer {
         // Everything before it splits at the `\ifnum` that guards the call.
         let guard = m.body[..end]
             .iter()
-            .rposition(|t| matches!(t, Token::Cs(n) if n == "ifnum"))?;
+            .rposition(|t| matches!(t, Token::Cs(n) if n.name() == "ifnum"))?;
         let body = m.body[..guard].to_vec();
         let cond = m.body[guard + 1..end].to_vec();
         // One self-reference only: another one elsewhere is a different program
@@ -392,12 +402,12 @@ impl Lowerer {
         let then_branch = self.block(lx, Some(&["else", "fi"]))?;
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
-            Some(Token::Cs(n)) if n == "else" => {
+            Some(Token::Cs(n)) if n.name() == "else" => {
                 else_branch = self.block(lx, Some(&["fi"]))?;
                 // Consume the `\fi`.
                 let _ = lx.next_token(&self.eng.cats);
             }
-            Some(Token::Cs(n)) if n == "fi" => {}
+            Some(Token::Cs(n)) if n.name() == "fi" => {}
             other => {
                 if let Some(t) = other {
                     lx.push_back(&[t]);
@@ -423,10 +433,11 @@ impl Lowerer {
             match &t {
                 _ if t.is_space() => continue,
                 Token::Char(c, _) => b64.push(*c),
-                Token::Cs(n) if n == crate::rust_ffi::END_CS => break,
+                Token::Cs(n) if n.name() == crate::rust_ffi::END_CS => break,
                 Token::Cs(n) => {
                     return Err(TexError(format!(
-                        "Unexpected \\{n} inside a \\rust block body"
+                        "Unexpected \\{} inside a \\rust block body",
+                        n.name()
                     )))
                 }
             }
@@ -486,7 +497,7 @@ impl Lowerer {
                 continue;
             }
             if let Token::Cs(n) = &t {
-                if n == crate::rust_ffi::END_CS {
+                if n.name() == crate::rust_ffi::END_CS {
                     break;
                 }
             }
@@ -499,8 +510,8 @@ impl Lowerer {
         Ok(Num::Rust { name, args })
     }
 
-    /// A number operand: a literal, `\count<n>` read at run time, or a call
-    /// into a compiled `\rust{ … }` block.
+    /// A number operand: a literal, `\count<n>` read at run time, or a call into
+    /// a compiled `\rust{ … }` block.
     fn number(&mut self, lx: &mut Lexer) -> R<Num> {
         // Peek for `\count`, which becomes a slot read rather than a constant.
         loop {
@@ -511,11 +522,11 @@ impl Lowerer {
                 continue;
             }
             match &t {
-                Token::Cs(n) if n == "count" => {
+                Token::Cs(n) if n.name() == "count" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     return Ok(Num::Count(reg));
                 }
-                Token::Cs(n) if n == crate::rust_ffi::CALL_CS => {
+                Token::Cs(n) if n.name() == crate::rust_ffi::CALL_CS => {
                     return self.rust_call(lx, false);
                 }
                 _ => {
@@ -555,17 +566,17 @@ impl Lowerer {
                 text.push_str(&t.to_text(self.eng.escape));
                 continue;
             };
-            let n = n.clone();
-            if stop.contains(&n.as_str()) {
+            let n = *n;
+            if stop.contains(&n.name()) {
                 work.push_back(&[Token::Cs(n)]);
                 break;
             }
-            match n.as_str() {
+            match n.name() {
                 "the" | "number" => {
                     flush!();
-                    if n == "the" {
+                    if n.name() == "the" {
                         match work.pending.pop() {
-                            Some(Token::Cs(w)) if w == "count" => {}
+                            Some(Token::Cs(w)) if w.name() == "count" => {}
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
                         let reg = self.eng.scan_number_pending(work)?;
@@ -573,7 +584,8 @@ impl Lowerer {
                         continue;
                     }
                     // `\number` takes either a register or a literal.
-                    let is_reg = matches!(work.pending.last(), Some(Token::Cs(w)) if w == "count");
+                    let is_reg =
+                        matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "count");
                     if is_reg {
                         let _ = work.pending.pop();
                         let reg = self.eng.scan_number_pending(work)?;
@@ -593,7 +605,7 @@ impl Lowerer {
                 "string" => {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
-                            Token::Cs(cs) => format!("{}{cs}", self.eng.escape),
+                            Token::Cs(cs) => format!("{}{}", self.eng.escape, cs.name()),
                             other => other.to_text(self.eng.escape),
                         });
                     }
@@ -601,7 +613,7 @@ impl Lowerer {
                 "csname" => {
                     // The name is built from text and macros, all compile-time.
                     let built = self.eng.read_csname_pending(work)?;
-                    work.push_back(&[Token::Cs(built)]);
+                    work.push_back(&[Token::cs(&built)]);
                 }
                 "expandafter" => {
                     let Some(held) = work.pending.pop() else {
@@ -611,16 +623,16 @@ impl Lowerer {
                         return Err(TexError("Missing token after \\expandafter".into()));
                     };
                     match &next {
-                        Token::Cs(m) if self.eng.is_macro(m) => {
-                            let m = m.clone();
-                            self.eng.expand_macro_pending(work, &m)?;
+                        Token::Cs(m) if self.eng.is_macro(*m) => {
+                            let m = *m;
+                            self.eng.expand_macro_pending(work, m)?;
                         }
                         _ => work.push_back(&[next]),
                     }
                     work.push_back(&[held]);
                 }
                 "iftrue" | "iffalse" => {
-                    let taken = n == "iftrue";
+                    let taken = n.name() == "iftrue";
                     let (t_ops, e_ops) = self.msg_arms(work)?;
                     flush!();
                     out.extend(if taken { t_ops } else { e_ops });
@@ -667,7 +679,7 @@ impl Lowerer {
                     flush!();
                     out.push(self.case_chain(value, branches));
                 }
-                _ if self.eng.is_macro(&n) => self.eng.expand_macro_pending(work, &n)?,
+                _ if self.eng.is_macro(n) => self.eng.expand_macro_pending(work, n)?,
                 _ => text.push_str(&t.to_text(self.eng.escape)),
             }
         }
@@ -708,14 +720,14 @@ impl Lowerer {
             let arm = self.msg_ops(work, &["or", "else", "fi"])?;
             arms.push(arm);
             match work.pending.pop() {
-                Some(Token::Cs(n)) if n == "or" => continue,
-                Some(Token::Cs(n)) if n == "else" => {
+                Some(Token::Cs(n)) if n.name() == "or" => continue,
+                Some(Token::Cs(n)) if n.name() == "else" => {
                     let default = self.msg_ops(work, &["fi"])?;
                     arms.push(default);
                     let _ = work.pending.pop();
                     return Ok(arms);
                 }
-                Some(Token::Cs(n)) if n == "fi" => {
+                Some(Token::Cs(n)) if n.name() == "fi" => {
                     // No `\else`: the default arm is empty.
                     arms.push(Vec::new());
                     return Ok(arms);
@@ -730,11 +742,11 @@ impl Lowerer {
         let then_ops = self.msg_ops(work, &["else", "fi"])?;
         let mut else_ops = Vec::new();
         match work.pending.pop() {
-            Some(Token::Cs(n)) if n == "else" => {
+            Some(Token::Cs(n)) if n.name() == "else" => {
                 else_ops = self.msg_ops(work, &["fi"])?;
                 let _ = work.pending.pop();
             }
-            Some(Token::Cs(n)) if n == "fi" => {}
+            Some(Token::Cs(n)) if n.name() == "fi" => {}
             _ => return Err(TexError("Incomplete \\if; missing \\fi".into())),
         }
         Ok((then_ops, else_ops))
@@ -750,11 +762,11 @@ impl Lowerer {
                 continue;
             }
             match &t {
-                Token::Cs(n) if n == "count" => {
+                Token::Cs(n) if n.name() == "count" => {
                     let reg = self.eng.scan_number_pending(work)?;
                     return Ok(Num::Count(reg));
                 }
-                Token::Cs(n) if n == crate::rust_ffi::CALL_CS => {
+                Token::Cs(n) if n.name() == crate::rust_ffi::CALL_CS => {
                     return self.rust_call(work, true);
                 }
                 _ => {
@@ -778,7 +790,8 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
         for c in cmds {
             match c {
-                // A line directive assigns nothing.
+                // Neither a line directive nor a `\rust{ … }` compile writes a
+                // register.
                 Cmd::Line(_) | Cmd::RustCompile(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {

@@ -38,6 +38,13 @@ pub enum Cat {
 /// document that sets its own catcodes has to see the same starting point.
 pub struct CatTable {
     codes: [Cat; 256],
+    /// Bumped by every `set`.
+    ///
+    /// Lexing ahead of the expander is only valid while the table it was done
+    /// under still holds. A counter is what lets a cached token stream say "I
+    /// was produced under generation N" and be thrown away the moment
+    /// `\catcode` moves the table on, without comparing 256 bytes each time.
+    generation: u32,
 }
 
 impl Default for CatTable {
@@ -63,7 +70,15 @@ impl CatTable {
         codes[b' ' as usize] = Cat::Space;
         codes[0] = Cat::Ignored;
         codes[127] = Cat::Invalid;
-        Self { codes }
+        Self {
+            codes,
+            generation: 0,
+        }
+    }
+
+    /// Which revision of the table this is; see [`CatTable::generation`]'s field.
+    pub fn generation(&self) -> u32 {
+        self.generation
     }
 
     pub fn get(&self, c: char) -> Cat {
@@ -80,7 +95,12 @@ impl CatTable {
     pub fn set(&mut self, c: char, cat: Cat) {
         if let Ok(i) = usize::try_from(u32::from(c)) {
             if i < 256 {
+                // Bump even when the value is unchanged: `\catcode` reassigning
+                // a character its current class is still a point where anything
+                // lexed ahead has to be re-checked, and pretending otherwise
+                // would make correctness depend on the old value.
                 self.codes[i] = cat;
+                self.generation = self.generation.wrapping_add(1);
             }
         }
     }

@@ -65,7 +65,7 @@ fn a_large_mixed_document_agrees() {
     for i in 0..4000 {
         match i % 5 {
             0 => src.push_str("\\message{line}\n"),
-            1 => src.push_str("\n"),
+            1 => src.push('\n'),
             2 => src.push_str("% comment\n"),
             3 => src.push_str("plain   words   here\n"),
             _ => src.push_str("\\def\\x{body}\n"),

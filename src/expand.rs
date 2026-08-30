@@ -12,7 +12,7 @@
 
 use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
-use crate::token::Token;
+use crate::token::{CsId, Token};
 use std::collections::HashMap;
 
 /// A `\def`'d macro: the parameter text as written, and the body.
@@ -28,7 +28,7 @@ pub struct Macro {
 pub enum Meaning {
     Macro(Macro),
     /// A primitive, by its canonical name (`relax`, `par`, …).
-    Primitive(String),
+    Primitive(CsId),
     /// `\let\a=b` — a character token.
     Char(char, Cat),
 }
@@ -39,12 +39,18 @@ pub enum Meaning {
 enum Save {
     Cat(char, Cat),
     Count(i64, Option<i64>),
-    Meaning(String, Option<Meaning>),
+    Meaning(CsId, Option<Meaning>),
 }
 
 pub struct Engine {
     pub cats: CatTable,
-    pub meanings: HashMap<String, Meaning>,
+    /// What each control sequence means, keyed by interned id.
+    ///
+    /// Keyed on `CsId` rather than the name: a lookup here happens on every
+    /// control sequence the expander touches, and hashing a `u32` is what makes
+    /// that cheap. `tex.web` reaches `eqtb` the same way, by the pointer the
+    /// hash table already produced.
+    pub meanings: HashMap<CsId, Meaning>,
     pub count: HashMap<i64, i64>,
     pub messages: Vec<String>,
     pub escape: char,
@@ -166,9 +172,9 @@ impl Engine {
         }
     }
 
-    fn set_meaning(&mut self, name: String, m: Meaning) {
+    fn set_meaning(&mut self, name: CsId, m: Meaning) {
         let old = self.meanings.get(&name).cloned();
-        self.save(Save::Meaning(name.clone(), old));
+        self.save(Save::Meaning(name, old));
         // A global assignment wipes the saved values other groups hold, so no
         // `}` can restore the old meaning over it.
         if self.global {
@@ -209,13 +215,13 @@ impl Engine {
         let Token::Cs(name) = &tok else {
             return Ok(false);
         };
-        let name = name.clone();
-        if self.try_expand(lx, &name, false)? {
+        let name = *name;
+        if self.try_expand(lx, name, false)? {
             return Ok(false);
         }
-        match name.as_str() {
+        match name.name() {
             "end" => return Ok(true),
-            "def" | "gdef" | "edef" | "xdef" => self.do_def(lx, &name)?,
+            kind @ ("def" | "gdef" | "edef" | "xdef") => self.do_def(lx, kind)?,
             "let" => self.do_let(lx)?,
             "global" => {
                 self.global = true;
@@ -253,12 +259,12 @@ impl Engine {
     /// it so a conditional behaves identically in a file and inside a `\message`
     /// body — in TeX they are the same machinery, and splitting them here would
     /// make `\ifnum` work in one place and not the other.
-    fn try_expand(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<bool> {
-        if let Some(Meaning::Macro(_)) = self.meanings.get(name) {
+    fn try_expand(&mut self, lx: &mut Lexer, name: CsId, pending_only: bool) -> R<bool> {
+        if let Some(Meaning::Macro(_)) = self.meanings.get(&name) {
             self.expand_macro(lx, name, pending_only)?;
             return Ok(true);
         }
-        match name {
+        match name.name() {
             n if CONDITIONALS.contains(&n) => {
                 self.do_conditional(lx, n, pending_only)?;
                 Ok(true)
@@ -300,11 +306,11 @@ impl Engine {
             "csname" => {
                 let built = self.read_csname(lx, pending_only)?;
                 // An undefined \csname name becomes \relax, per tex.web §372.
-                if !self.meanings.contains_key(&built) {
-                    self.meanings
-                        .insert(built.clone(), Meaning::Primitive("relax".into()));
-                }
-                lx.push_back(&[Token::Cs(built)]);
+                let id = CsId::intern(&built);
+                self.meanings
+                    .entry(id)
+                    .or_insert_with(|| Meaning::Primitive(CsId::intern("relax")));
+                lx.push_back(&[Token::Cs(id)]);
                 Ok(true)
             }
             _ => Ok(false),
@@ -329,8 +335,8 @@ impl Engine {
         };
         match &next {
             Token::Cs(n) => {
-                let n = n.clone();
-                if !self.try_expand(lx, &n, true)? {
+                let n = *n;
+                if !self.try_expand(lx, n, true)? {
                     lx.push_back(&[next]);
                 }
             }
@@ -419,7 +425,7 @@ impl Engine {
                 return Err(TexError("Incomplete \\if; all text was ignored".into()));
             };
             let Token::Cs(n) = &t else { continue };
-            match n.as_str() {
+            match n.name() {
                 n if CONDITIONALS.contains(&n) => depth += 1,
                 "fi" => match depth {
                     0 => return Ok(false),
@@ -468,8 +474,8 @@ impl Engine {
             match &t {
                 Token::Char(c, _) => return Ok(*c),
                 Token::Cs(n) => {
-                    let n = n.clone();
-                    if !self.try_expand(lx, &n, pending_only)? {
+                    let n = *n;
+                    if !self.try_expand(lx, n, pending_only)? {
                         // An unexpandable control sequence compares as itself.
                         return Ok('\u{0}');
                     }
@@ -521,7 +527,7 @@ impl Engine {
                 t if t.is_space() => continue,
                 Token::Char('=', _) => continue,
                 other => {
-                    src = Some(other.clone());
+                    src = Some(*other);
                     break;
                 }
             }
@@ -533,7 +539,7 @@ impl Engine {
             Token::Char(c, k) => Meaning::Char(*c, *k),
             Token::Cs(n) => match self.meanings.get(n) {
                 Some(m) => m.clone(),
-                None => Meaning::Primitive(n.clone()),
+                None => Meaning::Primitive(*n),
             },
         };
         self.set_meaning(name, meaning);
@@ -561,9 +567,9 @@ impl Engine {
 
     // ── macro calls ──────────────────────────────────────────────────────
 
-    fn expand_macro(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<()> {
-        let Some(Meaning::Macro(m)) = self.meanings.get(name).cloned() else {
-            return Err(TexError(format!("\\{name} is not a macro")));
+    fn expand_macro(&mut self, lx: &mut Lexer, name: CsId, pending_only: bool) -> R<()> {
+        let Some(Meaning::Macro(m)) = self.meanings.get(&name).cloned() else {
+            return Err(TexError(format!("\\{} is not a macro", name.name())));
         };
         let args = self.match_params(lx, &m.params, pending_only)?;
         let mut out = Vec::with_capacity(m.body.len());
@@ -580,13 +586,13 @@ impl Engine {
                         continue;
                     }
                     Some(Token::Char(_, Cat::Param)) => {
-                        out.push(m.body[i + 1].clone());
+                        out.push(m.body[i + 1]);
                         i += 2;
                         continue;
                     }
-                    _ => out.push(m.body[i].clone()),
+                    _ => out.push(m.body[i]),
                 },
-                t => out.push(t.clone()),
+                t => out.push(*t),
             }
             i += 1;
         }
@@ -604,7 +610,7 @@ impl Engine {
         let mut i = 0;
         while i < params.len() {
             if !matches!(params[i], Token::Char(_, Cat::Param)) {
-                let want = params[i].clone();
+                let want = params[i];
                 let got = self.take(lx, pending_only);
                 if got.as_ref() != Some(&want) {
                     return Err(TexError("Use of macro doesn't match its definition".into()));
@@ -726,8 +732,8 @@ impl Engine {
         let Some(Token::Cs(what)) = lx.next_token(&self.cats) else {
             return Err(TexError("You can't use this after \\advance".into()));
         };
-        if what != "count" {
-            return Err(TexError(format!("Unsupported register \\{what}")));
+        if what.name() != "count" {
+            return Err(TexError(format!("Unsupported register \\{}", what.name())));
         }
         let reg = self.scan_number(lx, false)?;
         self.skip_by(lx)?;
@@ -795,7 +801,7 @@ impl Engine {
                     continue;
                 }
                 Token::Char('+', _) => continue,
-                other => break other.clone(),
+                other => break *other,
             }
         };
         if matches!(cur, Token::Char('`', _)) {
@@ -804,21 +810,26 @@ impl Engine {
             };
             let code = match t {
                 Token::Char(c, _) => u32::from(c) as i64,
-                Token::Cs(n) => n.chars().next().map(|c| u32::from(c) as i64).unwrap_or(0),
+                Token::Cs(n) => n
+                    .name()
+                    .chars()
+                    .next()
+                    .map(|c| u32::from(c) as i64)
+                    .unwrap_or(0),
             };
             return Ok(sign * code);
         }
         if let Token::Cs(name) = &cur {
-            let name = name.clone();
-            if name == "count" {
+            let name = *name;
+            if name.name() == "count" {
                 let reg = self.scan_number(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
             }
             // A macro in numeric position expands and the scan resumes.
-            if self.try_expand(lx, &name, pending_only)? {
+            if self.try_expand(lx, name, pending_only)? {
                 return Ok(sign * self.scan_number(lx, pending_only)?);
             }
-            return Err(TexError(format!("Missing number, found \\{name}")));
+            return Err(TexError(format!("Missing number, found \\{}", name.name())));
         }
         let mut digits = String::new();
         loop {
@@ -880,8 +891,8 @@ impl Engine {
             }
             match &t {
                 Token::Cs(name) => {
-                    let name = name.clone();
-                    if !self.try_expand(lx, &name, true)? {
+                    let name = *name;
+                    if !self.try_expand(lx, name, true)? {
                         out.push(t);
                     }
                 }
@@ -904,23 +915,23 @@ impl Engine {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
-                Token::Cs(name) if name == "the" || name == "number" => {
-                    let n = self.read_the(lx, name == "number")?;
+                Token::Cs(name) if name.name() == "the" || name.name() == "number" => {
+                    let n = self.read_the(lx, name.name() == "number")?;
                     out.push_str(&n);
                 }
-                Token::Cs(name) if name == "string" => {
+                Token::Cs(name) if name.name() == "string" => {
                     // `\string` is `sprint_cs` (tex.web §262), NOT `print_cs`:
                     // no trailing space after a multi-letter name.
                     if let Some(next) = lx.pending.pop() {
                         out.push_str(&match &next {
-                            Token::Cs(n) => format!("{}{n}", self.escape),
+                            Token::Cs(n) => format!("{}{}", self.escape, n.name()),
                             other => other.to_text(self.escape),
                         });
                     }
                 }
                 Token::Cs(name) => {
-                    let name = name.clone();
-                    if !self.try_expand(lx, &name, true)? {
+                    let name = *name;
+                    if !self.try_expand(lx, name, true)? {
                         out.push_str(&t.to_text(self.escape));
                     }
                 }
@@ -939,8 +950,8 @@ impl Engine {
         let Some(Token::Cs(what)) = lx.pending.pop() else {
             return Err(TexError("You can't use \\the here".into()));
         };
-        if what != "count" {
-            return Err(TexError(format!("Unsupported \\the\\{what}")));
+        if what.name() != "count" {
+            return Err(TexError(format!("Unsupported \\the\\{}", what.name())));
         }
         let reg = self.scan_number(lx, true)?;
         Ok(self.count.get(&reg).unwrap_or(&0).to_string())
@@ -953,12 +964,15 @@ impl Engine {
                 return Err(TexError("Missing \\endcsname inserted".into()));
             };
             match &t {
-                Token::Cs(n) if n == "endcsname" => return Ok(name),
+                Token::Cs(n) if n.name() == "endcsname" => return Ok(name),
                 Token::Char(c, _) => name.push(*c),
                 Token::Cs(n) => {
-                    let n = n.clone();
-                    if !self.try_expand(lx, &n, pending_only)? {
-                        return Err(TexError(format!("Missing \\endcsname before \\{n}")));
+                    let n = *n;
+                    if !self.try_expand(lx, n, pending_only)? {
+                        return Err(TexError(format!(
+                            "Missing \\endcsname before \\{}",
+                            n.name()
+                        )));
                     }
                 }
             }
@@ -1015,11 +1029,11 @@ impl Engine {
         self.read_relation(lx, false)
     }
 
-    pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: &str) -> R<()> {
+    pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
         self.expand_macro(lx, name, false)
     }
 
-    pub fn expand_macro_pending(&mut self, lx: &mut Lexer, name: &str) -> R<()> {
+    pub fn expand_macro_pending(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
         self.expand_macro(lx, name, true)
     }
 
@@ -1071,8 +1085,8 @@ impl Engine {
 
 /// More frontend surface for the lowering pass.
 impl Engine {
-    pub fn is_macro(&self, name: &str) -> bool {
-        matches!(self.meanings.get(name), Some(Meaning::Macro(_)))
+    pub fn is_macro(&self, name: CsId) -> bool {
+        matches!(self.meanings.get(&name), Some(Meaning::Macro(_)))
     }
     pub fn read_balanced_pub(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         self.read_balanced(lx)
@@ -1087,7 +1101,7 @@ impl Engine {
         self.meanings_equal(a, b)
     }
     /// Define a macro with no parameters, for `\edef`'s rewritten body.
-    pub fn define_macro(&mut self, name: String, body: Vec<Token>) {
+    pub fn define_macro(&mut self, name: CsId, body: Vec<Token>) {
         self.set_meaning(
             name,
             Meaning::Macro(Macro {
