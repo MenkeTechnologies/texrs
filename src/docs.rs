@@ -409,7 +409,7 @@ pub fn emacs_stdlib_el() -> String {
 fn category_codes() -> String {
     let table = CatTable::new();
     let mut out = String::from(
-        "      <section class=\"tutorial-section\" id=\"ref-catcodes\">\n        <h2>Category codes</h2>\n        <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>\n          <tbody>\n",
+        "      <section class=\"tutorial-section\" id=\"tbl-catcodes\">\n        <h2>Category codes</h2>\n        <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>\n          <tbody>\n",
     );
     for cat in Cat::ALL {
         let chars = initex_members(&table, cat);
@@ -480,7 +480,7 @@ fn named(c: u8) -> String {
 /// does not.
 fn divergences() -> String {
     let mut out = String::from(
-        "      <section class=\"tutorial-section\" id=\"ref-divergences\">\n        <h2>Divergences from tex</h2>\n        <p>Where this engine and real <code>tex</code> disagree, taken from <code>tests/known_gaps.txt</code> &mdash; the baseline the differential gate enforces in both directions, so this list can neither grow silently nor go stale.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Case</th><th>What differs</th></tr></thead>\n          <tbody>\n",
+        "      <section class=\"tutorial-section\" id=\"tbl-divergences\">\n        <h2>Divergences from tex</h2>\n        <p>Where this engine and real <code>tex</code> disagree, taken from <code>tests/known_gaps.txt</code> &mdash; the baseline the differential gate enforces in both directions, so this list can neither grow silently nor go stale.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Case</th><th>What differs</th></tr></thead>\n          <tbody>\n",
     );
     for (case, reason) in known_gaps(include_str!("../tests/known_gaps.txt")) {
         let _ = writeln!(
@@ -553,7 +553,7 @@ const ENVIRONMENT: &[(&str, &str)] = &[
 /// The environment table.
 fn environment() -> String {
     let mut out = String::from(
-        "      <section class=\"tutorial-section\" id=\"ref-environment\">\n        <h2>Environment</h2>\n        <table class=\"file-table\">\n          <thead><tr><th>Variable</th><th>What it does</th></tr></thead>\n          <tbody>\n",
+        "      <section class=\"tutorial-section\" id=\"tbl-environment\">\n        <h2>Environment</h2>\n        <table class=\"file-table\">\n          <thead><tr><th>Variable</th><th>What it does</th></tr></thead>\n          <tbody>\n",
     );
     for (name, note) in ENVIRONMENT {
         let _ = writeln!(
