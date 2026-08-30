@@ -70,7 +70,18 @@
     "{"
     "}"
     "\\begingroup"
-    "\\endgroup")
+    "\\endgroup"
+    "\\newcommand"
+    "\\renewcommand"
+    "\\providecommand"
+    "\\DeclareRobustCommand"
+    "\\documentclass"
+    "\\usepackage"
+    "\\RequirePackage"
+    "\\PassOptionsToPackage"
+    "\\PassOptionsToClass"
+    "\\makeatletter"
+    "\\makeatother")
   "Every primitive texrs resolves, for completion at point.")
 
 (defconst texrs-stdlib--docs
@@ -133,6 +144,17 @@
     (puthash "}" "}  —  Close a group (category code 2), undoing every non-global assignment made inside it. [Grouping]" table)
     (puthash "\\begingroup" "\\begingroup  —  Open a group without braces, scoping the macro table and the registers written inside it. [Grouping]" table)
     (puthash "\\endgroup" "\\endgroup  —  Close a `\\begingroup`, undoing every non-global assignment made since it. [Grouping]" table)
+    (puthash "\\newcommand" "\\newcommand  —  Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. [LaTeX]" table)
+    (puthash "\\renewcommand" "\\renewcommand  —  Redefine a macro. [LaTeX]" table)
+    (puthash "\\providecommand" "\\providecommand  —  Define a macro only if the name is free. [LaTeX]" table)
+    (puthash "\\DeclareRobustCommand" "\\DeclareRobustCommand  —  Define a macro. [LaTeX]" table)
+    (puthash "\\documentclass" "\\documentclass  —  Consumed, with its optional arguments, and produces nothing. [LaTeX]" table)
+    (puthash "\\usepackage" "\\usepackage  —  Consumed with its optional arguments, producing nothing, for the same reason as `\\documentclass`: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn. [LaTeX]" table)
+    (puthash "\\RequirePackage" "\\RequirePackage  —  Consumed with its optional arguments, producing nothing. [LaTeX]" table)
+    (puthash "\\PassOptionsToPackage" "\\PassOptionsToPackage  —  Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded. [LaTeX]" table)
+    (puthash "\\PassOptionsToClass" "\\PassOptionsToClass  —  Consumed with both of its arguments, producing nothing. [LaTeX]" table)
+    (puthash "\\makeatletter" "\\makeatletter  —  Make `@` a letter (category code 11), so LaTeX's internal names like `\\@ifnextchar` become spellable as single control sequences. [LaTeX]" table)
+    (puthash "\\makeatother" "\\makeatother  —  Make `@` an ordinary character again (category code 12), closing a `\\makeatletter` region. [LaTeX]" table)
     table)
   "Primitive name to the line eldoc shows for it.")
 

@@ -14,6 +14,8 @@
 //!   * "Registers"         → `compiler::COUNT_SLOTS` and `expand::do_arith`.
 //!   * "Grouping"          → `expand::begin_group` / `end_group` and the
 //!     save/restore wrapper `lower.rs` emits around a group body.
+//!   * "LaTeX"             → `latex.rs`, `expand::do_newcommand` and
+//!     `expand::compile_time_preamble_directive`.
 //!
 //! A primitive is documented here only if texrs resolves it, so the language
 //! server and the static reference never drift from what the engine can run.
@@ -36,6 +38,7 @@ pub const CHAPTERS: &[&str] = &[
     "Grouping",
     "Intercepts",
     "Inline Rust",
+    "LaTeX",
 ];
 
 /// The reference corpus, in chapter order.
@@ -395,6 +398,73 @@ pub const CORPUS: &[Entry] = &[
         "Grouping",
         "Close a `\\begingroup`, undoing every non-global assignment made since it. A `}` will not close one, and neither will the end of the file.",
         "\\begingroup <body>\\endgroup",
+    ),
+    // ══ LaTeX — latex.rs, expand::do_newcommand ════════════════════════════
+    (
+        "\\newcommand",
+        "LaTeX",
+        "Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. LaTeX writes this as a chain of `\\ifnum...\\def`, which cannot run here because lowering emits both arms of a conditional, so texrs dispatches on the argument count natively instead. Two divergences from latex.ltx: redefining an existing name is allowed rather than an error, and the `[default]` form's default is recorded but not yet substituted at a call that omits the bracket.",
+        "\\newcommand{\\NAME}[ARGC][DEFAULT]{BODY}\n\\newcommand{\\greet}[1]{hello #1}\n\\message{\\greet{world}}   % => hello world",
+    ),
+    (
+        "\\renewcommand",
+        "LaTeX",
+        "Redefine a macro. Identical to `\\newcommand` here, because texrs does not check whether the name already exists in either direction.",
+        "\\renewcommand{\\NAME}[ARGC]{BODY}\n\\newcommand{\\x}{one}\n\\renewcommand{\\x}{two}\n\\message{\\x}   % => two",
+    ),
+    (
+        "\\providecommand",
+        "LaTeX",
+        "Define a macro only if the name is free. An existing definition is kept and the new body is consumed rather than left in the document as text.",
+        "\\providecommand{\\NAME}[ARGC]{BODY}\n\\newcommand{\\x}{first}\n\\providecommand{\\x}{second}\n\\message{\\x}   % => first",
+    ),
+    (
+        "\\DeclareRobustCommand",
+        "LaTeX",
+        "Define a macro. Robustness is a property of LaTeX's expansion-in-moving-arguments machinery, which has no counterpart here, so this behaves exactly as `\\newcommand`.",
+        "\\DeclareRobustCommand{\\NAME}[ARGC]{BODY}\n\\DeclareRobustCommand{\\x}{text}\n\\message{\\x}   % => text",
+    ),
+    (
+        "\\documentclass",
+        "LaTeX",
+        "Consumed, with its optional arguments, and produces nothing. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one.",
+        "\\documentclass[OPTIONS]{CLASS}\n\\documentclass[12pt]{article}\n\\message{the body still runs}",
+    ),
+    (
+        "\\usepackage",
+        "LaTeX",
+        "Consumed with its optional arguments, producing nothing, for the same reason as `\\documentclass`: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn.",
+        "\\usepackage[OPTIONS]{PACKAGE}\n\\usepackage[utf8]{inputenc}",
+    ),
+    (
+        "\\RequirePackage",
+        "LaTeX",
+        "Consumed with its optional arguments, producing nothing. Same treatment as `\\usepackage`; the difference between them is where LaTeX allows each, which does not matter to an engine that loads neither.",
+        "\\RequirePackage[OPTIONS]{PACKAGE}\n\\RequirePackage{amsmath}",
+    ),
+    (
+        "\\PassOptionsToPackage",
+        "LaTeX",
+        "Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded.",
+        "\\PassOptionsToPackage{OPTIONS}{PACKAGE}\n\\PassOptionsToPackage{dvipsnames}{xcolor}",
+    ),
+    (
+        "\\PassOptionsToClass",
+        "LaTeX",
+        "Consumed with both of its arguments, producing nothing. The class counterpart of `\\PassOptionsToPackage`.",
+        "\\PassOptionsToClass{OPTIONS}{CLASS}\n\\PassOptionsToClass{a4paper}{article}",
+    ),
+    (
+        "\\makeatletter",
+        "LaTeX",
+        "Make `@` a letter (category code 11), so LaTeX's internal names like `\\@ifnextchar` become spellable as single control sequences. This is a catcode change, so it takes effect at COMPILE time, exactly as `\\catcode`\\@=11` does.",
+        "\\makeatletter <internal names> \\makeatother",
+    ),
+    (
+        "\\makeatother",
+        "LaTeX",
+        "Make `@` an ordinary character again (category code 12), closing a `\\makeatletter` region. After it, `\\@x` is the control sequence `\\` followed by the characters `@x` rather than one name.",
+        "\\makeatletter <internal names> \\makeatother",
     ),
 ];
 

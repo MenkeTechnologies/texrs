@@ -6,8 +6,30 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
+Versions 0.2.0, 0.3.0 and 0.3.1 were released without cutting a section here;
+everything below had accumulated under Unreleased and is filed under 0.4.0,
+which is the release that carries it to crates.io and the Homebrew tap.
+
 ### Added
 
+- A LaTeX layer for the half of LaTeX that lives in the mouth and the expander.
+  `src/latex/prelude.tex` is a file of `\newcommand`s compiled into the binary,
+  and a document naming `\documentclass`, `\usepackage`, `\PassOptionsToPackage`
+  or `\RequirePackage` is recognised as LaTeX and lowered against it.
+  `\newcommand`, `\renewcommand`, `\providecommand` and
+  `\DeclareRobustCommand` are dispatched natively rather than through
+  latex.ltx's `\ifnum` chain, which cannot run here because lowering emits both
+  arms of a conditional. The preamble directives are consumed and produce
+  nothing; `\makeatletter` and `\makeatother` are the catcode change they are.
+  Against a 167-file LaTeX/LuaLaTeX corpus this moves the compile count from 0
+  to 2 and moves the remaining failures out of the preamble directives and into
+  the packages themselves — 122 now stop at `\defaultfontfeatures`, 41 at
+  `\directlua`.
+- The eleven LaTeX control sequences are in `src/corpus.rs` under a new "LaTeX"
+  chapter, so they reach `docs/reference.html`, editor completion and hover the
+  same way every other primitive does.
 - `-X bst FILE.bst` reads a BibTeX style: the fields an entry may carry, the
   `MACRO` abbreviations, the functions, and the `READ`/`SORT`/`ITERATE` that say
   what it does. It also names every function the style calls that nothing
@@ -16,6 +38,8 @@ All notable changes to texrs are recorded here. The format follows
   against the styles TeX Live ships (`plain`, `unsrt`, `abbrv`, `alpha`), which
   parse whole with nothing undefined. The interpreter is deliberately not here:
   it needs `width$`, which measures a string in a font and so needs a `.tfm`.
+- `-X build --help`, and the same for `-X watch` and `-X dump`, print the usage
+  instead of reporting `--help` as an unknown argument.
 - `tests/cli.rs` now holds the `-X` commands to the same drift guard the options
   have: every command the usage text lists must be offered by the zsh completion
   and documented in the man page, and the completion may offer none the binary

@@ -56,7 +56,7 @@
             <span class="sep">/</span>
             <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
           </nav>
-          <p class="docs-build-line">texrs v0.3.1 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
+          <p class="docs-build-line">texrs v0.4.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
         </div>
         <div class="tutorial-toolbar">
           <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
@@ -269,6 +269,42 @@
 \count2=\rustcall add \count1 22 \endrust</pre></td></tr>
             <tr><td><code>\rustcompile</code></td><td>What a <code>\rust{ … }</code> block becomes: compile and register the block whose base64 body follows, up to <code>\endrust</code>. Written by the desugarer rather than by hand, and carried in a brace-free form so it reads correctly whatever the category codes are where the block appeared.</td><td><pre>\rustcompile &lt;base64&gt;\endrust</pre></td></tr>
             <tr><td><code>\endrust</code></td><td>Terminate a <code>\rustcompile</code> body or a <code>\rustcall</code> argument list. A control sequence rather than a brace, so neither form depends on a category code the document may not have set yet.</td><td><pre>\rustcall twice 21\endrust</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="ch-latex">
+        <h2>LaTeX</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\newcommand</code></td><td>Define a macro with <code>n</code> positional parameters: <code>\newcommand{\x}[2]{#1 and #2}</code>. LaTeX writes this as a chain of <code>\ifnum...\def</code>, which cannot run here because lowering emits both arms of a conditional, so texrs dispatches on the argument count natively instead. Two divergences from latex.ltx: redefining an existing name is allowed rather than an error, and the <code>[default]</code> form's default is recorded but not yet substituted at a call that omits the bracket.</td><td><pre>\newcommand{\NAME}[ARGC][DEFAULT]{BODY}
+\newcommand{\greet}[1]{hello #1}
+\message{\greet{world}}   % =&gt; hello world</pre></td></tr>
+            <tr><td><code>\renewcommand</code></td><td>Redefine a macro. Identical to <code>\newcommand</code> here, because texrs does not check whether the name already exists in either direction.</td><td><pre>\renewcommand{\NAME}[ARGC]{BODY}
+\newcommand{\x}{one}
+\renewcommand{\x}{two}
+\message{\x}   % =&gt; two</pre></td></tr>
+            <tr><td><code>\providecommand</code></td><td>Define a macro only if the name is free. An existing definition is kept and the new body is consumed rather than left in the document as text.</td><td><pre>\providecommand{\NAME}[ARGC]{BODY}
+\newcommand{\x}{first}
+\providecommand{\x}{second}
+\message{\x}   % =&gt; first</pre></td></tr>
+            <tr><td><code>\DeclareRobustCommand</code></td><td>Define a macro. Robustness is a property of LaTeX's expansion-in-moving-arguments machinery, which has no counterpart here, so this behaves exactly as <code>\newcommand</code>.</td><td><pre>\DeclareRobustCommand{\NAME}[ARGC]{BODY}
+\DeclareRobustCommand{\x}{text}
+\message{\x}   % =&gt; text</pre></td></tr>
+            <tr><td><code>\documentclass</code></td><td>Consumed, with its optional arguments, and produces nothing. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one.</td><td><pre>\documentclass[OPTIONS]{CLASS}
+\documentclass[12pt]{article}
+\message{the body still runs}</pre></td></tr>
+            <tr><td><code>\usepackage</code></td><td>Consumed with its optional arguments, producing nothing, for the same reason as <code>\documentclass</code>: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn.</td><td><pre>\usepackage[OPTIONS]{PACKAGE}
+\usepackage[utf8]{inputenc}</pre></td></tr>
+            <tr><td><code>\RequirePackage</code></td><td>Consumed with its optional arguments, producing nothing. Same treatment as <code>\usepackage</code>; the difference between them is where LaTeX allows each, which does not matter to an engine that loads neither.</td><td><pre>\RequirePackage[OPTIONS]{PACKAGE}
+\RequirePackage{amsmath}</pre></td></tr>
+            <tr><td><code>\PassOptionsToPackage</code></td><td>Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded.</td><td><pre>\PassOptionsToPackage{OPTIONS}{PACKAGE}
+\PassOptionsToPackage{dvipsnames}{xcolor}</pre></td></tr>
+            <tr><td><code>\PassOptionsToClass</code></td><td>Consumed with both of its arguments, producing nothing. The class counterpart of <code>\PassOptionsToPackage</code>.</td><td><pre>\PassOptionsToClass{OPTIONS}{CLASS}
+\PassOptionsToClass{a4paper}{article}</pre></td></tr>
+            <tr><td><code>\makeatletter</code></td><td>Make <code>@</code> a letter (category code 11), so LaTeX's internal names like <code>\@ifnextchar</code> become spellable as single control sequences. This is a catcode change, so it takes effect at COMPILE time, exactly as <code>\catcode</code>\@=11<code> does.</code></td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
+            <tr><td><code>\makeatother</code></td><td>Make <code>@</code> an ordinary character again (category code 12), closing a <code>\makeatletter</code> region. After it, <code>\@x</code> is the control sequence <code>\</code> followed by the characters <code>@x</code> rather than one name.</td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
           </tbody>
         </table>
       </section>

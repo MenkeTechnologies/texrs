@@ -240,19 +240,28 @@ diagnostic rather than a missing-function error later.
 No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
 typesetter yet — see `docs/ROADMAP.md`.
 
-**No LaTeX, and no Lua.** texrs is plain TeX: the mouth, the expander, and the
-primitives listed above. It loads no format, so `\documentclass`,
-`\usepackage`, `\PassOptionsToPackage`, `\makeatletter` and the rest of the
-LaTeX layer are undefined control sequences here, as they are in `tex` without
-`latex.ltx`. `\directlua` and the LuaTeX interface are likewise absent.
+**Some LaTeX, no Lua.** texrs carries the part of LaTeX that lives in the mouth
+and the expander, as TeX rather than as Rust: `src/latex/prelude.tex` is a file
+of `\newcommand`s compiled into the binary, and a document that writes
+`\documentclass` or `\usepackage` is recognised as LaTeX and lowered against it.
+`\newcommand`, `\renewcommand`, `\providecommand` and `\DeclareRobustCommand`
+are dispatched natively; `\documentclass`, `\usepackage`, `\RequirePackage` and
+the `\PassOptionsTo*` pair are consumed and produce nothing, because a package is
+TeX that builds boxes and there is no stomach to build them in. `\makeatletter`
+is a catcode change and works as one.
 
-This is worth stating with a number rather than in the abstract: run against
-the 167 `.tex` files in `MenkeTechnologiesPublications`, texrs compiles **none**
-of them. Every one fails immediately, 122 on `\PassOptionsToPackage`, 41 on
-`\directlua`, 3 on `\documentclass`, 1 on `\makeatletter`. They are LaTeX and
-LuaLaTeX documents, and nothing about them is close to what this engine reads.
-Supporting them means a format layer, a package system and an embedded Lua —
-each its own project, none of them on `docs/ROADMAP.md` yet.
+What that buys, and what it does not: a macro that would have drawn something
+yields its text instead, and a document whose meaning IS its layout will not
+survive it. `\directlua` and the LuaTeX interface are absent entirely.
+
+The number, run against the 167 `.tex` files in a real LaTeX/LuaLaTeX corpus:
+texrs compiles **2**. The other 165 still stop at a control sequence nothing
+defines — 122 at `\defaultfontfeatures`, 41 at `\directlua`, one at `\and`, one
+at `\@ifundefined`. Before the prelude the count was zero, with 122 stopping at
+`\PassOptionsToPackage`; the failures have moved from the preamble directives
+into the packages themselves, which is progress and is not arrival. Getting the
+rest means fontspec, an embedded Lua and the stomach those macros are written
+against — each its own project, none of them on `docs/ROADMAP.md` yet.
 
 ## [0x07] How it runs
 
