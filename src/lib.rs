@@ -23,9 +23,11 @@ pub mod catcode;
 pub mod cff;
 pub mod charcodes;
 pub mod cli;
+pub mod colour;
 pub mod compiler;
 pub mod corpus;
 pub mod dap;
+pub mod dimen;
 pub mod docs;
 pub mod document;
 pub mod dvi;
@@ -194,6 +196,12 @@ fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chun
 /// Arimo asks for Arial's metrics, which are Helvetica's, and a monospace
 /// request goes to Courier whatever it was called.
 pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
+    run_pdf_at(None, src)
+}
+
+/// The same, told where the document was read from, so a path it names can be
+/// resolved relative to it.
+pub fn run_pdf_at(near: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, TexError> {
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src_d) {
@@ -210,6 +218,8 @@ pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
         &text,
         &families,
         &crate::typeset::Layout::default(),
+        None,
+        near,
     ))
 }
 

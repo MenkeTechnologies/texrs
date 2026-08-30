@@ -350,6 +350,19 @@ impl Lowerer {
                     let v = self.number(lx)?;
                     out.push(Cmd::SetCount(reg, v));
                 }
+                // `\dimen0=1pt`. A dimension register is a register in the same
+                // slot file as the counts, offset past them, so everything that
+                // already works for a count -- assignment, a group's save and
+                // restore -- works for it with no second mechanism.
+                "dimen" => {
+                    let reg = self.eng.scan_number_file(lx)?;
+                    self.eng.skip_equals_file(lx)?;
+                    let sp = self.eng.scan_dimen_file(lx)?;
+                    out.push(Cmd::SetCount(
+                        crate::compiler::DIMEN_BASE + reg,
+                        Num::Literal(sp),
+                    ));
+                }
                 // `\pageno=7`, where `\pageno` was `\countdef`'d: the name is
                 // the register, so this is the `\count0=7` arm reached by
                 // another spelling.
@@ -363,7 +376,14 @@ impl Lowerer {
                         unreachable!("guarded by the arm's own pattern")
                     };
                     self.eng.skip_equals_file(lx)?;
-                    let v = self.number(lx)?;
+                    // Which register it is decides what follows the `=`: a
+                    // dimension register takes a dimension, and reading a bare
+                    // number there would store `2pt` as two scaled points and
+                    // leave the `pt` behind in the document.
+                    let v = match reg >= crate::compiler::DIMEN_BASE {
+                        true => Num::Literal(self.eng.scan_dimen_file(lx)?),
+                        false => self.number(lx)?,
+                    };
                     out.push(Cmd::SetCount(reg, v));
                 }
                 "advance" | "multiply" | "divide" => {
@@ -478,7 +498,7 @@ impl Lowerer {
                 // Both define a control sequence that stands for a number, and
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
-                "chardef" | "countdef" | "mathchardef" => {
+                "chardef" | "countdef" | "mathchardef" | "dimendef" => {
                     self.eng.compile_time_numeric_def(lx, name.name())?
                 }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
@@ -1028,6 +1048,16 @@ impl Lowerer {
                     flush!();
                     if n.name() == "the" {
                         match work.pending.pop() {
+                            // `\the\dimen0` is written as a DIMENSION -- 1.0pt,
+                            // not 65536 -- which is the whole difference
+                            // between the two registers at this level.
+                            Some(Token::Cs(w)) if w.name() == "dimen" => {
+                                let reg = self.eng.scan_number_pending(work)?;
+                                out.push(MsgOp::Dimen(Num::Count(
+                                    crate::compiler::DIMEN_BASE + reg,
+                                )));
+                                continue;
+                            }
                             Some(Token::Cs(w)) if w.name() == "count" => {}
                             // `\the\pageno` reads the register the name stands
                             // for, and `\the\active` is the constant itself --
@@ -1046,7 +1076,12 @@ impl Lowerer {
                             }
                             Some(Token::Cs(w)) => match self.eng.numeric_cs(w) {
                                 Some(crate::expand::NumericCs::Register(r)) => {
-                                    out.push(MsgOp::Number(Num::Count(r)));
+                                    // A `\dimendef` name is a dimension
+                                    // register, so `\the` writes it as one.
+                                    out.push(match r >= crate::compiler::DIMEN_BASE {
+                                        true => MsgOp::Dimen(Num::Count(r)),
+                                        false => MsgOp::Number(Num::Count(r)),
+                                    });
                                     continue;
                                 }
                                 Some(crate::expand::NumericCs::Value(v)) => {
@@ -1062,6 +1097,13 @@ impl Lowerer {
                         continue;
                     }
                     // `\number` takes either a register or a literal.
+                    // `\number\dimen0` gives the scaled points, unrendered.
+                    if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "dimen") {
+                        let _ = work.pending.pop();
+                        let reg = self.eng.scan_number_pending(work)?;
+                        out.push(MsgOp::Number(Num::Count(crate::compiler::DIMEN_BASE + reg)));
+                        continue;
+                    }
                     let is_reg =
                         matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "count");
                     if is_reg {

@@ -74,6 +74,8 @@
     "\\delcode"
     "\\mathchardef"
     "\""
+    "\\dimen"
+    "\\dimendef"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -163,6 +165,8 @@
     (puthash "\\delcode" "\\delcode  —  A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. [Registers]" table)
     (puthash "\\mathchardef" "\\mathchardef  —  Define a control sequence standing for a math code, as `\\chardef` does for a character code. [Registers]" table)
     (puthash "\"" "\"  —  A hexadecimal constant, and `'` an octal one (tex.web \\u{a7}445). [Registers]" table)
+    (puthash "\\dimen" "\\dimen  —  A dimension register. [Registers]" table)
+    (puthash "\\dimendef" "\\dimendef  —  Give a dimension register a name, as `\\countdef` does for a count. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

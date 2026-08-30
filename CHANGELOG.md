@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Dimensions: `\dimen` registers, the units that reach them, `\dimendef`, and
+  `\the`/`\number`. A dimension is an integer count of scaled points and every
+  unit is an exact integer ratio to a point (`tex.web` §458) rather than a
+  float, which is why `1in` is 72.26999pt; printing is Knuth's `print_scaled`
+  (§103), the fewest digits that read back as the same integer. All nine units
+  were checked against `tex -ini`.
 - The per-character tables besides `\catcode`: `\mathcode`, `\lccode`,
   `\uccode`, `\sfcode` and `\delcode`, read and written the same way and scoped
   by a group the same way. INITEX's defaults are measured against `tex -ini`,

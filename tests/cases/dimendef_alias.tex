@@ -1,0 +1,8 @@
+% \dimendef names a dimension register, and the name has to behave as the
+% register does on both sides: an assignment through it reads a DIMENSION
+% rather than a number, and \the through it writes one.
+\catcode`\{=1 \catcode`\}=2
+\dimendef\dimenA=0
+\dimenA=2pt
+\message{[\the\dimen0][\the\dimenA]}
+\end

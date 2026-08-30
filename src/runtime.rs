@@ -190,6 +190,14 @@ fn b_msg_close(_vm: &mut VM, _argc: u8) -> Value {
     Value::Int(0)
 }
 
+/// Append a dimension the way TeX writes one: `print_scaled`, then `pt`.
+fn b_msg_dimen(vm: &mut VM, _argc: u8) -> Value {
+    let sp = vm.pop().to_int();
+    let text = format!("{}pt", crate::dimen::print_scaled(sp));
+    BUILDING.with(|b| b.borrow_mut().push_str(&text));
+    Value::Int(0)
+}
+
 /// Install the `\message` builtins on `vm`.
 ///
 /// Shared by the interpreted path and the AOT runtime hook: a compiled document
@@ -202,6 +210,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
+    vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);

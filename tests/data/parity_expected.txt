@@ -50,6 +50,10 @@ VALUE
 [A] [B] [C] [diff]
 #==# delimited_params.tex
 [alpha|beta]
+#==# dimendef_alias.tex
+[2.0pt][2.0pt]
+#==# dimension_units.tex
+[1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
 #==# edef_expands_now.tex
 4-9
 #==# edef_freezes_conditional.tex

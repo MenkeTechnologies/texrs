@@ -1,0 +1,13 @@
+% A dimension is an integer count of scaled points, 65536 to the point, and
+% every unit is an exact integer ratio to a point (tex.web §458) -- which is
+% why 1in is 72.26999pt and not 72.27pt. Printing is Knuth's print_scaled
+% (§103): the fewest digits that read back as the same integer, so 1pt is
+% "1.0" and 1sp is "0.00002".
+\catcode`\{=1 \catcode`\}=2
+\dimen0=1pt \dimen1=1in \dimen2=1cm \dimen3=1mm
+\message{[\the\dimen0][\the\dimen1][\the\dimen2][\the\dimen3]}
+\dimen0=1bp \dimen1=1pc \dimen2=1dd \dimen3=1cc \dimen4=1sp
+\message{[\the\dimen0][\the\dimen1][\the\dimen2][\the\dimen3][\the\dimen4]}
+\dimen0=-3.25pt
+\message{[\the\dimen0][\number\dimen0]}
+\end

@@ -643,6 +643,81 @@ impl Engine {
     // ── definitions ──────────────────────────────────────────────────────
 
     /// `\def`, `\gdef`, `\edef`, `\xdef` — the last two expand the body now.
+    /// A dimension: an optional sign, a decimal number, and a unit
+    /// (`tex.web` §448-453). The result is scaled points, which is the only
+    /// form a dimension ever has -- `pt` is not privileged, it is just the unit
+    /// whose ratio is one.
+    pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        let mut sign = 1i64;
+        let mut cur = loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing number, treated as zero".into()));
+            };
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char('-', _) => {
+                    sign = -sign;
+                    continue;
+                }
+                Token::Char('+', _) => continue,
+                other => break *other,
+            }
+        };
+        // The integer part, then an optional fraction after `.` or `,`.
+        let mut whole = String::new();
+        let mut fraction = String::new();
+        let mut seen_point = false;
+        loop {
+            match &cur {
+                Token::Char(c, _) if c.is_ascii_digit() => match seen_point {
+                    true => fraction.push(*c),
+                    false => whole.push(*c),
+                },
+                Token::Char('.' | ',', _) if !seen_point => seen_point = true,
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    break;
+                }
+            }
+            match self.take(lx, pending_only) {
+                Some(t) => cur = t,
+                None => break,
+            }
+        }
+        // Then the unit, which is two letters, after optional spaces.
+        let mut unit = String::new();
+        while unit.len() < 2 {
+            let Some(t) = self.take(lx, pending_only) else {
+                break;
+            };
+            match &t {
+                t if t.is_space() && unit.is_empty() => continue,
+                Token::Char(c, _) if c.is_ascii_alphabetic() => unit.push(c.to_ascii_lowercase()),
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    break;
+                }
+            }
+        }
+        let int: i64 = whole.parse().unwrap_or(0);
+        let frac = crate::dimen::round_decimals(&fraction);
+        let Some(sp) = crate::dimen::to_scaled(int, frac, &unit) else {
+            return Err(TexError("Illegal unit of measure (pt inserted)".into()));
+        };
+        // One optional space is absorbed after a unit, as after a constant.
+        if let Some(t) = self.take(lx, pending_only) {
+            if !t.is_space() {
+                lx.push_back(std::slice::from_ref(&t));
+            }
+        }
+        Ok((sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN))
+    }
+
+    /// The same, for a caller that is lowering.
+    pub fn scan_dimen_file(&mut self, lx: &mut Lexer) -> R<i64> {
+        self.scan_dimen(lx, false)
+    }
+
     /// The control sequence an ACTIVE CHARACTER stands for.
     ///
     /// An active `~` and the control sequence `\~` are different things in TeX
@@ -937,6 +1012,7 @@ impl Engine {
         // stop at 255 and name the table they overran.
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
+            "dimendef" => (255, "register code"),
             "chardef" => (255, "character code"),
             _ => (255, "register code"),
         };
@@ -947,6 +1023,9 @@ impl Engine {
             // A mathchar is a constant like a chardef: what differs is the
             // range it may hold, not what it then does.
             "chardef" | "mathchardef" => Meaning::CharDef(v),
+            // A dimension register is a register: the name stands for the slot,
+            // and the slot is the one the dimensions live in.
+            "dimendef" => Meaning::CountDef(crate::compiler::DIMEN_BASE + v),
             _ => Meaning::CountDef(v),
         };
         self.set_meaning(name, meaning);

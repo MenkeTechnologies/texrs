@@ -238,27 +238,18 @@ pub fn dimension(text: &str) -> Option<i64> {
 
     // §452 `round_decimals`: the digits are folded in from the right, so the
     // fraction is the nearest sixteen-bit one rather than a truncation.
-    let mut f = 0i64;
-    for digit in fraction.bytes().rev().take(17) {
-        f = (f + (digit - b'0') as i64 * 0x2_0000) / 10;
-    }
-    f = (f + 1) / 2;
+    let f = crate::dimen::round_decimals(&fraction);
     let scaled = whole.checked_mul(65536)?.checked_add(f)?;
 
-    // §458: the unit's ratio, applied to the scaled value, truncating.
-    let (num, denom): (i64, i64) = match unit.as_str() {
-        "pt" => (1, 1),
-        "in" => (7227, 100),
-        "pc" => (12, 1),
-        "cm" => (7227, 254),
-        "mm" => (7227, 2540),
-        "bp" => (7227, 7200),
-        "dd" => (1238, 1157),
-        "cc" => (14856, 1157),
+    // §458: the unit's ratio, applied to the scaled value, truncating. The
+    // table lives in `dimen.rs` with the rest of TeX's dimension arithmetic --
+    // the engine reads the same units from tokens, and two copies of a
+    // conversion table are two chances to fix only one of them.
+    let (num, denom) = crate::dimen::unit_ratio(&unit)?;
+    if unit == "sp" {
         // A dimension in scaled points is already one.
-        "sp" => return Some(sign * scaled / 65536),
-        _ => return None,
-    };
+        return Some(sign * scaled / 65536);
+    }
     // §460: a dimension may not exceed 16383.99998pt. tex clamps and
     // complains; a driver reading a paper size has nothing to complain to, so
     // it clamps quietly -- but it must clamp, or a page would come out with a
@@ -268,8 +259,8 @@ pub fn dimension(text: &str) -> Option<i64> {
 }
 
 /// The largest dimension TeX can hold: 2^30 - 1 scaled points, which is
-/// 16383.99998pt.
-pub const MAX_DIMEN: i64 = 0x3fff_ffff;
+/// 16383.99998pt. Defined once, in `dimen.rs`.
+pub use crate::dimen::MAX_DIMEN;
 
 /// `PSfile="fig.eps" llx=0 lly=0 urx=100 ury=50 rwi=1000`.
 fn figure(text: &str) -> Special {

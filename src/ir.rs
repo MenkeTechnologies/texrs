@@ -49,6 +49,11 @@ pub enum Arith {
 pub enum MsgOp {
     Text(String),
     Number(Num),
+    /// A number rendered as a DIMENSION -- `\the\dimen0` gives `1.0pt`, not
+    /// `65536`. The value is scaled points either way; what differs is how it
+    /// is written, so this carries the same `Num` and asks the runtime for
+    /// TeX's `print_scaled` instead of a plain integer.
+    Dimen(Num),
     /// A number computed and thrown away, for a call made for its effect —
     /// `\rustcall` in running text rather than inside a message body. It rides
     /// the message machinery because that is where a run-time value already has
@@ -260,6 +265,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
         match op {
             MsgOp::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
             MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
+            MsgOp::Dimen(n) => out.push_str(&format!("{pad}Dimen {}\n", num_text(n))),
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
             MsgOp::If {
                 left,

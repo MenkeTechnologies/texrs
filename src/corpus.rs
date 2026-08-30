@@ -416,6 +416,18 @@ pub const CORPUS: &[Entry] = &[
         "A hexadecimal constant, and `'` an octal one (tex.web \\u{a7}445). The hex digits are UPPERCASE: `\"FF` is 255 and `\"ff` is an error -- the opposite of `^^` notation, which takes lowercase. plain.tex writes every `\\mathcode` as a hexadecimal constant.",
         "\\count1=\"FF   % 255\n\\count2='777  % 511",
     ),
+    (
+        "\\dimen",
+        "Registers",
+        "A dimension register. A dimension is an integer count of scaled points, 65536 to the printer's point, and a unit is an exact integer ratio to a point (tex.web \u{a7}458) rather than a float -- which is why `1in` is 72.26999pt. The units are pt, in, pc, cm, mm, bp, dd, cc and sp. `\\the` writes one back by Knuth's print_scaled (\u{a7}103), the fewest digits that read back as the same integer, and `\\number` gives the scaled points instead.",
+        "\\dimen0=1in\n\\message{\\the\\dimen0}   % => 72.26999pt",
+    ),
+    (
+        "\\dimendef",
+        "Registers",
+        "Give a dimension register a name, as `\\countdef` does for a count. The name behaves as the register does on both sides: an assignment through it reads a dimension, and `\\the` through it writes one.",
+        "\\dimendef\\dimen@=0\n\\dimen@=2pt",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

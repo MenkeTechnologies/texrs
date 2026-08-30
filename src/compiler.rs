@@ -43,6 +43,9 @@ pub mod ops {
     /// rather than record one, because tex writes the paren hard against what
     /// came before it while the stream is joined with spaces. No arguments.
     pub const MSG_CLOSE: u16 = 4007;
+    /// Append a dimension, written as TeX writes one: one argument, the value
+    /// in scaled points.
+    pub const MSG_DIMEN: u16 = 4008;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -50,6 +53,10 @@ pub mod ops {
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
 pub const COUNT_SLOTS: u16 = 256;
+/// Where the dimension registers start. They are registers exactly as the
+/// counts are -- assigned, read and restored by a group -- so they are slots in
+/// the same file rather than a second store with its own rules.
+pub const DIMEN_BASE: i64 = 256;
 
 pub struct Compiler {
     b: ChunkBuilder,
@@ -107,7 +114,7 @@ impl Compiler {
     pub fn compile(mut self, cmds: &[Cmd]) -> Result<Chunk, TexError> {
         // Every count register starts at zero, as INITEX leaves them; the slots
         // have to be written before they are read or a read finds `Undef`.
-        for reg in 0..COUNT_SLOTS {
+        for reg in 0..TOTAL_SLOTS {
             self.b.emit(Op::LoadInt(0), self.line);
             self.b.emit(Op::SetSlot(reg), self.line);
         }
@@ -328,6 +335,11 @@ impl Compiler {
                     self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
+                MsgOp::Dimen(n) => {
+                    self.num(n)?;
+                    self.b.emit(Op::CallBuiltin(ops::MSG_DIMEN, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
                 MsgOp::If {
                     left,
                     rel,
@@ -416,8 +428,11 @@ impl Compiler {
 
 /// A register number as a slot, clamped to the 256 TeX provides.
 fn slot(reg: i64) -> u16 {
-    u16::try_from(reg).unwrap_or(0).min(COUNT_SLOTS - 1)
+    u16::try_from(reg).unwrap_or(0).min(TOTAL_SLOTS - 1)
 }
+
+/// Counts and dimensions together.
+pub const TOTAL_SLOTS: u16 = 512;
 
 impl Default for Compiler {
     fn default() -> Self {
