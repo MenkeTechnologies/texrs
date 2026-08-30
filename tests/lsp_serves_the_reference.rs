@@ -77,7 +77,7 @@ fn every_served_primitive_reaches_the_page() {
         // DIFFERENT primitive's detail would fail.
         let plain = entry
             .doc
-            .split(|c| c == '`' || c == '&' || c == '<' || c == '>')
+            .split(['`', '&', '<', '>'])
             .max_by_key(|s| s.len())
             .unwrap_or("")
             .trim();
