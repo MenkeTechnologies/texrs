@@ -172,6 +172,21 @@ this at an
 .I .xdv
 should say what the file is rather than fail as if it were damaged.
 .TP
+.BI \-X " dvi \fIA\fR.dvi \fIB\fR.dvi"
+Say whether two files are the same DOCUMENT, and exit non-zero when they are
+not.  Not a byte comparison: two engines that typeset one document identically
+still write different files \(em the preamble's comment carries the time of the
+run, and which movement opcode encodes a displacement is a choice \(em so what
+is compared is what a reader would see.  The pages, the characters set, the
+rules, the specials and the fonts.  Positions are left out for the same reason:
+two correct engines may round a displacement differently.
+.PP
+The character codes are the font's rather than Unicode, since that is what DVI
+carries: in cmr10, code 11 is the
+.B ff
+ligature.  For comparing two engines it does not matter, because both write the
+same code.
+.TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
 .PP

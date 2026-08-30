@@ -226,6 +226,12 @@ impl Dvi {
     /// character: not the bytes of the file, which carry positions and font
     /// numbers that two correct engines may legitimately differ on, but what
     /// ended up on the page.
+    ///
+    /// The codes are the FONT's, not Unicode. DVI says "set character 11 of the
+    /// current font", and in cmr10 that is the `ff` ligature — so `different`
+    /// comes back as `di\u{b}erent`. Mapping it would need the font's encoding,
+    /// which is a `.tfm` file this does not read; for comparing two engines it
+    /// does not matter, because both write the same code.
     pub fn text(&self) -> String {
         self.ops
             .iter()
@@ -265,6 +271,147 @@ impl Dvi {
         let text = self.text();
         if !text.is_empty() {
             out.push_str(&format!("text       {text:?}\n"));
+        }
+        out
+    }
+}
+
+/// How two DVI files differ, in the terms a parity harness cares about.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Difference {
+    Pages {
+        left: usize,
+        right: usize,
+    },
+    /// The characters set differ, with the first place they part company.
+    Text {
+        at: usize,
+        left: String,
+        right: String,
+    },
+    /// One file draws a rule the other does not.
+    Rules {
+        left: usize,
+        right: usize,
+    },
+    /// A `\special` one carries and the other does not.
+    Special {
+        only_in_left: bool,
+        text: String,
+    },
+    /// The fonts the two files ask for.
+    Fonts {
+        left: Vec<String>,
+        right: Vec<String>,
+    },
+}
+
+impl Dvi {
+    /// The rules drawn, in order.
+    fn rules(&self) -> Vec<(i32, i32)> {
+        self.ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Rule { height, width, .. } => Some((*height, *width)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The specials carried, in order.
+    fn specials(&self) -> Vec<String> {
+        self.ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Special(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The fonts asked for, sorted and deduplicated.
+    fn fonts(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::DefineFont { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// What differs between two DVI files, in what a reader would notice.
+    ///
+    /// Deliberately NOT a byte comparison. Two engines that typeset the same
+    /// document identically still write different files: the comment carries a
+    /// timestamp, the movement opcodes chosen for one displacement are a
+    /// choice, and the postamble's pointers depend on where things landed. A
+    /// parity harness that diffed bytes would report all of that as a
+    /// divergence and none of it would be one.
+    ///
+    /// What is compared is what a reader would see: how many pages, the
+    /// characters set, the rules drawn, the specials carried, the fonts asked
+    /// for. Positions are left out for the same reason — two correct engines
+    /// may legitimately round a displacement differently — which is why this
+    /// says "the same document" rather than "the same file".
+    pub fn compare(&self, other: &Dvi) -> Vec<Difference> {
+        let mut out = Vec::new();
+        if self.pages() != other.pages() {
+            out.push(Difference::Pages {
+                left: self.pages(),
+                right: other.pages(),
+            });
+        }
+
+        let (left_text, right_text) = (self.text(), other.text());
+        if left_text != right_text {
+            let at = left_text
+                .chars()
+                .zip(right_text.chars())
+                .position(|(a, b)| a != b)
+                .unwrap_or(left_text.chars().count().min(right_text.chars().count()));
+            out.push(Difference::Text {
+                at,
+                left: left_text,
+                right: right_text,
+            });
+        }
+
+        let (left_rules, right_rules) = (self.rules(), other.rules());
+        if left_rules.len() != right_rules.len() {
+            out.push(Difference::Rules {
+                left: left_rules.len(),
+                right: right_rules.len(),
+            });
+        }
+
+        for text in self.specials() {
+            if !other.specials().contains(&text) {
+                out.push(Difference::Special {
+                    only_in_left: true,
+                    text,
+                });
+            }
+        }
+        for text in other.specials() {
+            if !self.specials().contains(&text) {
+                out.push(Difference::Special {
+                    only_in_left: false,
+                    text,
+                });
+            }
+        }
+
+        let (left_fonts, right_fonts) = (self.fonts(), other.fonts());
+        if left_fonts != right_fonts {
+            out.push(Difference::Fonts {
+                left: left_fonts,
+                right: right_fonts,
+            });
         }
         out
     }
@@ -312,11 +459,21 @@ mod tests {
 
     /// What real tex ships for `src`, or `None` when there is no tex here.
     fn tex_dvi(name: &str, src: &str) -> Option<Vec<u8>> {
+        engine_dvi("tex", name, src)
+    }
+
+    /// The same, from whichever engine is named. pdftex needs telling to write
+    /// DVI rather than PDF; tex has no such flag and ignores it.
+    fn engine_dvi(engine: &str, name: &str, src: &str) -> Option<Vec<u8>> {
         let dir = std::env::temp_dir().join(format!("texrs_dvi_{}_{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).ok()?;
         std::fs::write(dir.join("t.tex"), src).ok()?;
-        let ran = std::process::Command::new("tex")
+        let mut command = std::process::Command::new(engine);
+        if engine != "tex" {
+            command.arg("-output-format=dvi");
+        }
+        let ran = command
             .arg("-interaction=batchmode")
             .arg("t.tex")
             .current_dir(&dir)
@@ -397,6 +554,78 @@ mod tests {
             .collect();
         assert_eq!(specials.len(), 1, "{:?}", dvi.summary());
         assert!(specials[0].contains("color push"), "{:?}", specials[0]);
+    }
+
+    #[test]
+    fn two_engines_typesetting_one_document_agree() {
+        // The comparison the parity contract will need when texrs ships DVI,
+        // usable today to check one engine against another: tex and pdftex
+        // write different bytes for the same document — the comment carries a
+        // timestamp, and the movement opcodes are a choice — and this must
+        // report no difference all the same.
+        let Some(from_tex) = tex_dvi("cmp_tex", "Hello DVI world.\n\\bye\n") else {
+            return;
+        };
+        let Some(from_pdftex) = engine_dvi("pdftex", "cmp_pdftex", "Hello DVI world.\n\\bye\n")
+        else {
+            return;
+        };
+        let left = Dvi::parse(&from_tex).expect("parses");
+        let right = Dvi::parse(&from_pdftex).expect("parses");
+        assert_eq!(
+            left.compare(&right),
+            vec![],
+            "the same document typeset by two engines is the same document"
+        );
+
+        // And what the comparison deliberately ignores: the preamble's comment
+        // carries the time of the run, so two runs a minute apart write
+        // different bytes for one document. A harness that compared those
+        // would report a divergence every time the clock ticked.
+        let mut later = left.clone();
+        for op in &mut later.ops {
+            if let Op::Preamble { comment, .. } = op {
+                *comment = " TeX output 1999.12.31:2359".to_string();
+            }
+        }
+        assert_ne!(later.ops, left.ops, "the files differ");
+        assert_eq!(later.compare(&left), vec![], "the documents do not");
+    }
+
+    #[test]
+    fn a_document_that_differs_says_where() {
+        let Some(one) = tex_dvi("cmp_one", "Hello.\n\\bye\n") else {
+            return;
+        };
+        let Some(two) = tex_dvi("cmp_two", "Hellp.\n\\bye\n") else {
+            return;
+        };
+        let differences = Dvi::parse(&one)
+            .unwrap()
+            .compare(&Dvi::parse(&two).unwrap());
+        match differences.first() {
+            Some(Difference::Text { at, left, right }) => {
+                assert_eq!(
+                    *at, 4,
+                    "the fifth character is where they part: {left} {right}"
+                );
+            }
+            other => panic!("expected a text difference, got {other:?}"),
+        }
+
+        // A page more is a difference of its own.
+        let Some(long) = tex_dvi("cmp_pages", "One.\n\\eject\nTwo.\n\\bye\n") else {
+            return;
+        };
+        let differences = Dvi::parse(&one)
+            .unwrap()
+            .compare(&Dvi::parse(&long).unwrap());
+        assert!(
+            differences
+                .iter()
+                .any(|d| matches!(d, Difference::Pages { left: 1, right: 2 })),
+            "{differences:?}"
+        );
     }
 
     #[test]

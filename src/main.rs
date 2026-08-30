@@ -79,6 +79,7 @@ const USAGE: &str = "\
   -X bundle fetch URL     // Download a bundle into the cache
   -X bundle list          // Say which bundles have been fetched
   -X dvi FILE.dvi         // Read what real tex shipped for a document
+  -X dvi A.dvi B.dvi      // Say whether two files are the same document
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -445,13 +446,30 @@ fn run_document(args: &[String]) -> ExitCode {
             let Some(file) = args.get(1) else {
                 return fail("`-X dvi` needs a .dvi file");
             };
-            match texrs::dvi::Dvi::open(file) {
-                Ok(dvi) => {
-                    print!("{}", dvi.summary());
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(&e),
+            let dvi = match texrs::dvi::Dvi::open(file) {
+                Ok(dvi) => dvi,
+                Err(e) => return fail(&e),
+            };
+            // With a second file, the question is whether the two are the same
+            // document rather than what one of them holds.
+            let Some(other) = args.get(2) else {
+                print!("{}", dvi.summary());
+                return ExitCode::SUCCESS;
+            };
+            let against = match texrs::dvi::Dvi::open(other) {
+                Ok(dvi) => dvi,
+                Err(e) => return fail(&e),
+            };
+            let differences = dvi.compare(&against);
+            if differences.is_empty() {
+                println!("the same document");
+                return ExitCode::SUCCESS;
             }
+            for difference in &differences {
+                println!("{difference:?}");
+            }
+            // A divergence is a failure: this is what a harness calls.
+            ExitCode::from(1)
         }
         "show" => {
             let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

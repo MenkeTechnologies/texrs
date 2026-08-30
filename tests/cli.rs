@@ -518,6 +518,38 @@ fn the_dvi_reader_reads_what_tex_wrote() {
         String::from_utf8_lossy(&bad.stderr)
     );
 
+    // Two files of one document compare equal, and the exit status says so —
+    // which is what a harness reads.
+    std::fs::copy(dir.join("t.dvi"), dir.join("copy.dvi")).unwrap();
+    let same = texrs()
+        .args(["-X", "dvi", "t.dvi", "copy.dvi"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(same.status.success());
+    assert!(String::from_utf8_lossy(&same.stdout).contains("the same document"));
+
+    // A different document exits non-zero and says what differs.
+    std::fs::write(dir.join("u.tex"), "Something else.\n\\bye\n").unwrap();
+    let _ = std::process::Command::new("tex")
+        .arg("-interaction=batchmode")
+        .arg("u.tex")
+        .current_dir(&dir)
+        .output();
+    if dir.join("u.dvi").is_file() {
+        let differ = texrs()
+            .args(["-X", "dvi", "t.dvi", "u.dvi"])
+            .current_dir(&dir)
+            .output()
+            .expect("run texrs");
+        assert!(!differ.status.success(), "a divergence is a failure");
+        assert!(
+            String::from_utf8_lossy(&differ.stdout).contains("Text"),
+            "{}",
+            String::from_utf8_lossy(&differ.stdout)
+        );
+    }
+
     // And one that is not there names itself.
     let missing = texrs()
         .args(["-X", "dvi", "absent.dvi"])
