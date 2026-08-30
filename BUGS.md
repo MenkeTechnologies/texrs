@@ -129,6 +129,17 @@ loop does not call the debugger's line marker, so a debug run stays interpreted.
 one piece — and `src/tiers.rs` pins that TeX's loop idiom reaches native code, so
 the recogniser, the rotated lowering and the switch cannot silently be lost.
 
+fusevm's strict numeric mode (`set_numeric_hook` + `set_fixnum_range`) is NOT
+used, though it describes a 32-bit integer type exactly and seven sibling
+frontends use it. It was tried and measured: on a 40-million-iteration
+`\advance` loop, strict mode ran in 0.14s against 0.11s for the wrapping that
+`Compiler::wrap_to_32_bits` emits inline, because strict-mode native code
+carries an overflow trap per arithmetic op. Both reach the tracing tier; the
+block tier is out either way, on the message builtins rather than on the numeric
+policy. The inline wrap is also the only one of the two that needs no host
+callback, so it holds under `--aot`. Do not re-litigate without a new
+measurement.
+
 ## How gaps get found
 
 Four harnesses, in increasing order of how much they cost to run:
