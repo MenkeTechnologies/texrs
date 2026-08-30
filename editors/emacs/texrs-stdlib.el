@@ -60,6 +60,10 @@
     "\\advance"
     "\\multiply"
     "\\divide"
+    "\\rust"
+    "\\rustcall"
+    "\\rustcompile"
+    "\\endrust"
     "{"
     "}"
     "\\begingroup"
@@ -115,6 +119,10 @@
     (puthash "\\advance" "\\advance  —  Add to a register. [Registers]" table)
     (puthash "\\multiply" "\\multiply  —  Multiply a register. [Registers]" table)
     (puthash "\\divide" "\\divide  —  Divide a register, truncating toward zero as TeX's does. [Registers]" table)
+    (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
+    (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)
+    (puthash "\\rustcompile" "\\rustcompile  —  What a `\\rust{ … }` block becomes: compile and register the block whose base64 body follows, up to `\\endrust`. [Inline Rust]" table)
+    (puthash "\\endrust" "\\endrust  —  Terminate a `\\rustcompile` body or a `\\rustcall` argument list. [Inline Rust]" table)
     (puthash "{" "{  —  Open a group (category code 1), which scopes the macro table AND the count registers written inside it: the lowered body is wrapped in save/restore for exactly the registers it assigns. [Grouping]" table)
     (puthash "}" "}  —  Close a group (category code 2), undoing every non-global assignment made inside it. [Grouping]" table)
     (puthash "\\begingroup" "\\begingroup  —  Open a group without braces, scoping the macro table and the registers written inside it. [Grouping]" table)

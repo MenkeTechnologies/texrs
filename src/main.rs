@@ -6,10 +6,13 @@
 //! stop earlier in the same pipeline: `--dump-tokens` after the mouth,
 //! `--disasm` after lowering, so each stage can be read on its own.
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: texrs [OPTIONS] FILE.tex
+       texrs -X new [DIR]           make a document (Texrs.toml + index.tex)
+       texrs -X build [--profile P] build the document this directory is in
 
   --repl          start the interactive prompt
   --lsp           speak the Language Server Protocol over stdio
@@ -18,6 +21,7 @@ usage: texrs [OPTIONS] FILE.tex
   --disasm        print the lowered fusevm bytecode and exit
   --aot           compile the document to a standalone native executable
   --tiers         run it, then report which fusevm tier took its bytecode
+  --profile NAME  which output of the document to build (with -X build)
   --no-cache      compile this run rather than reading the bytecode cache
   --cache-stats   say what the cache holds and where, and exit
   --cache-clear   delete the cache and exit
@@ -26,6 +30,13 @@ usage: texrs [OPTIONS] FILE.tex
 ";
 
 fn main() -> ExitCode {
+    // The document commands come first: `-X` takes over the whole invocation,
+    // as tectonic's V2 interface does, so nothing below has to know about them.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("-X") {
+        return run_document(&args[1..]);
+    }
+
     let mut path: Option<String> = None;
     let mut dump_tokens = false;
     let mut disasm = false;
@@ -170,6 +181,74 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => fail(&e.0),
+    }
+}
+
+/// `texrs -X …`: the document commands, ported in shape from tectonic's V2
+/// interface — a document is a directory with a `Texrs.toml` in it, and the
+/// commands act on the document rather than on a file.
+fn run_document(args: &[String]) -> ExitCode {
+    let Some(command) = args.first().map(String::as_str) else {
+        eprint!("{USAGE}");
+        return ExitCode::from(1);
+    };
+    match command {
+        "new" => {
+            let dir = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            // The document is named after its directory, which is what the
+            // user has already chosen by making one.
+            let name = std::fs::canonicalize(&dir)
+                .ok()
+                .as_deref()
+                .and_then(Path::file_name)
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "document".to_string());
+            match texrs::document::scaffold(&dir, &name) {
+                Ok(path) => {
+                    println!("wrote {}", path.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        "build" => {
+            let mut profile: Option<String> = None;
+            let mut rest = args[1..].iter();
+            while let Some(arg) = rest.next() {
+                match arg.as_str() {
+                    "--profile" => match rest.next() {
+                        Some(name) => profile = Some(name.clone()),
+                        None => return fail("--profile needs a name"),
+                    },
+                    other => return fail(&format!("unknown argument: {other}")),
+                }
+            }
+            let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let document = match texrs::document::Document::find_from(here) {
+                Ok(d) => d,
+                Err(e) => return fail(&e),
+            };
+            match document.build(profile.as_deref()) {
+                Ok(built) => {
+                    println!(
+                        "built {} from {} input(s) → {}",
+                        built.profile,
+                        built.inputs.len(),
+                        built.path.display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        other => {
+            eprintln!("texrs: unknown document command: {other}");
+            eprint!("{USAGE}");
+            ExitCode::from(1)
+        }
     }
 }
 

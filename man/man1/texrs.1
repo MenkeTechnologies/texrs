@@ -75,6 +75,65 @@ and
 For what is not carried, see
 .B BUGS.md
 in the source tree.
+.SH DOCUMENTS
+A document larger than one file is described by a
+.I Texrs.toml
+at its root, and the
+.B \-X
+commands act on that document rather than on a file \(em the shape
+.BR tectonic (1)
+gives its own V2 interface.
+.PP
+.RS 4
+.nf
+[doc]
+name = "thesis"
+inputs = ["macros.tex", "body.tex"]
+
+[[output]]
+name = "default"
+type = "messages"
+.fi
+.RE
+.PP
+The inputs are read in order and compiled as one document, and what each of them
+hashed to is recorded, so a build says exactly what it read. An output
+.B type
+is a pipeline this engine has:
+.BR messages ,
+.B tokens
+or
+.BR disasm .
+There is no
+.BR bundle ,
+.BR tex_format ,
+.B shell_escape
+or
+.B synctex
+key, as there is in tectonic's schema: texrs has no package universe, one
+format, no shell and no page, and a key describing machinery that does not exist
+would be a promise the engine cannot keep.
+.TP
+.B \-X new " [" \fIDIR\fR ]
+Write a
+.I Texrs.toml
+and an
+.I index.tex
+into
+.I DIR
+(the current directory by default), named after it. The starting document sets
+the category codes INITEX leaves ordinary, because one that did not would fail
+on its first group. An existing document is never overwritten.
+.TP
+.B \-X build " [" \-\-profile " \fINAME\fR ]"
+Build the document this directory is in, found by walking up, into its
+.I build/
+directory. With one output the profile need not be named; with several, the one
+called
+.B default
+is used unless
+.B \-\-profile
+says otherwise.
 .SH OPTIONS
 .TP
 .B \-\-repl
@@ -170,6 +229,43 @@ Print the option grammar and exit.
 .TP
 .B \-\-version
 Print the version banner and exit.
+.SH INLINE RUST
+A
+.B \erust{ \&... }
+block is compiled by
+.BR rustc ,
+loaded, and its
+.B #[no_mangle] pub extern "C"
+functions become callable from the document:
+.RS
+.nf
+\erust{
+    #[no_mangle]
+    pub extern "C" fn twice(n: i64) -> i64 { n * 2 }
+}
+\ecatcode`\e{=1 \ecatcode`\e}=2
+\ecount1=21
+\emessage{\erustcall twice \ecount1 \eendrust}   % => 42
+.fi
+.RE
+.PP
+The block body is Rust, not TeX, so it is lifted out of the file BEFORE the
+mouth reads it \(em
+.BR # ,
+.BR { ,
+.B }
+and
+.B &
+are category codes the mouth would act on.  A call is a NUMBER wherever TeX
+reads one: a register assignment, an arithmetic operand, a conditional, or a
+message body.  In running text it is called for its effect and the value is
+dropped.
+.PP
+The compiled library is cached by body hash, so only the first run pays for the
+compile.  A block that does not compile stops the run with rustc's own
+diagnostic;
+.B RUSTC
+names the compiler to use.
 .SH EXIT STATUS
 .TP
 .B 0

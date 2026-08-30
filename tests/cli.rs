@@ -68,7 +68,9 @@ fn the_completion_offers_every_option_the_binary_takes() {
         });
         assert!(offered, "the zsh completion does not offer {opt}");
     }
-    // And offers nothing the binary would refuse.
+    // And offers nothing the binary would refuse. `--profile` belongs to
+    // `-X build` rather than to a plain run, so it is checked there instead —
+    // see a_document_is_made_and_built_from_anywhere_inside_it.
     for line in completion.lines() {
         let Some(start) = line.find("'--") else {
             continue;
@@ -78,6 +80,9 @@ fn the_completion_offers_every_option_the_binary_takes() {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
+        if flag == "--profile" {
+            continue;
+        }
         let out = texrs().arg(&flag).arg("--help").output().expect("run");
         assert!(
             out.status.success(),
@@ -254,6 +259,77 @@ fn every_document_the_binary_compiles_lands_in_the_shard() {
     );
 
     let _ = std::fs::remove_dir_all(&cache);
+}
+
+/// A document is a directory with a `Texrs.toml` in it, and the `-X` commands
+/// act on the document rather than on a file.
+#[test]
+fn a_document_is_made_and_built_from_anywhere_inside_it() {
+    let dir = scratch_cache("document");
+    let run = |args: &[&str], cwd: &Path| -> std::process::Output {
+        texrs()
+            .args(args)
+            .current_dir(cwd)
+            .env("XDG_CACHE_HOME", &dir)
+            .env("HOME", &dir)
+            .output()
+            .expect("run texrs")
+    };
+
+    // A new document is one command, and it builds as it stands.
+    let made = run(&["-X", "new", "."], &dir);
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    assert!(dir.join("Texrs.toml").is_file());
+    assert!(dir.join("index.tex").is_file());
+
+    let built = run(&["-X", "build"], &dir);
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = dir.join("build").join(format!(
+        "{}.txt",
+        dir.file_name().unwrap().to_string_lossy()
+    ));
+    assert!(output.is_file(), "the build wrote {output:?}");
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap().trim(),
+        "hello from texrs"
+    );
+
+    // The document is found by walking up, so a build works from inside it.
+    let nested = dir.join("chapters").join("one");
+    std::fs::create_dir_all(&nested).unwrap();
+    assert!(run(&["-X", "build"], &nested).status.success());
+
+    // A profile that is not there says which ones are.
+    let missing = run(&["-X", "build", "--profile", "nope"], &dir);
+    assert!(!missing.status.success());
+    let err = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        err.contains("no output named") && err.contains("default"),
+        "{err}"
+    );
+
+    // Outside a document, the failure names what is missing.
+    let bare = scratch_cache("no_document");
+    let out = run(&["-X", "build"], &bare);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Texrs.toml"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // An unknown document command is refused rather than ignored.
+    assert!(!run(&["-X", "frobnicate"], &dir).status.success());
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bare);
 }
 
 #[test]

@@ -19,14 +19,17 @@ pub mod compiler;
 pub mod corpus;
 pub mod dap;
 pub mod docs;
+pub mod document;
 pub mod expand;
 pub mod io;
 pub mod ir;
 pub mod lexer;
 pub mod lower;
 pub mod lsp;
+pub mod parallel;
 pub mod repl;
 pub mod runtime;
+pub mod rust_ffi;
 pub mod script_cache;
 pub mod status;
 pub mod tiers;
@@ -39,8 +42,7 @@ pub use expand::{Engine, TexError};
 /// [`run_messages`] joins them the way the terminal line does; the REPL needs
 /// them apart, because it prints only the ones the newest line added.
 pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
-    let cmds = crate::lower::Lowerer::new().lower(src)?;
-    let chunk = crate::compiler::Compiler::new().compile(&cmds);
+    let chunk = compile(src)?;
     crate::runtime::run(chunk).map_err(TexError)
 }
 
@@ -83,7 +85,8 @@ pub fn compile_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk
 /// The bytecode `src` compiles to, for `--disasm` and for tests that want to
 /// see that a construct really lowered rather than being folded away.
 pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
-    let cmds = crate::lower::Lowerer::new().lower(src)?;
+    let src = crate::rust_ffi::desugar(src);
+    let cmds = crate::lower::Lowerer::new().lower(&src)?;
     Ok(crate::compiler::Compiler::new().compile(&cmds))
 }
 
@@ -92,7 +95,10 @@ pub fn compile(src: &str) -> Result<fusevm::Chunk, TexError> {
 /// `src/lsp.rs` publishes the diagnostic this returns; every other caller wants
 /// [`compile`], which drops the position.
 pub fn compile_located(src: &str) -> Result<fusevm::Chunk, (TexError, u32)> {
-    let cmds = crate::lower::Lowerer::new().lower_located(src)?;
+    // The desugar pads its replacement with newlines, so a diagnostic after a
+    // `\rust{ … }` block still lands on the line the author wrote it on.
+    let src = crate::rust_ffi::desugar(src);
+    let cmds = crate::lower::Lowerer::new().lower_located(&src)?;
     Ok(crate::compiler::Compiler::new().compile(&cmds))
 }
 
@@ -101,7 +107,8 @@ pub fn compile_located(src: &str) -> Result<fusevm::Chunk, (TexError, u32)> {
 /// The markers are extra ops, so this is NOT what an ordinary run compiles:
 /// nothing pays for the debugger that is not using it.
 pub fn compile_debug(src: &str) -> Result<fusevm::Chunk, TexError> {
-    let cmds = crate::lower::Lowerer::new().lower(src)?;
+    let src = crate::rust_ffi::desugar(src);
+    let cmds = crate::lower::Lowerer::new().lower(&src)?;
     Ok(crate::compiler::Compiler::new_debug().compile(&cmds))
 }
 
