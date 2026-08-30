@@ -46,13 +46,19 @@ fn a_conditional_still_has_two_branches_here_and_a_jump_only_after_codegen() {
     assert!(ast.contains("then"), "no then branch: {ast}");
     assert!(ast.contains("else"), "no else branch: {ast}");
     // Both arms survive to here: lowering a conditional does not pick one.
-    assert!(ast.contains("\"big\"") && ast.contains("\"small\""), "{ast}");
+    assert!(
+        ast.contains("\"big\"") && ast.contains("\"small\""),
+        "{ast}"
+    );
 
     // The same document after code generation has no such structure -- which is
     // what makes this listing worth printing separately.
     let out = texrs().arg("--disasm").arg(&path).output().expect("run");
     let disasm = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(!disasm.contains("IfNum"), "disasm still shows the IR: {disasm}");
+    assert!(
+        !disasm.contains("IfNum"),
+        "disasm still shows the IR: {disasm}"
+    );
 }
 
 #[test]
@@ -76,7 +82,9 @@ fn a_macro_appears_as_what_it_expanded_to() {
 fn a_tail_recursive_macro_shows_as_the_loop_it_lowered_to() {
     let path = write(
         "loop.tex",
-        &format!("{HEAD}\\def\\r{{\\advance\\count1 by 1 \\ifnum\\count1<4 \\r \\fi}}\n\\r\n\\end\n"),
+        &format!(
+            "{HEAD}\\def\\r{{\\advance\\count1 by 1 \\ifnum\\count1<4 \\r \\fi}}\n\\r\n\\end\n"
+        ),
     );
     let ast = dump(&path);
     assert!(ast.contains("Loop"), "not lowered to a loop: {ast}");
@@ -98,7 +106,10 @@ fn a_group_names_the_registers_it_saves() {
 
 #[test]
 fn a_document_that_does_not_lower_reports_the_error_rather_than_printing_a_tree() {
-    let path = write("bad.tex", &format!("{HEAD}\\count0=\\message{{x}}\n\\end\n"));
+    let path = write(
+        "bad.tex",
+        &format!("{HEAD}\\count0=\\message{{x}}\n\\end\n"),
+    );
     let out = texrs().arg("--dump-ast").arg(&path).output().expect("run");
     assert!(!out.status.success(), "a broken document exited zero");
     let said = String::from_utf8_lossy(&out.stderr).to_string();

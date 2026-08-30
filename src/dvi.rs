@@ -877,10 +877,7 @@ mod tests {
         // directory the other one is still reading `w.dvi` out of.
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "texrs_dvitype_{}_{seq}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("texrs_dvitype_{}_{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).ok()?;
         let file = dir.join("w.dvi");
