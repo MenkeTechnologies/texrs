@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Active characters. A character of category 13 is a command rather than text:
+  `\catcode`\~=13 \def~{...}` defines `~` itself, it may take parameters, and
+  `\let~=\x` works. An active `~` and the control sequence `\~` stay different
+  things — measured, tex gives `[a][b]` for the pair — so an active character
+  interns under a name no source can spell rather than sharing the control
+  sequence table's spelling. plain.tex needs this at line 20,
+  `\outer\def^^L{\par}`, where the macro being defined IS the form feed.
 - Glyph names to Unicode (`agl`), ported from `agl.c` in `xdvipdfmx`, and the
   `/ToUnicode` map an embedded font is written with. A PDF says which glyph to
   draw and never which character it is, so a reader asked to copy a paragraph
