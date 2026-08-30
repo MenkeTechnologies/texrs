@@ -1,12 +1,17 @@
 //! Reading DVI, ported from tectonic's `xdv`.
 //!
-//! texrs has no stomach and writes no DVI: it stops where the boxes would
-//! begin. So why read it? Because the parity contract stops there too. Today
-//! the harness compares `\message` streams, which is everything the mouth and
-//! the expander produce and nothing the rest of TeX does; the moment texrs sets
-//! a character, the reference to compare against is what real tex shipped, and
-//! that is a DVI file. This is the reading half of that comparison, written
-//! now, while the format can be read against a document whose output is known.
+//! texrs has no stomach yet: it stops where the boxes would begin, so nothing
+//! in it produces a page today. Both halves of the format are here anyway, and
+//! for the same reason. Reading, because the parity contract stops in the same
+//! place -- today the harness compares `\message` streams, which is everything
+//! the mouth and the expander produce and nothing the rest of TeX does, and the
+//! moment texrs sets a character the reference to compare against is what real
+//! tex shipped, which is a DVI file. Writing, because that is what the stomach
+//! will call, and a DVI file is more than its opcodes: it is a linked list read
+//! backwards, and the pointers can only be filled in while writing. Both are
+//! held against the tools that read the format -- `dvitype` accepts what
+//! [`Writer`] writes, and a file of real tex's, read and written back, is the
+//! same document.
 //!
 //! It is also the honest shape of the port. tectonic's `xdv` is a parser and an
 //! event stream, not a typesetter; the typesetter is `engine_xetex`, which is a
@@ -453,6 +458,343 @@ fn read_string(bytes: &[u8], at: &mut usize, n: usize) -> Result<String, String>
     Ok(text)
 }
 
+impl Dvi {
+    /// Write these ops back out as a DVI file.
+    ///
+    /// Not the same bytes that were read: this is a re-encoding, not a copy.
+    /// A movement written as `w0` (repeat the last horizontal move) comes back
+    /// as an explicit `right`, a number written wider than it needed to be
+    /// comes back in the narrowest form that holds it, and the postamble's
+    /// counted maxima are counted again from what the pages do. What survives
+    /// is everything a driver acts on, which is what
+    /// [`Dvi::compare`] compares -- so a file read and written back sets the
+    /// same characters, in the same fonts, at the same places.
+    ///
+    /// Characters do not carry their widths, so the horizontal extent this
+    /// counts is a lower bound; a driver reads the `.tfm` for the real one.
+    pub fn rewrite(&self) -> Vec<u8> {
+        let comment = self
+            .ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Preamble { comment, .. } => Some(comment.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut out = Writer::new(&comment);
+        for op in &self.ops {
+            match op {
+                // The preamble is already written, and everything from the
+                // postamble on is what `finish` builds: the fonts are defined
+                // there a second time, and re-playing those definitions would
+                // define each font twice.
+                Op::Preamble { .. } => {}
+                Op::Postamble { .. } => break,
+                Op::BeginPage { counts } => out.begin_page(*counts),
+                Op::EndPage => out.end_page(),
+                Op::SetChar(code) => out.set_char(*code, 0),
+                Op::PutChar(code) => out.put_char(*code),
+                Op::Rule { height, width, set } => out.rule(*height, *width, *set),
+                Op::Push => out.push(),
+                Op::Pop => out.pop(),
+                Op::Right(amount) => out.right(*amount),
+                Op::Down(amount) => out.down(*amount),
+                Op::Font(number) => out.font(*number),
+                Op::DefineFont { number, name, at } => {
+                    // A checksum of zero tells a driver not to check, which is
+                    // the honest thing to write for a font this never read.
+                    out.define_font(*number, name, *at, 0, *at)
+                }
+                Op::Special(text) => out.special(text),
+                Op::Noop => out.noop(),
+                Op::Extension(_) => {}
+            }
+        }
+        out.finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Writing DVI.
+// ---------------------------------------------------------------------------
+
+/// A DVI file being written.
+///
+/// The reading half above exists so texrs can be compared with what real tex
+/// shipped. This is the half the stomach will call when there is one: it takes
+/// the same events the reader hands back and lays them out as `tex.web`
+/// §583-§590 says a DVI file is laid out, which is more than writing opcodes.
+/// A DVI file is a linked list read backwards -- every page points at the one
+/// before it, the postamble points at the last page, and the last four bytes
+/// point at the postamble -- so the pointers can only be filled in while
+/// writing, and a writer that gets them wrong produces a file every viewer
+/// refuses even though every opcode in it is correct.
+///
+/// The numbers in the postamble are the other half of that: the tallest and
+/// widest a page reached, and the deepest the stack went. They are what a
+/// driver allocates from before it reads a single page, so they are counted
+/// here rather than asked for.
+pub struct Writer {
+    bytes: Vec<u8>,
+    /// Where the last `bop` began, which the next one points at.
+    previous_page: i32,
+    pages: u16,
+    fonts: Vec<(u32, String, i32, u32, i32)>,
+    /// Position, and the extents a page reached, in scaled points.
+    h: i32,
+    v: i32,
+    max_h: i32,
+    max_v: i32,
+    stack: Vec<(i32, i32)>,
+    max_stack: u16,
+}
+
+/// The units tex writes: `num`/`den` say that one DVI unit is
+/// 25400000/473628672 metres, which is 1/100000 of an inch.
+const NUM: u32 = 25_400_000;
+const DEN: u32 = 473_628_672;
+/// DVI format 2, which is what every driver reads.
+pub const VERSION: u8 = 2;
+
+impl Default for Writer {
+    fn default() -> Self {
+        Writer::new("texrs")
+    }
+}
+
+impl Writer {
+    /// A writer whose preamble carries `comment` -- where tex stamps the format
+    /// it used and the date it ran.
+    pub fn new(comment: &str) -> Writer {
+        let mut w = Writer {
+            bytes: Vec::new(),
+            previous_page: -1,
+            pages: 0,
+            fonts: Vec::new(),
+            h: 0,
+            v: 0,
+            max_h: 0,
+            max_v: 0,
+            stack: Vec::new(),
+            max_stack: 0,
+        };
+        w.byte(247);
+        w.byte(VERSION);
+        w.unsigned(NUM, 4);
+        w.unsigned(DEN, 4);
+        w.unsigned(1000, 4); // mag
+        let comment: Vec<u8> = comment.bytes().take(255).collect();
+        w.byte(comment.len() as u8);
+        w.bytes.extend(&comment);
+        w
+    }
+
+    fn byte(&mut self, b: u8) {
+        self.bytes.push(b);
+    }
+
+    fn unsigned(&mut self, value: u32, width: usize) {
+        for i in (0..width).rev() {
+            self.bytes.push((value >> (8 * i)) as u8);
+        }
+    }
+
+    fn signed(&mut self, value: i32, width: usize) {
+        self.unsigned(value as u32, width);
+    }
+
+    /// The narrowest of the four widths that can hold `value`, which is what
+    /// keeps a DVI file small: most movements fit in one byte.
+    fn width_for(value: i32) -> usize {
+        match value {
+            -0x80..=0x7f => 1,
+            -0x8000..=0x7fff => 2,
+            -0x80_0000..=0x7f_ffff => 3,
+            _ => 4,
+        }
+    }
+
+    /// Define a font: its number, its name, the size it is used at, and the
+    /// checksum and design size from its `.tfm`, which a driver compares
+    /// against the font it finds so a document set with one cmr10 is not
+    /// silently drawn with another.
+    pub fn define_font(&mut self, number: u32, name: &str, at: i32, checksum: u32, design: i32) {
+        self.fonts
+            .push((number, name.to_string(), at, checksum, design));
+        self.write_font_definition(number, name, at, checksum, design);
+    }
+
+    fn write_font_definition(
+        &mut self,
+        number: u32,
+        name: &str,
+        at: i32,
+        checksum: u32,
+        design: i32,
+    ) {
+        let width = Writer::width_for(number as i32).max(1);
+        self.byte(242 + width as u8);
+        self.unsigned(number, width);
+        self.unsigned(checksum, 4);
+        self.signed(at, 4);
+        self.signed(design, 4);
+        // The name is an area and a file name; texrs writes no area, and lets
+        // the driver's own search find the font.
+        let name: Vec<u8> = name.bytes().take(255).collect();
+        self.byte(0);
+        self.byte(name.len() as u8);
+        self.bytes.extend(&name);
+    }
+
+    /// Select a font by number.
+    pub fn font(&mut self, number: u32) {
+        // §586: the first 64 fonts are an opcode each.
+        if number < 64 {
+            self.byte(171 + number as u8);
+            return;
+        }
+        let width = Writer::width_for(number as i32).max(1);
+        self.byte(234 + width as u8);
+        self.unsigned(number, width);
+    }
+
+    /// Begin a page carrying `\count0..9`.
+    pub fn begin_page(&mut self, counts: [i32; 10]) {
+        let here = self.bytes.len() as i32;
+        self.byte(139);
+        for count in counts {
+            self.signed(count, 4);
+        }
+        self.signed(self.previous_page, 4);
+        self.previous_page = here;
+        self.pages += 1;
+        self.h = 0;
+        self.v = 0;
+        self.stack.clear();
+    }
+
+    pub fn end_page(&mut self) {
+        self.byte(140);
+    }
+
+    /// Set a character, moving right by its width -- which the caller knows and
+    /// this does not, so it is given.
+    pub fn set_char(&mut self, code: u32, width: i32) {
+        match code < 128 {
+            true => self.byte(code as u8),
+            false => {
+                let bytes = Writer::width_for(code as i32).max(1);
+                self.byte(127 + bytes as u8);
+                self.unsigned(code, bytes);
+            }
+        }
+        self.advance(width);
+    }
+
+    /// Set a character without moving.
+    pub fn put_char(&mut self, code: u32) {
+        let bytes = Writer::width_for(code as i32).max(1);
+        self.byte(132 + bytes as u8);
+        self.unsigned(code, bytes);
+    }
+
+    /// A rule, which moves right by its width when `set`.
+    pub fn rule(&mut self, height: i32, width: i32, set: bool) {
+        self.byte(match set {
+            true => 132,
+            false => 137,
+        });
+        self.signed(height, 4);
+        self.signed(width, 4);
+        if set {
+            self.advance(width);
+        }
+        self.max_v = self.max_v.max(self.v + height.max(0));
+    }
+
+    /// Move right (or left, for a negative amount).
+    pub fn right(&mut self, amount: i32) {
+        let width = Writer::width_for(amount);
+        self.byte(142 + width as u8);
+        self.signed(amount, width);
+        self.advance(amount);
+    }
+
+    /// Move down the page. Positive is down: DVI's y axis points the other way
+    /// from the one most graphics formats use.
+    pub fn down(&mut self, amount: i32) {
+        let width = Writer::width_for(amount);
+        self.byte(156 + width as u8);
+        self.signed(amount, width);
+        self.v += amount;
+        self.max_v = self.max_v.max(self.v);
+    }
+
+    fn advance(&mut self, amount: i32) {
+        self.h += amount;
+        self.max_h = self.max_h.max(self.h);
+    }
+
+    pub fn push(&mut self) {
+        self.byte(141);
+        self.stack.push((self.h, self.v));
+        self.max_stack = self.max_stack.max(self.stack.len() as u16);
+    }
+
+    pub fn pop(&mut self) {
+        self.byte(142);
+        if let Some((h, v)) = self.stack.pop() {
+            self.h = h;
+            self.v = v;
+        }
+    }
+
+    /// `\special{…}`: what a document says that DVI has no word for.
+    pub fn special(&mut self, text: &str) {
+        let text = text.as_bytes();
+        let width = Writer::width_for(text.len() as i32).max(1);
+        self.byte(238 + width as u8);
+        self.unsigned(text.len() as u32, width);
+        self.bytes.extend(text);
+    }
+
+    pub fn noop(&mut self) {
+        self.byte(138);
+    }
+
+    /// Close the file: the postamble, the fonts again, the pointer back to the
+    /// postamble, and the padding that ends every DVI file.
+    pub fn finish(mut self) -> Vec<u8> {
+        let postamble = self.bytes.len() as u32;
+        self.byte(248);
+        self.signed(self.previous_page, 4);
+        self.unsigned(NUM, 4);
+        self.unsigned(DEN, 4);
+        self.unsigned(1000, 4);
+        self.signed(self.max_v, 4);
+        self.signed(self.max_h, 4);
+        self.unsigned(self.max_stack as u32, 2);
+        self.unsigned(self.pages as u32, 2);
+        // Every font is defined again in the postamble, so a driver can load
+        // them all before reading a page.
+        for (number, name, at, checksum, design) in self.fonts.clone() {
+            self.write_font_definition(number, &name, at, checksum, design);
+        }
+        self.byte(249);
+        self.unsigned(postamble, 4);
+        self.byte(VERSION);
+        // §590: at least four 223s, and enough of them to make the file a
+        // multiple of four bytes long.
+        for _ in 0..4 {
+            self.byte(223);
+        }
+        while !self.bytes.len().is_multiple_of(4) {
+            self.byte(223);
+        }
+        self.bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +825,189 @@ mod tests {
         let bytes = std::fs::read(dir.join("t.dvi")).ok();
         let _ = std::fs::remove_dir_all(&dir);
         bytes
+    }
+
+    /// What `dvitype` says about `bytes`, or `None` when there is no TeX here.
+    /// It is Knuth's own reader and it validates as it goes, so it is the
+    /// oracle for a file this wrote.
+    fn dvitype(bytes: &[u8]) -> Option<String> {
+        let dir = std::env::temp_dir().join(format!("texrs_dvitype_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).ok()?;
+        let file = dir.join("w.dvi");
+        std::fs::write(&file, bytes).ok()?;
+        let ran = std::process::Command::new("dvitype")
+            .arg("w.dvi")
+            .current_dir(&dir)
+            .output()
+            .ok()?;
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        Some(said)
+    }
+
+    /// A file this writes is a file Knuth's own reader accepts, and one this
+    /// reads back is the same document.
+    ///
+    /// The pointers are what makes this worth testing: a DVI file is a linked
+    /// list read backwards, and a writer that gets the back-pointers or the
+    /// postamble's position wrong produces a file every driver refuses even
+    /// though every opcode in it is right. `dvitype` follows those pointers.
+    #[test]
+    fn what_this_writes_is_a_file_dvitype_reads() {
+        let Some(bytes) = tex_dvi("rewrite", "Hello DVI world.\n\\bye\n") else {
+            return;
+        };
+        let original = Dvi::parse(&bytes).expect("real tex parses");
+        let written = original.rewrite();
+        let again = Dvi::parse(&written).expect("what this wrote parses");
+
+        // The same document: the same pages, the same text, the same fonts, in
+        // the same places.
+        assert_eq!(
+            original.compare(&again),
+            Vec::new(),
+            "a file read and written back is a different document"
+        );
+        assert_eq!(again.pages(), original.pages());
+        assert_eq!(again.text(), original.text());
+
+        // And it is a file rather than a pile of opcodes.
+        let Some(said) = dvitype(&written) else {
+            return;
+        };
+        assert!(
+            !said.contains("Bad DVI file"),
+            "dvitype refused what this wrote: {said}"
+        );
+        assert!(said.contains("totalpages=1"), "{said}");
+        assert!(said.contains("cmr10"), "the font came through: {said}");
+        // dvitype checks the postamble's counted maxima against the pages it
+        // reads and complains when they disagree.
+        assert!(!said.contains("should be"), "{said}");
+    }
+
+    /// A page built from nothing, which is what the stomach will do: define a
+    /// font, put the origin where tex puts it, and set some characters.
+    #[test]
+    fn a_page_written_from_nothing_says_what_it_holds() {
+        // The checksum a driver compares against the font it finds, from the
+        // font itself.
+        let found = std::process::Command::new("kpsewhich")
+            .arg("cmr10.tfm")
+            .output();
+        let Ok(found) = found else { return };
+        let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+        let Ok(tfm) = crate::tfm::Tfm::open(&path) else {
+            return;
+        };
+        // 10pt, in the scaled points a DVI file counts in.
+        let ten_pt = 655_360;
+        let checksum = tfm.checksum;
+
+        let mut w = Writer::new("texrs test");
+        w.define_font(0, "cmr10", ten_pt, checksum, ten_pt);
+        w.begin_page([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        w.push();
+        // One inch down and one inch across from the corner tex measures from.
+        w.down(ten_pt * 72 / 10);
+        w.right(ten_pt * 72 / 10);
+        w.font(0);
+        for c in "Hi".chars() {
+            let width = tfm.char(c as u8).map(|m| m.width).unwrap_or(0.0);
+            w.set_char(c as u32, (width * ten_pt as f64) as i32);
+        }
+        // A rule under it, which is the other thing a page can hold.
+        w.rule(ten_pt / 10, ten_pt, true);
+        w.pop();
+        w.end_page();
+        let bytes = w.finish();
+
+        // It reads back as what was written.
+        let dvi = Dvi::parse(&bytes).expect("parses");
+        assert_eq!(dvi.pages(), 1);
+        assert_eq!(dvi.text(), "Hi", "{:?}", dvi.text());
+        assert!(
+            bytes.len().is_multiple_of(4),
+            "a DVI file is a multiple of four bytes"
+        );
+        assert!(
+            bytes.ends_with(&[223, 223, 223, 223]),
+            "and ends in padding"
+        );
+
+        // And dvitype reads it, checksum and all: a mismatch there is what it
+        // reports when a document was set with a different font of the same
+        // name.
+        let Some(said) = dvitype(&bytes) else { return };
+        assert!(!said.contains("Bad DVI file"), "{said}");
+        assert!(!said.contains("checksum doesn't match"), "{said}");
+        assert!(said.contains("totalpages=1"), "{said}");
+        assert!(said.contains("[Hi]"), "the characters it set: {said}");
+    }
+
+    /// The postamble's numbers are counted while writing, and they are what a
+    /// driver allocates from before it has read a page: the tallest and widest
+    /// the pages reached, the deepest the stack went, and how many pages there
+    /// are. This checks the bookkeeping directly, because `dvitype` reads them
+    /// without checking them.
+    #[test]
+    fn the_postamble_counts_what_the_pages_did() {
+        let mut w = Writer::new("counting");
+        w.begin_page([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        w.push();
+        w.down(100);
+        w.push();
+        w.down(400); // 500 down, the deepest this page goes
+        w.right(700);
+        w.pop();
+        w.right(50); // back at 100 down, so this does not raise the maximum
+        w.pop();
+        w.end_page();
+        w.begin_page([2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        w.right(900); // wider than page one
+        w.end_page();
+        let bytes = w.finish();
+
+        // Follow the file the way a driver does: the last bytes point at the
+        // postamble.
+        let end = bytes.len() - bytes.iter().rev().take_while(|&&b| b == 223).count();
+        let at = u32::from_be_bytes([
+            bytes[end - 5],
+            bytes[end - 4],
+            bytes[end - 3],
+            bytes[end - 2],
+        ]) as usize;
+        assert_eq!(bytes[at], 248, "the pointer lands on the postamble");
+        let number = |from: usize, width: usize| -> i64 {
+            bytes[from..from + width]
+                .iter()
+                .fold(0i64, |value, &b| (value << 8) | b as i64)
+        };
+        // post: p(4) num(4) den(4) mag(4) max_v(4) max_h(4) max_stack(2) pages(2)
+        assert_eq!(number(at + 17, 4), 500, "the tallest a page reached");
+        assert_eq!(number(at + 21, 4), 900, "the widest");
+        assert_eq!(number(at + 25, 2), 2, "the deepest the stack went");
+        assert_eq!(number(at + 27, 2), 2, "two pages");
+
+        // The last page points back at the one before it, which is how a
+        // driver reads a document backwards.
+        let last = number(at + 1, 4) as usize;
+        assert_eq!(bytes[last], 139, "the pointer lands on a page");
+        let previous = number(last + 41, 4);
+        assert!(previous > 0, "the second page points at the first");
+        assert_eq!(bytes[previous as usize], 139);
+        // `number` reads unsigned, and a pointer to nothing is -1 written in
+        // four bytes.
+        assert_eq!(
+            number(previous as usize + 41, 4),
+            0xffff_ffff,
+            "the first points at nothing"
+        );
     }
 
     #[test]

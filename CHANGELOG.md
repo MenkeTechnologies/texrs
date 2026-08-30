@@ -8,6 +8,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Writing DVI (`dvi::Writer`), the other half of the format ported from
+  tectonic's `xdv`. It is what the stomach will call: a DVI file is a linked
+  list read backwards -- every page points at the one before it, the postamble
+  points at the last page, the last four bytes point at the postamble -- so the
+  pointers can only be filled in while writing, and the postamble's counted
+  maxima are counted here rather than asked for. `Dvi::rewrite` re-emits what
+  was read. Held against `dvitype`, Knuth's own reader: it accepts a page built
+  from nothing, checksum and all, and accepts a file of real tex's read and
+  written back, which compares equal to the original as a document.
 - The `.bst` interpreter, ported from `bibtex.web`: the stack machine, its 37
   builtins, `SORT`/`ITERATE`/`REVERSE`, crossref inheritance with BibTeX's
   min-crossrefs rule, and the 79-column line breaking that gives a `.bbl` its

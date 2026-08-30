@@ -160,9 +160,14 @@ page with its
 .BR \ecount0 ,
 the fonts it defines, its specials, and the characters it sets.
 .PP
-texrs writes no DVI \(em it stops where the boxes would begin \(em so this
-reads one rather than writing it. The parity contract stops in the same place:
-today it compares the
+texrs has no stomach yet \(em it stops where the boxes would begin \(em so
+nothing in it produces a page today, and this reads what another engine wrote.
+The library writes the format as well as reads it, which is what the stomach
+will call when there is one; a DVI file is a linked list read backwards, and
+its pointers can only be filled in while writing, so
+.BR dvitype (1)
+is held against what texrs writes.  The parity contract stops in the same
+place: today it compares the
 .B \emessage
 stream, and the moment texrs sets a character the reference to compare against
 is what tex shipped. This is the reading half of that comparison, written while
@@ -583,6 +588,15 @@ the document does at run time happens \(em no
 is written and no
 .B \erust
 block is compiled \(em because none of that is compilation.
+.TP
+.B \-\-text
+Print what the document SAYS -- its own words, after every macro has been
+expanded -- rather than only the
+.B \\message
+stream. This is not a typeset page: there is no line breaking, no page and no
+font, because those are the stomach's and texrs has none. It is the text, in
+order, which is what an engine with a mouth and an expander can honestly
+produce.
 .TP
 .B \-\-no\-cache
 Compile this run rather than reading the bytecode cache.  The result is the
