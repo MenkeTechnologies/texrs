@@ -197,6 +197,11 @@ fn a_fallback_glyph_reaches_the_dvi_and_switches_font() {
 fn a_missing_fallback_is_not_an_error() {
     // The chain degrades to what is installed; the approximations catch what no
     // loaded font carries.
+    //
+    // The claim is that the MISSING fallback is tolerated, which only means
+    // anything where the base font is there to load: with no installation at
+    // all neither loads, and the test would be asserting nothing.
+    let _base = font_or_skip!();
     let chain = FontChain::load("cmr10", &["definitely-not-a-font"]).expect("still loads");
     assert_eq!(chain.fonts.len(), 1);
     assert!(chain.resolve('a').is_some());
