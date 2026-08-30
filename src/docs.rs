@@ -95,7 +95,7 @@ const HEAD: &str = "<!DOCTYPE html>
       </div>
     </div>
 
-    
+    <main class=\"tutorial-main\">
       <h2 class=\"tutorial-title\"><span class=\"step-hash\">&gt;_</span>PRIMITIVE REFERENCE</h2>
       <p class=\"tutorial-subtitle\">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href=\"https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md\">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
 
