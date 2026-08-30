@@ -37,8 +37,13 @@ pub struct Glyph {
 }
 
 /// A Type 1 font.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Type1 {
+    /// The font as a PDF embeds it: the cleartext header, the encrypted body,
+    /// and the zeros that close the file. A `FontFile` stream is those three
+    /// concatenated, with `Length1`, `Length2` and `Length3` saying where each
+    /// ends -- which is why they are kept rather than reassembled.
+    parts: (Vec<u8>, Vec<u8>, Vec<u8>),
     pub font_name: String,
     /// The matrix that takes the font's units to em units: `0.001 0 0 0.001 0
     /// 0` for a font counting in thousandths.
@@ -159,8 +164,13 @@ impl Type1 {
         };
         let private = decrypt(&binary, EEXEC_KEY, 4);
 
+        // §  : a Type 1 file ends with 512 zeros written as text, and a PDF
+        // counts them separately from the body.
+        let (body, trailer) = split_trailer(&joined, start);
+
         let mut font = Type1 {
             font_name: text_after(clear, b"/FontName").unwrap_or_default(),
+            parts: (joined[..start].to_vec(), body.to_vec(), trailer.to_vec()),
             ..Type1::default()
         };
         font.font_matrix = numbers_after(clear, b"/FontMatrix")
@@ -278,6 +288,20 @@ impl Type1 {
         }
     }
 
+    /// The font as a PDF embeds it: the bytes, and where the cleartext, the
+    /// encrypted body and the closing zeros end.
+    ///
+    /// A `FontFile` stream is exactly the file as it was, so this hands back
+    /// what was read rather than anything rebuilt: a font a driver re-encoded
+    /// would no longer decrypt.
+    pub fn embeddable(&self) -> (Vec<u8>, usize, usize, usize) {
+        let (clear, body, trailer) = &self.parts;
+        let mut bytes = clear.clone();
+        bytes.extend(body);
+        bytes.extend(trailer);
+        (bytes, clear.len(), body.len(), trailer.len())
+    }
+
     /// The glyph of this name.
     pub fn glyph(&self, name: &str) -> Option<&Glyph> {
         self.glyphs.get(name)
@@ -357,6 +381,37 @@ impl Type1 {
             glyph.left_side_bearing,
             glyph.charstring.len()
         )
+    }
+}
+
+/// Where the encrypted body ends and the closing zeros begin.
+///
+/// A Type 1 file ends with 512 `0` characters and a `cleartomark`, written as
+/// text. They are not part of the encrypted body, and a PDF counts them
+/// separately, so the split is by looking for the run of zeros rather than by
+/// trusting a length.
+fn split_trailer(joined: &[u8], start: usize) -> (&[u8], &[u8]) {
+    let body = &joined[start..];
+    // The zeros are near the end but not at it: `cleartomark` follows them,
+    // and it belongs to the trailer. So the search starts at the last zero and
+    // walks back over the run.
+    let Some(last) = body.iter().rposition(|&b| b == b'0') else {
+        return (body, &body[body.len()..]);
+    };
+    let mut at = last + 1;
+    let mut zeros = 0usize;
+    while at > 0 {
+        match body[at - 1] {
+            b'0' => zeros += 1,
+            c if c.is_ascii_whitespace() => {}
+            _ => break,
+        }
+        at -= 1;
+    }
+    match zeros >= 512 {
+        true => (&body[..at], &body[at..]),
+        // A font with no trailer: a PFA cut short, or one already stripped.
+        false => (body, &body[body.len()..]),
     }
 }
 
@@ -519,6 +574,40 @@ mod tests {
         assert_eq!(font.encoding.get(&65).map(String::as_str), Some("A"));
         assert_eq!(font.encoding.get(&11).map(String::as_str), Some("ff"));
         assert_eq!(font.encoded(65).map(|g| g.name.as_str()), Some("A"));
+    }
+
+    /// The three parts a PDF embeds, and what they must add up to.
+    #[test]
+    fn the_font_comes_apart_into_the_lengths_a_pdf_wants() {
+        let Some(bytes) = installed("cmr10.pfb") else {
+            return;
+        };
+        let font = Type1::parse(&bytes).expect("cmr10 reads");
+        let (embedded, clear, binary, trailer) = font.embeddable();
+
+        assert_eq!(embedded.len(), clear + binary + trailer);
+        // The cleartext is PostScript and ends where eexec does.
+        assert!(embedded[..clear].starts_with(b"%!"));
+        assert!(embedded[..clear].ends_with(b"eexec\r") || embedded[..clear].ends_with(b"eexec\n"));
+        // The body is what decrypts, so it must not be text.
+        assert!(
+            embedded[clear..clear + binary]
+                .iter()
+                .any(|&b| b > 127 || b == 0),
+            "the encrypted body reads as text, so the split is wrong"
+        );
+        // The trailer is 512 zeros and the words that close the file.
+        assert!(trailer >= 512, "{trailer}");
+        assert_eq!(
+            embedded[clear + binary..]
+                .iter()
+                .filter(|&&b| b == b'0')
+                .count(),
+            512
+        );
+        // And the three parts together are the file as it was, because a font
+        // that was rebuilt would no longer decrypt.
+        assert!(bytes.windows(64).any(|w| w == &embedded[..64]));
     }
 
     /// What is not a Type 1 font, and a font whose body will not decrypt.

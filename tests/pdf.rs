@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use texrs::pdf::{document, Page};
+use texrs::pdf::{document, Font, Page};
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("texrs_pdf_{}_{name}", std::process::id()));
@@ -205,4 +205,152 @@ fn a_reader_refuses_a_file_whose_table_is_wrong() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `pdffonts` on a document carrying a font in it.
+fn fonts_in(path: &std::path::Path) -> Option<String> {
+    let out = Command::new("pdffonts").arg(path).output().ok()?;
+    let complaints = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        complaints.trim().is_empty(),
+        "pdffonts had to repair the file: {complaints}"
+    );
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// A document set in Computer Modern, carried in the file.
+///
+/// This is what a TeX document needs and a base-14 name cannot give: nobody
+/// has Computer Modern installed, so the font travels with the document. The
+/// test is whether a reader that did not write the file will take the font out
+/// of it and draw with it -- `pdffonts` says whether it is there and embedded,
+/// and Ghostscript refuses a `FontFile` whose three lengths do not describe the
+/// font, because it has to decrypt it to draw anything.
+#[test]
+fn a_font_carried_in_the_file_is_one_a_reader_accepts() {
+    let Ok(found) = Command::new("kpsewhich").arg("cmr10.pfb").output() else {
+        return;
+    };
+    let pfb = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if pfb.is_empty() {
+        return;
+    }
+    let cmr10 = texrs::type1::Type1::open(&pfb).expect("the font reads");
+
+    let dir = scratch("embedded");
+    let mut page = Page::letter();
+    page.text_in(
+        Font::Embedded(Box::new(cmr10.clone())),
+        24.0,
+        72.0,
+        700.0,
+        "Hello from Computer Modern",
+    );
+    // Code 11 is an ff ligature in a TeX font and a vertical tab in anyone
+    // else's, which is what the encoding in the file is for.
+    page.text_in(Font::Embedded(Box::new(cmr10)), 24.0, 72.0, 660.0, "o\u{b}ice");
+    let path = write(&dir, &[page]);
+
+    if let Some(report) = fonts_in(&path) {
+        // The name the font calls itself, the kind it is, and -- the part that
+        // matters -- that it is in the file.
+        assert!(report.contains("CMR10"), "{report}");
+        assert!(report.contains("Type 1"), "{report}");
+        let line = report
+            .lines()
+            .find(|line| line.contains("CMR10"))
+            .expect("the font");
+        let columns: Vec<&str> = line.split_whitespace().collect();
+        assert!(
+            columns.contains(&"yes"),
+            "the font is not embedded: {line:?}"
+        );
+    }
+
+    // What the text comes back as, through two engines that share no code:
+    // xpdf reads the glyph names out of the encoding this wrote, and
+    // Ghostscript draws the page and reports what it drew. Either of them
+    // getting words back means the codes in the content stream reached the
+    // right glyphs of the embedded font.
+    if let Some(text) = extracted(&path) {
+        assert!(text.contains("Hello from Computer Modern"), "{text:?}");
+    }
+    if let Ok(out) = Command::new("gs")
+        .args([
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-sDEVICE=txtwrite",
+            "-o",
+            "-",
+        ])
+        .arg(&path)
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        assert!(
+            text.contains("Hello from Computer Modern"),
+            "ghostscript drew {text:?}"
+        );
+    }
+
+    // Ghostscript decrypts the embedded font to draw with it, so it is the one
+    // that catches a font this took apart wrongly.
+    if let Ok(out) = Command::new("gs")
+        .args(["-dNOPAUSE", "-dBATCH", "-dQUIET", "-sDEVICE=nullpage"])
+        .arg(&path)
+        .output()
+    {
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "ghostscript refused it: {said}");
+        assert!(!said.contains("Error"), "ghostscript complained: {said}");
+    }
+
+    // What no reader here checks: `Length1`, `Length2` and `Length3`. Both
+    // xpdf and Ghostscript find the parts of a Type 1 font by reading it
+    // rather than by trusting the numbers, and accept a file whose lengths are
+    // wrong by a byte. The lengths are pinned instead by the test in
+    // `type1.rs` that takes the font apart and checks each part is what it
+    // should be -- a property, since there is no oracle for it.
+
+    // And the file really carries the font rather than naming it: a PFB is
+    // tens of kilobytes, and a page that named a font would be two.
+    let size = std::fs::metadata(&path).expect("the file").len();
+    assert!(size > 20_000, "{size} bytes is too small to hold a font");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The widths and the encoding a reader is given for an embedded font.
+#[test]
+fn the_widths_and_the_encoding_are_the_fonts_own() {
+    let Ok(found) = Command::new("kpsewhich").arg("cmr10.pfb").output() else {
+        return;
+    };
+    let pfb = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if pfb.is_empty() {
+        return;
+    }
+    let cmr10 = texrs::type1::Type1::open(&pfb).expect("the font reads");
+
+    let mut page = Page::letter();
+    page.text_in(Font::Embedded(Box::new(cmr10)), 12.0, 72.0, 700.0, "A");
+    let bytes = document(&[page]);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+
+    // An A is 750 thousandths of an em, which is what the .tfm says too.
+    assert!(text.contains("/FirstChar"), "{}", &text[..400]);
+    assert!(text.contains("750"), "the widths are not in the file");
+    // The encoding is written as differences, so a code means what the font
+    // says and not what the reader assumes.
+    assert!(text.contains("/Differences"), "no encoding");
+    assert!(text.contains("/ff"), "the ligature is not in the encoding");
+    // The three lengths that let a reader take the font apart.
+    for key in ["/Length1", "/Length2", "/Length3"] {
+        assert!(text.contains(key), "{key} is missing");
+    }
+    // Symbolic, because a TeX font is in none of the standard encodings.
+    assert!(text.contains("/Flags 4"), "the font is not marked symbolic");
 }

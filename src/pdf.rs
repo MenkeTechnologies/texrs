@@ -262,6 +262,29 @@ impl Pdf {
     }
 }
 
+/// A font a page sets text in.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Font {
+    /// One of the fourteen every reader has, named rather than embedded --
+    /// which is what makes a file like that three kilobytes instead of three
+    /// hundred.
+    Base14(String),
+    /// A Type 1 font carried in the file, so the document reads the same
+    /// wherever it is opened. This is what a TeX document needs: nobody has
+    /// Computer Modern installed.
+    Embedded(Box<crate::type1::Type1>),
+}
+
+impl Font {
+    /// What the font calls itself.
+    pub fn name(&self) -> String {
+        match self {
+            Font::Base14(name) => name.clone(),
+            Font::Embedded(font) => font.font_name.clone(),
+        }
+    }
+}
+
 /// One page: how big it is, and what is drawn on it.
 #[derive(Debug, Clone)]
 pub struct Page {
@@ -270,9 +293,9 @@ pub struct Page {
     pub height: f64,
     /// The content stream: the operators that draw the page.
     pub content: String,
-    /// The fonts the content names, as `(name in the content, base font)` --
-    /// `("F1", "Helvetica")`.
-    pub fonts: Vec<(String, String)>,
+    /// The fonts the content names, as `(name in the content, font)` --
+    /// `("F1", Helvetica)`.
+    pub fonts: Vec<(String, Font)>,
 }
 
 impl Page {
@@ -290,11 +313,20 @@ impl Page {
     /// measured up from the bottom of the page -- PDF's axis, which points the
     /// other way from DVI's.
     pub fn text(&mut self, font: &str, size: f64, x: f64, y: f64, text: &str) {
+        self.text_in(Font::Base14(font.to_string()), size, x, y, text);
+    }
+
+    /// The same, in a font carried in the file.
+    ///
+    /// The text is bytes rather than characters: a code in a TeX font means
+    /// whatever the font's own encoding says, and 11 is an `ff` ligature and
+    /// not a vertical tab.
+    pub fn text_in(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str) {
         let name = format!("F{}", self.fonts.len() + 1);
-        let name = match self.fonts.iter().find(|(_, base)| base == font) {
+        let name = match self.fonts.iter().find(|(_, used)| used == &font) {
             Some((existing, _)) => existing.clone(),
             None => {
-                self.fonts.push((name.clone(), font.to_string()));
+                self.fonts.push((name.clone(), font));
                 name
             }
         };
@@ -305,9 +337,9 @@ impl Page {
                 other => vec![other],
             })
             .collect();
-        let _ = write!(
+        let _ = writeln!(
             self.content,
-            "BT /{name} {size} Tf 1 0 0 1 {x} {y} Tm ({escaped}) Tj ET\n"
+            "BT /{name} {size} Tf 1 0 0 1 {x} {y} Tm ({escaped}) Tj ET"
         );
     }
 
@@ -336,18 +368,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         let fonts: BTreeMap<String, Object> = page
             .fonts
             .iter()
-            .map(|(name, base)| {
-                let font = pdf.add(Object::dict([
-                    ("Type", Object::name("Font")),
-                    // A base-14 font is named rather than embedded: every
-                    // reader has these, which is what makes a file like this
-                    // three kilobytes instead of three hundred.
-                    ("Subtype", Object::name("Type1")),
-                    ("BaseFont", Object::name(base)),
-                    ("Encoding", Object::name("WinAnsiEncoding")),
-                ]));
-                (name.clone(), font)
-            })
+            .map(|(name, font)| (name.clone(), add_font(&mut pdf, font)))
             .collect();
         let resources = Object::dict([("Font", Object::Dict(fonts))]);
         kids.push(pdf.add(Object::dict([
@@ -383,6 +404,116 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         pdf.set_catalog(number);
     }
     pdf.finish()
+}
+
+/// Add a font to the file, embedding it when it is not one of the fourteen.
+///
+/// Ported from `pdf_font_load_type1`. Embedding is four objects that have to
+/// agree: the font dictionary, an encoding saying what each code means, a
+/// descriptor with the measurements a reader needs to substitute or lay out
+/// the font, and the file itself as a stream. The stream is the font exactly as
+/// it was read, because a Type 1 font that was rebuilt would no longer
+/// decrypt, and `Length1`, `Length2` and `Length3` say where its three parts
+/// end.
+fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
+    let Font::Embedded(type1) = font else {
+        return pdf.add(Object::dict([
+            ("Type", Object::name("Font")),
+            ("Subtype", Object::name("Type1")),
+            ("BaseFont", Object::name(&font.name())),
+            ("Encoding", Object::name("WinAnsiEncoding")),
+        ]));
+    };
+
+    let (bytes, clear, binary, trailer) = type1.embeddable();
+    let file = pdf.add(Object::Stream {
+        dict: BTreeMap::from([
+            ("Length1".to_string(), Object::Integer(clear as i64)),
+            ("Length2".to_string(), Object::Integer(binary as i64)),
+            ("Length3".to_string(), Object::Integer(trailer as i64)),
+        ]),
+        data: bytes,
+    });
+
+    // The measurements a reader needs. A TeX font is not in any of the
+    // standard encodings, so `Symbolic` is set: that is what tells a reader to
+    // believe the font's own encoding rather than overlay a standard one.
+    let bbox = type1.font_bbox;
+    let descriptor = pdf.add(Object::dict([
+        ("Type", Object::name("FontDescriptor")),
+        ("FontName", Object::name(&type1.font_name)),
+        ("Flags", Object::Integer(4)),
+        (
+            "FontBBox",
+            Object::Array(bbox.iter().map(|&n| Object::Real(n)).collect()),
+        ),
+        ("ItalicAngle", Object::Integer(0)),
+        // Ascent, descent and cap height are asked for and are not in a Type 1
+        // font; the bounding box is what there is to say.
+        ("Ascent", Object::Real(bbox[3])),
+        ("Descent", Object::Real(bbox[1])),
+        ("CapHeight", Object::Real(bbox[3])),
+        ("StemV", Object::Integer(80)),
+        ("FontFile", file),
+    ]));
+
+    // The codes the font's own encoding uses, and what each is called. A
+    // reader that was told nothing would use its own idea of what code 11 is,
+    // which in a TeX font is an `ff` ligature.
+    let mut first = 256usize;
+    let mut last = 0usize;
+    for code in 0..=255usize {
+        if type1.encoded(code as u8).is_some() {
+            first = first.min(code);
+            last = last.max(code);
+        }
+    }
+    let (first, last) = match first > last {
+        true => (0, 0),
+        false => (first, last),
+    };
+
+    let mut differences = Vec::new();
+    let mut expected = usize::MAX;
+    for code in first..=last {
+        let Some(glyph) = type1.encoded(code as u8) else {
+            continue;
+        };
+        // A run of consecutive codes is written once with its first code, so
+        // the array is `1 /a /b /c 40 /x` rather than a code per name.
+        if code != expected {
+            differences.push(Object::Integer(code as i64));
+        }
+        differences.push(Object::name(&glyph.name));
+        expected = code + 1;
+    }
+    let encoding = pdf.add(Object::dict([
+        ("Type", Object::name("Encoding")),
+        ("Differences", Object::Array(differences)),
+    ]));
+
+    // The widths, in thousandths of an em, which is what the font is drawn in.
+    let widths: Vec<Object> = (first..=last)
+        .map(|code| {
+            Object::Real(
+                type1
+                    .encoded(code as u8)
+                    .map(|glyph| glyph.width)
+                    .unwrap_or(0.0),
+            )
+        })
+        .collect();
+
+    pdf.add(Object::dict([
+        ("Type", Object::name("Font")),
+        ("Subtype", Object::name("Type1")),
+        ("BaseFont", Object::name(&type1.font_name)),
+        ("FirstChar", Object::Integer(first as i64)),
+        ("LastChar", Object::Integer(last as i64)),
+        ("Widths", Object::Array(widths)),
+        ("Encoding", encoding),
+        ("FontDescriptor", descriptor),
+    ]))
 }
 
 #[cfg(test)]
@@ -512,7 +643,10 @@ mod tests {
 
         // A font is named once however often it is used.
         assert_eq!(page.fonts.len(), 2);
-        assert_eq!(page.fonts[0], ("F1".to_string(), "Helvetica".to_string()));
+        assert_eq!(
+            page.fonts[0],
+            ("F1".to_string(), Font::Base14("Helvetica".to_string()))
+        );
         assert_eq!(page.content.matches("/F1").count(), 2);
         // The parentheses in the text are escaped, or the stream ends early.
         assert!(
