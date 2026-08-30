@@ -250,7 +250,13 @@ fn a_font_carried_in_the_file_is_one_a_reader_accepts() {
     );
     // Code 11 is an ff ligature in a TeX font and a vertical tab in anyone
     // else's, which is what the encoding in the file is for.
-    page.text_in(Font::Embedded(Box::new(cmr10)), 24.0, 72.0, 660.0, "o\u{b}ice");
+    page.text_in(
+        Font::Embedded(Box::new(cmr10)),
+        24.0,
+        72.0,
+        660.0,
+        "o\u{b}ice",
+    );
     let path = write(&dir, &[page]);
 
     if let Some(report) = fonts_in(&path) {
