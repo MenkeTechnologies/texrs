@@ -67,6 +67,16 @@ the harness enforces rather than a note.
   scratch value. texrs starts every register at zero, as INITEX does.
   `tests/cases/plain_count0.tex` pins that, and `scripts/fuzz/gen.pl` generates
   against `\count1`..`\count9`, the window where both engines start equal.
+- **A negative `\ifcase` selector takes case 0.** `tex.web` §509 skips n cases
+  and takes the (n+1)th, so a selector below zero — or past the last `\or` with
+  no `\else` — matches nothing and the `\else` branch runs. `do_ifcase` counts
+  down with `while remaining > 0`, which a negative n never enters, so it falls
+  through to case 0: `\ifcase -1 ZERO\else DEFAULT\fi` prints `ZERO` where tex
+  prints `DEFAULT`. Like `def_in_conditional_arm.tex` this is a wrong answer
+  rather than a refusal — nothing errors. Pinned by
+  `tests/cases/cond_ifcase_negative.tex`. The fix looks like one branch in
+  `do_ifcase`, but it is a semantics change and is recorded here first, as the
+  roadmap's rule requires.
 - **`\edef` scratch registers.** Freezing `\the\count0` into a macro body needs
   somewhere to put the value now, and the count registers are the only run-time
   store this milestone has. texrs takes them from the top (255 downward), so a

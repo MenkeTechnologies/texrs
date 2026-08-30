@@ -74,3 +74,15 @@ def_in_conditional_arm.tex
 #                  be run-time state, or the conditional to be decidable while
 #                  lowering; neither is a small change.
 
+
+cond_ifcase_negative.tex
+#                  A NEGATIVE `\ifcase' selector takes case 0 instead of the
+#                  `\else' branch. tex.web 509 skips n cases and takes the
+#                  (n+1)th, so a selector below zero or past the last `\or'
+#                  matches nothing and `\else' runs; do_ifcase counts down with
+#                  `while remaining > 0', which a negative n never enters, so
+#                  it falls straight through to case 0. tex prints DEFAULT
+#                  where texrs prints ZERO. Like def_in_conditional_arm.tex
+#                  this is a wrong answer rather than a refusal: nothing
+#                  errors. Found by writing the reference manual's
+#                  conditionals chapter.

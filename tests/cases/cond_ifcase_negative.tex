@@ -1,0 +1,9 @@
+% A NEGATIVE \ifcase selector.
+%
+% tex.web 509: \ifcase skips n cases and takes the (n+1)th, and a selector
+% that is negative or past the last \or matches nothing -- so the \else
+% branch runs. texrs counts down from n with a `while remaining > 0`, which
+% a negative n never enters, so it takes case 0 instead.
+\catcode`\{=1 \catcode`\}=2
+\ifcase -1 \message{ZERO}\else\message{DEFAULT}\fi
+\end
