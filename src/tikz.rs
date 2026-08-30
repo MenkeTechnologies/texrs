@@ -100,8 +100,7 @@ fn paths_in(coords: &str, width: f64) -> Vec<Path> {
     let mut connected = false;
     let mut rest = coords;
 
-    loop {
-        let Some(open) = rest.find('(') else { break };
+    while let Some(open) = rest.find('(') {
         let before = &rest[..open];
         if before.contains("cycle") {
             closed = true;
