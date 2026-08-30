@@ -1,0 +1,8 @@
+% ^^ notation has TWO forms (tex.web §352) and the second character decides
+% which: two LOWERCASE hex digits are a hex code, anything else is one
+% character shifted by 64. `^^4A' is the interesting one -- `A' is not a
+% lowercase hex digit, so the single-character rule applies to the `4' alone
+% and the `A' is ordinary text.
+\catcode`\{=1 \catcode`\}=2 \catcode`\^=7
+\message{[^^41][^^4a][^^4A]}
+\end

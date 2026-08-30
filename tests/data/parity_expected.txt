@@ -6,6 +6,10 @@
 [-2147483648] [2147483647]
 #==# backtick_codes.tex
 65-66
+#==# caret_hex_notation.tex
+[A][J][tA]
+#==# caret_in_control_sequence_name.tex
+[11]
 #==# catcode_midfile.tex
 AT
 #==# cond_ifcase.tex

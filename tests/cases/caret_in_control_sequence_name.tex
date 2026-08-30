@@ -1,0 +1,9 @@
+% The ^^ substitution belongs to the input processor (tex.web §353), so it runs
+% before anything is classified and applies inside a control sequence name.
+% plain.tex line 16 is `\catcode`\^^K=7', where the name of the control
+% sequence IS the control character; reading it raw made it `\^' and junk.
+\catcode`\{=1 \catcode`\}=2 \catcode`\^=7
+\catcode`\^^K=7
+\count1=`\^^K
+\message{[\the\count1]}
+\end

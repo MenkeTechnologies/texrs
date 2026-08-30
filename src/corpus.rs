@@ -54,8 +54,8 @@ pub const CORPUS: &[Entry] = &[
     (
         "^^X",
         "Category codes",
-        "Control-character notation (tex.web \u{a7}352): a superscript character twice, then one character, denotes the control character 64 above or below it. This is how a line end is written inside a macro body.",
-        "^^M   % carriage return\n^^I   % tab",
+        "Control-character notation (tex.web \u{a7}352), in two forms decided by what follows: `^^` and two LOWERCASE hex digits is that hex code, while `^^` and anything else is one character shifted by 64. So `^^41` is `A` and `^^4a` is `J`, but `^^4A` is `tA` \u{2014} `A` is not a lowercase hex digit, so the shift applies to the `4` alone. The substitution belongs to the input processor (\u{a7}353), which runs before anything is classified, so it applies inside a control sequence name too: plain.tex writes `\\catcode`\\^^K=7`. This is also how a line end is written inside a macro body.",
+        "^^M   % carriage return\n^^I   % tab\n^^41  % the hex form: A",
     ),
     (
         "`",

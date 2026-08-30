@@ -193,6 +193,25 @@ impl Lexer {
             return None;
         }
         let third = self.chars.get(self.pos + 2).copied()?;
+        // Two forms, and which one applies depends on the NEXT character as
+        // well: `^^` followed by two LOWERCASE hex digits is that hex code, and
+        // anything else is the single character shifted by 64. Measured against
+        // tex 3.141592653, which is where the lowercase part comes from --
+        // `^^41` is `A` and `^^4a` is `J`, but `^^4A` is `tA`, because `A` is
+        // not a lowercase hex digit and so the single-character rule applies to
+        // the `4` alone. Reading only the second form left plain.tex's
+        // `\catcode`\^^K=7` unreadable, which is line 16 of it.
+        let is_lower_hex = |c: char| matches!(c, '0'..='9' | 'a'..='f');
+        if is_lower_hex(third) {
+            if let Some(fourth) = self.chars.get(self.pos + 3).copied() {
+                if is_lower_hex(fourth) {
+                    self.pos += 4;
+                    let hi = third.to_digit(16)?;
+                    let lo = fourth.to_digit(16)?;
+                    return char::from_u32(hi * 16 + lo);
+                }
+            }
+        }
         let code = u32::from(third);
         if code >= 128 {
             return None;
@@ -362,11 +381,26 @@ impl Lexer {
     /// A control WORD is a maximal run of letters and swallows the spaces after
     /// it (state S); a control SYMBOL is exactly one character and does not.
     /// That asymmetry is why `\foo bar` loses its space and `\! bar` keeps it.
+    /// The next character with `^^` notation already applied.
+    ///
+    /// The substitution belongs to the input processor (`tex.web` §353), which
+    /// runs BEFORE anything is classified -- so it applies inside a control
+    /// sequence name as much as in running text. plain.tex line 16 is
+    /// `\catcode`\^^K=7`, where the name of the control sequence IS the
+    /// control character, and reading it raw made it `\^` followed by junk.
+    fn decoded_char(&mut self, cats: &CatTable) -> Option<char> {
+        let c = self.peek()?;
+        if let Some(decoded) = self.double_superscript(cats, c) {
+            return Some(decoded);
+        }
+        self.pos += 1;
+        Some(c)
+    }
+
     fn control_sequence(&mut self, cats: &CatTable) -> Token {
-        let Some(first) = self.peek() else {
+        let Some(first) = self.decoded_char(cats) else {
             return Token::cs("");
         };
-        self.pos += 1;
         if cats.get(first) != Cat::Letter {
             // A control space (`\ `) leaves the state mid-line, like any other
             // single-character control sequence.
@@ -377,12 +411,18 @@ impl Lexer {
             return Token::cs(first.encode_utf8(&mut [0u8; 4]));
         }
         let mut name = String::from(first);
-        while let Some(c) = self.peek() {
+        loop {
+            // The decode has to happen before the letter test, and be undone
+            // when what it produced is not a letter: `\ab^^K` names `ab`.
+            let save = self.pos;
+            let Some(c) = self.decoded_char(cats) else {
+                break;
+            };
             if cats.get(c) != Cat::Letter {
+                self.pos = save;
                 break;
             }
             name.push(c);
-            self.pos += 1;
         }
         self.state = State::SkipBlanks;
         Token::cs(&name)

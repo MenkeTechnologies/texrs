@@ -88,7 +88,7 @@
 (defconst texrs-stdlib--docs
   (let ((table (make-hash-table :test 'equal)))
     (puthash "\\catcode" "\\catcode  —  Set or read a character's category code. [Category codes]" table)
-    (puthash "^^X" "^^X  —  Control-character notation (tex.web §352): a superscript character twice, then one character, denotes the control character 64 above or below it. [Category codes]" table)
+    (puthash "^^X" "^^X  —  Control-character notation (tex.web §352), in two forms decided by what follows: `^^` and two LOWERCASE hex digits is that hex code, while `^^` and anything else is one character shifted by 64. [Category codes]" table)
     (puthash "`" "`  —  A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence. [Category codes]" table)
     (puthash "\\def" "\\def  —  Define a macro. [Macro definition]" table)
     (puthash "\\gdef" "\\gdef  —  Define globally: the definition survives the enclosing group, where a `\\def` inside braces is undone at the closing brace. [Macro definition]" table)

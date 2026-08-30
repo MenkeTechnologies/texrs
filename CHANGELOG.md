@@ -30,6 +30,16 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `^^` notation reads its hex form. `tex.web` §352 has two: `^^` and two
+  LOWERCASE hex digits is that hex code, and `^^` and anything else is one
+  character shifted by 64. Only the second was implemented, so `^^41` read as
+  `t1` where tex reads `A`. Measured: `^^4a` is `J` but `^^4A` is `tA`, because
+  `A` is not a lowercase hex digit.
+- `^^` notation applies inside a control sequence name. The substitution belongs
+  to the input processor (§353) and runs before anything is classified, so
+  `\catcode`\^^K=7` names the control character — plain.tex line 16. Reading it
+  raw made it `\^` followed by junk, which is where loading plain.tex stopped.
+
 - A numeric constant is limited to TeX's 2147483647, not the host `i64`. The
   scanner reported `Number too big` only when the digits overflowed an `i64`, so
   `\count1=99999999999` was accepted and printed back where tex reports and
