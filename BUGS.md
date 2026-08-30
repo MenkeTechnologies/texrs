@@ -44,7 +44,7 @@ the harness enforces rather than a note.
   bodies tex froze to the same tokens compare unequal under `\ifx`.
   `tests/cases/edef_freezes_conditional.tex` and
   `tests/cases/ifx_after_edef_conditional.tex` pin both faces of it; found by
-  `scripts/fuzz_parity.sh` at seed 77.
+  `the parity-fuzz binary` at seed 77.
 - **Errors.** An undefined control sequence is not an error: texrs prints its
   name into the message stream and exits 0, where tex reports `! Undefined
   control sequence.` and expands it to nothing. `tests/cases/undefined_cs.tex`
@@ -94,7 +94,7 @@ Four harnesses, in increasing order of how much they cost to run:
 | --- | --- | --- |
 | `tests/differential.rs` | every committed case against real `tex`, no hand-written expectations | `cargo test` |
 | `tests/fuzz_smoke.rs`, `tests/fuzz_mass_replay.rs` | replays the fuzz targets on the seed corpus and on generated mutations of every `.tex` in the tree | `cargo test` |
-| `scripts/fuzz_parity.sh` | generates random programs in the implemented subset and diffs both engines, reducing whatever diverges | `bash scripts/fuzz_parity.sh -n 200` |
+| `the parity-fuzz binary` | generates random programs in the implemented subset and diffs both engines, reducing whatever diverges | `cargo run --bin parity-fuzz -- --programs 200` |
 | `fuzz/` (cargo-fuzz) | coverage-guided, looking for panics rather than divergences | `cargo +nightly fuzz run lower -- -timeout=10` |
 
 A divergence the fuzzer finds is reduced to a minimal case and committed to

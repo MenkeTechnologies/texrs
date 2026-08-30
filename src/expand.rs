@@ -1553,6 +1553,23 @@ impl Engine {
             }),
         );
     }
+
+    /// The same, with a parameter text — validated as `\def`'s is.
+    ///
+    /// `\edef` takes parameters exactly as `\def` does; what differs is only
+    /// when the BODY is expanded. A definition path that dropped them would
+    /// leave `\edef\pair#1,#2.{…}` matching nothing and its delimiters landing
+    /// in the output.
+    pub fn define_macro_with_params(
+        &mut self,
+        name: CsId,
+        params: Vec<Token>,
+        body: Vec<Token>,
+    ) -> R<()> {
+        validate_params(&params)?;
+        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        Ok(())
+    }
 }
 
 /// Check a macro's parameter text the way `tex.web` §476 does.

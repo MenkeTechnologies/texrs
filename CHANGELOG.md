@@ -63,6 +63,15 @@ which is the release that carries it to crates.io and the Homebrew tap.
   that runs it leaves the run that follows starting from bytecode: on a hit the
   mouth, the expander and the lowerer are skipped entirely. Nothing the document
   does at RUN time happens, because none of that is compilation.
+- `parity-fuzz`, the differential fuzzer as a binary, ported in shape from the
+  sibling frontends' — and for their reason. The oracle is the expensive part:
+  a `tex` invocation costs ~0.5s of process start and format load, so a fuzzer
+  running one construct per invocation spends its budget on startup. Each
+  program now packs 40 independent probes, and a divergence is minimized to the
+  single probe responsible before it is reported. 1600 probes cost 80 tex
+  invocations rather than 1600. It replaces `scripts/fuzz_parity.sh` and
+  `scripts/fuzz/gen.pl`: one implementation of the harness, in the language the
+  engine is written in, with no bash or perl in the loop.
 - `tests/opcodes.rs` guards the builtin id space. The ids are a wire format,
   not an internal detail: a cached chunk and an `--aot` object both call
   builtins by number, so renumbering one does not fail to compile — it makes
@@ -159,7 +168,7 @@ which is the release that carries it to crates.io and the Homebrew tap.
   disagree.
 - `--dump-tokens` and `--disasm`: the mouth's token stream, and the lowered
   fusevm bytecode.
-- Differential fuzzing: `scripts/fuzz_parity.sh` generates seeded random
+- Differential fuzzing: `the parity-fuzz binary` generates seeded random
   programs confined to the implemented subset, runs both engines in parallel,
   and reduces whatever diverges to a minimal case.
 - cargo-fuzz targets `lex`, `lower` and `run`, with `tests/fuzz_smoke.rs`
@@ -194,6 +203,12 @@ which is the release that carries it to crates.io and the Homebrew tap.
   real `tex`, end to end, with the two caveats printed beside the numbers.
 
 ### Fixed
+
+- `\edef` dropped its parameter text. `\edef\pair#1,#2.{…}` matched nothing and
+  left its delimiters in the output where tex prints the arguments; `\edef`
+  differs from `\def` only in WHEN the body is expanded, not in whether it takes
+  parameters. Found by `parity-fuzz` on its third program, and pinned by
+  `tests/cases/edef_with_parameters.tex`.
 
 - `Lexer::line` counted newlines from the start of the file on every call, which
   is O(n) per token and O(n²) per document: the scaling benchmark caught it on

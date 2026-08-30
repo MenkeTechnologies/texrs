@@ -1,0 +1,9 @@
+% \edef takes a parameter text exactly as \def does; what differs is only
+% when the body is expanded. Dropping the parameters left the delimiters in
+% the output and matched nothing. Found by parity-fuzz.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count1=7
+\edef\pair#1,#2.{[#1|#2|\the\count1 ]}
+\count1=99
+\message{\pair A,B.}
+\end

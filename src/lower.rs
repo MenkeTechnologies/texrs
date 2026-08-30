@@ -362,7 +362,11 @@ impl Lowerer {
         let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
-        // Parameter text is not supported for the snapshot form.
+        // The parameter text, exactly as `\def` reads it. `\edef` differs from
+        // `\def` only in WHEN the body is expanded; dropping the parameters
+        // here left `\edef\pair#1,#2.{…}` matching nothing and its delimiters
+        // landing in the output. Found by `parity-fuzz`.
+        let mut params: Vec<Token> = Vec::new();
         loop {
             let Some(t) = lx.next_token(&self.eng.cats) else {
                 return Err(TexError("Runaway definition".into()));
@@ -370,6 +374,7 @@ impl Lowerer {
             if matches!(t, Token::Char(_, Cat::BeginGroup)) {
                 break;
             }
+            params.push(t);
         }
         let body = self.eng.read_balanced_pub(lx)?;
         // Find `\the\count<n>` in the body; anything else stays literal.
@@ -397,7 +402,7 @@ impl Lowerer {
                 other => new_body.push(*other),
             }
         }
-        self.eng.define_macro(name, new_body);
+        self.eng.define_macro_with_params(name, params, new_body)?;
         Ok(cmd)
     }
 

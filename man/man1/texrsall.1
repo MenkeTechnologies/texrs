@@ -235,9 +235,12 @@ and the fuzz smoke and mass\-replay harnesses.
 The same comparison as a script, over
 .IR tests/cases .
 .TP
-.B bash scripts/fuzz_parity.sh \-n 500
-Generates seeded random programs confined to the implemented subset, runs both
-engines in parallel, and reduces whatever diverges to a minimal case.
+.B cargo run \-\-bin parity\-fuzz \-\- \-\-programs 500
+Generates seeded programs confined to the implemented subset and runs each
+through both engines, packing 40 independent probes into every one because the
+oracle costs half a second per invocation.  A divergence is minimized to the
+single probe responsible before it is reported, and replays exactly with
+.BR "\-\-seed N \-\-once" .
 .TP
 .B cargo +nightly fuzz run lower
 Coverage\-guided fuzzing for panics rather than divergences; targets

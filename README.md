@@ -305,17 +305,18 @@ started passing, so the list cannot go stale.
 Hand-written cases only cover what someone thought to write down.
 
 ```sh
-bash scripts/fuzz_parity.sh -n 500        # random programs, both engines, diffed
-bash scripts/fuzz_parity.sh -1 case.tex   # one file, verbose
+cargo run --bin parity-fuzz -- --programs 500        # random programs, both engines, diffed
+cargo run --bin parity-fuzz -- --seed 7 --once   # one file, verbose
 cargo +nightly fuzz run lower -- -timeout=10
 ```
 
-`scripts/fuzz_parity.sh` generates seeded random programs confined to the
-implemented subset, runs them under both engines in parallel, and REDUCES
-whatever diverges — dropping statements for as long as the divergence survives,
-and refusing a reduction that changes the divergence into a different one — so
-what it hands back is small enough to commit to `tests/cases`. The same seed
-generates the same corpus on any machine.
+`parity-fuzz` generates seeded programs confined to the implemented subset and
+runs each through both engines. Each program packs 40 independent **probes**,
+because the oracle is the expensive part — a `tex` invocation costs ~0.5s of
+process start and format load, so one construct per invocation would spend the
+whole budget on startup. On a divergence the probe list is minimized to the one
+that actually diverges before it is reported, and every program is a pure
+function of its index, so a finding replays exactly with `--seed N --once`.
 
 `fuzz/` is a cargo-fuzz crate (targets `lex`, `lower`, `run`) looking for panics
 rather than divergences. `tests/fuzz_smoke.rs` replays each target on its seed
