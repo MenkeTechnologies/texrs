@@ -232,6 +232,33 @@ fn main() -> ExitCode {
 
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
+    if cli.dvi_out {
+        // A page, at last. The font is plain TeX's own; without a .tfm there
+        // are no widths and so no line breaking, which is why a missing one is
+        // an error rather than a silent fallback to guessed metrics.
+        let font = match texrs::typeset::find_font("cmr10") {
+            Some(p) => p,
+            None => return fail("--dvi: cmr10.tfm not found (is a TeX installation present?)"),
+        };
+        let layout = texrs::typeset::Layout::default();
+        let built = match no_cache {
+            true => texrs::run_dvi(&src, &font, &layout),
+            false => texrs::run_dvi_cached(std::path::Path::new(&path), &src, &font, &layout),
+        };
+        return match built {
+            Ok(bytes) => {
+                let out = std::path::Path::new(&path).with_extension("dvi");
+                match std::fs::write(&out, &bytes) {
+                    Ok(()) => {
+                        println!("({path} -> {} [{} bytes])", out.display(), bytes.len());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(&format!("{}: {e}", out.display())),
+                }
+            }
+            Err(e) => fail(&e.0),
+        };
+    }
     if cli.text {
         // The document's own words, after expansion. Printed as-is: this is not
         // a typeset page and does not pretend to be one.

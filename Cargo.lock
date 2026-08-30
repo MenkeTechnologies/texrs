@@ -1749,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "texrs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bincode",
  "criterion",
@@ -1763,6 +1763,7 @@ dependencies = [
  "nix",
  "nu-ansi-term",
  "once_cell",
+ "rayon",
  "reedline",
  "rkyv",
  "serde",

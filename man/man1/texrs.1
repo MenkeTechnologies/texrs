@@ -764,6 +764,22 @@ is written and no
 .B \erust
 block is compiled \(em because none of that is compilation.
 .TP
+.B \-\-dvi
+Typeset the document to
+.I FILE.dvi
+beside the source, and say where it went. The text is measured in
+.B cmr10
+and broken into lines that fit plain TeX's measure, then stacked down plain
+TeX's page. What comes out is a real DVI file: \fBdvitype\fR reads it and
+\fBdvipdfmx\fR turns it into a PDF.
+.IP
+It is not \fBtex\fR's typesetting. Lines are broken first-fit -- the first
+break that fits -- where \fBtex\fR considers every feasible set of breakpoints
+for a whole paragraph at once and minimises the total badness
+(\fItex.web\fR \(sc813). There is no hyphenation, no glue stretching or
+shrinking, no page breaking by penalties, one font and no maths. A paragraph set
+here and the same paragraph set by \fBtex\fR will not agree line for line.
+.TP
 .B \-\-text
 Print what the document SAYS -- its own words, after every macro has been
 expanded -- rather than only the

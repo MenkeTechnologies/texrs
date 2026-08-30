@@ -86,6 +86,10 @@ nu-ansi-term = "0.50"
 # (zshrs ZRSC, awkrs AWKR, vimlrs VIML, elisprs ELSP) under texrs's own TEXR
 # magic — pinned to the version and features they serialize with, or a shard one
 # of them wrote could not be validated by the others' tools.
+# Paragraph-parallel line breaking. A paragraph is broken independently of its
+# neighbours -- the measure is the same for all of them and no state crosses the
+# blank line between two -- so the work fans out with nothing to synchronise.
+rayon = "1"
 rkyv = { version = "0.7", features = ["validation", "archive_le", "size_32"] }
 memmap2 = "0.9"
 # The inner blob of a cache entry: a bincode-encoded fusevm::Chunk.

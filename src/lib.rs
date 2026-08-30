@@ -50,6 +50,7 @@ pub mod tfm;
 pub mod tiers;
 pub mod token;
 pub mod type1;
+pub mod typeset;
 pub mod vf;
 
 pub use expand::{Engine, TexError};
@@ -90,6 +91,79 @@ pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
     }
     let cmds = lowerer.lower(&src)?;
     crate::compiler::Compiler::new().compile(&cmds)
+}
+
+/// Typeset a document to DVI, and say where the font came from.
+///
+/// The text is what `run_text` produces; this adds the part that had been
+/// missing entirely -- measuring it in a real font, breaking it into lines and
+/// stacking those onto pages. `font_path` is a `.tfm`; `cmr10.tfm` is the one
+/// plain TeX sets in, and the name written into the DVI is the file's stem so a
+/// driver can find the same metrics.
+/// The document's text, with the bytecode taken from the rkyv shard when the
+/// file has not changed since it was compiled.
+///
+/// The compile is 80% of a typesetting run -- the mouth, the expander and the
+/// lowerer -- and it is exactly the part that does not change between runs of
+/// an unedited file. Reading the chunk back instead of rebuilding it is the
+/// difference between setting a book in a second and setting it in a tenth.
+pub fn run_text_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
+    let chunk = compile_text_cached(path, src)?;
+    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(crate::runtime::take_text())
+}
+
+/// The text-carrying bytecode for a file, cached under its own key.
+///
+/// Keyed on the .tex file itself, in `scripts.rkyv`, guarded by its mtime, with
+/// the mode as a suffix: the two chunks differ -- one carries the document's
+/// characters and the other does not -- so sharing a key would serve a `--text`
+/// run the silent chunk, or the other way about. An earlier revision keyed on a
+/// synthetic `foo.tex.text` path, which does not exist, so `canonicalize` failed
+/// and the cache never hit at all.
+fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk, TexError> {
+    if let Some(chunk) = crate::script_cache::try_load_mode(path, "text") {
+        return Ok(chunk);
+    }
+    let src_d = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
+    if crate::latex::looks_like_latex(&src_d) {
+        lowerer.preload(crate::latex::PRELUDE)?;
+    }
+    let cmds = lowerer.lower(&src_d)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    crate::script_cache::store_mode(path, "text", &chunk);
+    Ok(chunk)
+}
+
+/// Typeset a file to DVI, using the bytecode cache.
+pub fn run_dvi_cached(
+    path: &std::path::Path,
+    src: &str,
+    font_path: &std::path::Path,
+    layout: &crate::typeset::Layout,
+) -> Result<Vec<u8>, TexError> {
+    let text = run_text_cached(path, src)?;
+    let font = crate::tfm::Tfm::open(font_path).map_err(TexError)?;
+    let name = font_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("cmr10");
+    Ok(crate::typeset::to_dvi(&text, &font, name, layout))
+}
+
+pub fn run_dvi(
+    src: &str,
+    font_path: &std::path::Path,
+    layout: &crate::typeset::Layout,
+) -> Result<Vec<u8>, TexError> {
+    let text = run_text(src)?;
+    let font = crate::tfm::Tfm::open(font_path).map_err(TexError)?;
+    let name = font_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("cmr10");
+    Ok(crate::typeset::to_dvi(&text, &font, name, layout))
 }
 
 pub fn run_messages(src: &str) -> Result<String, TexError> {

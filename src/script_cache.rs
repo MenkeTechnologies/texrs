@@ -461,6 +461,45 @@ pub fn store_keyed(key: &str, chunk: &fusevm::Chunk) {
 const DIGEST_KEYED: i64 = 0;
 
 /// The compiled chunk for `path`, if the cache still has one that matches it.
+/// The chunk for a document compiled in a particular MODE.
+///
+/// The .tex file itself is the key, so a document lives in `scripts.rkyv` under
+/// its own name and is guarded by its own mtime -- edit the file and the entry
+/// goes stale, as it should. The mode is a suffix on that key because one
+/// document compiles to more than one chunk: a `--text` run carries the
+/// document's characters and an ordinary run does not, and serving one where
+/// the other was asked for would be a silently wrong answer rather than a slow
+/// one.
+pub fn try_load_mode(path: &Path, mode: &str) -> Option<fusevm::Chunk> {
+    let cache = CACHE.as_ref()?;
+    let canonical = path.canonicalize().ok()?;
+    let key = format!("{}#{mode}", canonical.to_str()?);
+    let (mtime_secs, mtime_nsecs) = file_mtime(&canonical)?;
+    let blob = cache.get(&key, mtime_secs, mtime_nsecs)?;
+    bincode::deserialize::<fusevm::Chunk>(&blob).ok()
+}
+
+/// Remember what a document compiled to in `mode`. Best-effort, as the
+/// path-keyed store is.
+pub fn store_mode(path: &Path, mode: &str, chunk: &fusevm::Chunk) {
+    let Some(cache) = CACHE.as_ref() else {
+        return;
+    };
+    let Ok(canonical) = path.canonicalize() else {
+        return;
+    };
+    let Some(base) = canonical.to_str() else {
+        return;
+    };
+    let Some((mtime_secs, mtime_nsecs)) = file_mtime(&canonical) else {
+        return;
+    };
+    let Ok(blob) = bincode::serialize(chunk) else {
+        return;
+    };
+    let _ = cache.put(&format!("{base}#{mode}"), mtime_secs, mtime_nsecs, blob);
+}
+
 pub fn try_load(path: &Path) -> Option<fusevm::Chunk> {
     let cache = CACHE.as_ref()?;
     let canonical = path.canonicalize().ok()?;
