@@ -242,6 +242,16 @@ tier compiled it, and the ops the block tier refuses with their counts.  The
 answers come from fusevm's own predicates, not from an assumption about them \(em
 enabling the JIT is not the same as being compiled by it.
 .TP
+.BI \-\-jobs= N
+Compile
+.I N
+documents at once when several files are named, one thread each; the default is
+one per core. Output is printed in ARGUMENT order however the threads finish,
+because a build log that reorders itself between runs is not one anyone can
+diff, and the exit status is the worst of the runs. A single document is
+compiled by one thread either way \(em this parallelises the batch, not the
+engine.
+.TP
 .B \-\-no\-cache
 Compile this run rather than reading the bytecode cache.  The result is the
 same either way; this is how a run is timed against a cold one, or how a cache
