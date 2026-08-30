@@ -468,6 +468,68 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
     let _ = std::fs::remove_dir_all(&bare);
 }
 
+/// `-X dvi` reads what real tex shipped. The file is produced here by tex
+/// itself, so what is parsed is a real one rather than bytes a test invented.
+#[test]
+fn the_dvi_reader_reads_what_tex_wrote() {
+    let dir = scratch_cache("dvi");
+    std::fs::write(dir.join("t.tex"), "Hello DVI world.\n\\bye\n").unwrap();
+    let tex = std::process::Command::new("tex")
+        .arg("-interaction=batchmode")
+        .arg("t.tex")
+        .current_dir(&dir)
+        .output();
+    let Ok(_) = tex else {
+        // No tex here; the parity suite needs one too.
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    };
+    if !dir.join("t.dvi").is_file() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+
+    let out = texrs()
+        .args(["-X", "dvi", "t.dvi"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("preamble"), "{text}");
+    assert!(text.contains("1 page(s)"), "{text}");
+    assert!(text.contains("Hello"), "the characters it set: {text}");
+
+    // A file that is not DVI says so rather than printing nothing.
+    std::fs::write(dir.join("not.dvi"), b"\xff").unwrap();
+    let bad = texrs()
+        .args(["-X", "dvi", "not.dvi"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!bad.status.success());
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("not a DVI opcode"),
+        "{}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+
+    // And one that is not there names itself.
+    let missing = texrs()
+        .args(["-X", "dvi", "absent.dvi"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("absent.dvi"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The bundle commands, without touching the network: what they refuse, and
 /// what an empty cache looks like.
 #[test]

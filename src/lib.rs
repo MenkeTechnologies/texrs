@@ -22,6 +22,7 @@ pub mod corpus;
 pub mod dap;
 pub mod docs;
 pub mod document;
+pub mod dvi;
 pub mod expand;
 pub mod format;
 pub mod geturl;

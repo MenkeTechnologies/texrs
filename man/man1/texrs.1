@@ -152,6 +152,26 @@ asked.  A response larger than a hundred megabytes is refused rather than
 written: a bundle is macro files, and anything that size is a mistake or a
 hostile server.
 .TP
+.BI \-X " dvi \fIFILE\fR.dvi"
+Read what real
+.BR tex (1)
+shipped for a document and print what is in it: the preamble's comment, each
+page with its
+.BR \ecount0 ,
+the fonts it defines, its specials, and the characters it sets.
+.PP
+texrs writes no DVI \(em it stops where the boxes would begin \(em so this
+reads one rather than writing it. The parity contract stops in the same place:
+today it compares the
+.B \emessage
+stream, and the moment texrs sets a character the reference to compare against
+is what tex shipped. This is the reading half of that comparison, written while
+the format can still be checked against a document whose output is known.
+XeTeX's extensions (opcodes 252\(en254) are named rather than decoded: pointing
+this at an
+.I .xdv
+should say what the file is rather than fail as if it were damaged.
+.TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
 .PP

@@ -78,6 +78,7 @@ const USAGE: &str = "\
   -X dump [--profile P]   // Build to stdout, writing nothing
   -X bundle fetch URL     // Download a bundle into the cache
   -X bundle list          // Say which bundles have been fetched
+  -X dvi FILE.dvi         // Read what real tex shipped for a document
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -440,6 +441,18 @@ fn run_document(args: &[String]) -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        "dvi" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X dvi` needs a .dvi file");
+            };
+            match texrs::dvi::Dvi::open(file) {
+                Ok(dvi) => {
+                    print!("{}", dvi.summary());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "show" => {
             let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             match texrs::document::Document::find_from(here) {
