@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # texrs as a pandoc --pdf-engine.
 #
-# pandoc hands its --pdf-engine a .tex file and expects a .pdf beside it. texrs
-# emits DVI, so this is the two steps that make it a PDF engine: texrs --dvi,
-# then dvipdfmx. Both are what tex itself has always done; nothing here is a
-# reimplementation of either.
+# pandoc hands its --pdf-engine a .tex file and expects a .pdf beside it, and a
+# pandoc book build already runs pandoc twice -- once for the .tex, once for the
+# .pdf. This replaces the second call.
 #
 #   pandoc book.md --pdf-engine=texrs-pdf -o book.pdf
 #
-# WHAT YOU GIVE UP by pointing a publication build at this. texrs is a mouth,
-# an expander and a first-fit line breaker. It does not load fontspec, so the
-# document is set in Computer Modern whatever \setmainfont asked for. It draws
-# no TikZ, applies no colour, and breaks lines first-fit where tex minimises
-# badness across a whole paragraph. A draft reads correctly; a book that is
-# being SOLD on its typography should still be built by an engine with a
-# stomach. This exists because it is 13x faster, which is worth having for the
-# passes where you are reading the words rather than the page.
+# WHAT YOU GIVE UP by pointing a publication build at this. The face a document
+# asks for is honoured by METRICS, not by outline: \setmainfont{Arimo} sets in
+# Helvetica, which carries Arial's widths, which are Arimo's -- the same shapes
+# it is not. Lines break first-fit where tex minimises badness across a whole
+# paragraph, and there is no hyphenation. A draft reads correctly; a book being
+# SOLD on its typography should still be built by an engine with a stomach.
+# This exists because it is an order of magnitude faster, which is worth having
+# for the passes where you are reading the words rather than the page.
 set -euo pipefail
 
 tex_in=""
@@ -38,16 +37,15 @@ if [[ ! -f "$tex_in" ]]; then
 fi
 
 command -v texrs >/dev/null || { echo "texrs-pdf: texrs not on PATH" >&2; exit 1; }
-command -v dvipdfmx >/dev/null || { echo "texrs-pdf: dvipdfmx not on PATH (it ships with TeX Live)" >&2; exit 1; }
 
 base="${tex_in%.tex}"
-dvi="$base.dvi"
 pdf="$base.pdf"
 
-texrs --dvi "$tex_in" >/dev/null
-# dvipdfmx writes beside the .dvi; -o keeps it there explicitly so a caller that
-# passed an output directory gets the file where pandoc will look for it.
-dvipdfmx -q -o "$pdf" "$dvi"
+# --pdf, NOT --dvi. A DVI can only name a .tfm font, so that route sets the
+# document in Computer Modern however loudly it said \setmainfont, and drops
+# the colour with it. --pdf writes the file directly, names the face the
+# document asked for, and carries \textcolor through as PDF's own operator.
+texrs --pdf "$tex_in" >/dev/null
 
 if [[ "$out_dir" != "." && -f "$pdf" ]]; then
     mkdir -p "$out_dir"
