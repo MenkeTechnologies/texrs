@@ -127,7 +127,10 @@ fn every_texrs_environment_variable_is_documented() {
         }
     }
     assert!(!names.is_empty(), "found no TEXRS_* variables to check");
-    let missing: Vec<&String> = names.iter().filter(|n| !page.contains(n.as_str())).collect();
+    let missing: Vec<&String> = names
+        .iter()
+        .filter(|n| !page.contains(n.as_str()))
+        .collect();
     assert!(
         missing.is_empty(),
         "{} environment variable(s) the engine reads are not in the reference:\n  {}",

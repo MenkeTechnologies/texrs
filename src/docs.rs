@@ -171,7 +171,10 @@ pub fn usage_sections(usage: &str) -> Vec<UsageSection> {
     for line in usage.lines() {
         let trimmed = line.trim_end();
         if let Some(title) = section_title(trimmed) {
-            sections.push(UsageSection { title, rows: Vec::new() });
+            sections.push(UsageSection {
+                title,
+                rows: Vec::new(),
+            });
             continue;
         }
         let Some(current) = sections.last_mut() else {
@@ -284,7 +287,6 @@ fn stats(usage: &str) -> String {
     out.push_str("        </div>");
     out
 }
-
 
 /// One `<section>` per chapter in `CHAPTERS` order, each holding one table row
 /// per primitive: the name, what it does, and its syntax with an example.
@@ -431,7 +433,9 @@ fn category_codes() -> String {
 /// contiguous runs collapse (`A`–`Z`), the ones with no printable form are
 /// named, and a category nothing starts in says so rather than showing blank.
 fn initex_members(table: &CatTable, cat: Cat) -> String {
-    let members: Vec<u8> = (0u8..=255).filter(|c| table.get(*c as char) == cat).collect();
+    let members: Vec<u8> = (0u8..=255)
+        .filter(|c| table.get(*c as char) == cat)
+        .collect();
     if members.is_empty() {
         return "&mdash;".to_string();
     }
