@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-usage: texrs [OPTIONS] FILE.tex
+usage: texrs [OPTIONS] FILE.tex [FILE.tex ...]
        texrs -X new [DIR]           make a document (Texrs.toml + index.tex)
        texrs -X build [--profile P] build the document this directory is in
        texrs -X watch [--profile P] rebuild it whenever an input changes
@@ -27,6 +27,7 @@ usage: texrs [OPTIONS] FILE.tex
   --tiers         run it, then report which fusevm tier took its bytecode
   --profile NAME  which output of the document to build (-X build, -X watch)
   --interval MS   how often -X watch looks for a change (default 250)
+  --jobs=N        compile N documents at once (default: one per core)
   --no-cache      compile this run rather than reading the bytecode cache
   --cache-stats   say what the cache holds and where, and exit
   --cache-clear   delete the cache and exit
@@ -52,12 +53,13 @@ fn main() -> ExitCode {
         return run_document(&args[1..]);
     }
 
-    let mut path: Option<String> = None;
+    let mut paths: Vec<String> = Vec::new();
     let mut dump_tokens = false;
     let mut disasm = false;
     let mut aot = false;
     let mut tiers = false;
     let mut no_cache = false;
+    let mut jobs: Option<usize> = None;
 
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -92,20 +94,38 @@ fn main() -> ExitCode {
             "--aot" => aot = true,
             "--tiers" => tiers = true,
             "--no-cache" => no_cache = true,
+            j if j.starts_with("--jobs=") => {
+                match j.trim_start_matches("--jobs=").parse::<usize>() {
+                    Ok(n) if n >= 1 => jobs = Some(n),
+                    _ => {
+                        eprintln!("texrs: --jobs needs a positive count");
+                        return ExitCode::from(1);
+                    }
+                }
+            }
             "--cache-stats" => return cache_stats(),
             "--cache-clear" => return cache_clear(),
             other if other.starts_with('-') && other.len() > 1 => {
                 eprintln!("texrs: unknown option: {other}");
                 return ExitCode::from(1);
             }
-            other => path = Some(other.to_string()),
+            other => paths.push(other.to_string()),
         }
     }
 
-    let Some(path) = path else {
+    if paths.is_empty() {
         eprint!("{USAGE}");
         return ExitCode::from(1);
-    };
+    }
+    // More than one document is the case that actually parallelises. Each is an
+    // independent compile -- its own mouth, macro table and chunk -- sharing
+    // nothing but the on-disk bytecode cache, so running them together is a
+    // straight fan-out. `tex` cannot do this at all: one process compiles one
+    // file, and a user wanting more reaches for `make -j`.
+    if paths.len() > 1 && !dump_tokens && !disasm && !tiers {
+        return run_many(&paths, no_cache, jobs);
+    }
+    let path = paths.remove(0);
     // The document is opened through the provider stack rather than read
     // directly: the stack is what `\input` will search, and opening the primary
     // through it means the run's record of what it read starts with the
@@ -197,6 +217,87 @@ fn main() -> ExitCode {
         }
         Err(e) => fail(&e.0),
     }
+}
+
+/// Compile and run several documents at once, one per core.
+///
+/// Each document is wholly independent -- its own mouth, catcode table, macro
+/// table and chunk -- so this is a fan-out with nothing to synchronise but the
+/// bytecode cache, which takes a writer lock of its own. `tex` has no
+/// equivalent: one process compiles one file, and a user who wants more runs
+/// `make -j` and gets a process per document instead of a thread.
+///
+/// Output is printed in ARGUMENT order however the threads finish, because a
+/// build log that reorders itself between runs is not a log anyone can diff.
+/// The exit code is the worst of the runs: one bad document fails the batch.
+fn run_many(paths: &[String], no_cache: bool, jobs: Option<usize>) -> ExitCode {
+    let workers = jobs
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
+        .max(1)
+        .min(paths.len());
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: Vec<std::sync::Mutex<Option<Result<String, String>>>> = (0..paths.len())
+        .map(|_| std::sync::Mutex::new(None))
+        .collect();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                // A shared cursor rather than a fixed slice each: documents
+                // differ in size by orders of magnitude, so handing out equal
+                // COUNTS would leave one worker with the big one and the rest
+                // idle. Taking the next index as each finishes balances it.
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= paths.len() {
+                        break;
+                    }
+                    *results[i].lock().expect("result slot") =
+                        Some(one_document(&paths[i], no_cache));
+                }
+            });
+        }
+    });
+
+    let mut code = ExitCode::SUCCESS;
+    let mut failed = false;
+    for (i, slot) in results.iter().enumerate() {
+        match slot.lock().expect("result slot").take() {
+            Some(Ok(line)) => println!("{line}"),
+            Some(Err(e)) => {
+                eprintln!("! {e}.");
+                failed = true;
+            }
+            None => {
+                eprintln!("texrs: {}: not run", paths[i]);
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        code = ExitCode::from(1);
+    }
+    code
+}
+
+/// One document, as the single-file path runs it, returning the line to print.
+fn one_document(path: &str, no_cache: bool) -> Result<String, String> {
+    let src = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let run = match no_cache {
+        true => texrs::run_messages(&src),
+        false => texrs::run_messages_cached(Path::new(path), &src),
+    };
+    let msgs = run.map_err(|e| e.0)?;
+    let body = match msgs.is_empty() {
+        true => String::new(),
+        false => format!(" {msgs}"),
+    };
+    Ok(format!("(./{path}{body} )"))
 }
 
 /// `texrs -X …`: the document commands, ported in shape from tectonic's V2
