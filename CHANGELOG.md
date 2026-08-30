@@ -8,6 +8,22 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The font a document names. `\setmainfont{Georgia}` was read and then ignored:
+  every document came out in Computer Modern whatever it asked for, because
+  nothing resolved the family and the page had only cmr10 to set in. The family
+  is now resolved through `fc-match` (then a walk of the font directories, since
+  `fc-match` always answers, with a default when it has no match), and the font
+  file is carried in the PDF as `/FontFile2` with a `/FontDescriptor` built from
+  its `head` and `hhea`. Lines are broken on that font's own advance widths,
+  read from `hmtx` through `cmap` and scaled to 1/1000 em, so a line set in it
+  ends where the font says rather than where cmr10 would have. Measured:
+  `pdffonts` on the output reports `Georgia TrueType yes`. A family the machine
+  does not have falls back to whichever of the fourteen carries the same metrics
+  — Arimo's are Arial's are Helvetica's — rather than back to Computer Modern.
+  CFF-flavoured OpenType is refused rather than embedded, because `/FontFile2`
+  must be a TrueType program. There is no subsetting yet: a font with a large
+  repertoire is embedded whole, and Arial Unicode alone is 23 MB.
+
 - Active characters. A character of category 13 is a command rather than text:
   `\catcode`\~=13 \def~{...}` defines `~` itself, it may take parameters, and
   `\let~=\x` works. An active `~` and the control sequence `\~` stay different

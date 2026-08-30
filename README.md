@@ -339,16 +339,29 @@ parity with `tex`, and neither of them says whether a 16,000-line book
 compiles.
 
 "Run" is the exact claim: the mouth and the expander read the whole document and
-produce what its text says. With `--dvi` there is also a page, set in Computer
-Modern at whatever measure was asked for — and a document that said
-`\setmainfont` gets Computer Modern anyway, because fontspec is not loaded.
-Colour does reach the page: `\textcolor` becomes the `color push rgb R G B` /
-`color pop` `\special` pair that dvipdfmx and dvips both read, so the words come
-out coloured in the PDF. Boxes a document nests, TikZ pictures and maths do
-not exist. A draft
-reads correctly; a book being sold on its typography should still be set by an
-engine with a real stomach, and `scripts/texrs-pdf` says the same thing where a
-`pandoc --pdf-engine` build would meet it.
+produce what its text says. `--dvi` sets a page, `--pdf` writes the PDF itself,
+and three of the things a document controls survive the trip:
+
+- **Fonts.** `\setmainfont{Georgia}` is honoured. The family is resolved through
+  `fc-match` and the font file is carried in the PDF as `/FontFile2`, so the page
+  is set in the face that was named — `pdffonts` reports it as `TrueType yes` —
+  and lines are broken on that font's own advance widths, read from its `hmtx`
+  through its `cmap`. A family the machine does not have falls back to whichever
+  of the fourteen carries the same metrics, not to Computer Modern. There is no
+  subsetting: naming a font with a large repertoire embeds the whole file, and
+  Arial Unicode by itself is 23 MB of it.
+- **Colour.** `\textcolor` becomes PDF's own `rg` operator under `--pdf`, and
+  under `--dvi` the `color push rgb R G B` / `color pop` `\special` pair that
+  dvipdfmx and dvips both read.
+- **TikZ.** The subset these documents actually draw with: `\draw` polylines
+  built from `--`, an optional `cycle`, a line width and the picture's x/y
+  scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
+  patterns and shadings are not there.
+
+Boxes a document nests, and maths, still do not exist. A draft reads correctly;
+a book being sold on its typography should still be set by an engine with a real
+stomach, and `scripts/texrs-pdf` says the same thing where a `pandoc
+--pdf-engine` build would meet it.
 
 ## [0x07] How it runs
 

@@ -273,6 +273,26 @@ pub enum Font {
     /// wherever it is opened. This is what a TeX document needs: nobody has
     /// Computer Modern installed.
     Embedded(Box<crate::type1::Type1>),
+    /// A TrueType or OpenType font carried in the file.
+    ///
+    /// What `\setmainfont{Arimo}` actually asks for. Naming one of the
+    /// fourteen gets the right WIDTHS -- Arimo's are Arial's are Helvetica's --
+    /// and the wrong shapes; this is the font itself, so the page is set in the
+    /// face the document named.
+    TrueType {
+        /// The name the file calls it by.
+        name: String,
+        /// The whole font file, embedded as `FontFile2`.
+        bytes: Vec<u8>,
+        /// Advance widths for codes 32..=255, in 1/1000 em.
+        widths: Vec<i64>,
+        /// `[xMin, yMin, xMax, yMax]`, in the same units.
+        bbox: [i64; 4],
+        /// From `hhea`, for the descriptor a reader needs.
+        ascent: i64,
+        /// From `hhea`. Negative, the way the table stores it.
+        descent: i64,
+    },
 }
 
 impl Font {
@@ -281,6 +301,7 @@ impl Font {
         match self {
             Font::Base14(name) => name.clone(),
             Font::Embedded(font) => font.font_name.clone(),
+            Font::TrueType { name, .. } => name.clone(),
         }
     }
 }
@@ -416,6 +437,52 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
 /// decrypt, and `Length1`, `Length2` and `Length3` say where its three parts
 /// end.
 fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
+    if let Font::TrueType {
+        name,
+        bytes,
+        widths,
+        bbox,
+        ascent,
+        descent,
+    } = font
+    {
+        // The font program, whole. A subsetted one would be smaller; a whole
+        // one is correct, and correctness is what was missing.
+        let file = pdf.add(Object::Stream {
+            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
+            data: bytes.clone(),
+        });
+        let descriptor = pdf.add(Object::dict([
+            ("Type", Object::name("FontDescriptor")),
+            ("FontName", Object::name(name)),
+            // 32 is the non-symbolic flag: the font uses a standard encoding,
+            // which is what the WinAnsi below makes true.
+            ("Flags", Object::Integer(32)),
+            (
+                "FontBBox",
+                Object::Array(bbox.iter().map(|v| Object::Integer(*v)).collect()),
+            ),
+            ("ItalicAngle", Object::Integer(0)),
+            ("Ascent", Object::Integer(*ascent)),
+            ("Descent", Object::Integer(*descent)),
+            ("CapHeight", Object::Integer(*ascent)),
+            ("StemV", Object::Integer(80)),
+            ("FontFile2", file),
+        ]));
+        return pdf.add(Object::dict([
+            ("Type", Object::name("Font")),
+            ("Subtype", Object::name("TrueType")),
+            ("BaseFont", Object::name(name)),
+            ("FirstChar", Object::Integer(32)),
+            ("LastChar", Object::Integer(255)),
+            (
+                "Widths",
+                Object::Array(widths.iter().map(|w| Object::Integer(*w)).collect()),
+            ),
+            ("Encoding", Object::name("WinAnsiEncoding")),
+            ("FontDescriptor", descriptor),
+        ]));
+    }
     let Font::Embedded(type1) = font else {
         return pdf.add(Object::dict([
             ("Type", Object::name("Font")),

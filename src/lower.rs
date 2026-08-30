@@ -304,10 +304,11 @@ impl Lowerer {
             // Colour, before the prelude's own \textcolor can swallow it. DVI
             // carries colour as a `\special` a driver reads, so it has to
             // survive lowering as structure rather than as text.
-            if self.text_output && name.name() == "textcolor" {
-                if self.lower_textcolor(lx, &mut out)? {
-                    continue;
-                }
+            if self.text_output
+                && name.name() == "textcolor"
+                && self.lower_textcolor(lx, &mut out)?
+            {
+                continue;
             }
             // A control sequence MEANS what it was last defined as. The
             // dispatch below is by NAME, so a document that redefines a

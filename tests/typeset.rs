@@ -238,13 +238,23 @@ fn setmainfont_reaches_the_pdf() {
              \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n"
         )
     };
+    // The contract is that the REQUEST reaches the file, by one of two routes:
+    // the font itself when the machine has it, and a face carrying the same
+    // widths when it does not. Which route a given family takes depends on
+    // what is installed, so the test asserts the outcome rather than the route.
     let mono = texrs::run_pdf(&src("ShareTechMono")).expect("pdf");
+    let mono = String::from_utf8_lossy(&mono);
     assert!(
-        String::from_utf8_lossy(&mono).contains("/Courier"),
-        "a monospace request must reach the file as Courier"
+        mono.contains("/Courier") || mono.contains("/FontFile2"),
+        "a monospace request reaches the file as Courier or as itself"
     );
-    let serif = texrs::run_pdf(&src("Times New Roman")).expect("pdf");
-    assert!(String::from_utf8_lossy(&serif).contains("/Times-Roman"));
+    // A face nothing is known about must still not fall back to a book font:
+    // a document that named one at all was asking not to be set in Computer
+    // Modern.
+    let unknown = texrs::run_pdf(&src("NoSuchFontExistsAnywhere")).expect("pdf");
+    let unknown = String::from_utf8_lossy(&unknown);
+    assert!(unknown.contains("/Helvetica"), "got {unknown:?}");
+    assert!(!unknown.contains("/FontFile2"), "nothing to embed");
 }
 
 #[test]
@@ -269,4 +279,77 @@ fn a_line_is_split_into_runs_where_the_colour_changes() {
     assert!(s.contains("(before )"), "the run before the colour: {s:?}");
     assert!(s.contains("(middle)"), "the coloured run");
     assert!(s.contains("0 0 1 rg"), "with the colour set for it");
+}
+
+/// A family that exists on the machine running the tests, or `None`.
+///
+/// Font availability is not a property of the code, so a test that needs a real
+/// font says so and skips rather than failing on a machine without one.
+fn some_installed_family() -> Option<&'static str> {
+    [
+        "Georgia",
+        "Verdana",
+        "Arial",
+        "DejaVu Sans",
+        "Liberation Sans",
+    ]
+    .into_iter()
+    .find(|f| texrs::typeset::find_family(f).is_some())
+}
+
+#[test]
+fn the_font_file_the_document_named_is_carried_in_the_pdf() {
+    // Naming one of the fourteen gets Arimo's WIDTHS via Helvetica and the
+    // wrong shapes. This is the font itself: `/FontFile2` is the font program,
+    // and `pdffonts` reports such a file as embedded.
+    let Some(family) = some_installed_family() else {
+        eprintln!("skipping: no known font installed");
+        return;
+    };
+    let src = format!(
+        "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\\setmainfont{{{family}}}\n\
+         \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let s = String::from_utf8_lossy(&pdf);
+    assert!(
+        s.contains("/FontFile2"),
+        "the font program must be in the file"
+    );
+    assert!(s.contains("/TrueType"), "and declared as one");
+    assert!(
+        s.contains("/Widths"),
+        "with its own widths, not a substitute's"
+    );
+}
+
+#[test]
+fn a_family_nothing_matches_still_typesets() {
+    // Refusing to set a document because a font is missing would be worse than
+    // setting it in a face that carries the same widths.
+    let src = "\\documentclass{article}\n\\usepackage{fontspec}\n\
+               \\setmainfont{NoSuchFontExistsAnywhere}\n\
+               \\begin{document}\nwords\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let s = String::from_utf8_lossy(&pdf);
+    assert!(s.contains("/BaseFont"), "something was named");
+    assert!(!s.contains("/FontFile2"), "but nothing was embedded");
+}
+
+#[test]
+fn an_embedded_font_is_measured_in_its_own_widths() {
+    // A line broken with Computer Modern's widths and set in another face runs
+    // long or short. The widths come from the font's hmtx through its cmap.
+    let Some(family) = some_installed_family() else {
+        return;
+    };
+    let font = texrs::typeset::embed_family(family).expect("embeddable");
+    let texrs::pdf::Font::TrueType { widths, .. } = &font else {
+        panic!("expected a TrueType font");
+    };
+    assert_eq!(widths.len(), 224, "codes 32..=255 inclusive");
+    // A space is narrower than an M in every text face there is.
+    let space = widths[0];
+    let em = widths[('M' as usize) - 32];
+    assert!(space < em, "space {space} should be narrower than M {em}");
 }

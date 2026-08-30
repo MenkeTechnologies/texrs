@@ -525,20 +525,37 @@ pub fn base14_for(family: &str) -> &'static str {
 pub fn to_pdf(text: &str, families: &Families, layout: &Layout) -> Vec<u8> {
     use crate::pdf::{document, Font, Page};
 
-    let main = Font::Base14(
-        families
-            .main
-            .as_deref()
-            .map(base14_for)
-            .unwrap_or("Helvetica")
-            .to_string(),
-    );
-    // The widths of the fourteen are not carried here, so lines are measured
-    // with cmr10's if it is installed and with a flat estimate if it is not.
-    // That is honest about what it is: the line breaking is approximate, and a
-    // line may run a little long or short of the measure.
+    // The font the document asked for, EMBEDDED if it can be found: that is
+    // the difference between a page set in Arimo's metrics and one set in
+    // Arimo. Failing that, one of the fourteen, which gets the widths right
+    // and the shapes wrong -- better than refusing to typeset.
+    let requested = families.main.as_deref();
+    let embedded = requested.and_then(embed_family);
+    let main = embedded.clone().unwrap_or_else(|| {
+        Font::Base14(requested.map(base14_for).unwrap_or("Helvetica").to_string())
+    });
+
+    // Measure in the face that will be printed. An embedded font carries its
+    // own widths; without one, cmr10's are the closest thing installed, and a
+    // line may then run a little long or short of the measure.
+    let embedded_widths = match &main {
+        Font::TrueType { widths, .. } => Some(widths.clone()),
+        _ => None,
+    };
     let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
     let width_of = |word: &str| -> f64 {
+        if let Some(w) = &embedded_widths {
+            // PDF widths are 1/1000 em, and codes below 32 are not in the table.
+            return word
+                .chars()
+                .map(|c| {
+                    let code = c as usize;
+                    let at = code.saturating_sub(32);
+                    let mille = w.get(at).copied().unwrap_or(500);
+                    mille as f64 / 1000.0 * layout.size
+                })
+                .sum();
+        }
         match &metrics {
             Some(f) => f.width_of(word) * layout.size,
             None => word.chars().count() as f64 * layout.size * 0.5,
@@ -617,11 +634,18 @@ fn break_lines_measured(
 
 /// Split a line into runs of text that share a colour.
 ///
+/// A stretch of a line and the colour it is drawn in, if it is not the default.
+///
+/// The three strings are the r, g and b the document asked for, kept verbatim
+/// as written rather than parsed, because they are handed straight back to
+/// PDF's `rg` operator.
+type ColourRun = (String, Option<(String, String, String)>);
+
 /// The markers the runtime writes turn colour on and off part way along a line,
 /// so a line is not one string in one colour: `let x` may be black and `= 1`
 /// blue. Each run is emitted with its own colour and its own position, which is
 /// why the caller advances x by the width of what it just drew.
-fn colour_runs(line: &str) -> Vec<(String, Option<(String, String, String)>)> {
+fn colour_runs(line: &str) -> Vec<ColourRun> {
     let mut runs = Vec::new();
     let mut current: Option<(String, String, String)> = None;
     let mut text = String::new();
@@ -658,4 +682,120 @@ fn colour_runs(line: &str) -> Vec<(String, Option<(String, String, String)>)> {
         runs.push((text, current));
     }
     runs
+}
+
+/// Find the file for a font family the document named.
+///
+/// `\setmainfont{Arimo}` names a FAMILY, not a path, and resolving one is what
+/// fontconfig exists for. `fc-match` is asked first because it answers the way
+/// every other program on the machine would; the directory walk is the fallback
+/// for a machine without it. A family nothing matches returns `None` and the
+/// caller falls back to naming one of the fourteen, which gets the widths right
+/// and the shapes wrong -- better than refusing to typeset.
+pub fn find_family(family: &str) -> Option<std::path::PathBuf> {
+    if let Ok(out) = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", family])
+        .output()
+    {
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let path = std::path::Path::new(&p);
+            // fc-match ALWAYS answers, with a default when it has no match, so
+            // the answer is only useful if it looks like the family asked for.
+            if path.exists() && file_matches(path, family) {
+                return Some(path.to_path_buf());
+            }
+        }
+    }
+    let wanted = normalise(family);
+    for dir in [
+        "/System/Library/Fonts",
+        "/System/Library/Fonts/Supplemental",
+        "/Library/Fonts",
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+    ] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if ext != "ttf" && ext != "otf" {
+                continue;
+            }
+            if normalise(&path.file_stem()?.to_string_lossy()).starts_with(&wanted) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// A font file's stem, compared the way a family name should be: case and
+/// spacing are not part of the identity.
+fn file_matches(path: &std::path::Path, family: &str) -> bool {
+    path.file_stem()
+        .map(|s| normalise(&s.to_string_lossy()).starts_with(&normalise(family)))
+        .unwrap_or(false)
+}
+
+fn normalise(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// Load a family as an embeddable PDF font: its outlines, and its own widths.
+///
+/// This is the difference between a page set in Arimo's METRICS and one set in
+/// Arimo. The widths come from the font's `hmtx` through its `cmap`, so a line
+/// is measured in the face it will be printed in rather than in Computer
+/// Modern's.
+pub fn embed_family(family: &str) -> Option<crate::pdf::Font> {
+    let path = find_family(family)?;
+    let bytes = std::fs::read(&path).ok()?;
+    let sfnt = crate::sfnt::Sfnt::parse(bytes.clone()).ok()?;
+    // A CFF-flavoured OpenType carries PostScript outlines, which a
+    // /FontFile2 must not: that entry means a TrueType font program.
+    if sfnt.is_cff() {
+        return None;
+    }
+    let head = sfnt.head().ok()?;
+    let hhea = sfnt.hhea().ok()?;
+    let cmap = sfnt.cmap().ok()?;
+    let advances = sfnt.advance_widths().ok()?;
+    let upem = f64::from(head.units_per_em.max(1));
+    let scale = |v: f64| (v * 1000.0 / upem).round() as i64;
+
+    // PDF wants a width for every code in the range, in 1/1000 em, so a code
+    // the font has no glyph for still needs an entry.
+    let mut widths = Vec::with_capacity(224);
+    for code in 32u32..=255 {
+        let gid = cmap.get(&code).copied().unwrap_or(0) as usize;
+        let adv = advances
+            .get(gid)
+            .or_else(|| advances.last())
+            .copied()
+            .unwrap_or(0);
+        widths.push(scale(f64::from(adv)));
+    }
+    Some(crate::pdf::Font::TrueType {
+        name: path.file_stem()?.to_string_lossy().replace(' ', ""),
+        bytes,
+        widths,
+        bbox: [
+            scale(f64::from(head.x_min)),
+            scale(f64::from(head.y_min)),
+            scale(f64::from(head.x_max)),
+            scale(f64::from(head.y_max)),
+        ],
+        ascent: scale(f64::from(hhea.ascender)),
+        descent: scale(f64::from(hhea.descender)),
+    })
 }
