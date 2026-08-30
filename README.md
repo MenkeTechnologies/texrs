@@ -239,6 +239,20 @@ diagnostic rather than a missing-function error later.
 No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
 typesetter yet — see `docs/ROADMAP.md`.
 
+**No LaTeX, and no Lua.** texrs is plain TeX: the mouth, the expander, and the
+primitives listed above. It loads no format, so `\documentclass`,
+`\usepackage`, `\PassOptionsToPackage`, `\makeatletter` and the rest of the
+LaTeX layer are undefined control sequences here, as they are in `tex` without
+`latex.ltx`. `\directlua` and the LuaTeX interface are likewise absent.
+
+This is worth stating with a number rather than in the abstract: run against
+the 167 `.tex` files in `MenkeTechnologiesPublications`, texrs compiles **none**
+of them. Every one fails immediately, 122 on `\PassOptionsToPackage`, 41 on
+`\directlua`, 3 on `\documentclass`, 1 on `\makeatletter`. They are LaTeX and
+LuaLaTeX documents, and nothing about them is close to what this engine reads.
+Supporting them means a format layer, a package system and an embedded Lua —
+each its own project, none of them on `docs/ROADMAP.md` yet.
+
 ## [0x07] How it runs
 
 texrs is a **fusevm frontend**, not an interpreter: mouth → expander → command
@@ -317,6 +331,63 @@ caught a line-number lookup that was O(n) per token, and fixing it took an
 rather than where its time goes, and prints the two caveats with the numbers:
 `tex` loads the plain format on every run while texrs loads nothing, and texrs
 implements the mouth and expander only.
+
+### Measured
+
+Against `tex` 3.141592653 (TeX Live 2026) on a 10-core machine. Every figure
+below is a median of repeated interleaved runs rather than a best-of, because
+the machine was under other load while they were taken; a quiet machine gives
+larger margins, not smaller. Read them with the two caveats above: `tex` is
+doing format loading that texrs does not do, and texrs is not doing the
+typesetting that `tex` does.
+
+**One document** (5.6 MB, 120k statements, 691k tokens):
+
+| | median | min |
+|---|---|---|
+| texrs | 0.259 s | 0.147 s |
+| `tex` | 1.038 s | 0.791 s |
+| | **4.0x** | **5.4x** |
+
+**Where that time goes**, which is why the mouth is not worth parallelising:
+
+| stage | time | share |
+|---|---|---|
+| mouth (lexing) | 0.143 s | 22% |
+| expander + lowerer | 0.308 s | **48%** |
+| code generation | 0.014 s | 2% |
+| VM execution | 0.171 s | 27% |
+
+**Many documents** (60 files, one thread each). This is the case that
+parallelises, and the one `tex` cannot do at all: one process compiles one
+file, so the comparison is against running it 60 times.
+
+| | median |
+|---|---|
+| texrs, all cores | **0.198 s** |
+| texrs, one at a time | 1.827 s |
+| `tex`, one at a time | 54.076 s |
+| | **272x faster than `tex`** |
+
+Scaling with `--jobs`, on those same 60 documents:
+
+| jobs | 1 | 2 | 4 | 8 | 10 | 16 |
+|---|---|---|---|---|---|---|
+| speedup | 1.00x | 1.85x | 2.71x | 4.96x | 6.73x | 5.58x |
+
+Ten cores, so the fall at 16 is oversubscription rather than a limit in the
+work. A single document is still a single thread: this parallelises the batch,
+not the engine.
+
+**Iteration depth.** `\def\r{... \ifnum ... \r \fi}` is TeX's loop, and
+`tex` recurses through it — one input-stack level per turn, giving up at
+`[input stack size=10000]`. texrs lowers that shape to a backward jump, so its
+stack use is constant and the bound is arithmetic rather than memory:
+
+| iterations | 9,000 | 12,000 | 1,000,000 |
+|---|---|---|---|
+| `tex` | ok | **capacity exceeded** | capacity exceeded |
+| texrs | ok | ok | ok |
 
 ## [0x0B] Documentation
 
