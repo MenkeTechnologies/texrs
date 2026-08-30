@@ -58,19 +58,36 @@ impl Default for Layout {
 /// metrics come from the `.tfm` the caller opened, which is the same file the
 /// driver will use to place the characters.
 pub fn to_dvi(text: &str, font: &Tfm, font_name: &str, layout: &Layout) -> Vec<u8> {
-    let mut w = Writer::new("texrs");
-    // The design size and checksum have to match the .tfm or a driver refuses
-    // the file: they are how it checks it has the font the document was set in.
-    let at = (layout.size * SP) as i32;
-    w.define_font(0, font_name, at, font.checksum, at);
+    // The single-font path, kept for callers that have one .tfm and want it
+    // used literally. Everything else goes through the chain.
+    let chain = FontChain {
+        fonts: vec![Loaded {
+            tfm: font.clone(),
+            name: font_name.to_string(),
+        }],
+        map: Vec::new(),
+    };
+    to_dvi_chain(text, &chain, layout)
+}
 
-    let lines = break_lines(text, font, layout);
+/// Set `text` through a font chain, falling back per glyph.
+pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
+    let mut w = Writer::new("texrs");
+    let at = (layout.size * SP) as i32;
+    for (i, f) in chain.fonts.iter().enumerate() {
+        // The design size and checksum have to match the .tfm or a driver
+        // refuses the file: they are how it checks it has the font the document
+        // was set in.
+        w.define_font(i as u32, &f.name, at, f.tfm.checksum, at);
+    }
+
+    let lines = break_lines_chain(text, chain, layout);
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
     for (page, chunk) in lines.chunks(per_page).enumerate() {
         let counts = [page as i32 + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         w.begin_page(counts);
-        w.font(0);
+        let mut current = usize::MAX;
         let mut baseline = layout.margin + layout.leading;
         for line in chunk {
             // Each line starts at the left margin, on its own baseline. DVI is
@@ -80,7 +97,7 @@ pub fn to_dvi(text: &str, font: &Tfm, font_name: &str, layout: &Layout) -> Vec<u
             w.push();
             w.down((baseline * SP) as i32);
             w.right((layout.margin * SP) as i32);
-            set_line(&mut w, line, font, layout);
+            set_line(&mut w, line, chain, layout, &mut current);
             w.pop();
             baseline += layout.leading;
         }
@@ -89,27 +106,38 @@ pub fn to_dvi(text: &str, font: &Tfm, font_name: &str, layout: &Layout) -> Vec<u
     w.finish()
 }
 
-/// Put one line's characters down, with the font's own kerns between them.
-fn set_line(w: &mut Writer, line: &str, font: &Tfm, layout: &Layout) {
-    let bytes: Vec<u8> = line.bytes().collect();
-    for (i, b) in bytes.iter().enumerate() {
-        let Some(m) = font.char(*b) else {
-            // A character the font does not have cannot be set. Skipping it
-            // silently would shorten the line without saying so; a space keeps
-            // the measure honest and is visible as a gap.
-            if let Some(sp) = font.char(b' ') {
-                w.right((sp.width * layout.size * SP) as i32);
+/// Put one line's characters down, switching fonts as the chain requires.
+fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, current: &mut usize) {
+    for ch in line.chars() {
+        if let Some((f, slot)) = chain.resolve(ch) {
+            // A font switch is an op in the file, so it is emitted only when the
+            // font actually changes -- one per run of characters, not one per
+            // character.
+            if *current != f {
+                w.font(f as u32);
+                *current = f;
             }
+            let width = chain.fonts[f]
+                .tfm
+                .char(slot)
+                .map(|m| m.width)
+                .unwrap_or(0.0);
+            w.set_char(u32::from(slot), (width * layout.size * SP) as i32);
+            continue;
+        }
+        // No font in the chain has it. The stand-in is set in the primary font
+        // rather than dropped: a glyph that vanishes takes the meaning of the
+        // line with it.
+        let Some(text) = FontChain::approximate(ch) else {
             continue;
         };
-        w.set_char(u32::from(*b), (m.width * layout.size * SP) as i32);
-        // A kern between this character and the next is part of what the font
-        // says the pair looks like; dropping it is why naive output looks
-        // loose next to tex's.
-        if let Some(next) = bytes.get(i + 1) {
-            if let Some(crate::tfm::Step::Kern { by, .. }) = font.step(*b, *next) {
-                w.right((by * layout.size * SP) as i32);
-            }
+        if *current != 0 {
+            w.font(0);
+            *current = 0;
+        }
+        for b in text.bytes() {
+            let width = chain.fonts[0].tfm.char(b).map(|m| m.width).unwrap_or(0.0);
+            w.set_char(u32::from(b), (width * layout.size * SP) as i32);
         }
     }
 }
@@ -121,6 +149,18 @@ fn set_line(w: &mut Writer, line: &str, font: &Tfm, layout: &Layout) {
 /// feasible set of breakpoints for the whole paragraph at once -- and the
 /// difference is visible as a raggeder right edge here.
 pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
+    let chain = FontChain {
+        fonts: vec![Loaded {
+            tfm: font.clone(),
+            name: String::from("cmr10"),
+        }],
+        map: Vec::new(),
+    };
+    break_lines_chain(text, &chain, layout)
+}
+
+/// The same, measuring through a font chain.
+pub fn break_lines_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<String> {
     use rayon::prelude::*;
     // Paragraph-parallel. A paragraph is broken independently of its
     // neighbours: the measure is the same for all of them, and no state crosses
@@ -130,7 +170,7 @@ pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
     let paras: Vec<&str> = text.split("\n\n").collect();
     paras
         .par_iter()
-        .map(|para| break_paragraph(para, font, layout))
+        .map(|para| break_paragraph(para, chain, layout))
         .reduce(Vec::new, |mut acc, mut more| {
             acc.append(&mut more);
             acc
@@ -138,13 +178,13 @@ pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
 }
 
 /// One paragraph, first-fit.
-fn break_paragraph(para: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
-    let space = font.char(b' ').map(|m| m.width).unwrap_or(0.33) * layout.size;
+fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String> {
+    let space = chain.width(' ', layout.size);
     let mut lines = Vec::new();
     let mut line = String::new();
     let mut width = 0.0f64;
     for word in para.split_whitespace() {
-        let ww = font.width_of(word) * layout.size;
+        let ww = chain.width_of(word, layout.size);
         let need = match line.is_empty() {
             true => ww,
             false => width + space + ww,
@@ -205,4 +245,167 @@ pub fn find_font(name: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// A font and the name a DVI file calls it by.
+pub struct Loaded {
+    pub tfm: Tfm,
+    pub name: String,
+}
+
+/// A chain of fonts, tried in order for each character.
+///
+/// This is `luaotfload.add_fallback` in a TFM world, and it is the reason the
+/// publication scripts required LuaTeX: a per-glyph fallback fixes missing
+/// arrows, box drawing and symbols in EVERY context, verbatim code included,
+/// and no other engine offered one. A `.tfm` addresses 256 slots, so a chain
+/// here is not "another Unicode font" but another 256-slot font plus the map
+/// saying which character lives in which of its slots.
+///
+/// Resolution order per character: the primary font's own map, then each
+/// fallback in turn, then an ASCII stand-in for the shapes Computer Modern
+/// simply does not have. What it never does is drop the character silently --
+/// a glyph that vanishes takes the meaning of a line with it, and a line that
+/// reads `a -- b` where the source said `a → b` is worse than one that says so.
+pub struct FontChain {
+    pub fonts: Vec<Loaded>,
+    /// Where a character lives: which font of the chain, and which slot.
+    map: Vec<(char, usize, u8)>,
+}
+
+/// Computer Modern's own positions for the characters these documents use.
+///
+/// `cmr10` is the text font; `cmsy10` is the symbol font and carries the
+/// arrows, the set operators AND the section and paragraph marks -- those last
+/// two are not in the text font, which is the mistake this table was written
+/// with the first time: `§` was pointed at cmr10 slot 120 and printed an `x`.
+///
+/// The slots are read off what `tex` itself emits for `\S`, `\P`,
+/// `\rightarrow`, `\leftarrow`, `\cup` and `\times` -- `dvitype` on its
+/// output names the character each one set. A wrong slot here prints a wrong
+/// glyph in silence, so guessing at them is not good enough.
+const CM_SYMBOLS: &[(char, &str, u8)] = &[
+    ('→', "cmsy10", 33),
+    ('←', "cmsy10", 32),
+    ('↔', "cmsy10", 36),
+    ('−', "cmsy10", 0),
+    ('×', "cmsy10", 2),
+    ('÷', "cmsy10", 4),
+    ('±', "cmsy10", 6),
+    ('∪', "cmsy10", 91),
+    ('∩', "cmsy10", 92),
+    ('≤', "cmsy10", 20),
+    ('≥', "cmsy10", 21),
+    ('≠', "cmsy10", 54),
+    ('·', "cmsy10", 1),
+    ('∞', "cmsy10", 49),
+    ('§', "cmsy10", 120),
+    ('¶', "cmsy10", 123),
+    ('†', "cmsy10", 121),
+    ('‡', "cmsy10", 122),
+];
+
+/// Shapes Computer Modern has no glyph for, and the nearest honest stand-in.
+///
+/// Box drawing is the case that matters here: the documents draw trees with it,
+/// and cm has no box-drawing at all. A rule could be drawn for each, but a
+/// character grid built out of rules is a different picture; the ASCII shapes
+/// keep the tree readable and keep the columns lined up, which is what the
+/// drawing is for.
+const APPROXIMATIONS: &[(char, &str)] = &[
+    // Computer Modern has no copyright sign; `(c)` is what a reader of the text
+    // would have written anyway.
+    ('©', "(c)"),
+    ('®', "(R)"),
+    ('™', "(TM)"),
+    ('—', "---"),
+    ('–', "--"),
+    ('…', "..."),
+    ('─', "-"),
+    ('│', "|"),
+    ('├', "|-"),
+    ('└', "`-"),
+    ('┌', ",-"),
+    ('┐', "-."),
+    ('┘', "-'"),
+    ('┬', "-,-"),
+    ('┴', "-'-"),
+    ('┼', "-+-"),
+    ('•', "*"),
+    ('“', "``"),
+    ('”', "''"),
+    ('‘', "`"),
+    ('’', "'"),
+];
+
+impl FontChain {
+    /// Load `primary` and each fallback by name, skipping any that is missing.
+    ///
+    /// A missing fallback is not an error: the chain degrades to what is
+    /// installed, and the approximations catch what no loaded font carries.
+    pub fn load(primary: &str, fallbacks: &[&str]) -> Result<FontChain, String> {
+        let mut fonts = Vec::new();
+        let path = find_font(primary).ok_or_else(|| format!("{primary}.tfm not found"))?;
+        fonts.push(Loaded {
+            tfm: Tfm::open(&path)?,
+            name: primary.to_string(),
+        });
+        for f in fallbacks {
+            if let Some(p) = find_font(f) {
+                if let Ok(tfm) = Tfm::open(&p) {
+                    fonts.push(Loaded {
+                        tfm,
+                        name: (*f).to_string(),
+                    });
+                }
+            }
+        }
+        let mut map = Vec::new();
+        for (ch, font_name, slot) in CM_SYMBOLS {
+            if let Some(i) = fonts.iter().position(|f| f.name == *font_name) {
+                // Only claim the slot if the font really defines it.
+                if fonts[i].tfm.char(*slot).is_some() {
+                    map.push((*ch, i, *slot));
+                }
+            }
+        }
+        Ok(FontChain { fonts, map })
+    }
+
+    /// Which font and slot carries `ch`, if any font in the chain does.
+    pub fn resolve(&self, ch: char) -> Option<(usize, u8)> {
+        // ASCII is the primary font's own, which is the common case and worth
+        // answering before any search.
+        if ch.is_ascii() && self.fonts[0].tfm.char(ch as u8).is_some() {
+            return Some((0, ch as u8));
+        }
+        self.map
+            .iter()
+            .find(|(c, _, _)| *c == ch)
+            .map(|(_, f, s)| (*f, *s))
+    }
+
+    /// The ASCII stand-in for a character no font in the chain carries.
+    pub fn approximate(ch: char) -> Option<&'static str> {
+        APPROXIMATIONS
+            .iter()
+            .find(|(c, _)| *c == ch)
+            .map(|(_, s)| *s)
+    }
+
+    /// The width of `ch` in points at `size`, however it is being rendered.
+    pub fn width(&self, ch: char, size: f64) -> f64 {
+        if let Some((f, slot)) = self.resolve(ch) {
+            return self.fonts[f].tfm.char(slot).map(|m| m.width).unwrap_or(0.0) * size;
+        }
+        if let Some(text) = Self::approximate(ch) {
+            return self.fonts[0].tfm.width_of(text) * size;
+        }
+        0.0
+    }
+
+    /// The width of a whole string, resolving each character through the chain.
+    pub fn width_of(&self, text: &str, size: f64) -> f64 {
+        text.chars().map(|c| self.width(c, size)).sum()
+    }
 }

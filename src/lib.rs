@@ -33,8 +33,8 @@ pub mod geturl;
 pub mod intercepts;
 pub mod io;
 pub mod ir;
-pub mod latex;
 pub mod itar;
+pub mod latex;
 pub mod lexer;
 pub mod lower;
 pub mod lsp;
@@ -138,6 +138,26 @@ fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chun
 }
 
 /// Typeset a file to DVI, using the bytecode cache.
+/// Typeset with a font CHAIN: the primary font, and fallbacks for the glyphs it
+/// does not carry.
+///
+/// This is what `luaotfload.add_fallback` gave a LuaTeX run, and the reason the
+/// publication scripts required LuaTeX at all. cmsy10 carries the arrows and the
+/// set operators cmr10 has no slot for; what neither has -- box drawing, chiefly
+/// -- is set as an ASCII stand-in rather than dropped.
+pub fn run_dvi_fallback(
+    path: Option<&std::path::Path>,
+    src: &str,
+    chain: &crate::typeset::FontChain,
+    layout: &crate::typeset::Layout,
+) -> Result<Vec<u8>, TexError> {
+    let text = match path {
+        Some(p) => run_text_cached(p, src)?,
+        None => run_text(src)?,
+    };
+    Ok(crate::typeset::to_dvi_chain(&text, chain, layout))
+}
+
 pub fn run_dvi_cached(
     path: &std::path::Path,
     src: &str,

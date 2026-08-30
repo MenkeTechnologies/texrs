@@ -11,7 +11,7 @@
 //! font and no maths.
 
 use texrs::tfm::Tfm;
-use texrs::typeset::{break_lines, find_font, to_dvi, Layout};
+use texrs::typeset::{break_lines, find_font, to_dvi, to_dvi_chain, FontChain, Layout};
 
 fn font() -> Tfm {
     let p = find_font("cmr10").expect("cmr10.tfm (is a TeX installation present?)");
@@ -93,4 +93,71 @@ fn the_text_survives_the_round_trip_through_dvi() {
     let got = parsed.text();
     assert!(got.contains("typesetting"), "got {got:?}");
     assert!(got.contains("works"), "got {got:?}");
+}
+
+#[test]
+fn a_glyph_the_text_font_lacks_comes_from_a_fallback() {
+    // `luaotfload.add_fallback` in a TFM world, and the reason the publication
+    // scripts required LuaTeX: cmr10 has no arrow, cmsy10 does.
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    let (font, slot) = chain.resolve('→').expect("an arrow must resolve");
+    assert_eq!(chain.fonts[font].name, "cmsy10");
+    assert_eq!(slot, 33, "the slot tex itself sets for \\rightarrow");
+}
+
+#[test]
+fn the_section_mark_comes_from_the_symbol_font_not_the_text_font() {
+    // This table was written wrong the first time: `§` pointed at cmr10 slot
+    // 120, which is an `x`, and the page said "x" where the document said "§"
+    // without anything reporting a problem.
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    let (font, slot) = chain.resolve('§').expect("a section mark must resolve");
+    assert_eq!(chain.fonts[font].name, "cmsy10");
+    assert_eq!(slot, 120);
+}
+
+#[test]
+fn ascii_still_comes_from_the_text_font() {
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    for ch in ['a', 'Z', '7', '.', ' '] {
+        let (font, slot) = chain.resolve(ch).expect("ascii resolves");
+        assert_eq!(chain.fonts[font].name, "cmr10", "for {ch:?}");
+        assert_eq!(slot, ch as u8);
+    }
+}
+
+#[test]
+fn a_shape_no_font_carries_is_approximated_rather_than_dropped() {
+    // Computer Modern has no box drawing at all, and these documents draw trees
+    // with it. A glyph that vanishes takes the meaning of the line with it.
+    assert_eq!(FontChain::approximate('├'), Some("|-"));
+    assert_eq!(FontChain::approximate('─'), Some("-"));
+    assert_eq!(FontChain::approximate('—'), Some("---"));
+    assert_eq!(FontChain::approximate('©'), Some("(c)"));
+    assert_eq!(FontChain::approximate('a'), None, "ascii needs no stand-in");
+}
+
+#[test]
+fn a_fallback_glyph_reaches_the_dvi_and_switches_font() {
+    // The end of the chain: the arrow must appear in the file as cmsy10's
+    // slot 33, with a font switch before it, or the page shows whatever cmr10
+    // happens to have at that position.
+    let chain = FontChain::load("cmr10", &["cmsy10"]).expect("fonts");
+    let dvi = to_dvi_chain("a → b", &chain, &Layout::default());
+    let parsed = texrs::dvi::Dvi::parse(&dvi).expect("parse");
+    let summary = parsed.summary();
+    assert!(
+        summary.contains("cmsy10"),
+        "the fallback font is used: {summary}"
+    );
+    assert_eq!(parsed.pages(), 1);
+}
+
+#[test]
+fn a_missing_fallback_is_not_an_error() {
+    // The chain degrades to what is installed; the approximations catch what no
+    // loaded font carries.
+    let chain = FontChain::load("cmr10", &["definitely-not-a-font"]).expect("still loads");
+    assert_eq!(chain.fonts.len(), 1);
+    assert!(chain.resolve('a').is_some());
 }

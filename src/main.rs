@@ -236,15 +236,19 @@ fn main() -> ExitCode {
         // A page, at last. The font is plain TeX's own; without a .tfm there
         // are no widths and so no line breaking, which is why a missing one is
         // an error rather than a silent fallback to guessed metrics.
-        let font = match texrs::typeset::find_font("cmr10") {
-            Some(p) => p,
-            None => return fail("--dvi: cmr10.tfm not found (is a TeX installation present?)"),
+        // cmr10 sets the text; cmsy10 carries the arrows and set operators it
+        // has no slot for. This is the per-glyph fallback that made LuaTeX a
+        // requirement for these documents.
+        let chain = match texrs::typeset::FontChain::load("cmr10", &["cmsy10", "cmmi10"]) {
+            Ok(c) => c,
+            Err(e) => return fail(&format!("--dvi: {e} (is a TeX installation present?)")),
         };
         let layout = texrs::typeset::Layout::default();
-        let built = match no_cache {
-            true => texrs::run_dvi(&src, &font, &layout),
-            false => texrs::run_dvi_cached(std::path::Path::new(&path), &src, &font, &layout),
+        let keyed = match no_cache {
+            true => None,
+            false => Some(std::path::Path::new(&path)),
         };
+        let built = texrs::run_dvi_fallback(keyed, &src, &chain, &layout);
         return match built {
             Ok(bytes) => {
                 let out = std::path::Path::new(&path).with_extension("dvi");
