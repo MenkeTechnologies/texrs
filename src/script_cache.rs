@@ -137,6 +137,31 @@ impl MmappedShard {
     }
 }
 
+/// The cache key for an assembled document: what its inputs hashed to, in
+/// order, and which profile compiled them.
+///
+/// A document built by `-X build` is not a file — it is several files joined —
+/// so it cannot be keyed the way a single source is, by path and mtime. Keying
+/// on the digests instead makes the entry valid exactly while the content is,
+/// which is stronger than an mtime: a file touched but not edited still hits,
+/// and a file restored from a backup with an older mtime does not wrongly.
+///
+/// The `doc:` prefix keeps these out of the way of the path-keyed entries; an
+/// absolute path cannot start with it.
+pub fn document_key(input_digests: &[String], profile: &str) -> String {
+    let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+    sha2::Digest::update(&mut hasher, profile.as_bytes());
+    for digest in input_digests {
+        sha2::Digest::update(&mut hasher, b"\0");
+        sha2::Digest::update(&mut hasher, digest.as_bytes());
+    }
+    let hex: String = sha2::Digest::finalize(hasher)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("doc:{hex}")
+}
+
 /// A handle to one shard file and the lock that serializes writers to it.
 pub struct ScriptCache {
     path: PathBuf,
@@ -407,6 +432,34 @@ pub static CACHE: once_cell::sync::Lazy<Option<ScriptCache>> = once_cell::sync::
     ScriptCache::open(&default_cache_path()).ok()
 });
 
+/// The chunk cached under `key`, if this build wrote one.
+///
+/// The mtime guards do not apply: the key IS the content, so an entry either
+/// describes these bytes or belongs to different ones. The binary's own mtime
+/// still does, since bytecode is only meaningful to the build that emitted it.
+pub fn try_load_keyed(key: &str) -> Option<fusevm::Chunk> {
+    let cache = CACHE.as_ref()?;
+    let blob = cache.get(key, DIGEST_KEYED, DIGEST_KEYED)?;
+    bincode::deserialize::<fusevm::Chunk>(&blob).ok()
+}
+
+/// Remember what the document under `key` compiled to. Best-effort, as the
+/// path-keyed store is.
+pub fn store_keyed(key: &str, chunk: &fusevm::Chunk) {
+    let Some(cache) = CACHE.as_ref() else {
+        return;
+    };
+    let Ok(blob) = bincode::serialize(chunk) else {
+        return;
+    };
+    let _ = cache.put(key, DIGEST_KEYED, DIGEST_KEYED, blob);
+}
+
+/// The mtime a digest-keyed entry carries. Any fixed pair does: the key already
+/// says what the content is, and this is what makes the guard a no-op rather
+/// than a comparison against a file that does not exist.
+const DIGEST_KEYED: i64 = 0;
+
 /// The compiled chunk for `path`, if the cache still has one that matches it.
 pub fn try_load(path: &Path) -> Option<fusevm::Chunk> {
     let cache = CACHE.as_ref()?;
@@ -663,6 +716,32 @@ mod tests {
         }
         std::env::remove_var("TEXRS_CACHE");
         assert!(cache_enabled(), "and unset is on");
+    }
+
+    #[test]
+    fn a_document_key_is_its_content_and_its_profile() {
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        // Same inputs, same order, same profile: the same key.
+        assert_eq!(
+            document_key(&[a.clone(), b.clone()], "default"),
+            document_key(&[a.clone(), b.clone()], "default")
+        );
+        // Order is content: two documents made of the same files in a
+        // different order are different documents.
+        assert_ne!(
+            document_key(&[a.clone(), b.clone()], "default"),
+            document_key(&[b.clone(), a.clone()], "default")
+        );
+        // The profile is part of the key, or a `disasm` build would be served
+        // the chunk a `messages` build cached — which is the same chunk, but
+        // the entry must still say which one asked for it.
+        assert_ne!(
+            document_key(std::slice::from_ref(&a), "default"),
+            document_key(std::slice::from_ref(&a), "bytes")
+        );
+        // A key cannot be mistaken for a path.
+        assert!(document_key(&[a], "default").starts_with("doc:"));
     }
 
     #[test]

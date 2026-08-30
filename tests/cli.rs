@@ -40,12 +40,23 @@ fn stdout_of(cmd: &mut Command) -> String {
 
 /// Every option the binary accepts, read from its own usage text — the list the
 /// other two are held against.
+///
+/// An option that takes a value is written `--jobs=N` in the usage line, and the
+/// two places it has to appear spell that differently: roff wants the value as
+/// its own argument (`.BI \-\-jobs= N`) and a zsh completion writes the flag
+/// with the value's spec after it (`--jobs=[…]:count:`). Comparing on the flag
+/// NAME — everything up to the `=` — is what makes the gate ask the question it
+/// means to ask ("is this flag documented?") rather than "is the usage line's
+/// exact spelling present?". An undocumented flag still fails, which is the
+/// point of the gate.
 fn options_from_usage() -> Vec<String> {
     let usage = stdout_of(texrs().arg("--help"));
     let mut out: Vec<String> = Vec::new();
     for line in usage.lines() {
         for word in line.split_whitespace() {
             let word = word.trim_end_matches(',');
+            // `--jobs=N` is the flag `--jobs`; the `N` is its value.
+            let word = word.split('=').next().unwrap_or(word);
             if word.starts_with("--") && word.len() > 2 {
                 out.push(word.to_string());
             }
@@ -84,7 +95,11 @@ fn the_completion_offers_every_option_the_binary_takes() {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
-        if DOCUMENT_FLAGS.contains(&flag.as_str()) {
+        // A flag written `--name=` in the completion takes its value inline
+        // and cannot be run bare; one in DOCUMENT_FLAGS belongs to a `-X`
+        // command and is checked there instead.
+        let takes_inline_value = rest[flag.len()..].starts_with('=');
+        if takes_inline_value || DOCUMENT_FLAGS.contains(&flag.as_str()) {
             continue;
         }
         let out = texrs().arg(&flag).arg("--help").output().expect("run");
@@ -290,6 +305,7 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
     assert!(dir.join("Texrs.toml").is_file());
     assert!(dir.join("index.tex").is_file());
 
+    let original = std::fs::read_to_string(dir.join("index.tex")).unwrap();
     let built = run(&["-X", "build"], &dir);
     assert!(
         built.status.success(),
@@ -352,6 +368,30 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
     // `-X watch` is not started here: the loop is covered by unit tests in
     // src/document.rs, and a background process in this suite would be a
     // flake rather than a check.
+
+    // A rebuild of an unchanged document is served from the cache, and says
+    // the same thing: a cache that changed the answer would be worse than none.
+    let again = run(&["-X", "build"], &dir);
+    assert!(again.status.success());
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap().trim(),
+        "hello from texrs",
+        "the cached build produces what the first one did"
+    );
+    // And an edit is not served the old chunk: the key is the content.
+    std::fs::write(
+        dir.join("index.tex"),
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\message{EDITED}\n\\end\n",
+    )
+    .unwrap();
+    assert!(run(&["-X", "build"], &dir).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap().trim(),
+        "EDITED",
+        "an edited document is compiled again rather than served the old chunk"
+    );
+    std::fs::write(dir.join("index.tex"), original).unwrap();
+    assert!(run(&["-X", "build"], &dir).status.success());
 
     // `-X show` reads the document rather than remembering it: the digest it
     // prints is the input's.

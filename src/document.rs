@@ -247,19 +247,7 @@ impl Document {
     pub fn build(&self, profile: Option<&str>) -> Result<Built, String> {
         let output = self.profile(profile)?.clone();
         let (source, inputs) = self.assemble()?;
-        let body = match output.kind {
-            OutputType::Messages => crate::run_messages(&source).map_err(|e| e.0)?,
-            OutputType::Tokens => {
-                let cats = crate::catcode::CatTable::new();
-                let mut lexer = crate::lexer::Lexer::new(&source);
-                let mut out = String::new();
-                while let Some(token) = lexer.next_token(&cats) {
-                    out.push_str(&format!("{token:?}\n"));
-                }
-                out
-            }
-            OutputType::Disasm => crate::compile(&source).map_err(|e| e.0)?.disassemble(),
-        };
+        let body = self.render(&output, &source, &inputs)?;
         std::fs::create_dir_all(&self.build_dir)
             .map_err(|e| format!("cannot make {}: {e}", self.build_dir.display()))?;
         let path = self.build_dir.join(format!(
@@ -332,19 +320,54 @@ impl Document {
     /// stdout, not a path to them.
     pub fn dump(&self, profile: Option<&str>) -> Result<String, String> {
         let output = self.profile(profile)?.clone();
-        let (source, _) = self.assemble()?;
-        match output.kind {
-            OutputType::Messages => crate::run_messages(&source).map_err(|e| e.0),
-            OutputType::Tokens => {
-                let cats = crate::catcode::CatTable::new();
-                let mut lexer = crate::lexer::Lexer::new(&source);
-                let mut out = String::new();
-                while let Some(token) = lexer.next_token(&cats) {
-                    out.push_str(&format!("{token:?}\n"));
-                }
-                Ok(out)
+        let (source, inputs) = self.assemble()?;
+        self.render(&output, &source, &inputs)
+    }
+
+    /// What a profile produces from the assembled source.
+    ///
+    /// The two that need bytecode take it from the cache when the same inputs
+    /// have been compiled by this build before. An assembled document is not a
+    /// file, so it cannot be keyed by path and mtime the way a single source
+    /// is; the key is what its inputs hashed to, which is valid exactly while
+    /// the content is. Rebuilding a document nobody has edited therefore costs
+    /// a hash of what was read rather than a compile — which is what makes
+    /// `-X watch` cheap on the ticks where nothing changed but something else
+    /// in the directory moved.
+    ///
+    /// The token stream is never cached: it is the mouth's output, which is
+    /// cheaper to produce than to look up.
+    fn render(
+        &self,
+        output: &Output,
+        source: &str,
+        inputs: &[crate::io::InputRecord],
+    ) -> Result<String, String> {
+        if output.kind == OutputType::Tokens {
+            let cats = crate::catcode::CatTable::new();
+            let mut lexer = crate::lexer::Lexer::new(source);
+            let mut out = String::new();
+            while let Some(token) = lexer.next_token(&cats) {
+                out.push_str(&format!("{token:?}\n"));
             }
-            OutputType::Disasm => Ok(crate::compile(&source).map_err(|e| e.0)?.disassemble()),
+            return Ok(out);
+        }
+
+        let digests: Vec<String> = inputs.iter().map(|r| r.digest.clone()).collect();
+        let key = crate::script_cache::document_key(&digests, &output.name);
+        let chunk = match crate::script_cache::try_load_keyed(&key) {
+            Some(chunk) => chunk,
+            None => {
+                let chunk = crate::compile(source).map_err(|e| e.0)?;
+                crate::script_cache::store_keyed(&key, &chunk);
+                chunk
+            }
+        };
+        match output.kind {
+            OutputType::Disasm => Ok(chunk.disassemble()),
+            // Running is the rest of what `run_messages` does; the compile in
+            // front of it is what the cache saved.
+            _ => Ok(crate::runtime::run(chunk)?.join(" ")),
         }
     }
 }
@@ -464,7 +487,21 @@ pub fn scaffold(dir: impl AsRef<Path>, name: &str) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
+    /// Keep the tests out of the cache the user's own runs are using.
+    ///
+    /// `script_cache::CACHE` is one per process and resolves on first use, so
+    /// this has to run before any build in this binary does — every test that
+    /// builds calls it first. Without it these tests read and write the real
+    /// shard, which is both a lie (they would pass on a warm cache that a
+    /// fresh machine does not have) and a mess (they would leave entries
+    /// behind).
+    fn without_the_shared_cache() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| std::env::set_var("TEXRS_CACHE", "0"));
+    }
+
     fn scratch(name: &str) -> PathBuf {
+        without_the_shared_cache();
         let dir = std::env::temp_dir().join(format!("texrs_doc_{}_{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
