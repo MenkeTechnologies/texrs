@@ -32,6 +32,10 @@ path = "src/main.rs"
 name = "gen-docs"
 path = "src/bin/gen_docs.rs"
 
+[[bin]]
+name = "gen-emacs-stdlib"
+path = "src/bin/gen_emacs_stdlib.rs"
+
 [lib]
 name = "texrs"
 path = "src/lib.rs"
