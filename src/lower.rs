@@ -274,6 +274,7 @@ impl Lowerer {
                     out.extend(if same { t } else { e });
                 }
                 "let" => self.eng.compile_time_let(lx)?,
+                "futurelet" => self.eng.compile_time_futurelet(lx)?,
                 // Advice registration is a compile-time act: it changes what
                 // the macros after it expand to.
                 "intercept" => self.eng.compile_time_intercept(lx)?,

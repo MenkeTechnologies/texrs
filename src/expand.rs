@@ -258,6 +258,7 @@ impl Engine {
             "end" => return Ok(true),
             kind @ ("def" | "gdef" | "edef" | "xdef") => self.do_def(lx, kind)?,
             "let" => self.do_let(lx)?,
+            "futurelet" => self.do_futurelet(lx, false)?,
             "global" => {
                 self.global = true;
                 let Some(next) = lx.next_token(&self.cats) else {
@@ -508,6 +509,17 @@ impl Engine {
                 }
             }
             (Some(Token::Char(c1, k1)), Some(Token::Char(c2, k2))) => c1 == c2 && k1 == k2,
+            // A control sequence `\let` (or `\futurelet`) to a character token
+            // MEANS that character, so it compares equal to it -- `tex.web` §507
+            // compares meanings, and the meaning of `\next` after
+            // `\futurelet\next` over an `A` is the character A. Without this,
+            // `\ifx\next[` is always false, and that single comparison is what
+            // LaTeX's `\@ifnextchar` is, hence every optional argument in the
+            // language.
+            (Some(Token::Cs(x)), Some(Token::Char(c, k)))
+            | (Some(Token::Char(c, k)), Some(Token::Cs(x))) => {
+                matches!(self.meanings.get(x), Some(Meaning::Char(mc, mk)) if mc == c && mk == k)
+            }
             _ => false,
         }
     }
@@ -563,6 +575,36 @@ impl Engine {
     }
 
     /// `\let\a=\b` — `\a` takes `\b`'s CURRENT meaning, not a reference to it.
+    /// `\futurelet\a\b\c` — look one token past the next without eating it.
+    ///
+    /// `tex.web` §1221: read three tokens, `\let` the first take the meaning of
+    /// the THIRD, then put the second and third back so the stream is exactly as
+    /// it was. That non-destructive peek is the whole basis of LaTeX's
+    /// `\@ifnextchar`, and so of every optional argument in the language --
+    /// `\newcommand{\x}[1]{...}` cannot be written without it.
+    fn do_futurelet(&mut self, lx: &mut Lexer, pending_only: bool) -> R<()> {
+        let Some(Token::Cs(name)) = self.take(lx, pending_only) else {
+            return Err(TexError("Missing control sequence inserted".into()));
+        };
+        let Some(first) = self.take(lx, pending_only) else {
+            return Err(TexError("Missing token for \\futurelet".into()));
+        };
+        let Some(second) = self.take(lx, pending_only) else {
+            return Err(TexError("Missing token for \\futurelet".into()));
+        };
+        let meaning = match &second {
+            Token::Char(c, k) => Meaning::Char(*c, *k),
+            Token::Cs(n) => match self.meanings.get(n) {
+                Some(m) => m.clone(),
+                None => Meaning::Primitive(*n),
+            },
+        };
+        self.set_meaning(name, meaning);
+        // Both tokens go back, in order: the peek must not consume them.
+        lx.push_back(&[first, second]);
+        Ok(())
+    }
+
     fn do_let(&mut self, lx: &mut Lexer) -> R<()> {
         let Some(Token::Cs(name)) = lx.next_token(&self.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
@@ -1189,6 +1231,12 @@ impl Engine {
 /// Compile-time control the lowering pass needs: grouping and `\let`, both of
 /// which act on the macro table and so belong to the frontend, not the VM.
 impl Engine {
+    /// `\futurelet` while lowering: the peek it performs is a frontend fact,
+    /// exactly as `\let` is.
+    pub fn compile_time_futurelet(&mut self, lx: &mut Lexer) -> R<()> {
+        self.do_futurelet(lx, false)
+    }
+
     pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {
         self.do_let(lx)
     }

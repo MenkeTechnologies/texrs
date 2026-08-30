@@ -1,0 +1,5 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\mk#1#2{\ifnum#2=1 \def#1##1{<##1>}\else \def#1##1{[##1]}\fi}
+\mk\q{1}
+\message{\q{a}}
+\end

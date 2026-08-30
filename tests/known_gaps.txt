@@ -60,3 +60,17 @@ let_char_token.tex
 #                  `INSIDE\egroup ' where tex ends `INSIDE\egroup'. The
 #                  meaning-copy half of \let is in parity; this is the
 #                  char-token half.
+def_in_conditional_arm.tex
+#                  A `\def' inside an arm of a RUN-TIME conditional is executed
+#                  while lowering, and lowering emits both arms because neither
+#                  is decided yet -- so the else arm's definition overwrites the
+#                  then arm's and the losing branch wins. tex interprets and
+#                  runs only the arm it took: it prints `<a>' where texrs prints
+#                  `[a]'. This is a miscompile rather than a refusal, which is
+#                  what makes it worth a case: nothing errors, the answer is
+#                  just wrong. It blocks LaTeX's `\newcommand{\x}[n]{...}',
+#                  whose argument-count dispatch is exactly a chain of
+#                  `\ifnum...\def...\else'. Fixing it needs the macro table to
+#                  be run-time state, or the conditional to be decidable while
+#                  lowering; neither is a small change.
+
