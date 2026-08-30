@@ -1,0 +1,8 @@
+% A constant above 2147483647 is too big (tex.web §445): tex reports
+% "! Number too big.", clamps to 2147483647 and CARRIES ON. texrs reports the
+% same and stops, which is its error model (see BUGS.md). The limit itself is
+% TeX's, not the host integer's -- the point of the case.
+\catcode`\{=1 \catcode`\}=2
+\count1=99999999999
+\message{[\the\count1]}
+\end

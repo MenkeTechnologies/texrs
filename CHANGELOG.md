@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A numeric constant is limited to TeX's 2147483647, not the host `i64`. The
+  scanner reported `Number too big` only when the digits overflowed an `i64`, so
+  `\count1=99999999999` was accepted and printed back where tex reports and
+  clamps (`tex.web` §445). A `\count` register is a 32-bit word, and this was
+  the remaining way to get a wider value into one.
+
 - `\newcommand*` defines the command. The star asks for a restriction nothing
   here reads, and an unrecognised one made the name scan give up, which dropped
   the DEFINITION: Pandoc writes `\newcommand*\pandocbounded[1]{...}`, so every

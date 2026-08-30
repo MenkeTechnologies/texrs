@@ -93,3 +93,11 @@ multiply_overflow.tex
 #                  so it still prints the message; texrs stops, which is the
 #                  error model recorded above ("Errors"). Fixing the recovery
 #                  fixes this case; the arithmetic itself already matches.
+number_too_big.tex
+#                  Both engines reject a constant above 2147483647 with
+#                  `Number too big` (tex.web §445); the divergence is the
+#                  recovery, exactly as in multiply_overflow.tex. tex clamps to
+#                  2147483647 and carries on, so it still prints the message;
+#                  texrs stops. The limit and the rejection point already match
+#                  -- before this case, texrs checked only for i64 overflow and
+#                  accepted 99999999999 outright.

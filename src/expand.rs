@@ -1284,10 +1284,16 @@ impl Engine {
         if digits.is_empty() {
             return Err(TexError("Missing number, treated as zero".into()));
         }
-        digits
-            .parse::<i64>()
-            .map(|n| sign * n)
-            .map_err(|_| TexError("Number too big".into()))
+        // tex.web §445: a constant above 2147483647 is too big. The limit is
+        // TeX's, not the host integer's -- checking only for `i64` overflow let
+        // `\\count1=99999999999` through, where real tex reports and clamps.
+        // The magnitude is tested before the sign is applied, which is why tex
+        // answers -2147483647 (not -2147483648) for a too-big negative.
+        const INFINITY: i64 = 2147483647;
+        match digits.parse::<i64>() {
+            Ok(n) if n <= INFINITY => Ok(sign * n),
+            _ => Err(TexError("Number too big".into())),
+        }
     }
 
     // ── text production ──────────────────────────────────────────────────

@@ -74,6 +74,8 @@ one two
 <zz>
 #==# number_prim.tex
 42--17
+#==# number_too_big.tex
+! Number too big.l.6 \count1=9999999999                      9[2147483647] )(see the transcript file for additional information
 #==# param_brace_delim.tex
 [X]{Y}
 #==# plain_count0.tex
