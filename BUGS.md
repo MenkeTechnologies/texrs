@@ -12,10 +12,10 @@ overrides it for a deliberate cross-version run.
 
 ## The corpus
 
-Every committed case in `tests/cases` matches the reference engine, and
-`tests/known_gaps.txt` is empty. The gate fails on any divergence not listed
-there AND on a listed case that has started passing, so an empty list is a claim
-the harness enforces rather than a note.
+Every committed case in `tests/cases` either matches the reference engine or is
+listed in `tests/known_gaps.txt` with the reason it does not. The gate fails on
+any divergence that is not listed there AND on a listed case that has started
+passing, so the list is a claim the harness enforces rather than a note.
 
 ## Not implemented
 
