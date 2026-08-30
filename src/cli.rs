@@ -387,6 +387,7 @@ pub const USAGE: &str = "\
   -X pfb FILE.pfb [C]     // Read a Type 1 font: its glyphs and their widths
   -X map FILE.map [NAME]  // Read a font map: what a TeX font name means
   -X enc FILE.enc         // Read an encoding: what each code is called
+  -X itar FILE.tar [NAME] // Index a tar bundle, or read one file out of it
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 

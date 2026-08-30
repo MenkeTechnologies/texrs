@@ -473,6 +473,33 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "itar" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X itar` needs a .tar bundle");
+            };
+            match texrs::itar::Itar::open(file) {
+                Ok(itar) => match args.get(2) {
+                    // A second argument reads one file out of the archive,
+                    // which is a seek and a read rather than a walk.
+                    Some(name) => match itar.read(name) {
+                        Ok(bytes) => {
+                            use std::io::Write;
+                            match std::io::stdout().write_all(&bytes) {
+                                Ok(()) => ExitCode::SUCCESS,
+                                Err(e) => fail(&e.to_string()),
+                            }
+                        }
+                        Err(e) => fail(&e),
+                    },
+                    None => {
+                        print!("{}", itar.summary());
+                        print!("{}", itar.index());
+                        ExitCode::SUCCESS
+                    }
+                },
+                Err(e) => fail(&e),
+            }
+        }
         "map" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X map` needs a font map, or a map and a TeX font name");

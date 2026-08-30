@@ -62,6 +62,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading an indexed tar bundle, ported from `tectonic_bundles::itar`: the tar
+  headers, the index that makes an archive seekable (`name offset length`), and
+  reading a file by seeking to it rather than walking the archive. `-X itar
+  FILE.tar [NAME]`. Held against `tar` itself -- the same names it lists and the
+  same bytes it extracts, for a name too long for a header field, for lengths
+  that straddle the 512-byte block, and for an empty file -- and a test that
+  reads a 16-byte file from the far end of a 20 MB archive faster than a
+  megabyte at the front, which is the property the format exists for.
 - Reading font maps and encoding files, ported from `fontmap.c` and
   `t1_load_enc` in `xdvipdfmx`. This is the join between the other font
   readers: a `.dvi` names `ptmr8r`, and the map is what turns that into a real

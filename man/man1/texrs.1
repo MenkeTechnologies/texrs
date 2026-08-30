@@ -316,6 +316,28 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " itar \fIFILE\fR.tar [" \fINAME\fR ]
+Index a tar bundle, or read one file out of one.  With no
+.I NAME
+this prints how many files the archive holds and then the index: a line per
+file, saying its name, where in the archive it begins and how long it is.  With
+one, it writes that file to standard output.
+.PP
+.B \-X bundle
+reads a zip and keeps it in memory, which is right for a paper's own support
+files and wrong for the other kind of bundle: TeX Live is gigabytes, a document
+reads a few dozen files out of it, and nothing should have to hold the rest.  A
+tar has no directory \(em finding a file means reading every header up to it
+\(em so the index supplies the one thing it lacks, and a file becomes a seek and
+a read.  The same index makes an archive fetchable a file at a time with a range
+request each, which is how tectonic ships TeX Live without shipping TeX Live.
+.PP
+Reading is held against
+.BR tar (1)
+itself: the same names it lists, the same bytes it extracts, for a name too long
+for a header field, for files whose lengths straddle the 512-byte block, and for
+a file of nothing at all.
+.TP
 .BI \-X " map \fIFILE\fR.map [" \fINAME\fR ]
 Read a font map.  With no
 .I NAME

@@ -1270,3 +1270,61 @@ fn the_map_and_encoding_readers_join_a_name_to_a_font() {
     assert!(enc.contains("names         256"), "{enc}");
     assert!(enc.contains("65 'A'   A"), "an A is where an A is: {enc}");
 }
+
+/// `-X itar` indexes a tar bundle and reads one file out of it.
+#[test]
+fn the_itar_reader_indexes_a_bundle_and_reads_from_it() {
+    let dir = scratch_cache("itar");
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("deep")).unwrap();
+    std::fs::write(work.join("macros.tex"), "\\def\\hi{HI}\n").unwrap();
+    std::fs::write(work.join("deep/other.tex"), "% deep\n").unwrap();
+    let made = std::process::Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
+        .args(["cf", "../b.tar", "macros.tex", "deep/other.tex"])
+        .current_dir(&work)
+        .status();
+    let Ok(made) = made else { return };
+    if !made.success() {
+        return;
+    }
+
+    // The summary and the index: a line per file, with where it begins.
+    let listing = stdout_of(texrs().args(["-X", "itar", "b.tar"]).current_dir(&dir));
+    assert!(listing.contains("files         2"), "{listing}");
+    let index: Vec<&str> = listing
+        .lines()
+        .filter(|line| line.contains(".tex "))
+        .collect();
+    assert_eq!(index.len(), 2, "{listing}");
+    for line in &index {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(words.len(), 3, "{line}");
+        // A file's data begins on a block boundary, because a tar header is a
+        // whole block.
+        assert_eq!(
+            words[1].parse::<u64>().expect("an offset") % 512,
+            0,
+            "{line}"
+        );
+    }
+
+    // One file, by its last component, byte for byte.
+    let out = stdout_of(
+        texrs()
+            .args(["-X", "itar", "b.tar", "other.tex"])
+            .current_dir(&dir),
+    );
+    assert_eq!(out, "% deep\n");
+
+    // A file that is not there is an error rather than nothing.
+    let missing = texrs()
+        .args(["-X", "itar", "b.tar", "nosuch.tex"])
+        .current_dir(&dir)
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("nosuch.tex"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

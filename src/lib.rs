@@ -34,6 +34,7 @@ pub mod intercepts;
 pub mod io;
 pub mod ir;
 pub mod latex;
+pub mod itar;
 pub mod lexer;
 pub mod lower;
 pub mod lsp;
