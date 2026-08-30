@@ -466,9 +466,119 @@ impl FontChain {
 /// OpenType one at all, while a PDF can name the fourteen fonts every reader
 /// has. Arimo is metric-compatible with Arial, which is metric-compatible with
 /// Helvetica, so that substitution is a real one rather than a shrug.
+/// Where a document keeps the font it supplied with itself.
+///
+/// fontspec's `\setmainfont{Arimo}[Path=..., Extension=.ttf,
+/// UprightFont=Arimo-VF]` does not name an INSTALLED family: it names a file
+/// that ships beside the document. Looking that name up among the installed
+/// families finds nothing, and `fc-match` answers anyway, with its default --
+/// so the book was set in whatever that default happened to be, which is the
+/// "everything comes out in the wrong face" complaint exactly.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FontFile {
+    /// `Path=` -- a directory, written with a trailing separator.
+    pub path: Option<String>,
+    /// `UprightFont=` -- the file's name, without its extension.
+    pub upright: Option<String>,
+    /// `Extension=` -- `.ttf`, including the dot.
+    pub extension: Option<String>,
+}
+
+impl FontFile {
+    /// Read the options fontspec was given: `Key=Value` separated by commas,
+    /// with `{...}` groups around values that contain commas of their own.
+    pub fn parse(options: &str) -> FontFile {
+        let mut out = FontFile::default();
+        for (key, value) in top_level_pairs(options) {
+            let value = value.trim().trim_matches(|c| c == '{' || c == '}');
+            match key.trim() {
+                "Path" => out.path = Some(value.to_string()),
+                "UprightFont" => out.upright = Some(value.to_string()),
+                "Extension" => out.extension = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The file this names, looked for where it might actually be.
+    ///
+    /// `Path=` is written by whatever produced the document and is regularly an
+    /// absolute path into a directory that no longer exists -- a build
+    /// scratchpad, another machine. The fonts themselves ship beside the
+    /// document, so a path that has gone stale is retried by its last
+    /// component against the document's own directory.
+    pub fn resolve(&self, near: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+        let upright = self.upright.as_deref()?;
+        let extension = self.extension.as_deref().unwrap_or(".ttf");
+        let file = format!("{upright}{extension}");
+        if let Some(path) = &self.path {
+            let full = std::path::Path::new(path).join(&file);
+            if full.is_file() {
+                return Some(full);
+            }
+            // The stale-path case: keep the directory the fonts are IN and look
+            // for it beside the document instead.
+            if let (Some(dir), Some(near)) = (last_component(path), near) {
+                let beside = near.join(dir).join(&file);
+                if beside.is_file() {
+                    return Some(beside);
+                }
+            }
+        }
+        let beside = near?.join(&file);
+        beside.is_file().then_some(beside)
+    }
+}
+
+/// The last directory of a path written with a trailing separator.
+fn last_component(path: &str) -> Option<&str> {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|c| !c.is_empty())
+}
+
+/// `Key=Value` pairs, splitting only on the commas that are not inside braces.
+///
+/// fontspec values nest: `UprightFeatures={RawFeature={axis={wght=400}}}` holds
+/// commas in some documents, and splitting on every comma tears it apart and
+/// makes the keys after it unreadable.
+fn top_level_pairs(options: &str) -> Vec<(&str, &str)> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let bytes = options.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                if let Some(pair) = split_pair(&options[start..i]) {
+                    out.push(pair);
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if let Some(pair) = split_pair(&options[start..]) {
+        out.push(pair);
+    }
+    out
+}
+
+fn split_pair(text: &str) -> Option<(&str, &str)> {
+    let at = text.find('=')?;
+    Some((&text[..at], &text[at + 1..]))
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Families {
     pub main: Option<String>,
+    /// The file `\setmainfont`s options named, when the document ships its
+    /// own font rather than naming an installed one.
+    pub main_file: FontFile,
     pub sans: Option<String>,
     pub mono: Option<String>,
 }
@@ -522,7 +632,16 @@ pub fn base14_for(family: &str) -> &'static str {
 /// `\setmainfont{Arimo}` becomes Helvetica's metrics rather than a book face.
 /// Colour travels the same markers the DVI path reads and comes out as PDF's
 /// own `rg` operator.
-pub fn to_pdf(text: &str, families: &Families, layout: &Layout) -> Vec<u8> {
+/// `page` is what `\pagecolor` asked for, painted under everything else.
+/// `near` is the directory the document was read from, which is where a font
+/// it ships with itself is looked for.
+pub fn to_pdf(
+    text: &str,
+    families: &Families,
+    layout: &Layout,
+    page_colour: Option<crate::colour::Rgb>,
+    near: Option<&std::path::Path>,
+) -> Vec<u8> {
     use crate::pdf::{document, Font, Page};
 
     // The font the document asked for, EMBEDDED if it can be found: that is
@@ -530,7 +649,13 @@ pub fn to_pdf(text: &str, families: &Families, layout: &Layout) -> Vec<u8> {
     // Arimo. Failing that, one of the fourteen, which gets the widths right
     // and the shapes wrong -- better than refusing to typeset.
     let requested = families.main.as_deref();
-    let embedded = requested.and_then(embed_family);
+    // A font the document SHIPS is tried first: it is the one the document
+    // actually meant, and its family name is regularly not installed at all.
+    let embedded = families
+        .main_file
+        .resolve(near)
+        .and_then(|file| embed_file(&file))
+        .or_else(|| requested.and_then(embed_family));
     let main = embedded.clone().unwrap_or_else(|| {
         Font::Base14(requested.map(base14_for).unwrap_or("Helvetica").to_string())
     });
@@ -568,6 +693,15 @@ pub fn to_pdf(text: &str, families: &Families, layout: &Layout) -> Vec<u8> {
     let mut pages = Vec::new();
     for chunk in lines.chunks(per_page) {
         let mut page = Page::letter();
+        // The page is painted first, and only first: a fill drawn after the
+        // text covers it, and a document that sets a dark page sets light
+        // text to go on it -- so getting the order wrong loses the words.
+        if let Some((r, g, b)) = page_colour {
+            page.content.push_str(&format!(
+                "{r} {g} {b} rg\n0 0 {} {} re\nf\n0 0 0 rg\n",
+                page.width, page.height
+            ));
+        }
         let mut y = layout.height + layout.margin - layout.leading;
         for line in chunk {
             // A line is a sequence of RUNS, each with its own colour: the
@@ -758,8 +892,17 @@ fn normalise(name: &str) -> String {
 /// is measured in the face it will be printed in rather than in Computer
 /// Modern's.
 pub fn embed_family(family: &str) -> Option<crate::pdf::Font> {
-    let path = find_family(family)?;
-    let bytes = std::fs::read(&path).ok()?;
+    embed_file(&find_family(family)?)
+}
+
+/// Embed the font FILE a document supplied itself.
+///
+/// fontspec `Path=` names a directory of `.ttf` files that ship WITH the
+/// document, which is how a book uses a face nobody has installed. Looking
+/// such a name up among the installed families finds nothing, and fc-match
+/// answers with a default -- so the book was set in whatever that default was.
+pub fn embed_file(path: &std::path::Path) -> Option<crate::pdf::Font> {
+    let bytes = std::fs::read(path).ok()?;
     let sfnt = crate::sfnt::Sfnt::parse(bytes.clone()).ok()?;
     // A CFF-flavoured OpenType carries PostScript outlines, which a
     // /FontFile2 must not: that entry means a TrueType font program.
@@ -798,4 +941,69 @@ pub fn embed_family(family: &str) -> Option<crate::pdf::Font> {
         ascent: scale(f64::from(hhea.ascender)),
         descent: scale(f64::from(hhea.descender)),
     })
+}
+
+#[cfg(test)]
+mod font_file_tests {
+    use super::FontFile;
+
+    /// The options a real book writes, verbatim.
+    const REAL: &str = "\n    Path=/private/tmp/build/scifi2/docs/.fonts/,\n    Extension=.ttf,\n    RawFeature={fallback=symfb},\n    UprightFont=Arimo-VF,\n    UprightFeatures={RawFeature={axis={wght=400}}},\n    BoldFont=Arimo-VF,\n    BoldFeatures={RawFeature={axis={wght=700}}},\n";
+
+    #[test]
+    fn the_options_a_document_ships_its_font_with() {
+        let spec = FontFile::parse(REAL);
+        assert_eq!(spec.upright.as_deref(), Some("Arimo-VF"));
+        assert_eq!(spec.extension.as_deref(), Some(".ttf"));
+        assert_eq!(
+            spec.path.as_deref(),
+            Some("/private/tmp/build/scifi2/docs/.fonts/")
+        );
+    }
+
+    #[test]
+    fn a_value_holding_commas_does_not_tear_the_keys_after_it() {
+        // `UprightFeatures={RawFeature={axis={wght=400}}}` sits BEFORE the keys
+        // that matter in some documents. Splitting on every comma leaves
+        // `wght=400}}}` as a key and loses everything past it.
+        let spec = FontFile::parse("Extension=.ttf,Numbers={Proportional,Lining},UprightFont=X-VF");
+        assert_eq!(spec.upright.as_deref(), Some("X-VF"));
+        assert_eq!(spec.extension.as_deref(), Some(".ttf"));
+    }
+
+    #[test]
+    fn a_stale_path_is_retried_beside_the_document() {
+        // `Path=` is written when the document is BUILT and regularly points
+        // into a scratch directory that is gone by the time it is read. The
+        // fonts ship with the document, so the last component is tried there.
+        let dir = std::env::temp_dir().join(format!("texrs_ff_{}", std::process::id()));
+        let fonts = dir.join(".fonts");
+        std::fs::create_dir_all(&fonts).expect("mkdir");
+        let file = fonts.join("Arimo-VF.ttf");
+        std::fs::write(&file, b"not really a font").expect("write");
+
+        let spec =
+            FontFile::parse("Path=/gone/for/good/.fonts/,Extension=.ttf,UprightFont=Arimo-VF");
+        assert_eq!(spec.resolve(Some(&dir)), Some(file.clone()));
+        // With nowhere to look, it resolves to nothing rather than to a guess.
+        assert_eq!(spec.resolve(None), None);
+
+        // A path that IS there wins outright.
+        let direct = format!(
+            "Path={}/,Extension=.ttf,UprightFont=Arimo-VF",
+            fonts.display()
+        );
+        assert_eq!(FontFile::parse(&direct).resolve(None), Some(file));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn options_that_name_no_file_resolve_to_nothing() {
+        // `\setmainfont{Georgia}` with no options at all must fall through to
+        // the installed families rather than resolving to some file nearby.
+        assert_eq!(
+            FontFile::parse("").resolve(Some(std::path::Path::new("/tmp"))),
+            None
+        );
+    }
 }

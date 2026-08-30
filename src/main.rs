@@ -233,7 +233,7 @@ fn main() -> ExitCode {
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
     if cli.pdf_out {
-        return match texrs::run_pdf(&src) {
+        return match texrs::run_pdf_at(Some(std::path::Path::new(&path)), &src) {
             Ok(bytes) => {
                 let out = std::path::Path::new(&path).with_extension("pdf");
                 match std::fs::write(&out, &bytes) {

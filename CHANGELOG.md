@@ -8,6 +8,33 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Colour, and the font a document ships with itself -- the two reasons a book
+  whose preamble is a palette and a `\setmainfont` came out black and in the
+  wrong face.
+  - `\definecolor`, `\providecolor` and `\colorlet` build the palette;
+    `\color`, `\textcolor` and `\pagecolor` use it. The prelude defined all six
+    to swallow their arguments and emit nothing, so a book with 2,119 colour
+    definitions and a `\color{neonCyan}` on every heading produced a PDF with
+    no colour operator in it at all. `\color` is a switch and ends with the
+    group that holds it; `\textcolor` puts the previous colour back. Models
+    read: `HTML`, `rgb`, `RGB`, `gray`, `cmyk` -- and a model that is none of
+    those defines nothing rather than guessing.
+  - `\pagecolor` is painted under the text rather than ignored. A document that
+    sets a dark page sets light text to go on it, so honouring one without the
+    other leaves white on white.
+  - fontspec's `Path=`, `UprightFont=` and `Extension=` are read. A document
+    that ships its own font names a FILE, not an installed family: looking
+    `Arimo` up among the installed families finds nothing, and `fc-match`
+    answers anyway with its default, which is what the whole book was then set
+    in. `Path=` is written when the document is built and is regularly a
+    scratch directory that no longer exists, so a stale one is retried by its
+    last component against the directory the document was read from -- where
+    the fonts actually are.
+  - A font is written into the PDF once and referred to from every page.
+    Embedding it per page is also correct PDF and unusable: a 144-page book
+    carrying Arimo came to 72 MB, one copy of the font per page. It is
+    1.7 MB now. Images are shared the same way.
+
 - Dimensions: `\dimen` registers, the units that reach them, `\dimendef`, and
   `\the`/`\number`. A dimension is an integer count of scaled points and every
   unit is an exact integer ratio to a point (`tex.web` §458) rather than a

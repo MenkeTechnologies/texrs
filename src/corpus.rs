@@ -540,6 +540,43 @@ pub const CORPUS: &[Entry] = &[
         "Consumed with both of its arguments, producing nothing. The class counterpart of `\\PassOptionsToPackage`.",
         "\\PassOptionsToClass{OPTIONS}{CLASS}\n\\PassOptionsToClass{a4paper}{article}",
     ),
+    // ── Colour — lower::lower_colour, colour.rs ──────────────────────────
+    (
+        "\\definecolor",
+        "LaTeX",
+        "Name a colour: `\\definecolor{neonCyan}{HTML}{05D9E8}`. The models read are `HTML` (six hex digits), `rgb` (three components in 0..=1), `RGB` (the same in 0..=255), `gray` and `cmyk`. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later `\\color` names something unknown and the page comes out black.",
+        "\\definecolor{NAME}{MODEL}{SPEC}\n\\definecolor{neonCyan}{HTML}{05D9E8}",
+    ),
+    (
+        "\\providecolor",
+        "LaTeX",
+        "Define a colour only if that name is not already defined. Otherwise `\\definecolor`.",
+        "\\providecolor{NAME}{MODEL}{SPEC}\n\\providecolor{link}{HTML}{05D9E8}",
+    ),
+    (
+        "\\colorlet",
+        "LaTeX",
+        "Give an existing colour another name. A name nothing has defined yet defines nothing.",
+        "\\colorlet{NEW}{OLD}\n\\definecolor{brand}{HTML}{FF2A6D}\n\\colorlet{heading}{brand}",
+    ),
+    (
+        "\\color",
+        "LaTeX",
+        "Switch the colour of everything that follows, until the group holding it closes -- a switch rather than a wrapper, which is why `{\\color{red}...}` colours only what is inside the braces. Takes a defined name, or a model and a spec: `\\color[rgb]{1,0,0}`. A second `\\color` in one group replaces the first rather than nesting, because TeX has one current colour and not a stack. A name nothing defined leaves the text in the colour it already had.",
+        "\\color{NAME}\n\\color[MODEL]{SPEC}\n{\\color{neonCyan}cyan words}",
+    ),
+    (
+        "\\textcolor",
+        "LaTeX",
+        "Colour exactly one argument: `\\textcolor{neonCyan}{words}`. Takes the same two forms as `\\color`. Unlike `\\color` it puts the previous colour back afterwards, so it never leaks into the text beside it.",
+        "\\textcolor{NAME}{TEXT}\n\\textcolor[MODEL]{SPEC}{TEXT}\n\\textcolor{red}{warning}",
+    ),
+    (
+        "\\pagecolor",
+        "LaTeX",
+        "Paint the page. Drawn under everything else, which is the only order that leaves the words on top of it -- and it has to be honoured, because a document that sets a dark page also sets light text to go on it, and doing one without the other leaves white on white.",
+        "\\pagecolor{NAME}\n\\definecolor{bgPrimary}{HTML}{05050A}\n\\pagecolor{bgPrimary}",
+    ),
     (
         "\\setmainfont",
         "LaTeX",

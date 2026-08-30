@@ -353,3 +353,34 @@ fn an_embedded_font_is_measured_in_its_own_widths() {
     let em = widths[('M' as usize) - 32];
     assert!(space < em, "space {space} should be narrower than M {em}");
 }
+
+/// `\setmainfont{Arimo}[Path=..., UprightFont=Arimo-VF]` names a FILE that
+/// ships with the document rather than an installed family. Reading the family
+/// and dropping the options is how a book whose font nobody has installed came
+/// out in whatever fc-match answered with.
+#[test]
+fn the_lowerer_keeps_the_font_file_the_preamble_named() {
+    let src = concat!(
+        "\\documentclass{article}\n\\usepackage{fontspec}\n",
+        "\\setmainfont{Arimo}[\n",
+        "    Path=/somewhere/.fonts/,\n",
+        "    Extension=.ttf,\n",
+        "    RawFeature={fallback=symfb},\n",
+        "    UprightFont=Arimo-VF,\n",
+        "]\n",
+        "\\begin{document}\nwords\n\\end{document}\n"
+    );
+    let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
+    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer.lower(src).expect("lower");
+    assert_eq!(lowerer.fonts.main.as_deref(), Some("Arimo"));
+    assert_eq!(
+        lowerer.fonts.main_file.upright.as_deref(),
+        Some("Arimo-VF"),
+        "the options were read and thrown away"
+    );
+    assert_eq!(
+        lowerer.fonts.main_file.path.as_deref(),
+        Some("/somewhere/.fonts/")
+    );
+}

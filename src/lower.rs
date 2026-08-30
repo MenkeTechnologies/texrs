@@ -41,6 +41,19 @@ pub struct Lowerer {
     /// answer. Recorded while lowering because that is where the preamble is
     /// read, and handed to the typesetter, which decides what it can honour.
     pub fonts: crate::typeset::Families,
+    /// The palette the document has defined, and the colour of the page.
+    ///
+    /// A document defines its colours once and refers to them by name from
+    /// then on -- `\definecolor{neonCyan}{HTML}{05D9E8}` in the preamble and
+    /// `\color{neonCyan}` wherever it wants it. Without the palette the name
+    /// means nothing and every page comes out black.
+    pub colours: crate::colour::Colours,
+    /// What `\pagecolor` asked the page to be painted.
+    ///
+    /// Load-bearing rather than decorative: a document that sets a dark page
+    /// also sets light text, and honouring the text without the page leaves
+    /// white-on-white.
+    pub page_colour: Option<crate::colour::Rgb>,
     /// Carry the document's own text into the program.
     ///
     /// Off by default: the terminal output of a `tex` run is its `\message`
@@ -86,6 +99,8 @@ impl Lowerer {
             ended: false,
             next_scratch: 255,
             fonts: crate::typeset::Families::default(),
+            colours: crate::colour::Colours::new(),
+            page_colour: None,
             text_output: false,
             depth: 0,
         }
@@ -180,6 +195,10 @@ impl Lowerer {
 
     fn block_inner(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
         let mut out = Vec::new();
+        // Whether a `\color` in THIS group is still in force. It is a switch,
+        // not a wrapper: it colours everything after it until the group that
+        // holds it closes, so the run is ended here rather than by the command.
+        let mut colour_open = false;
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
@@ -239,7 +258,8 @@ impl Lowerer {
                         }
                     }
                     Token::Char(_, Cat::EndGroup) => {
-                        return Ok(Self::drop_empty_line_directives(out))
+                        self.close_colour(&mut out, &mut colour_open);
+                        return Ok(Self::drop_empty_line_directives(out));
                     }
                     // The document's own words. Dropping these is why a book
                     // used to compile to a program that printed nothing.
@@ -269,6 +289,7 @@ impl Lowerer {
             if let Some(stops) = stop {
                 if stops.contains(&name.name()) {
                     lx.push_back(&[Token::Cs(name)]);
+                    self.close_colour(&mut out, &mut colour_open);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
             }
@@ -301,13 +322,11 @@ impl Lowerer {
                     }
                 }
             }
-            // Colour, before the prelude's own \textcolor can swallow it. DVI
-            // carries colour as a `\special` a driver reads, so it has to
-            // survive lowering as structure rather than as text.
-            if self.text_output
-                && name.name() == "textcolor"
-                && self.lower_textcolor(lx, &mut out)?
-            {
+            // Colour, before the prelude's own definitions can swallow it. The
+            // prelude defines these to consume their arguments and emit
+            // nothing, which is why a book full of `\color{neonCyan}` came out
+            // entirely black.
+            if self.text_output && self.lower_colour(lx, name, &mut out, &mut colour_open)? {
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -513,7 +532,13 @@ impl Lowerer {
                     let k = name.name();
                     let _ = self.eng.read_optional_bracket(lx)?;
                     let name = self.eng.read_group_text_pub(lx)?;
-                    let _ = self.eng.read_optional_bracket(lx)?;
+                    // The options are where a document that SHIPS its font
+                    // says so, with `Path=` and `UprightFont=`. Discarding
+                    // them left only a family name nothing has installed.
+                    let options = self.optional_text(lx)?.unwrap_or_default();
+                    if k == "setmainfont" || k == "setromanfont" {
+                        self.fonts.main_file = crate::typeset::FontFile::parse(&options);
+                    }
                     let slot = match k {
                         "setsansfont" => &mut self.fonts.sans,
                         "setmonofont" => &mut self.fonts.mono,
@@ -584,6 +609,7 @@ impl Lowerer {
                 }
             }
         }
+        self.close_colour(&mut out, &mut colour_open);
         Ok(Self::drop_empty_line_directives(out))
     }
 
@@ -656,37 +682,116 @@ impl Lowerer {
     /// `rgb` model is understood, which is what a Pandoc document writes;
     /// anything else falls through to the ordinary macro path rather than being
     /// coloured wrongly.
-    fn lower_textcolor(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<bool> {
-        let Some(model) = self.eng.read_optional_bracket(lx)? else {
-            return Ok(false);
-        };
-        let model: String = model.iter().map(|t| t.to_text(self.eng.escape)).collect();
-        if model.trim() != "rgb" {
-            return Ok(false);
+    /// The colour commands, before the prelude's stubs can swallow them.
+    ///
+    /// Returns whether the command was one of these and has been dealt with.
+    /// The colour reaches the page as a marker in the text -- `\u{1}r,g,b\u{2}`
+    /// to start and `\u{3}` to end -- because both backends draw colour as
+    /// something wrapped around a run of characters rather than as a character.
+    fn lower_colour(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+        colour_open: &mut bool,
+    ) -> R<bool> {
+        match name.name() {
+            // `\definecolor{name}{model}{spec}` -- the palette, which is what
+            // every later `\color{name}` is looked up in.
+            "definecolor" | "providecolor" | "colorlet" => {
+                let _ = self.eng.read_optional_bracket(lx)?;
+                let defined = self.eng.read_group_text_pub(lx)?;
+                let second = self.eng.read_group_text_pub(lx)?;
+                match name.name() {
+                    // `\colorlet{new}{old}` names an existing colour again.
+                    "colorlet" => {
+                        if let Some(rgb) = self.colours.get(&second) {
+                            self.colours.define_rgb(&defined, rgb);
+                        }
+                    }
+                    other => {
+                        let spec = self.eng.read_group_text_pub(lx)?;
+                        // `\providecolor` defines only what is not defined.
+                        let fresh = self.colours.get(&defined).is_none();
+                        if other == "definecolor" || fresh {
+                            self.colours.define(&defined, &second, &spec);
+                        }
+                    }
+                }
+                Ok(true)
+            }
+            // `\pagecolor{name}` paints the page. Recorded rather than drawn:
+            // the backend paints it under everything else, which is the only
+            // order in which the text stays on top of it.
+            "pagecolor" => {
+                let model = self.optional_text(lx)?;
+                let spec = self.eng.read_group_text_pub(lx)?;
+                if let Some(rgb) = self.colours.resolve(model.as_deref(), &spec) {
+                    self.page_colour = Some(rgb);
+                }
+                Ok(true)
+            }
+            // `\color{name}` is a SWITCH: everything after it is that colour
+            // until the group holding it closes. `\textcolor{name}{text}`
+            // colours exactly its argument.
+            "color" | "textcolor" => {
+                let model = self.optional_text(lx)?;
+                let spec = self.eng.read_group_text_pub(lx)?;
+                let Some((r, g, b)) = self.colours.resolve(model.as_deref(), &spec) else {
+                    // An unknown colour leaves the text in the colour it had.
+                    // `\textcolor` still owes its argument to the page.
+                    if name.name() == "textcolor" {
+                        let raw = self.eng.read_balanced_group(lx)?;
+                        self.lower_into(&raw, out)?;
+                    }
+                    return Ok(true);
+                };
+                if name.name() == "color" {
+                    // A second `\color` in one group replaces the first rather
+                    // than nesting: TeX has one current colour, not a stack.
+                    self.close_colour(out, colour_open);
+                    self.push_text(out, &format!("\u{1}{r},{g},{b}\u{2}"));
+                    *colour_open = true;
+                    return Ok(true);
+                }
+                self.push_text(out, &format!("\u{1}{r},{g},{b}\u{2}"));
+                let raw = self.eng.read_balanced_group(lx)?;
+                self.lower_into(&raw, out)?;
+                self.push_text(out, "\u{3}");
+                Ok(true)
+            }
+            _ => Ok(false),
         }
-        let spec = self.eng.read_group_text_pub(lx)?;
-        let parts: Vec<f64> = spec
-            .split(',')
-            .filter_map(|p| p.trim().parse::<f64>().ok())
-            .collect();
-        if parts.len() != 3 {
-            return Ok(false);
+    }
+
+    /// End a `\color` that is still in force, if there is one.
+    fn close_colour(&self, out: &mut Vec<Cmd>, colour_open: &mut bool) {
+        if std::mem::take(colour_open) {
+            self.push_text(out, "\u{3}");
         }
-        self.push_text(
-            out,
-            &format!("\u{1}{},{},{}\u{2}", parts[0], parts[1], parts[2]),
-        );
-        let raw = self.eng.read_balanced_group(lx)?;
+    }
+
+    /// An optional `[model]`, as its text.
+    fn optional_text(&mut self, lx: &mut Lexer) -> R<Option<String>> {
+        Ok(self.eng.read_optional_bracket(lx)?.map(|tokens| {
+            tokens
+                .iter()
+                .map(|t| t.to_text(self.eng.escape))
+                .collect::<String>()
+        }))
+    }
+
+    /// Lower a group's tokens into the run in progress.
+    fn lower_into(&mut self, raw: &[Token], out: &mut Vec<Cmd>) -> R<()> {
         let mut inner = Lexer::new("");
-        inner.push_back(&raw);
+        inner.push_back(raw);
         for cmd in self.block(&mut inner, None)? {
             match (&cmd, out.last_mut()) {
                 (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
                 _ => out.push(cmd),
             }
         }
-        self.push_text(out, "\u{3}");
-        Ok(true)
+        Ok(())
     }
 
     /// Append text to the run in progress, looking past line directives.

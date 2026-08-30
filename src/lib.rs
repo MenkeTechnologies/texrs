@@ -199,9 +199,14 @@ pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
     run_pdf_at(None, src)
 }
 
-/// The same, told where the document was read from, so a path it names can be
-/// resolved relative to it.
-pub fn run_pdf_at(near: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, TexError> {
+/// The same, told which FILE the document was read from, so a path it names
+/// can be resolved relative to the directory holding it.
+///
+/// The argument is the document, not its directory: a font shipped beside it
+/// lives in `dir/.fonts/`, and looking for that inside `book.tex/` finds
+/// nothing at all -- silently, since a font that cannot be found is a font
+/// that gets substituted.
+pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, TexError> {
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src_d) {
@@ -211,6 +216,8 @@ pub fn run_pdf_at(near: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
     // The families are read while lowering, because that is where the preamble
     // is; they have to be taken from the lowerer before it is dropped.
     let families = lowerer.fonts.clone();
+    // `\pagecolor` is read in the same place and for the same reason.
+    let page_colour = lowerer.page_colour;
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     let _ = crate::runtime::run(chunk).map_err(TexError)?;
     let text = crate::runtime::take_text();
@@ -218,8 +225,8 @@ pub fn run_pdf_at(near: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
         &text,
         &families,
         &crate::typeset::Layout::default(),
-        None,
-        near,
+        page_colour,
+        path.and_then(|p| p.parent()),
     ))
 }
 

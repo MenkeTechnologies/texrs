@@ -407,22 +407,43 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let tree = pdf.reserve();
 
+    // A font is written ONCE and referred to from every page that uses it.
+    // Adding it per page instead is correct PDF and unusable in practice: a
+    // 144-page book carrying an embedded Arimo came out at 72 MB, one whole
+    // copy of the font per page.
+    let mut font_objects: Vec<(&Font, Object)> = Vec::new();
+    let mut image_objects: Vec<(&crate::image::Image, Object)> = Vec::new();
+
     let mut kids = Vec::with_capacity(pages.len());
     for page in pages {
         let content = pdf.add(Object::Stream {
             dict: BTreeMap::new(),
             data: page.content.clone().into_bytes(),
         });
-        let fonts: BTreeMap<String, Object> = page
-            .fonts
-            .iter()
-            .map(|(name, font)| (name.clone(), add_font(&mut pdf, font)))
-            .collect();
-        let images: BTreeMap<String, Object> = page
-            .images
-            .iter()
-            .map(|(name, image)| (name.clone(), add_image(&mut pdf, image)))
-            .collect();
+        let mut fonts: BTreeMap<String, Object> = BTreeMap::new();
+        for (name, font) in &page.fonts {
+            let object = match font_objects.iter().find(|(seen, _)| *seen == font) {
+                Some((_, object)) => object.clone(),
+                None => {
+                    let object = add_font(&mut pdf, font);
+                    font_objects.push((font, object.clone()));
+                    object
+                }
+            };
+            fonts.insert(name.clone(), object);
+        }
+        let mut images: BTreeMap<String, Object> = BTreeMap::new();
+        for (name, image) in &page.images {
+            let object = match image_objects.iter().find(|(seen, _)| *seen == image) {
+                Some((_, object)) => object.clone(),
+                None => {
+                    let object = add_image(&mut pdf, image);
+                    image_objects.push((image, object.clone()));
+                    object
+                }
+            };
+            images.insert(name.clone(), object);
+        }
         let resources = match images.is_empty() {
             true => Object::dict([("Font", Object::Dict(fonts))]),
             false => Object::dict([
