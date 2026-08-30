@@ -34,6 +34,7 @@ pub const CHAPTERS: &[&str] = &[
     "Conditionals",
     "Registers",
     "Grouping",
+    "Inline Rust",
 ];
 
 /// The reference corpus, in chapter order.
@@ -324,6 +325,31 @@ pub const CORPUS: &[Entry] = &[
         "Registers",
         "Divide a register, truncating toward zero as TeX's does.",
         "\\divide\\count<N> by <number>\n\\count1=7 \\divide\\count1 by 2   % => 3",
+    ),
+    // ══ Inline Rust — rust_ffi.rs, fusevm::ffi ════════════════════════════
+    (
+        "\\rust",
+        "Inline Rust",
+        "Open a block of Rust compiled and loaded at run time. The body is Rust, not TeX \u{2014} it is lifted out of the file BEFORE the mouth reads it, because `#`, `{`, `}` and `&` are category codes the mouth would act on. Every `#[no_mangle] pub extern \"C\"` function the block exports becomes callable with `\\rustcall`. Needs `rustc` on PATH; the compiled library is cached by body hash, so a second run does not compile it again.",
+        "\\rust{ <rust source> }\n\\rust{\n    #[no_mangle]\n    pub extern \"C\" fn twice(n: i64) -> i64 { n * 2 }\n}",
+    ),
+    (
+        "\\rustcall",
+        "Inline Rust",
+        "Call a function a `\\rust` block exported. The name runs to the first space, the arguments are numbers, and `\\endrust` ends the list. It is a NUMBER wherever TeX reads one \u{2014} a register assignment, an arithmetic operand, a conditional, or a `\\message` body \u{2014} and in running text it is called for its effect with the value dropped.",
+        "\\rustcall <name> <numbers…>\\endrust\n\\count1=21\n\\message{\\rustcall twice \\count1 \\endrust}   % => 42\n\\count2=\\rustcall add \\count1 22 \\endrust",
+    ),
+    (
+        "\\rustcompile",
+        "Inline Rust",
+        "What a `\\rust{ … }` block becomes: compile and register the block whose base64 body follows, up to `\\endrust`. Written by the desugarer rather than by hand, and carried in a brace-free form so it reads correctly whatever the category codes are where the block appeared.",
+        "\\rustcompile <base64>\\endrust",
+    ),
+    (
+        "\\endrust",
+        "Inline Rust",
+        "Terminate a `\\rustcompile` body or a `\\rustcall` argument list. A control sequence rather than a brace, so neither form depends on a category code the document may not have set yet.",
+        "\\rustcall twice 21\\endrust",
     ),
     // ══ Grouping — expand::begin_group / end_group, lower's save/restore ═══
     (

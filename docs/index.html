@@ -117,6 +117,19 @@
       </section>
 
       <section class="tutorial-section">
+        <h2>Inline Rust</h2>
+        <p>A <code>\rust{ … }</code> block is compiled by <code>rustc</code>, loaded, and its exported functions become callable from the document. The body is Rust, not TeX, so it is lifted out of the file <em>before the mouth reads it</em> — <code>#</code>, <code>{</code>, <code>}</code> and <code>&amp;</code> are category codes the mouth would act on.</p>
+<pre>\rust{
+    #[no_mangle]
+    pub extern "C" fn twice(n: i64) -&gt; i64 { n * 2 }
+}
+\catcode`\{=1 \catcode`\}=2
+\count1=21
+\message{\rustcall twice \count1 \endrust}   % =&gt; 42</pre>
+        <p>A call is a <em>number</em> wherever TeX reads one: a register assignment, an arithmetic operand, a conditional, or a <code>\message</code> body. The compiled library is cached by body hash, so only the first run pays for the compile, and a block that does not compile stops the run with rustc's own diagnostic rather than a missing-function error later.</p>
+      </section>
+
+      <section class="tutorial-section">
         <h2>Toolchain</h2>
         <div class="cat-grid">
           <div class="cat-card"><h4>texrs &lt;file&gt;</h4><p>Tokenise, expand, lower, and run a <code>.tex</code> file on fusevm; print its <code>\message</code> stream.</p></div>

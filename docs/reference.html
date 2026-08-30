@@ -233,6 +233,26 @@
         </table>
       </section>
 
+      <section class="tutorial-section" id="ch-inline-rust">
+        <h2>Inline Rust</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\rust</code></td><td>Open a block of Rust compiled and loaded at run time. The body is Rust, not TeX — it is lifted out of the file BEFORE the mouth reads it, because <code>#</code>, <code>{</code>, <code>}</code> and <code>&amp;</code> are category codes the mouth would act on. Every <code>#[no_mangle] pub extern "C"</code> function the block exports becomes callable with <code>\rustcall</code>. Needs <code>rustc</code> on PATH; the compiled library is cached by body hash, so a second run does not compile it again.</td><td><pre>\rust{ &lt;rust source&gt; }
+\rust{
+    #[no_mangle]
+    pub extern "C" fn twice(n: i64) -&gt; i64 { n * 2 }
+}</pre></td></tr>
+            <tr><td><code>\rustcall</code></td><td>Call a function a <code>\rust</code> block exported. The name runs to the first space, the arguments are numbers, and <code>\endrust</code> ends the list. It is a NUMBER wherever TeX reads one — a register assignment, an arithmetic operand, a conditional, or a <code>\message</code> body — and in running text it is called for its effect with the value dropped.</td><td><pre>\rustcall &lt;name&gt; &lt;numbers…&gt;\endrust
+\count1=21
+\message{\rustcall twice \count1 \endrust}   % =&gt; 42
+\count2=\rustcall add \count1 22 \endrust</pre></td></tr>
+            <tr><td><code>\rustcompile</code></td><td>What a <code>\rust{ … }</code> block becomes: compile and register the block whose base64 body follows, up to <code>\endrust</code>. Written by the desugarer rather than by hand, and carried in a brace-free form so it reads correctly whatever the category codes are where the block appeared.</td><td><pre>\rustcompile &lt;base64&gt;\endrust</pre></td></tr>
+            <tr><td><code>\endrust</code></td><td>Terminate a <code>\rustcompile</code> body or a <code>\rustcall</code> argument list. A control sequence rather than a brace, so neither form depends on a category code the document may not have set yet.</td><td><pre>\rustcall twice 21\endrust</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
       <section class="tutorial-section">
         <h2>Command line</h2>
         <table class="file-table">

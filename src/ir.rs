@@ -15,6 +15,14 @@ pub enum Num {
     Literal(i64),
     /// `\count<n>` — a register read.
     Count(i64),
+    /// `\rustcall <name> <args>\endrust` — a call into a compiled `\rust{ … }`
+    /// block. It is a `Num` rather than a command of its own because that is
+    /// where a value is useful: anywhere TeX reads a number, which is a register
+    /// assignment, an arithmetic operand, a conditional, or a `\message` body.
+    Rust {
+        name: String,
+        args: Vec<Num>,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -41,6 +49,11 @@ pub enum Arith {
 pub enum MsgOp {
     Text(String),
     Number(Num),
+    /// A number computed and thrown away, for a call made for its effect —
+    /// `\rustcall` in running text rather than inside a message body. It rides
+    /// the message machinery because that is where a run-time value already has
+    /// somewhere to be evaluated; nothing is appended.
+    Discard(Num),
     If {
         left: Num,
         rel: Rel,
@@ -57,6 +70,11 @@ pub enum MsgOp {
 
 #[derive(Clone, Debug)]
 pub enum Cmd {
+    /// `\rustcompile <base64>\endrust` — compile and register the functions a
+    /// `\rust{ … }` block exported. It is a run-time command, not a compile-time
+    /// one: compiling calls `rustc`, and doing that while LOWERING would mean a
+    /// document could not be lowered on a machine that only has to run it.
+    RustCompile(String),
     /// The source line the commands after this one came from.
     ///
     /// A line directive, the way any compiler carries one: the lowerer emits it

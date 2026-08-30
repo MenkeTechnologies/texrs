@@ -12,6 +12,13 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- Inline Rust: a `\rust{ … }` block is compiled by `rustc`, loaded, and its
+  exported functions are callable as `\rustcall <name> <numbers…>\endrust` —
+  a number wherever TeX reads one. The block is lifted out of the file before
+  the mouth reads it, because its body is Rust and `#`, `{`, `}` and `&` are
+  category codes the mouth would act on. The replacement carries no braces, so
+  it reads correctly whatever the catcodes are where the block appeared. A block
+  that does not compile stops the run with rustc's own diagnostic.
 - `--aot`: compile a document to a standalone native executable. The chunk is
   emitted as a relocatable object through fusevm's ahead-of-time compiler and
   linked against the texrs runtime staticlib, so the result runs with no

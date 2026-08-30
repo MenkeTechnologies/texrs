@@ -185,6 +185,18 @@ impl Lowerer {
                     let parts = self.message_parts(lx)?;
                     out.push(Cmd::Message(parts));
                 }
+                // `\rustcompile <base64>\endrust`, which is what a `\rust{ … }`
+                // block desugared to before the mouth ever read the file.
+                n if n == crate::rust_ffi::COMPILE_CS => {
+                    let b64 = self.rust_blob(lx)?;
+                    out.push(Cmd::RustCompile(b64));
+                }
+                // A bare `\rustcall` in running text: called for its effect,
+                // with the value dropped.
+                n if n == crate::rust_ffi::CALL_CS => {
+                    let call = self.rust_call(lx, false)?;
+                    out.push(Cmd::Message(vec![MsgOp::Discard(call)]));
+                }
                 "ifnum" => {
                     let left = self.number(lx)?;
                     let rel = match self.eng.read_relation_file(lx)? {
@@ -396,7 +408,99 @@ impl Lowerer {
         Ok((then_branch, else_branch))
     }
 
-    /// A number operand: a literal, or `\count<n>` which must be read at run time.
+    /// The base64 body of a `\rustcompile <base64>\endrust`.
+    ///
+    /// Every character up to the terminating control sequence, spaces skipped:
+    /// base64's alphabet is letters, digits, `+`, `/` and `=`, none of which the
+    /// mouth can turn into anything but a character token whatever the catcodes
+    /// are.
+    fn rust_blob(&mut self, lx: &mut Lexer) -> R<String> {
+        let mut b64 = String::new();
+        loop {
+            let Some(t) = lx.next_token(&self.eng.cats) else {
+                return Err(TexError("Runaway \\rustcompile: missing \\endrust".into()));
+            };
+            match &t {
+                _ if t.is_space() => continue,
+                Token::Char(c, _) => b64.push(*c),
+                Token::Cs(n) if n == crate::rust_ffi::END_CS => break,
+                Token::Cs(n) => {
+                    return Err(TexError(format!(
+                        "Unexpected \\{n} inside a \\rust block body"
+                    )))
+                }
+            }
+        }
+        Ok(b64)
+    }
+
+    /// One token, from the file or from the pending list.
+    ///
+    /// The lowerer reads from two places -- running text (`\rustcall` in a
+    /// statement) and an already-expanded token run (`\rustcall` inside a
+    /// `\message` body) -- and the FFI call parser is the same either way, so
+    /// the difference is a flag rather than two copies of the parser.
+    fn take_token(&mut self, lx: &mut Lexer, pending: bool) -> Option<Token> {
+        match pending {
+            true => lx.pending.pop(),
+            false => lx.next_token(&self.eng.cats),
+        }
+    }
+
+    /// `\rustcall <name> <numbers…>\endrust`.
+    ///
+    /// The name is characters up to the first space, and the arguments are
+    /// numbers up to `\endrust`. Both ends are catcode-independent: a control
+    /// sequence terminates the list, and the only category the form depends on
+    /// is the escape character.
+    fn rust_call(&mut self, lx: &mut Lexer, pending: bool) -> R<Num> {
+        let mut name = String::new();
+        loop {
+            let Some(t) = self.take_token(lx, pending) else {
+                return Err(TexError("Runaway \\rustcall: no name".into()));
+            };
+            match &t {
+                _ if t.is_space() && name.is_empty() => continue,
+                _ if t.is_space() => break,
+                Token::Char(c, _) => name.push(*c),
+                // A control sequence ends the name; it is the argument list, or
+                // the terminator for a call that takes none.
+                Token::Cs(_) => {
+                    lx.push_back(&[t]);
+                    break;
+                }
+            }
+        }
+        if name.is_empty() {
+            return Err(TexError("Missing function name after \\rustcall".into()));
+        }
+
+        let mut args = Vec::new();
+        loop {
+            let Some(t) = self.take_token(lx, pending) else {
+                return Err(TexError(format!(
+                    "Runaway \\rustcall {name}: missing \\endrust"
+                )));
+            };
+            if t.is_space() {
+                continue;
+            }
+            if let Token::Cs(n) = &t {
+                if n == crate::rust_ffi::END_CS {
+                    break;
+                }
+            }
+            lx.push_back(&[t]);
+            args.push(match pending {
+                true => self.msg_number(lx)?,
+                false => self.number(lx)?,
+            });
+        }
+        Ok(Num::Rust { name, args })
+    }
+
+    /// A number operand: a literal, `\count<n>` read at run time, or a call
+    /// into a compiled `\rust{ … }` block.
     fn number(&mut self, lx: &mut Lexer) -> R<Num> {
         // Peek for `\count`, which becomes a slot read rather than a constant.
         loop {
@@ -410,6 +514,9 @@ impl Lowerer {
                 Token::Cs(n) if n == "count" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     return Ok(Num::Count(reg));
+                }
+                Token::Cs(n) if n == crate::rust_ffi::CALL_CS => {
+                    return self.rust_call(lx, false);
                 }
                 _ => {
                     lx.push_back(&[t]);
@@ -475,6 +582,13 @@ impl Lowerer {
                         let v = self.eng.scan_number_pending(work)?;
                         text.push_str(&v.to_string());
                     }
+                }
+                // `\rustcall <name> <numbers…>\endrust` inside a message: the
+                // returned value is rendered where the call stands.
+                n if n == crate::rust_ffi::CALL_CS => {
+                    flush!();
+                    let call = self.rust_call(work, true)?;
+                    out.push(MsgOp::Number(call));
                 }
                 "string" => {
                     if let Some(next) = work.pending.pop() {
@@ -640,6 +754,9 @@ impl Lowerer {
                     let reg = self.eng.scan_number_pending(work)?;
                     return Ok(Num::Count(reg));
                 }
+                Token::Cs(n) if n == crate::rust_ffi::CALL_CS => {
+                    return self.rust_call(work, true);
+                }
                 _ => {
                     work.push_back(&[t]);
                     return Ok(Num::Literal(self.eng.scan_number_pending(work)?));
@@ -662,7 +779,7 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
         for c in cmds {
             match c {
                 // A line directive assigns nothing.
-                Cmd::Line(_) => {}
+                Cmd::Line(_) | Cmd::RustCompile(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

@@ -18,7 +18,10 @@ use texrs::corpus::{CHAPTERS, CORPUS};
 /// The primitives named in `expand.rs` and `lower.rs` dispatch, minus the ones
 /// that are not control sequences a document writes.
 fn dispatched() -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+    let mut names: BTreeSet<String> = DISPATCHED_BY_CONSTANT
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     for src in [
         include_str!("../src/expand.rs"),
         include_str!("../src/lower.rs"),
@@ -65,7 +68,21 @@ const NOT_PRIMITIVES: &[&str] = &["endgroup\u{0}"];
 /// Documented primitives that have no dispatch arm of their own because another
 /// primitive's scanner consumes them. They are still written in documents, so
 /// they belong in the corpus.
-const CONSUMED_BY_A_SCANNER: &[&str] = &["endcsname"];
+///
+/// `rust` is the block keyword: the desugarer rewrites it away before the mouth
+/// ever runs, so the engine never dispatches on it — and a document still
+/// writes it.
+const CONSUMED_BY_A_SCANNER: &[&str] = &["endcsname", "rust"];
+
+/// Primitives whose dispatch arm matches a CONSTANT rather than a string
+/// literal, so the scanner below cannot see them. The FFI names live in
+/// `src/rust_ffi.rs` because the desugarer writes them and the lowerer reads
+/// them, and one spelling in one place is what keeps those two agreeing.
+const DISPATCHED_BY_CONSTANT: &[&str] = &[
+    texrs::rust_ffi::COMPILE_CS,
+    texrs::rust_ffi::CALL_CS,
+    texrs::rust_ffi::END_CS,
+];
 
 #[test]
 fn every_dispatched_primitive_is_documented() {

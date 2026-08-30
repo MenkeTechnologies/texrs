@@ -31,12 +31,13 @@ shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
 - [\[0x01\] Install](#0x01-install)
 - [\[0x02\] Usage](#0x02-usage)
 - [\[0x03\] What works](#0x03-what-works)
-- [\[0x04\] What does not](#0x04-what-does-not)
-- [\[0x05\] How it runs](#0x05-how-it-runs)
-- [\[0x06\] Parity](#0x06-parity)
-- [\[0x07\] Fuzzing](#0x07-fuzzing)
-- [\[0x08\] Benchmarks](#0x08-benchmarks)
-- [\[0x09\] Documentation](#0x09-documentation)
+- [\[0x04\] Inline Rust](#0x04-inline-rust)
+- [\[0x05\] What does not](#0x05-what-does-not)
+- [\[0x06\] How it runs](#0x06-how-it-runs)
+- [\[0x07\] Parity](#0x07-parity)
+- [\[0x08\] Fuzzing](#0x08-fuzzing)
+- [\[0x09\] Benchmarks](#0x09-benchmarks)
+- [\[0x0A\] Documentation](#0x0a-documentation)
 - [\[0xFF\] Licence](#0xff-licence)
 
 ---
@@ -146,12 +147,34 @@ than none.
 - `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
 - `\message`.
 
-## [0x04] What does not
+## [0x04] Inline Rust
+
+```tex
+\rust{
+    #[no_mangle]
+    pub extern "C" fn twice(n: i64) -> i64 { n * 2 }
+}
+\catcode`\{=1 \catcode`\}=2
+\count1=21
+\message{\rustcall twice \count1 \endrust}   % => 42
+```
+
+The block is compiled by `rustc`, loaded, and its exported functions become
+callable. Its body is Rust, not TeX, so it is lifted out of the file **before
+the mouth reads it** — `#`, `{`, `}` and `&` are category codes the mouth would
+act on. A call is a *number* wherever TeX reads one: a register assignment, an
+arithmetic operand, a conditional, or a `\message` body.
+
+The compiled library is cached by body hash, so only the first run pays for the
+compile, and a block that does not compile stops the run with rustc's own
+diagnostic rather than a missing-function error later.
+
+## [0x05] What does not
 
 No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
 typesetter yet — see `docs/ROADMAP.md`.
 
-## [0x05] How it runs
+## [0x06] How it runs
 
 texrs is a **fusevm frontend**, not an interpreter: mouth → expander → command
 stream → fusevm bytecode → the VM runs it. A count register is a VM **slot**, so
@@ -164,7 +187,7 @@ is folded while lowering instead, because there is nothing for the VM to test.
 `tests/lowering.rs` asserts the emitted bytecode rather than the printed output —
 output parity alone would not distinguish a frontend from a tree-walker.
 
-## [0x06] Parity
+## [0x07] Parity
 
 The contract is the `\message` stream, compared byte-for-byte against the real
 `tex` binary. No expectation is written by hand:
@@ -188,7 +211,7 @@ group. Every case is in parity except the ones `tests/known_gaps.txt` names,
 and the gate fails both on an unlisted divergence and on a listed case that has
 started passing, so the list cannot go stale.
 
-## [0x07] Fuzzing
+## [0x08] Fuzzing
 
 Hand-written cases only cover what someone thought to write down.
 
@@ -211,7 +234,7 @@ corpus under stable Rust, and `tests/fuzz_mass_replay.rs` points the mouth at
 generated mutations of every `.tex` in the tree, so `cargo test` still exercises
 the harness on a machine with no nightly toolchain.
 
-## [0x08] Benchmarks
+## [0x09] Benchmarks
 
 ```sh
 cargo bench                  # the pipeline against itself: mouth, frontend, VM
@@ -230,7 +253,7 @@ rather than where its time goes, and prints the two caveats with the numbers:
 `tex` loads the plain format on every run while texrs loads nothing, and texrs
 implements the mouth and expander only.
 
-## [0x09] Documentation
+## [0x0A] Documentation
 
 - **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)

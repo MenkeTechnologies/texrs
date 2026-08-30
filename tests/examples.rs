@@ -9,15 +9,32 @@
 //! in `tests/cases` may diverge if `tests/known_gaps.txt` says why; an example
 //! may not. An example that cannot be kept in parity does not belong in
 //! `examples/`.
+//!
+//! `examples/extensions/` is the one exception, and it is not an escape hatch:
+//! those documents use constructs texrs ADDS to TeX — inline Rust — for which
+//! there is no `tex` behaviour to be in parity WITH. They still have to run and
+//! print something, which is what the first test below checks for every example
+//! in the tree.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 
+/// The examples held to parity with real tex: everything directly in
+/// `examples/`.
 fn examples() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    tex_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("examples"))
+}
+
+/// The examples that use constructs tex does not have, in
+/// `examples/extensions/`. They must run; there is nothing to compare them to.
+fn extensions() -> Vec<PathBuf> {
+    tex_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/extensions"))
+}
+
+fn tex_files(dir: &Path) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .expect("examples/")
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "tex"))
         .collect();
@@ -27,7 +44,8 @@ fn examples() -> Vec<PathBuf> {
 
 #[test]
 fn every_example_runs_and_prints_something() {
-    let all = examples();
+    let mut all = examples();
+    all.extend(extensions());
     assert!(!all.is_empty(), "examples/ has no .tex files");
     for path in &all {
         let src = std::fs::read_to_string(path).expect("read example");

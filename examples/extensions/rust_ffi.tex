@@ -1,0 +1,25 @@
+% Inline Rust: a block compiled and loaded at run time, called from TeX.
+%
+% The block is lifted out of the file before the mouth reads it -- its body is
+% Rust, full of characters TeX would read as category codes -- and every
+% `#[no_mangle] pub extern "C"` function it exports becomes callable.
+%
+% A call is a NUMBER wherever TeX reads one: a register assignment, an
+% arithmetic operand, a conditional, or a message body.
+%
+% Needs `rustc` on PATH. The compiled library is cached by body hash, so only
+% the first run pays for it.
+\rust{
+    #[no_mangle]
+    pub extern "C" fn texrs_example_twice(n: i64) -> i64 { n * 2 }
+
+    #[no_mangle]
+    pub extern "C" fn texrs_example_add(a: i64, b: i64) -> i64 { a + b }
+}
+\catcode`\{=1 \catcode`\}=2
+\count1=21
+\message{twice=\rustcall texrs_example_twice \count1 \endrust}
+\count2=\rustcall texrs_example_add \count1 21 \endrust
+\message{sum=\the\count2}
+\message{\ifnum\rustcall texrs_example_twice \count1 \endrust>41 BIG\else SMALL\fi}
+\end

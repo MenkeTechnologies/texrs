@@ -18,6 +18,10 @@ pub mod ops {
     pub const MSG_APPEND: u16 = 4000;
     /// Finish the message being built and record it.
     pub const MSG_FLUSH: u16 = 4001;
+    /// Compile and register a `\rust{ … }` block: one argument, the base64 body.
+    pub const FFI_COMPILE: u16 = 4003;
+    /// Call a function a block exported: the name, then its arguments.
+    pub const FFI_CALL: u16 = 4004;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -81,6 +85,12 @@ impl Compiler {
                     self.b.emit(Op::CallBuiltin(ops::DBG_LINE, 0), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
+            }
+            Cmd::RustCompile(b64) => {
+                let k = self.b.add_constant(Value::Str(b64.clone().into()));
+                self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::CallBuiltin(ops::FFI_COMPILE, 1), self.line);
+                self.b.emit(Op::Pop, self.line);
             }
             Cmd::SetCount(reg, n) => {
                 self.num(n);
@@ -190,6 +200,10 @@ impl Compiler {
                     self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
+                MsgOp::Discard(n) => {
+                    self.num(n);
+                    self.b.emit(Op::Pop, self.line);
+                }
                 MsgOp::Number(n) => {
                     self.num(n);
                     self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
@@ -261,6 +275,17 @@ impl Compiler {
             }
             Num::Count(reg) => {
                 self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+            }
+            Num::Rust { name, args } => {
+                // The name first, then the arguments: the builtin pops the
+                // whole run and the name is what it dispatches on.
+                let k = self.b.add_constant(Value::Str(name.clone().into()));
+                self.b.emit(Op::LoadConst(k), self.line);
+                for a in args {
+                    self.num(a);
+                }
+                let argc = u8::try_from(args.len() + 1).unwrap_or(u8::MAX);
+                self.b.emit(Op::CallBuiltin(ops::FFI_CALL, argc), self.line);
             }
         }
     }
