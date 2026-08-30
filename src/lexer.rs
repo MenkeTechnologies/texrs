@@ -20,6 +20,14 @@ enum State {
 pub struct Lexer {
     chars: Vec<char>,
     pos: usize,
+    /// The last answer [`Lexer::line`] gave, as `(position, line)`.
+    ///
+    /// Counting newlines from the start of the file on every call is O(n) per
+    /// token and so O(n²) per document — which the scaling benchmark caught:
+    /// quadrupling the input cost 27x. Counting only what has been consumed
+    /// SINCE the last answer makes the whole walk amortized O(n), and a rewind
+    /// (the scanner pushes tokens back) simply recounts from the start.
+    line_cache: std::cell::Cell<(usize, u32)>,
     state: State,
     /// Pushed-back tokens (`\expandafter` and macro expansion feed these).
     pub pending: Vec<Token>,
@@ -30,6 +38,7 @@ impl Lexer {
         Self {
             chars: src.chars().collect(),
             pos: 0,
+            line_cache: std::cell::Cell::new((0, 1)),
             state: State::NewLine,
             pending: Vec::new(),
         }
@@ -50,10 +59,15 @@ impl Lexer {
     /// than tracked incrementally: the scanner rewinds and pushes back, and a
     /// counter that has to be maintained through both is a counter that drifts.
     pub fn line(&self) -> u32 {
-        1 + self.chars[..self.pos.min(self.chars.len())]
-            .iter()
-            .filter(|c| **c == '\n')
-            .count() as u32
+        let pos = self.pos.min(self.chars.len());
+        let (from, base) = match self.line_cache.get() {
+            (cached_pos, line) if cached_pos <= pos => (cached_pos, line),
+            // The scanner moved backwards: recount.
+            _ => (0, 1),
+        };
+        let line = base + self.chars[from..pos].iter().filter(|c| **c == '\n').count() as u32;
+        self.line_cache.set((pos, line));
+        line
     }
 
     fn peek(&self) -> Option<char> {

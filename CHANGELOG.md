@@ -68,7 +68,20 @@ All notable changes to texrs are recorded here. The format follows
   debugger, since texrs ships neither server — which is also why this plugin
   runs on Community editions where its siblings need a paid IDE.
 
+- Benchmarks. `cargo bench` measures the pipeline against itself — the mouth
+  alone, the frontend, the VM alone, and the whole run — so a slow expander and
+  a slow VM cannot hide behind one end-to-end number, plus a size sweep that
+  shows how the cost scales. `bench/compare.sh` measures the only comparison
+  that says whether the engine is fast: the same documents through texrs and
+  real `tex`, end to end, with the two caveats printed beside the numbers.
+
 ### Fixed
+
+- `Lexer::line` counted newlines from the start of the file on every call, which
+  is O(n) per token and O(n²) per document: the scaling benchmark caught it on
+  its first run, where quadrupling the input cost 27x. It now counts only what
+  has been consumed since the last answer. The 800-statement document went from
+  248 ms to 11.7 ms; the sweep is close to linear rather than quadratic.
 
 - A panic in the argument reader on TeX's `#{` parameter form, found by
   `cargo fuzz run lower`. The parameter text is now validated at definition

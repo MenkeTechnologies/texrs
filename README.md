@@ -35,7 +35,8 @@ shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
 - [\[0x05\] How it runs](#0x05-how-it-runs)
 - [\[0x06\] Parity](#0x06-parity)
 - [\[0x07\] Fuzzing](#0x07-fuzzing)
-- [\[0x08\] Documentation](#0x08-documentation)
+- [\[0x08\] Benchmarks](#0x08-benchmarks)
+- [\[0x09\] Documentation](#0x09-documentation)
 - [\[0xFF\] Licence](#0xff-licence)
 
 ---
@@ -195,7 +196,26 @@ corpus under stable Rust, and `tests/fuzz_mass_replay.rs` points the mouth at
 generated mutations of every `.tex` in the tree, so `cargo test` still exercises
 the harness on a machine with no nightly toolchain.
 
-## [0x08] Documentation
+## [0x08] Benchmarks
+
+```sh
+cargo bench                  # the pipeline against itself: mouth, frontend, VM
+bash bench/compare.sh        # the same documents through texrs and real tex
+```
+
+`cargo bench` separates the stages, because one end-to-end number cannot tell a
+slow expander from a slow VM, and sweeps document size, because a frontend
+that is quadratic in the number of macro calls looks fine on a small file and
+stops being usable on a real one. That sweep has already earned its keep: it
+caught a line-number lookup that was O(n) per token, and fixing it took an
+800-statement document from 248 ms to 11.7 ms.
+
+`bench/compare.sh` is the comparison that says whether the engine is fast
+rather than where its time goes, and prints the two caveats with the numbers:
+`tex` loads the plain format on every run while texrs loads nothing, and texrs
+implements the mouth and expander only.
+
+## [0x09] Documentation
 
 - **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)

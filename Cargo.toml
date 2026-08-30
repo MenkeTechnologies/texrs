@@ -48,6 +48,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"
 
+# Input digests (src/io.rs): what a run read, recorded so a cache keyed on more
+# than one file can say whether it is still valid.
+sha2 = "0.10"
+
 # The interactive prompt (`texrs --repl`), the same line editor the sibling
 # frontends' REPLs use: history in ~/.texrs/history and Tab completion over the
 # primitive corpus. nu-ansi-term paints the prompt; the home comes from `dirs`,
@@ -68,10 +72,16 @@ nix = { version = "0.29", features = ["fs"] }
 dirs = "5"
 once_cell = "1"
 
+[[bench]]
+name = "pipeline"
+harness = false
+
 [dev-dependencies]
 # The DAP integration test writes a document to a scratch directory and points
 # the adapter at it by path.
 tempfile = "3"
+# The benchmarks; `cargo bench` only.
+criterion = "0.5"
 
 # texrs is a standalone crate, not a workspace member. An explicit empty
 # `[workspace]` stops cargo walking up to the MenkeTechnologiesMeta parent, and
