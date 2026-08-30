@@ -176,6 +176,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- tests/typeset.rs no longer fails on a machine with no TeX installation. The
+  metrics it measures in belong to an installation, not to this crate, so on a
+  runner with neither `kpsewhich` nor a texmf tree all thirteen panicked before
+  asserting anything. They say so and stop now, which is how tests/fontmap.rs
+  has always guarded. Installing the metrics part-way is worse than not at all:
+  `texlive-base` carries cmr10 and cmsy10 and makes these pass, and fontmap.rs
+  then starts asserting against an installation naming 438 fonts where it wants
+  more than a thousand. A font that is FOUND and unreadable still fails.
+
 - The lowering test's register prologue is measured rather than written down.
   It skipped a hardcoded 512 ops -- two for each of 256 count registers -- and
   when dimension registers took the bank to 512 that skip landed inside the
