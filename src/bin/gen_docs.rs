@@ -16,9 +16,12 @@ fn main() {
         eprintln!("gen-docs: cannot write {out}: {e}");
         std::process::exit(1);
     }
+    // Counted off what the language server served, since that is what the page
+    // was rendered from: a primitive the server stops resolving should make this
+    // number fall rather than keep reporting the corpus's optimistic total.
     println!(
         "wrote {out} ({} entries, {} chapters)",
-        texrs::corpus::CORPUS.len(),
+        texrs::lsp::served().len(),
         texrs::corpus::CHAPTERS.len()
     );
 }

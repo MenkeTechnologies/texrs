@@ -228,6 +228,17 @@ fn token_at(text: &str, line: u32, col: u32) -> Option<String> {
     if chars[col] == '{' || chars[col] == '}' {
         return Some(chars[col].to_string());
     }
+    // `^^X` is one token to the mouth and one entry in the corpus, and the
+    // cursor can be on any of its three characters. Recognised before the
+    // walk below, which is looking for an escape character and would refuse.
+    if let Some(caret) = caret_notation_at(&chars, col) {
+        return Some(caret);
+    }
+    // A backtick is the corpus's name for the character-code prefix; it is a
+    // token a document writes and a reader hovers, not a control sequence.
+    if chars[col] == '`' {
+        return Some("`".to_string());
+    }
 
     // Walk left to the escape character. Letters may precede the cursor; a
     // backslash ends the walk because it opens the sequence.
@@ -251,6 +262,25 @@ fn token_at(text: &str, line: u32, col: u32) -> Option<String> {
         return None;
     }
     Some(chars[start..end].iter().collect())
+}
+
+/// `^^X` spanning `col`, if the cursor is anywhere in one.
+///
+/// The corpus documents the notation itself rather than a particular control
+/// character, so any `^^` pair plus its following character answers as `^^X` —
+/// which is the name the entry is filed under.
+fn caret_notation_at(chars: &[char], col: usize) -> Option<String> {
+    // The cursor may sit on the first caret, the second, or the character.
+    for start in [col, col.saturating_sub(1), col.saturating_sub(2)] {
+        if chars.get(start) == Some(&'^')
+            && chars.get(start + 1) == Some(&'^')
+            && chars.get(start + 2).is_some()
+            && col <= start + 2
+        {
+            return Some("^^X".to_string());
+        }
+    }
+    None
 }
 
 fn publish_diagnostics(conn: &Connection, uri: &Uri, text: &str) {
@@ -314,4 +344,66 @@ fn spawn_orphan_guard() {
             }
         }
     });
+}
+
+/// One primitive exactly as the language server serves it.
+///
+/// Not read from the corpus: `name`, `doc` and `example` come out of the
+/// completion response an editor receives, and `chapter` out of the hover
+/// response for the same name. The reference manual is rendered from these, so
+/// the page cannot claim anything the server would not tell an editor — if
+/// hover stops resolving a primitive, the manual loses it and
+/// `tests/lsp_serves_the_reference.rs` fails rather than the page quietly
+/// shrinking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Served {
+    /// The completion item's label.
+    pub name: String,
+    /// The chapter, parsed back out of the hover markdown.
+    pub chapter: String,
+    /// The completion item's `detail`.
+    pub doc: String,
+    /// The `tex` block the completion item's documentation carries.
+    pub example: String,
+}
+
+/// Ask the server for everything it documents.
+pub fn served() -> Vec<Served> {
+    completion_items()
+        .into_iter()
+        .map(|item| {
+            let doc = item.detail.clone().unwrap_or_default();
+            let example = match &item.documentation {
+                Some(lsp_types::Documentation::MarkupContent(m)) => unfence(&m.value),
+                _ => String::new(),
+            };
+            let chapter = hover_chapter(&item.label).unwrap_or_default();
+            Served {
+                name: item.label,
+                chapter,
+                doc,
+                example,
+            }
+        })
+        .collect()
+}
+
+/// The chapter the hover response states for `name`, or `None` when hover does
+/// not resolve it — which is a gap in the server, not in the corpus.
+pub fn hover_chapter(name: &str) -> Option<String> {
+    let markdown = hover_markdown(name, 0, 0);
+    // `**`\catcode`** — _Category codes_`
+    let (_, rest) = markdown.split_once("— _")?;
+    let (chapter, _) = rest.split_once('_')?;
+    Some(chapter.to_string())
+}
+
+/// Strip the ```tex fence the completion documentation wraps an example in.
+fn unfence(markdown: &str) -> String {
+    markdown
+        .trim()
+        .trim_start_matches("```tex")
+        .trim_end_matches("```")
+        .trim_matches('\n')
+        .to_string()
 }

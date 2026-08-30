@@ -15,7 +15,8 @@
 use std::fmt::Write as _;
 
 use crate::catcode::{Cat, CatTable};
-use crate::corpus::{Entry, CHAPTERS, CORPUS};
+use crate::corpus::{CHAPTERS, CORPUS};
+use crate::lsp::Served;
 
 /// The chrome above the generated chapters: head, header, scheme strip, title.
 const HEAD: &str = "<!DOCTYPE html>
@@ -128,7 +129,7 @@ pub fn reference_html() -> String {
         head = HEAD
             .replace("__TEXRS_VERSION__", env!("CARGO_PKG_VERSION"))
             .replace("__TEXRS_STATS__", &stats(crate::cli::USAGE))
-            + &chapters(CORPUS)
+            + &chapters(&crate::lsp::served())
             + &category_codes()
             + &builtins()
             + &tiers_report()
@@ -290,10 +291,15 @@ fn stats(usage: &str) -> String {
 
 /// One `<section>` per chapter in `CHAPTERS` order, each holding one table row
 /// per primitive: the name, what it does, and its syntax with an example.
-fn chapters(corpus: &[Entry]) -> String {
+///
+/// The rows are the LANGUAGE SERVER's answers, not the corpus's rows —
+/// `lsp::served()` reads them out of the completion and hover responses an
+/// editor receives. A primitive the server stops resolving therefore leaves the
+/// manual too, rather than the two drifting apart while both look right.
+fn chapters(served: &[Served]) -> String {
     let mut out = String::new();
     for chapter in CHAPTERS {
-        let entries: Vec<&Entry> = corpus.iter().filter(|(_, c, ..)| c == chapter).collect();
+        let entries: Vec<&Served> = served.iter().filter(|e| e.chapter == *chapter).collect();
         if entries.is_empty() {
             continue;
         }
@@ -302,13 +308,13 @@ fn chapters(corpus: &[Entry]) -> String {
             "      <section class=\"tutorial-section\" id=\"ch-{anchor}\">\n        <h2>{chapter}</h2>\n        <table class=\"file-table\">\n          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>\n          <tbody>\n",
             anchor = anchor(chapter),
         );
-        for (name, _chapter, doc, example) in entries {
+        for entry in entries {
             let _ = writeln!(
                 out,
                 "            <tr><td><code>{name}</code></td><td>{doc}</td><td><pre>{example}</pre></td></tr>",
-                name = escape(name),
-                doc = markdown_code(doc),
-                example = escape(example),
+                name = escape(&entry.name),
+                doc = markdown_code(&entry.doc),
+                example = escape(&entry.example),
             );
         }
         out.push_str("          </tbody>\n        </table>\n      </section>\n\n");

@@ -9,7 +9,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-
 fn main() -> ExitCode {
     struct Stats;
     impl Drop for Stats {
@@ -43,7 +42,10 @@ fn main() -> ExitCode {
             // a file someone is grepping.
             let colored = texrs::banner::colored_stdout();
             texrs::banner::print_banner(colored);
-            print!("{}", texrs::banner::render_usage(texrs::cli::USAGE, colored));
+            print!(
+                "{}",
+                texrs::banner::render_usage(texrs::cli::USAGE, colored)
+            );
             return ExitCode::SUCCESS;
         }
         texrs::cli::Mode::Version => {
