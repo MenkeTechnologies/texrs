@@ -530,7 +530,7 @@ fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
     // it asks for input rather than printing its usage and quitting. With stdin
     // closed there is nothing to read, so the session ends immediately and
     // successfully, having printed nothing.
-    let mut child = texrs()
+    let child = texrs()
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

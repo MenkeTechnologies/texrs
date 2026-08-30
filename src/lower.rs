@@ -64,6 +64,7 @@ impl Lowerer {
     pub fn new() -> Self {
         Self {
             eng: Engine::new(),
+            ended: false,
             next_scratch: 255,
             depth: 0,
         }

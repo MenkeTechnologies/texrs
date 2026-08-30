@@ -101,8 +101,39 @@ man texrsall     # the comprehensive one, modeled on zshall(1)
 
 ## [0x02] Usage
 
+`texrs` takes `tex`'s own command line, in all three of its invocation forms:
+
+```sh
+texrs [OPTIONS] [FILE[.tex]]... [COMMANDS]   # files, then the rest as input
+texrs [OPTIONS] '\FIRST-LINE'                # the arguments ARE the input
+texrs [OPTIONS] '&FMT' ARGS                  # with a named format
+```
+
+A bare name gets `.tex` appended, so `texrs doc` and `texrs doc.tex` are the
+same run. Options may be spelled with one dash or two, and a value may follow
+an `=` or a space — `-jobname=x`, `--jobname=x` and `-jobname x` all agree.
+
+tex's options:
+
+```sh
+-interaction=MODE     batchmode, nonstopmode, scrollmode or errorstopmode
+-jobname=NAME         set the job name
+-output-directory=DIR write files in this directory
+-progname=NAME        set the program name
+-fmt=NAME             use a named format
+-ini                  be initex
+-halt-on-error        stop at the first error
+-file-line-error      file:line:error style messages
+-recorder             record the files read
+-8bit                 write 8-bit characters as themselves
+```
+
+texrs's own:
+
 ```sh
 texrs file.tex             # run it, print the \message stream
+texrs a.tex b.tex c.tex    # compile a batch, one document per core
+texrs --jobs=N file...     # bound that to N workers
 texrs --repl               # interactive prompt; state carries across lines
 texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dap                # Debug Adapter Protocol over stdio: breakpoints, stepping
@@ -116,6 +147,12 @@ texrs --cache-clear        # delete it; it holds only what can be recompiled
 texrs --help
 texrs --version
 ```
+
+Two places the grammar departs from `tex`, both because texrs takes several
+files where tex takes one: a non-option argument is a FILE unless it begins
+with `\`, and options are recognised anywhere rather than only before the
+first file, so `texrs doc -halt-on-error` sets the flag instead of typesetting
+it.
 
 Output is written the way tex writes it on the terminal, which is what the
 parity harnesses compare:

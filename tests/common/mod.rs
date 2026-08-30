@@ -60,6 +60,11 @@ pub fn tex() -> Option<String> {
 /// own. The harness also raises that limit (see `reference`) so a wrap should
 /// not happen at all; this is what keeps a wrap from being read as an empty
 /// message stream if it does.
+// Each test binary that includes this module uses part of it: differential.rs
+// wants the whole oracle, cli_tex.rs only wants `tex()`. Rust compiles the
+// module once per binary and warns about what that binary does not call, so the
+// allowance is on the module rather than on the callers.
+#[allow(dead_code)]
 pub fn messages_of(out: &str) -> String {
     let Some(at) = out.find("(./") else {
         return String::new();
@@ -77,6 +82,7 @@ pub fn messages_of(out: &str) -> String {
     body.replace('\n', "").trim().to_string()
 }
 
+#[allow(dead_code)]
 pub fn reference(tex: &str, case: &Path) -> String {
     let dir = std::env::temp_dir().join(format!("texrs-ref-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);

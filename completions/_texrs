@@ -6,6 +6,17 @@
 
 _texrs() {
   _arguments -s \
+    '-interaction=[how the engine behaves at an error]:mode:(batchmode nonstopmode scrollmode errorstopmode)' \
+    '-jobname=[set the job name]:name:' \
+    '-output-directory=[write files in this directory]:directory:_files -/' \
+    '-progname=[set the program name]:name:' \
+    '-fmt=[use a named format]:format:' \
+    '-ini[be initex]' \
+    '-halt-on-error[stop at the first error]' \
+    '(-no-file-line-error)-file-line-error[file:line:error style messages]' \
+    '(-file-line-error)-no-file-line-error[plain error messages]' \
+    '-recorder[record the files read]' \
+    '-8bit[write 8-bit characters as themselves]' \
     '(- *)--repl[start the interactive prompt]' \
     '(- *)--lsp[speak the Language Server Protocol over stdio]' \
     '(- *)--dap[speak the Debug Adapter Protocol over stdio]' \

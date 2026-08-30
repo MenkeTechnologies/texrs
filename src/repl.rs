@@ -101,7 +101,9 @@ pub fn run() -> Result<(), String> {
     if unsafe { libc::isatty(0) } != 1 {
         return run_piped();
     }
-    println!("{}", crate::banner::repl_banner());
+    // The logo and the live-stats box, the way every sibling engine's prompt
+    // opens. Colour only when a terminal is there to read it.
+    crate::banner::print_banner(true);
     let mut session = Session::new();
 
     let history = dirs::home_dir()
