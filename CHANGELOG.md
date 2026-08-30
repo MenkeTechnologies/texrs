@@ -67,7 +67,10 @@ which is the release that carries it to crates.io and the Homebrew tap.
   manifest, both hand-written docs pages, both man pages (with the date), and
   the IntelliJ plugin — regenerates the two derived from the corpus, runs the
   full verify, then tags, pushes and publishes. `tests/version_sync.rs` is the
-  gate under it: drift in any of the six now fails the suite rather than sitting
+  gate under it, and it checks version SLOTS rather than every version-shaped
+  string: a sentence dating a change is true and a gate that failed on it would
+  push whoever holds the release to falsify it. Drift in any of the six now
+  fails the suite rather than sitting
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).

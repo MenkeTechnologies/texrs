@@ -51,6 +51,13 @@ fi
 perl -i -pe "s/^version = \"\Q$CURRENT\E\"/version = \"$NEW\"/" Cargo.toml
 
 # The two hand-written docs pages carry a build line reading `texrs vX.Y.Z · …`.
+#
+# Only the BRANDED form is stamped, never a bare `vX.Y.Z`. A sentence dating a
+# change ("the expander gained \futurelet in v0.3.1") is true and must survive a
+# bump, and a stamp that rewrote every version-shaped string would falsify it --
+# the same carelessness that turned an `0.0.0.0` IP address into `0.18.1.0` in a
+# sibling's docs during a sweep today. tests/version_sync.rs enforces the same
+# split from the other side.
 for f in docs/index.html docs/report.html; do
   perl -i -pe "s/texrs v\Q$CURRENT\E/texrs v$NEW/g" "$f"
 done
