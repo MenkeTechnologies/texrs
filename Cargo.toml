@@ -59,6 +59,10 @@ serde_json = "1"
 toml = "0.8"
 libc = "0.2"
 
+# Glob matching for `\intercept` patterns (src/intercepts.rs), the same crate
+# the sibling engines match their function/method intercepts with.
+glob = "0.3"
+
 # Input digests (src/io.rs): what a run read, recorded so a cache keyed on more
 # than one file can say whether it is still valid.
 sha2 = "0.10"

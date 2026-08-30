@@ -12,6 +12,16 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- Intercepts: `\intercept{before|after|around}{<glob>}{\handler}` weaves advice
+  into macro expansion, with `\proceed` standing for the original expansion
+  inside an `around` handler. The pattern is a glob over macro names, so advice
+  registered now catches macros a package defines later — a registry keyed by
+  exact name would need the document to know every name up front, which is the
+  thing a macro package makes impossible. Expansion is a compile-time act here,
+  so advice is woven into the token stream and undone by the group that
+  registered it. A call inside advice is not advised, which is what keeps a
+  handler that calls the macro it advises from weaving itself forever; the depth
+  travels in the token stream on two markers the mouth cannot produce.
 - Inline Rust: a `\rust{ … }` block is compiled by `rustc`, loaded, and its
   exported functions are callable as `\rustcall <name> <numbers…>\endrust` —
   a number wherever TeX reads one. The block is lifted out of the file before

@@ -72,7 +72,14 @@ const NOT_PRIMITIVES: &[&str] = &["endgroup\u{0}"];
 /// `rust` is the block keyword: the desugarer rewrites it away before the mouth
 /// ever runs, so the engine never dispatches on it — and a document still
 /// writes it.
-const CONSUMED_BY_A_SCANNER: &[&str] = &["endcsname", "rust"];
+const CONSUMED_BY_A_SCANNER: &[&str] = &[
+    "endcsname",
+    "rust",
+    // `\proceed` is substituted while an `around` advice is woven, so it is
+    // consumed by the weave rather than dispatched — and a document writes it,
+    // inside every around handler.
+    "proceed",
+];
 
 /// Primitives whose dispatch arm matches a CONSTANT rather than a string
 /// literal, so the scanner below cannot see them. The FFI names live in

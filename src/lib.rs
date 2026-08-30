@@ -21,6 +21,7 @@ pub mod dap;
 pub mod docs;
 pub mod document;
 pub mod expand;
+pub mod intercepts;
 pub mod io;
 pub mod ir;
 pub mod lexer;

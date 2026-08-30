@@ -1657,6 +1657,7 @@ dependencies = [
  "criterion",
  "dirs",
  "fusevm",
+ "glob",
  "libc",
  "lsp-server",
  "lsp-types",

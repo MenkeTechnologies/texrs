@@ -267,6 +267,38 @@ Print the option grammar and exit.
 .TP
 .B \-\-version
 Print the version banner and exit.
+.SH INTERCEPTS
+.B \eintercept{before|after|around}{<glob>}{\ehandler}
+registers advice on macro expansion:
+.RS
+.nf
+\edef\egreet#1{HELLO-#1}
+\edef\etrace{[in]}
+\eintercept{before}{greet}{\etrace}
+\emessage{\egreet{WORLD}}      % => [in]HELLO-WORLD
+.fi
+.RE
+.PP
+.B before
+puts the handler's body in front of the expansion,
+.B after
+puts it behind, and
+.B around
+replaces it, with
+.B \eproceed
+standing for what the macro would have expanded to \(em a handler with no
+.B \eproceed
+suppresses the call.
+.PP
+The pattern is a GLOB over macro names, which is what makes advice useful on a
+macro package: it is registered before the macros it will catch exist.  The
+handler is a macro that takes no parameters; one that takes them is refused
+rather than called with whatever followed the intercepted call.
+.PP
+Expansion is a compile\-time act, so advice is woven into the token stream and
+is undone by the group that registered it, like any other assignment.  A handler
+that calls the macro it advises does not weave itself: a call inside advice is
+not advised.
 .SH INLINE RUST
 A
 .B \erust{ \&... }

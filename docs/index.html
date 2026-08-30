@@ -117,6 +117,19 @@
       </section>
 
       <section class="tutorial-section">
+        <h2>Intercepts</h2>
+        <p>Advice on macro expansion — <code>before</code>, <code>after</code>, <code>around</code> — matched by a <em>glob over macro names</em>, so the advice is registered before the macros it will catch exist. That is what makes it usable on a macro package rather than only on names the document already knows.</p>
+<pre>\def\greet#1{HELLO-#1}
+\def\trace{[in]}
+\def\loud{&lt;&lt;\proceed&gt;&gt;}
+
+\intercept{before}{greet}{\trace}   % =&gt; [in]HELLO-WORLD
+\intercept{after}{sec*}{\note}      % every sectioning macro, including later ones
+\intercept{around}{greet}{\loud}    % =&gt; &lt;&lt;HELLO-WORLD&gt;&gt;</pre>
+        <p>Expansion is a compile-time act here, so advice is woven into the token stream and is undone by the group that registered it, like any other assignment. A handler that calls the macro it advises does not weave itself: a call inside advice is not advised, and the depth travels on two markers the mouth cannot produce.</p>
+      </section>
+
+      <section class="tutorial-section">
         <h2>Inline Rust</h2>
         <p>A <code>\rust{ … }</code> block is compiled by <code>rustc</code>, loaded, and its exported functions become callable from the document. The body is Rust, not TeX, so it is lifted out of the file <em>before the mouth reads it</em> — <code>#</code>, <code>{</code>, <code>}</code> and <code>&amp;</code> are category codes the mouth would act on.</p>
 <pre>\rust{

@@ -1,0 +1,28 @@
+% Advice on macro expansion: before, after and around, matched by glob.
+%
+% Expansion is a compile-time act in texrs -- the macro is gone by the time the
+% VM starts -- so advice is woven into the token stream rather than into
+% anything at run time.
+%
+% The pattern is a glob over macro names, which is what makes this useful on a
+% macro package: the advice is registered before the macros it will catch even
+% exist.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\trace{[in]}
+\def\note{[out]}
+\def\loud{<<\proceed>>}
+
+% before / after, on one macro and on a family.
+\def\greet#1{HELLO-#1}
+\intercept{before}{greet}{\trace}
+\message{\greet{WORLD}}
+
+\intercept{after}{sec*}{\note}
+\def\section#1{S:#1}
+\message{\section{A}}
+
+% around, with \proceed standing for the original expansion. Scoped to the
+% group, so the macro is itself again at the closing brace.
+{\intercept{around}{greet}{\loud}\message{\greet{INSIDE}}}
+\message{\greet{OUTSIDE}}
+\end

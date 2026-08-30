@@ -34,6 +34,7 @@ pub const CHAPTERS: &[&str] = &[
     "Conditionals",
     "Registers",
     "Grouping",
+    "Intercepts",
     "Inline Rust",
 ];
 
@@ -325,6 +326,19 @@ pub const CORPUS: &[Entry] = &[
         "Registers",
         "Divide a register, truncating toward zero as TeX's does.",
         "\\divide\\count<N> by <number>\n\\count1=7 \\divide\\count1 by 2   % => 3",
+    ),
+    // ══ Intercepts — intercepts.rs, expand::weave_advice ══════════════════
+    (
+        "\\intercept",
+        "Intercepts",
+        "Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. The pattern is a GLOB over macro names, so advice registered now catches macros a package defines later. The handler is a macro that takes no parameters. Like `\\def`, this takes effect at compile time and is undone by the group it was registered in.",
+        "\\intercept{before|after|around}{<glob>}{\\handler}\n\\def\\greet#1{HELLO-#1}\n\\def\\trace{[in]}\n\\intercept{before}{greet}{\\trace}\n\\message{\\greet{WORLD}}   % => [in]HELLO-WORLD",
+    ),
+    (
+        "\\proceed",
+        "Intercepts",
+        "Inside an `around` handler, what the intercepted macro would have expanded to. A handler with no `\\proceed` replaces the call outright, which is how advice suppresses one. Outside an `around` handler it means nothing.",
+        "\\def\\loud{<<\\proceed>>}\n\\intercept{around}{greet}{\\loud}\n\\message{\\greet{WORLD}}   % => <<HELLO-WORLD>>",
     ),
     // ══ Inline Rust — rust_ffi.rs, fusevm::ffi ════════════════════════════
     (

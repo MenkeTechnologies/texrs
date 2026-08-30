@@ -31,13 +31,14 @@ shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
 - [\[0x01\] Install](#0x01-install)
 - [\[0x02\] Usage](#0x02-usage)
 - [\[0x03\] What works](#0x03-what-works)
-- [\[0x04\] Inline Rust](#0x04-inline-rust)
-- [\[0x05\] What does not](#0x05-what-does-not)
-- [\[0x06\] How it runs](#0x06-how-it-runs)
-- [\[0x07\] Parity](#0x07-parity)
-- [\[0x08\] Fuzzing](#0x08-fuzzing)
-- [\[0x09\] Benchmarks](#0x09-benchmarks)
-- [\[0x0A\] Documentation](#0x0a-documentation)
+- [\[0x04\] Intercepts](#0x04-intercepts)
+- [\[0x05\] Inline Rust](#0x05-inline-rust)
+- [\[0x06\] What does not](#0x06-what-does-not)
+- [\[0x07\] How it runs](#0x07-how-it-runs)
+- [\[0x08\] Parity](#0x08-parity)
+- [\[0x09\] Fuzzing](#0x09-fuzzing)
+- [\[0x0A\] Benchmarks](#0x0a-benchmarks)
+- [\[0x0B\] Documentation](#0x0b-documentation)
 - [\[0xFF\] Licence](#0xff-licence)
 
 ---
@@ -147,7 +148,30 @@ than none.
 - `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
 - `\message`.
 
-## [0x04] Inline Rust
+## [0x04] Intercepts
+
+```tex
+\def\greet#1{HELLO-#1}
+\def\trace{[in]}
+\def\loud{<<\proceed>>}
+
+\intercept{before}{greet}{\trace}      % => [in]HELLO-WORLD
+\intercept{after}{sec*}{\note}         % every sectioning macro, including
+                                       % the ones a package defines later
+\intercept{around}{greet}{\loud}       % => <<HELLO-WORLD>>
+```
+
+Advice on macro expansion — `before`, `after`, `around`, with `\proceed`
+standing for the original expansion inside an `around` handler. The pattern is a
+**glob over macro names**, which is what makes it useful on a macro package: the
+advice is registered before the macros it will catch exist.
+
+Expansion is a compile-time act here, so advice is woven into the token stream
+and is undone by the group that registered it, like any other assignment. A
+handler that calls the macro it advises does not weave itself — a call inside
+advice is not advised.
+
+## [0x05] Inline Rust
 
 ```tex
 \rust{
@@ -169,12 +193,12 @@ The compiled library is cached by body hash, so only the first run pays for the
 compile, and a block that does not compile stops the run with rustc's own
 diagnostic rather than a missing-function error later.
 
-## [0x05] What does not
+## [0x06] What does not
 
 No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
 typesetter yet — see `docs/ROADMAP.md`.
 
-## [0x06] How it runs
+## [0x07] How it runs
 
 texrs is a **fusevm frontend**, not an interpreter: mouth → expander → command
 stream → fusevm bytecode → the VM runs it. A count register is a VM **slot**, so
@@ -187,7 +211,7 @@ is folded while lowering instead, because there is nothing for the VM to test.
 `tests/lowering.rs` asserts the emitted bytecode rather than the printed output —
 output parity alone would not distinguish a frontend from a tree-walker.
 
-## [0x07] Parity
+## [0x08] Parity
 
 The contract is the `\message` stream, compared byte-for-byte against the real
 `tex` binary. No expectation is written by hand:
@@ -211,7 +235,7 @@ group. Every case is in parity except the ones `tests/known_gaps.txt` names,
 and the gate fails both on an unlisted divergence and on a listed case that has
 started passing, so the list cannot go stale.
 
-## [0x08] Fuzzing
+## [0x09] Fuzzing
 
 Hand-written cases only cover what someone thought to write down.
 
@@ -234,7 +258,7 @@ corpus under stable Rust, and `tests/fuzz_mass_replay.rs` points the mouth at
 generated mutations of every `.tex` in the tree, so `cargo test` still exercises
 the harness on a machine with no nightly toolchain.
 
-## [0x09] Benchmarks
+## [0x0A] Benchmarks
 
 ```sh
 cargo bench                  # the pipeline against itself: mouth, frontend, VM
@@ -253,7 +277,7 @@ rather than where its time goes, and prints the two caveats with the numbers:
 `tex` loads the plain format on every run while texrs loads nothing, and texrs
 implements the mouth and expander only.
 
-## [0x0A] Documentation
+## [0x0B] Documentation
 
 - **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)

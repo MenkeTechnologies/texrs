@@ -233,6 +233,23 @@
         </table>
       </section>
 
+      <section class="tutorial-section" id="ch-intercepts">
+        <h2>Intercepts</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\intercept</code></td><td>Register advice on macro expansion: <code>before</code> puts the handler's body in front of the expansion, <code>after</code> puts it behind, and <code>around</code> replaces it with <code>\proceed</code> standing for what the macro would have expanded to. The pattern is a GLOB over macro names, so advice registered now catches macros a package defines later. The handler is a macro that takes no parameters. Like <code>\def</code>, this takes effect at compile time and is undone by the group it was registered in.</td><td><pre>\intercept{before|after|around}{&lt;glob&gt;}{\handler}
+\def\greet#1{HELLO-#1}
+\def\trace{[in]}
+\intercept{before}{greet}{\trace}
+\message{\greet{WORLD}}   % =&gt; [in]HELLO-WORLD</pre></td></tr>
+            <tr><td><code>\proceed</code></td><td>Inside an <code>around</code> handler, what the intercepted macro would have expanded to. A handler with no <code>\proceed</code> replaces the call outright, which is how advice suppresses one. Outside an <code>around</code> handler it means nothing.</td><td><pre>\def\loud{&lt;&lt;\proceed&gt;&gt;}
+\intercept{around}{greet}{\loud}
+\message{\greet{WORLD}}   % =&gt; &lt;&lt;HELLO-WORLD&gt;&gt;</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
       <section class="tutorial-section" id="ch-inline-rust">
         <h2>Inline Rust</h2>
         <table class="file-table">

@@ -247,6 +247,9 @@ impl Lowerer {
                     out.extend(if same { t } else { e });
                 }
                 "let" => self.eng.compile_time_let(lx)?,
+                // Advice registration is a compile-time act: it changes what
+                // the macros after it expand to.
+                "intercept" => self.eng.compile_time_intercept(lx)?,
                 "edef" | "xdef" => {
                     if let Some(cmd) = self.edef_snapshot(lx)? {
                         out.push(cmd);
@@ -595,6 +598,8 @@ impl Lowerer {
                         text.push_str(&v.to_string());
                     }
                 }
+                // An advice marker: it carries depth, not text.
+                n if self.eng.advice_marker(n) => {}
                 // `\rustcall <name> <numbers…>\endrust` inside a message: the
                 // returned value is rendered where the call stands.
                 n if n == crate::rust_ffi::CALL_CS => {

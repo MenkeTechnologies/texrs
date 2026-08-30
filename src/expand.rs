@@ -40,6 +40,12 @@ enum Save {
     Cat(char, Cat),
     Count(i64, Option<i64>),
     Meaning(CsId, Option<Meaning>),
+    /// The whole intercept registry as it stood before a registration inside
+    /// this group. Advice is a document-wide effect, and TeX's rule is that a
+    /// non-global assignment does not escape its group; the registry is small
+    /// and registrations are rare, so the undo record is the whole list rather
+    /// than a per-entry diff.
+    Intercepts(crate::intercepts::Registry),
 }
 
 pub struct Engine {
@@ -60,7 +66,33 @@ pub struct Engine {
     conds: Vec<CondState>,
     /// Set by `\global`, cleared by the assignment it prefixes.
     global: bool,
+    /// Advice registered with `\intercept`, woven into matching expansions.
+    pub intercepts: crate::intercepts::Registry,
+    /// How deep inside an advice body expansion currently is.
+    ///
+    /// Advice is NOT woven into a call that occurs inside advice: a handler
+    /// that calls the macro it advises would otherwise weave itself forever.
+    /// The depth is carried in the token stream by the two markers below rather
+    /// than by a counter around the weave, because the handler's tokens are
+    /// pushed back and expanded later, long after the weave returned.
+    advice_depth: u32,
 }
+
+/// An advice body between the two depth markers, so a call inside it is not
+/// itself advised.
+fn wrapped(body: &[Token]) -> Vec<Token> {
+    let mut v = Vec::with_capacity(body.len() + 2);
+    v.push(Token::cs(ADVICE_IN));
+    v.extend(body.iter().copied());
+    v.push(Token::cs(ADVICE_OUT));
+    v
+}
+
+/// Pushed in front of an advice body, and behind it. The NUL keeps both out of
+/// reach of any document: a control sequence's name comes from the mouth, and
+/// the mouth cannot produce one.
+pub const ADVICE_IN: &str = "\u{0}advice-in";
+pub const ADVICE_OUT: &str = "\u{0}advice-out";
 
 #[derive(PartialEq, Clone, Copy)]
 enum CondState {
@@ -111,6 +143,8 @@ impl Engine {
             groups: Vec::new(),
             conds: Vec::new(),
             global: false,
+            intercepts: crate::intercepts::Registry::new(),
+            advice_depth: 0,
         }
     }
 
@@ -154,6 +188,7 @@ impl Engine {
                         self.meanings.remove(&name);
                     }
                 },
+                Save::Intercepts(old) => self.intercepts = old,
             }
         }
         Ok(())
@@ -265,6 +300,12 @@ impl Engine {
             return Ok(true);
         }
         match name.name() {
+            // The advice markers: they carry the "inside advice" depth through
+            // the token stream, and expand to nothing.
+            ADVICE_IN | ADVICE_OUT => {
+                self.advice_marker(name.name());
+                Ok(true)
+            }
             n if CONDITIONALS.contains(&n) => {
                 self.do_conditional(lx, n, pending_only)?;
                 Ok(true)
@@ -596,8 +637,77 @@ impl Engine {
             }
             i += 1;
         }
+        let out = self.weave_advice(name, out)?;
         lx.push_back(&out);
         Ok(())
+    }
+
+    /// Wrap `expansion` in whatever advice matches `name`.
+    ///
+    /// Costs one `is_empty` check when a document registers none, which is
+    /// every document that does not use the feature.
+    fn weave_advice(&mut self, name: CsId, expansion: Vec<Token>) -> R<Vec<Token>> {
+        if self.intercepts.is_empty() || self.advice_depth > 0 {
+            return Ok(expansion);
+        }
+        let advice: Vec<crate::intercepts::Intercept> = self
+            .intercepts
+            .matching(name.name())
+            .into_iter()
+            .cloned()
+            .collect();
+        if advice.is_empty() {
+            return Ok(expansion);
+        }
+
+        let mut out = expansion;
+        for a in advice {
+            let body = self.advice_body(&a.handler)?;
+            out = match a.advice {
+                crate::intercepts::Advice::Before => {
+                    let mut v = wrapped(&body);
+                    v.extend(out);
+                    v
+                }
+                crate::intercepts::Advice::After => {
+                    let mut v = out;
+                    v.extend(wrapped(&body));
+                    v
+                }
+                // `\proceed` stands for what the macro would have expanded to.
+                // A handler with no `\proceed` replaces the call outright,
+                // which is what an around advice that suppresses is for.
+                crate::intercepts::Advice::Around => {
+                    let mut v = Vec::with_capacity(body.len() + out.len());
+                    for t in &body {
+                        match t {
+                            Token::Cs(n) if n.name() == "proceed" => v.extend(out.iter().copied()),
+                            other => v.push(*other),
+                        }
+                    }
+                    wrapped(&v)
+                }
+            };
+        }
+        Ok(out)
+    }
+
+    /// The body of an advice handler: a macro that takes no parameters.
+    ///
+    /// A handler with parameters is refused rather than called with whatever
+    /// followed the intercepted call, which would silently eat the document's
+    /// own tokens.
+    fn advice_body(&self, handler: &str) -> R<Vec<Token>> {
+        let id = CsId::intern(handler);
+        match self.meanings.get(&id) {
+            Some(Meaning::Macro(m)) if m.params.is_empty() => Ok(m.body.clone()),
+            Some(Meaning::Macro(_)) => Err(TexError(format!(
+                "Intercept handler \\{handler} takes parameters; advice handlers take none"
+            ))),
+            _ => Err(TexError(format!(
+                "Intercept handler \\{handler} is not a macro"
+            ))),
+        }
     }
 
     fn match_params(
@@ -1061,6 +1171,83 @@ impl Engine {
 impl Engine {
     pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {
         self.do_let(lx)
+    }
+
+    /// Consume an advice marker, if `name` is one.
+    ///
+    /// The markers travel in the token stream, so every walker that reads
+    /// tokens has to know them — the expander's own dispatch, and the message
+    /// walker in `lower.rs`, which would otherwise render one as text.
+    pub fn advice_marker(&mut self, name: &str) -> bool {
+        match name {
+            ADVICE_IN => {
+                self.advice_depth += 1;
+                true
+            }
+            ADVICE_OUT => {
+                self.advice_depth = self.advice_depth.saturating_sub(1);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `\intercept{<kind>}{<pattern>}{\handler}` — register advice.
+    ///
+    /// At COMPILE time, like `\def`: advice changes what the macros AFTER it
+    /// expand to, so a registration read at run time would be a registration
+    /// that never fired. Scoped to the enclosing group, like any other
+    /// assignment.
+    pub fn compile_time_intercept(&mut self, lx: &mut Lexer) -> R<()> {
+        let kind = self.group_text(lx)?;
+        let advice = crate::intercepts::Advice::parse(&kind).ok_or_else(|| {
+            TexError(format!(
+                "Unknown intercept kind `{kind}'; use before, after or around"
+            ))
+        })?;
+        let pattern = self.group_text(lx)?;
+        let handler = self.group_cs_name(lx)?;
+        if let Some(frame) = self.groups.last_mut() {
+            frame.push(Save::Intercepts(self.intercepts.clone()));
+        }
+        self.intercepts
+            .register(&pattern, advice, &handler)
+            .map_err(TexError)
+    }
+
+    /// The characters of the next brace group, spaces and all.
+    fn group_text(&mut self, lx: &mut Lexer) -> R<String> {
+        let toks = self.next_group(lx)?;
+        Ok(toks
+            .iter()
+            .filter_map(|t| match t {
+                Token::Char(c, _) => Some(*c),
+                Token::Cs(_) => None,
+            })
+            .collect())
+    }
+
+    /// The name of the single control sequence in the next brace group.
+    fn group_cs_name(&mut self, lx: &mut Lexer) -> R<String> {
+        let toks = self.next_group(lx)?;
+        match toks.iter().find(|t| matches!(t, Token::Cs(_))) {
+            Some(Token::Cs(n)) => Ok(n.name().to_string()),
+            _ => Err(TexError(
+                "Intercept handler must be a control sequence, as in {\\handler}".into(),
+            )),
+        }
+    }
+
+    /// Skip to the next `{` and read the group it opens.
+    fn next_group(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        while let Some(t) = lx.next_token(&self.cats) {
+            match &t {
+                _ if t.is_space() => continue,
+                Token::Char(_, Cat::BeginGroup) => return self.read_balanced(lx),
+                _ => return Err(TexError("Missing { for \\intercept".into())),
+            }
+        }
+        Err(TexError("Runaway \\intercept: missing {".into()))
     }
     pub fn compile_time_begin_group(&mut self) {
         self.begin_group();
