@@ -26,6 +26,14 @@ All notable changes to texrs are recorded here. The format follows
   0..255, with tex's two different messages kept apart (`Bad character code`
   against `Bad register code`) because that is how an author finds which they
   got wrong. Measured against real tex; `tests/cases` pins all of it.
+- Embedding a Type 1 font in a PDF, ported from `pdf_font_load_type1` in
+  `xdvipdfmx`: the `FontFile` stream with the three lengths that divide a Type
+  1 font into its cleartext, its encrypted body and its closing zeros, a
+  `FontDescriptor`, the font's own encoding as a `/Differences` array, and the
+  widths out of the charstrings. This is what a TeX document needs and a
+  base-14 name cannot give -- nobody has Computer Modern installed, so the font
+  travels with the document. `pdffonts` reports it embedded, and both xpdf and
+  Ghostscript read the text back out of a page set in it.
 - `--dvi` typesets: the join between reading a document and writing one that had
   been missing. texrs could say what a document's words were, and could read and
   write DVI, and nothing called one from the other, so a book "ran" and produced
