@@ -38,7 +38,8 @@ shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
 - [\[0x08\] Parity](#0x08-parity)
 - [\[0x09\] Fuzzing](#0x09-fuzzing)
 - [\[0x0A\] Benchmarks](#0x0a-benchmarks)
-- [\[0x0B\] Documentation](#0x0b-documentation)
+- [\[0x0B\] Releasing](#0x0b-releasing)
+- [\[0x0C\] Documentation](#0x0c-documentation)
 - [\[0xFF\] Licence](#0xff-licence)
 
 ---
@@ -400,7 +401,23 @@ stack use is constant and the bound is arithmetic rather than memory:
 | `tex` | ok | **capacity exceeded** | capacity exceeded |
 | texrs | ok | ok | ok |
 
-## [0x0B] Documentation
+## [0x0B] Releasing
+
+```sh
+bash scripts/bump.sh patch          # 0.4.0 -> 0.4.1, everywhere
+bash scripts/bump.sh 1.2.3 --dry-run
+```
+
+The version lives in six tracked files — the manifest, two hand-written docs
+pages, the generated reference page, two man pages, and the IntelliJ plugin's
+`gradle.properties`. Nothing in a build or a test run notices when they
+disagree, which is how v0.1.0 once sat in the docs through v0.3.0. So
+`tests/version_sync.rs` fails when any of them drifts, and `scripts/bump.sh` is
+the one command that stamps all six, regenerates the two that are derived from
+the corpus rather than substituted, runs the full verify, then tags, pushes and
+publishes.
+
+## [0x0C] Documentation
 
 - **Docs hub** — [menketechnologies.github.io/texrs](https://menketechnologies.github.io/texrs/) (`docs/index.html`)
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)

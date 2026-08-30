@@ -63,6 +63,14 @@ which is the release that carries it to crates.io and the Homebrew tap.
   that runs it leaves the run that follows starting from bytecode: on a hit the
   mouth, the expander and the lowerer are skipped entirely. Nothing the document
   does at RUN time happens, because none of that is compilation.
+- `scripts/bump.sh` stamps the version in all six files that state one — the
+  manifest, both hand-written docs pages, both man pages (with the date), and
+  the IntelliJ plugin — regenerates the two derived from the corpus, runs the
+  full verify, then tags, pushes and publishes. `tests/version_sync.rs` is the
+  gate under it: drift in any of the six now fails the suite rather than sitting
+  in a page that claims a version the binary has not been for three releases,
+  which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
+  three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
 - `parity-fuzz`, the differential fuzzer as a binary, ported in shape from the
   sibling frontends' — and for their reason. The oracle is the expensive part:
   a `tex` invocation costs ~0.5s of process start and format load, so a fuzzer
