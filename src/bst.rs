@@ -10,12 +10,7 @@
 //! otherwise: does this style call something nothing defines? bibtex reports
 //! that at run time, one undefined name per run, in the middle of a build.
 //!
-//! The interpreter is the next piece and is deliberately not here. It needs one
-//! thing texrs has no way to provide yet: `width$` measures a string in the
-//! current font, which means reading a `.tfm`. A style that never calls it —
-//! most do, through `format.lab.names` — would run without, but an interpreter
-//! that was right for some styles and silently wrong for others is worse than
-//! none.
+//! [`crate::bstvm`] runs what this reads.
 
 use std::collections::BTreeSet;
 use std::path::Path;

@@ -85,6 +85,7 @@ const USAGE: &str = "\
   -X bib FILE.bib         // Read a bibliography database
   -X bib FILE.aux         // Say what a document cites, and what is missing
   -X bst FILE.bst         // Read a bibliography style, and check its names
+  -X bibtex FILE.aux      // Run the style: write the .bbl a document reads
   -X tfm FILE.tfm [C]     // Read a font's metrics, or one character's
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
@@ -496,6 +497,12 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "bibtex" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X bibtex` needs a .aux file");
+            };
+            bibtex_run(std::path::Path::new(file))
+        }
         "tfm" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X tfm` needs a .tfm file");
@@ -676,6 +683,21 @@ fn external_command(name: &str, args: &[String]) -> Option<ExitCode> {
     }
 }
 
+/// Where TeX keeps a file of any kind, asked of `kpsewhich`.
+fn kpsewhich_named(name: &str) -> String {
+    let found = std::process::Command::new("kpsewhich").arg(name).output();
+    match found {
+        Ok(out) => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match path.is_empty() {
+                true => name.to_string(),
+                false => path,
+            }
+        }
+        Err(_) => name.to_string(),
+    }
+}
+
 /// Where TeX keeps a file, asked of `kpsewhich`. A font is named `cmr10`, not
 /// by its path, and every TeX installation puts it somewhere different.
 fn kpsewhich(name: &str) -> String {
@@ -695,6 +717,67 @@ fn kpsewhich(name: &str) -> String {
             }
         }
         Err(_) => name.to_string(),
+    }
+}
+
+/// `-X bibtex FILE.aux`: the whole of what `bibtex` does. Read the `.aux` for
+/// the citations, the style and the databases; read the databases with the
+/// style's own `MACRO`s defined, because that is where `month = jan` gets its
+/// meaning; run the style; write the `.bbl` beside the `.aux`.
+fn bibtex_run(path: &Path) -> ExitCode {
+    let aux = match texrs::bib::Aux::open(path) {
+        Ok(aux) => aux,
+        Err(e) => return fail(&e),
+    };
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let Some(name) = &aux.style else {
+        return fail(&format!("{}: no \\bibstyle", path.display()));
+    };
+    // A style is named without its extension, and lives beside the document or
+    // in the installation.
+    let beside = dir.join(format!("{name}.bst"));
+    let found = match beside.exists() {
+        true => beside.to_string_lossy().to_string(),
+        false => kpsewhich_named(&format!("{name}.bst")),
+    };
+    let style = match texrs::bst::Style::open(&found) {
+        Ok(style) => style,
+        Err(e) => return fail(&e),
+    };
+    for missing in style.undefined() {
+        eprintln!("texrs: {name}.bst calls {missing}, which nothing defines");
+    }
+
+    let mut database = texrs::bib::Bib::default();
+    if aux.databases.is_empty() {
+        return fail(&format!("{}: no \\bibdata", path.display()));
+    }
+    for part in &aux.databases {
+        let file = dir.join(format!("{part}.bib"));
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(e) => return fail(&format!("cannot read {}: {e}", file.display())),
+        };
+        let read = texrs::bib::Bib::parse_with(&text, &style.macros());
+        database.entries.extend(read.entries);
+        database.strings.extend(read.strings);
+        database.preamble.push_str(&read.preamble);
+        database.warnings.extend(read.warnings);
+    }
+
+    let (bbl, warnings) = texrs::bstvm::run(&aux, &style, &database);
+    let out = path.with_extension("bbl");
+    if let Err(e) = std::fs::write(&out, &bbl) {
+        return fail(&format!("cannot write {}: {e}", out.display()));
+    }
+    for warning in database.warnings.iter().chain(warnings.iter()) {
+        eprintln!("texrs: {warning}");
+    }
+    // A bibliography with a warning in it is one a person has to look at: a
+    // missing entry becomes a `?` in the document.
+    match warnings.is_empty() && database.warnings.is_empty() {
+        true => ExitCode::SUCCESS,
+        false => ExitCode::from(1),
     }
 }
 

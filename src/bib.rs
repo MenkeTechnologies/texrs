@@ -53,6 +53,11 @@ pub struct Bib {
     /// The `@string` abbreviations, already expanded into the values above but
     /// kept because a reader may want to know what the file defined.
     pub strings: BTreeMap<String, String>,
+
+    /// Every `@preamble`, concatenated in the order they were read. It is TeX
+    /// a style writes out ahead of the bibliography, which is how a database
+    /// carries the macros its entries use.
+    pub preamble: String,
     /// What was wrong but not fatal, in the order it was met.
     pub warnings: Vec<String>,
 }
@@ -64,6 +69,24 @@ impl Bib {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         Ok(Bib::parse(&text))
+    }
+
+    /// Parse `text` with abbreviations already defined -- the `MACRO`s a
+    /// `.bst` declares, which is where a database's `month = jan` gets its
+    /// meaning. BibTeX hands the style's macros to the database reader, so a
+    /// database read without them resolves fewer names than BibTeX would.
+    pub fn parse_with(text: &str, macros: &[(String, String)]) -> Bib {
+        let mut bib = Bib::default();
+        for (name, value) in macros {
+            bib.strings.insert(name.to_ascii_lowercase(), value.clone());
+        }
+        let mut parser = Parser {
+            chars: text.chars().collect(),
+            at: 0,
+            bib,
+        };
+        parser.run();
+        parser.bib
     }
 
     /// Parse `text`.
@@ -306,9 +329,7 @@ impl Parser {
                 "comment" => {
                     self.skip_balanced();
                 }
-                "preamble" => {
-                    self.skip_balanced();
-                }
+                "preamble" => self.read_preamble(),
                 "string" => self.read_string_definition(),
                 _ => self.read_entry(&kind),
             }
@@ -398,6 +419,23 @@ impl Parser {
                 key,
                 fields,
             });
+        }
+    }
+
+    /// `@preamble{"..."}`: TeX to be written out before the bibliography. It
+    /// reads as a value, so an abbreviation and a `#` concatenation work in it
+    /// the way they do in a field.
+    fn read_preamble(&mut self) {
+        self.skip_space();
+        let Some(open) = self.opening() else {
+            return;
+        };
+        self.at += 1;
+        let value = self.read_value();
+        self.bib.preamble.push_str(&value);
+        self.skip_space();
+        if self.peek() == Some(closing(open)) {
+            self.at += 1;
         }
     }
 

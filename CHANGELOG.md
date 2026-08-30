@@ -8,6 +8,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The `.bst` interpreter, ported from `bibtex.web`: the stack machine, its 37
+  builtins, `SORT`/`ITERATE`/`REVERSE`, crossref inheritance with BibTeX's
+  min-crossrefs rule, and the 79-column line breaking that gives a `.bbl` its
+  shape. `-X bibtex FILE.aux` does what `bibtex` does, end to end. Held against
+  the real program: `plain`, `unsrt`, `abbrv` and `alpha` are run over a
+  database built to reach the awkward parts -- a von name, a junior, an
+  accented name, a corporate name in braces, `others`, a crossref pair, a
+  `\noopsort` key, a title that has to wrap -- and the `.bbl` files must match
+  byte for byte.
 - `.tfm` reading, ported from xetex's `read_font_info` (`tex.web` §539-§576):
   character widths, heights, depths and italic corrections, the ligature and
   kern program, and the `FONTDIMEN` parameters. `-X tfm FILE.tfm [CHAR]` prints

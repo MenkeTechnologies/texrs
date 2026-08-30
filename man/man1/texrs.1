@@ -273,7 +273,45 @@ which measures a string in a font and so needs a
 An interpreter that was right for the styles avoiding that and quietly wrong for
 the rest would be worse than none.
 .TP
-.BI \-X " tfm \fIFILE\fR.tfm [" \fICHAR\fR ]
+.BI \-X " bibtex \fIFILE\fR.aux"
+Run the style: read the
+.I .aux
+for what the document cites, which style it wants and which databases to read;
+read those databases with the style's own
+.B MACRO
+abbreviations defined, which is where
+.B month = jan
+gets its meaning; run the style; write the
+.I .bbl
+the document reads back in.  This is what
+.BR bibtex (1)
+does, and it writes the same file \(em the four styles TeX Live ships are
+compared against the real program, whole
+.I .bbl
+against whole
+.IR .bbl ,
+in the test suite.
+.PP
+A
+.I .bst
+is a program in a stack language, and running one means the 37 builtins:
+.BR format.name$ ,
+which splits a name into First, von, Last and Jr and renders it through a
+format like
+.BR "{vv~}{ll}{, jj}{, f.}" ,
+ties and all;
+.BR change.case$ ,
+.B purify$
+and
+.BR text.prefix$ ,
+which treat a brace group beginning with a backslash as one character;
+.BR width$ ,
+which measures in cmr10; and the sorting and cross-referencing BibTeX does
+around them \(em an entry inherits the fields of the entry it cross-references,
+and that entry joins the bibliography only if it was cited on its own or is
+pointed at twice.
+.TP
+.BI \-X " tfm \fIFILE\fR.tfm ["" \fICHAR\fR ]
 Read a font's metrics.  With no
 .I CHAR
 this prints what the font says about itself \(em its family, coding scheme,

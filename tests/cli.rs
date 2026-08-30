@@ -962,3 +962,79 @@ fn the_tfm_reader_reads_a_font_by_name_and_by_path() {
     assert!(f.contains("lig  i -> 0o14"), "{f}");
     assert!(f.contains("kern ! +0.077779"), "{f}");
 }
+
+/// `-X bibtex` writes the `.bbl` the real `bibtex` writes.
+///
+/// The unit tests hold the builtins to what BibTeX does; this holds the
+/// command that strings them together to it, through the file system: the same
+/// `.aux`, the same database, the same installed style, and the two `.bbl`
+/// files compared.
+#[test]
+fn the_bibtex_command_writes_what_bibtex_writes() {
+    let dir = scratch_cache("bibtex");
+    std::fs::write(
+        dir.join("refs.bib"),
+        "@article{k, author={Knuth, Donald E.}, title={Literate Programming},\n\
+          journal={The Computer Journal}, year=1984, volume=27, number=2,\n\
+          pages={97--111}, month=may}\n\
+         @book{b, author={van Beethoven, Ludwig and de la Vega, Maria},\n\
+          title={The Ninth}, publisher={DG}, year=1826}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("t.aux"),
+        "\\relax\n\\citation{k}\n\\citation{b}\n\\bibstyle{plain}\n\\bibdata{refs}\n",
+    )
+    .unwrap();
+
+    // What the real bibtex writes, if this machine has one.
+    let Ok(real) = std::process::Command::new("bibtex")
+        .arg("t")
+        .current_dir(&dir)
+        .output()
+    else {
+        return;
+    };
+    let _ = real;
+    let Ok(want) = std::fs::read_to_string(dir.join("t.bbl")) else {
+        return;
+    };
+    std::fs::remove_file(dir.join("t.bbl")).unwrap();
+
+    let out = texrs()
+        .args(["-X", "bibtex", "t.aux"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(dir.join("t.bbl")).expect("texrs wrote a .bbl");
+    assert!(
+        got.contains("Donald~E. Knuth"),
+        "the run reached the names: {got}"
+    );
+    assert_eq!(got, want, "texrs and bibtex wrote different bibliographies");
+
+    // An .aux with no style says so rather than writing half a file.
+    std::fs::write(
+        dir.join("n.aux"),
+        "\\relax\n\\citation{k}\n\\bibdata{refs}\n",
+    )
+    .unwrap();
+    let out = texrs()
+        .args(["-X", "bibtex", "n.aux"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("bibstyle"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
