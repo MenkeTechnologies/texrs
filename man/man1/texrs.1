@@ -3,8 +3,30 @@
 texrs \- a TeX engine: Knuth's mouth and expander, lowered onto a bytecode VM
 .SH SYNOPSIS
 .B texrs
-[\fIOPTIONS\fR] \fIFILE\fR.tex
+[\fIOPTIONS\fR] [\fIFILE\fR[.tex]]... [\fICOMMANDS\fR]
+.br
+.B texrs
+[\fIOPTIONS\fR] \fB\e\fIFIRST-LINE\fR
+.br
+.B texrs
+[\fIOPTIONS\fR] \fB&\fIFMT\fR \fIARGS\fR
+.br
+.B texrs
 .SH DESCRIPTION
+Invoked the way
+.BR tex (1)
+is invoked.  A file name without an extension gets
+.BR .tex ;
+arguments after the file are more TeX input, read after it, unless the file's
+own
+.B \eend
+stopped the run first; a first argument beginning with
+.B \e
+makes the whole argument list a line of input with no file at all; and
+.B texrs
+with no arguments opens the prompt, because an engine given nothing to do should
+ask rather than print its usage and quit.
+.PP
 .B texrs
 reads a TeX file, tokenises it under a mutable category\-code table, expands
 the macros, and lowers what is left to

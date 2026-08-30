@@ -12,6 +12,21 @@ All notable changes to texrs are recorded here. The format follows
   path, valid while the source's mtime matches to the nanosecond, so a second
   run skips the mouth, the expander and the lowerer. `--no-cache`,
   `--cache-stats`, `--cache-clear`, and `TEXRS_CACHE=0`.
+- The command line is `tex`'s. A bare name gets `.tex`; a first argument
+  beginning with `\` makes the whole list a line of input with no file; further
+  arguments after a file are input read after it — unless the file's own `\end`
+  stopped the run, which `tex` also honours; `-interaction=batchmode` writes
+  nothing to the terminal; and `-jobname`, `-output-directory`, `-progname`,
+  `-fmt`, `-ini`, `-halt-on-error`, `-file-line-error`, `-recorder` and `-8bit`
+  are accepted in tex's own spelling, so an invocation written for `tex` drives
+  texrs unchanged. `tests/cli_tex.rs` compares each form against the real binary,
+  including which side of the closing paren a message lands on.
+- `texrs` with no arguments opens the prompt rather than printing its usage.
+  `tex` prompts for input here too: an engine given nothing to do should ask.
+- The banner is the fleet's — logo, live-stats box, tagline — shared by the
+  prompt, `--help` and `--version`, with every count read from the tables at
+  call time so it cannot go stale. `--help` prints it above a sectioned option
+  list in house style.
 - Intercepts: `\intercept{before|after|around}{<glob>}{\handler}` weaves advice
   into macro expansion, with `\proceed` standing for the original expansion
   inside an `around` handler. The pattern is a glob over macro names, so advice

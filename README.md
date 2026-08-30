@@ -131,7 +131,11 @@ tex's options:
 texrs's own:
 
 ```sh
+texrs                      # no arguments: the prompt
 texrs file.tex             # run it, print the \message stream
+texrs file                 # the same: .tex is appended when there is no extension
+texrs '\message{hi}\end'   # the arguments are the input, as in tex
+texrs file '\message{x}'   # more input, read after the file
 texrs a.tex b.tex c.tex    # compile a batch, one document per core
 texrs --jobs=N file...     # bound that to N workers
 texrs --repl               # interactive prompt; state carries across lines
