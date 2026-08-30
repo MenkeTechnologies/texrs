@@ -131,6 +131,19 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- Long file names in a tar bundle. A path too long for a header's hundred bytes
+  is written as an extra entry before the real one, and the tars disagree on
+  which: GNU tar writes an `L` block whose data is the path, bsdtar a pax `x`
+  block whose data is `length key=value` records, and only `ustar`'s
+  prefix/name split was understood. The other two were skipped as "not a file",
+  which left the truncated hundred bytes from the header behind them -- a name
+  that reads plausibly in a listing and can never be looked up, so a bundle's
+  deepest packages were unreachable. Both extensions are read now. The tests
+  that covered this built their archive with the system `tar`, so they asserted
+  whatever the machine's tar happened to write: green on macOS, where bsdtar
+  splits the name, and red on CI, where GNU tar does not. The new ones build
+  both archives byte by byte and hold everywhere.
+
 - Glyph names on a machine with no TeX installation. The Adobe glyph list is
   found with `kpsewhich`, so a developer machine resolves every name out of the
   installed `glyphlist.txt` and the built-in map is never reached. The built-in

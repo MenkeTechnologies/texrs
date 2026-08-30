@@ -70,6 +70,30 @@ fn text(field: &[u8]) -> String {
         .collect()
 }
 
+/// The `path` a pax extended header carries.
+///
+/// The data is a run of records, each written as its own length in bytes, a
+/// space, `key=value`, and a newline -- and the length counts itself, which is
+/// why a record is measured rather than searched for: a value may hold a
+/// newline, and a scan for one would cut the record short.
+fn pax_path(data: &[u8]) -> Option<String> {
+    let mut rest = data;
+    while !rest.is_empty() {
+        let space = rest.iter().position(|&b| b == b' ')?;
+        let length: usize = std::str::from_utf8(&rest[..space]).ok()?.parse().ok()?;
+        if length > rest.len() || length <= space + 1 {
+            return None;
+        }
+        let record = &rest[space + 1..length];
+        rest = &rest[length..];
+        if let Some(value) = record.strip_prefix(b"path=") {
+            let value = value.strip_suffix(b"\n").unwrap_or(value);
+            return String::from_utf8(value.to_vec()).ok();
+        }
+    }
+    None
+}
+
 /// The checksum a tar header carries: the sum of its bytes with the checksum
 /// field itself read as spaces. It is the only thing in a tar that says a
 /// block is a header rather than somebody's data.
@@ -136,6 +160,8 @@ impl Itar {
         let mut entries = Vec::new();
         let mut at = 0u64;
         let mut header = [0u8; BLOCK as usize];
+        // Set by a long-name extension, and consumed by the header after it.
+        let mut extended: Option<String> = None;
         while at + BLOCK <= length {
             file.seek(SeekFrom::Start(at))
                 .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -156,6 +182,34 @@ impl Itar {
             }
             let size = octal(&header[124..136])
                 .ok_or_else(|| format!("{}: a header with no size", path.display()))?;
+            let kind = header[156];
+            // A name too long for the header's hundred bytes is written as an
+            // extra entry BEFORE the real one, and no two tars agree on which:
+            // GNU tar writes an `L` block whose data is the path, bsdtar a pax
+            // `x` block whose data is a set of `length key=value` records. Both
+            // are extensions rather than files, and skipping both -- which is
+            // what treating every other type as "not a file to read" did --
+            // leaves the truncated hundred bytes out of the header that
+            // follows, so a bundle's deepest packages come back under a name
+            // nothing can be looked up by.
+            if matches!(kind, b'L' | b'x' | b'X') {
+                let length = usize::try_from(size)
+                    .map_err(|_| format!("{}: a {kind} block of {size} bytes", path.display()))?;
+                let mut data = vec![0u8; length];
+                file.seek(SeekFrom::Start(at + BLOCK))
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                file.read_exact(&mut data)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                // A pax header carries whatever its writer chose to record, and
+                // most of it is not a name. Only `path` replaces one, and a
+                // block that has none leaves the real header's name alone.
+                extended = match kind {
+                    b'L' => Some(text(&data)),
+                    _ => pax_path(&data),
+                };
+                at += BLOCK + size.div_ceil(BLOCK) * BLOCK;
+                continue;
+            }
             // `ustar` splits a long name into a prefix and a name.
             let name = text(&header[0..100]);
             let prefix = text(&header[345..500]);
@@ -163,9 +217,11 @@ impl Itar {
                 true => name,
                 false => format!("{prefix}/{name}"),
             };
-            let kind = header[156];
+            // An extension read a moment ago is the name of THIS entry, and of
+            // no other: whatever it said, the next header speaks for itself.
+            let name = extended.take().unwrap_or(name);
             // 0 and '0' are a plain file; everything else -- a directory, a
-            // link, a long-name extension -- is not a file to read.
+            // link -- is not a file to read.
             if matches!(kind, 0 | b'0') && !name.ends_with('/') {
                 entries.push(Entry {
                     name,
@@ -302,6 +358,119 @@ impl InputProvider for Itar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tar header block, built the way the format says so a test does not
+    /// depend on which `tar` the machine running it happens to have.
+    fn block(name: &str, size: usize, kind: u8) -> Vec<u8> {
+        let mut header = vec![0u8; 512];
+        header[..name.len().min(100)].copy_from_slice(&name.as_bytes()[..name.len().min(100)]);
+        header[124..135].copy_from_slice(format!("{size:011o}").as_bytes());
+        header[156] = kind;
+        header[257..262].copy_from_slice(b"ustar");
+        header[263..265].copy_from_slice(b"00");
+        // The checksum reads its own field as spaces, so it is written after.
+        let sum = checksum(&header);
+        header[148..154].copy_from_slice(format!("{sum:06o}").as_bytes());
+        header[155] = b' ';
+        header
+    }
+
+    /// Data padded to the whole block a tar stores it in.
+    fn padded(data: &[u8]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        out.resize(data.len().div_ceil(512) * 512, 0);
+        out
+    }
+
+    fn indexed(archive: &[u8], name: &str) -> Itar {
+        let path =
+            std::env::temp_dir().join(format!("texrs_itar_{}_{name}.tar", std::process::id()));
+        std::fs::write(&path, archive).expect("write");
+        Itar::open(&path).expect("open")
+    }
+
+    /// A path too long for the header's hundred bytes, written the two ways the
+    /// tars in the world write it.
+    const LONG: &str = "texmf-dist/tex/latex/a-directory-with-a-long-name/a-directory-with-a-long-name/a-directory-with-a-long-name/a-rather-long-package-name.sty";
+
+    #[test]
+    fn a_gnu_long_name_is_the_name_of_the_entry_after_it() {
+        // GNU tar writes the path as the DATA of an `L` block, and truncates the
+        // real header behind it to a hundred bytes. Reading only the real header
+        // gives a name that is a prefix of the truncated path -- which looks
+        // plausible in a listing and can never be looked up.
+        assert!(
+            LONG.len() > 100,
+            "the case only exists past a hundred bytes"
+        );
+        let mut tar = block("././@LongLink", LONG.len() + 1, b'L');
+        tar.extend(padded(format!("{LONG}\0").as_bytes()));
+        tar.extend(block(LONG, 7, b'0'));
+        tar.extend(padded(b"% deep\n"));
+        tar.extend(vec![0u8; 1024]);
+
+        let itar = indexed(&tar, "gnu");
+        let names: Vec<&str> = itar.entries().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [LONG]);
+        assert_eq!(itar.read(LONG).expect("read"), b"% deep\n");
+    }
+
+    #[test]
+    fn a_pax_header_supplies_the_path_of_the_entry_after_it() {
+        // bsdtar writes an `x` block whose data is `length key=value` records.
+        let record = format!(" path={LONG}\n");
+        // The length counts its own digits, and both lengths that could be
+        // right are tried the way a writer picks one.
+        let mut length = record.len() + 2;
+        if length.to_string().len() + record.len() != length {
+            length = record.len() + 3;
+        }
+        let records = format!("{length}{record}");
+        let mut tar = block("PaxHeader/x", records.len(), b'x');
+        tar.extend(padded(records.as_bytes()));
+        tar.extend(block(LONG, 7, b'0'));
+        tar.extend(padded(b"% deep\n"));
+        tar.extend(vec![0u8; 1024]);
+
+        let itar = indexed(&tar, "pax");
+        let names: Vec<&str> = itar.entries().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [LONG]);
+    }
+
+    #[test]
+    fn an_extension_names_one_entry_and_not_the_one_after_that() {
+        // The override has to be consumed. Left set, every following entry
+        // would come back under the long name -- and by_name would hold one
+        // file where the archive has several.
+        let mut tar = block("././@LongLink", LONG.len() + 1, b'L');
+        tar.extend(padded(format!("{LONG}\0").as_bytes()));
+        tar.extend(block(LONG, 7, b'0'));
+        tar.extend(padded(b"% deep\n"));
+        tar.extend(block("macros.tex", 3, b'0'));
+        tar.extend(padded(b"HI\n"));
+        tar.extend(vec![0u8; 1024]);
+
+        let itar = indexed(&tar, "consumed");
+        let names: Vec<&str> = itar.entries().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [LONG, "macros.tex"]);
+        assert_eq!(itar.read("macros.tex").expect("read"), b"HI\n");
+    }
+
+    #[test]
+    fn a_pax_block_with_no_path_leaves_the_real_name_alone() {
+        // A pax header carries whatever its writer recorded -- mtime, uid,
+        // anything -- and most of it says nothing about the name.
+        let records = "30 mtime=1700000000.000000\n";
+        let mut tar = block("PaxHeader/x", records.len(), b'x');
+        tar.extend(padded(records.as_bytes()));
+        tar.extend(block("macros.tex", 3, b'0'));
+        tar.extend(padded(b"HI\n"));
+        tar.extend(vec![0u8; 1024]);
+
+        let itar = indexed(&tar, "nopath");
+        let names: Vec<&str> = itar.entries().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["macros.tex"]);
+    }
 
     /// An archive built by the system's own `tar`, which is the oracle: this
     /// reads what another program wrote.
