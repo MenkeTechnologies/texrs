@@ -342,16 +342,27 @@ compiles.
 produce what its text says. `--dvi` sets a page, `--pdf` writes the PDF itself,
 and three of the things a document controls survive the trip:
 
-- **Fonts.** `\setmainfont{Georgia}` is honoured. The family is resolved through
-  `fc-match` and the font file is carried in the PDF as `/FontFile2`, so the page
-  is set in the face that was named — `pdffonts` reports it as `TrueType yes` —
-  and lines are broken on that font's own advance widths, read from its `hmtx`
-  through its `cmap`. A family the machine does not have falls back to whichever
-  of the fourteen carries the same metrics, not to Computer Modern. There is no
-  subsetting: naming a font with a large repertoire embeds the whole file, and
-  Arial Unicode by itself is 23 MB of it.
-- **Colour.** `\textcolor` becomes PDF's own `rg` operator under `--pdf`, and
-  under `--dvi` the `color push rgb R G B` / `color pop` `\special` pair that
+- **Fonts.** `\setmainfont{Arimo}` is honoured, both ways a document writes it.
+  A family the machine has installed is resolved through `fc-match`; a document
+  that ships its own font names a FILE instead, with fontspec's `Path=`,
+  `UprightFont=` and `Extension=`, and that is read too. The difference matters
+  because `fc-match` ALWAYS answers — asked for a font nobody has installed it
+  returns its default, so a book whose fonts travel with it was set in whatever
+  that default happened to be. `Path=` is written when the document is built
+  and is regularly a directory that no longer exists, so a stale one is retried
+  against the directory the document was read from, where the fonts are.
+  The file is carried in the PDF as `/FontFile2` — `pdffonts` reports
+  `Arimo-VF TrueType yes` — once, and referred to from every page; lines are
+  broken on that font's own advance widths, out of its `hmtx` through its
+  `cmap`. A family nothing can be found for falls back to whichever of the
+  fourteen carries the same metrics, not to Computer Modern. There is no
+  subsetting: a font with a large repertoire is embedded whole.
+- **Colour.** `\definecolor`, `\providecolor` and `\colorlet` build the palette
+  and `\color`, `\textcolor` and `\pagecolor` use it, in the `HTML`, `rgb`,
+  `RGB`, `gray` and `cmyk` models. `\color` is a switch and ends with the group
+  holding it; `\textcolor` puts the previous colour back. Under `--pdf` this is
+  PDF's own `rg` operator, and `\pagecolor` is painted under the text; under
+  `--dvi` it is the `color push rgb R G B` / `color pop` `\special` pair that
   dvipdfmx and dvips both read.
 - **TikZ.** The subset these documents actually draw with: `\draw` polylines
   built from `--`, an optional `cycle`, a line width and the picture's x/y
