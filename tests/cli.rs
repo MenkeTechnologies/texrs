@@ -562,6 +562,64 @@ fn the_dvi_reader_reads_what_tex_wrote() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `-X bib` reads a database, and says so when it could not read all of it.
+#[test]
+fn the_bib_reader_reads_a_database_and_reports_what_it_could_not() {
+    let dir = scratch_cache("bib");
+    std::fs::write(
+        dir.join("refs.bib"),
+        "@STRING{tug = \"TeX Users Group\"}\n\
+         @Article{knuth1984,\n  author = {Knuth, Donald E.},\n\
+           journal = tug # \" Journal\",\n  year = 1984\n}\n",
+    )
+    .unwrap();
+
+    let out = texrs()
+        .args(["-X", "bib", "refs.bib"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("article        knuth1984"), "{text}");
+    assert!(
+        text.contains("TeX Users Group Journal"),
+        "the abbreviation and the concatenation: {text}"
+    );
+
+    // A database with a record that cannot be read still prints what it could,
+    // and the exit status says something was wrong.
+    std::fs::write(
+        dir.join("bad.bib"),
+        "@misc{k, title={one}}\n@misc{k, title={two}}\n",
+    )
+    .unwrap();
+    let out = texrs()
+        .args(["-X", "bib", "bad.bib"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!out.status.success(), "a warning is a non-zero exit");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("defined twice"), "{text}");
+    assert!(text.contains("one"), "and the entry it kept: {text}");
+
+    // A file that is not there names itself.
+    let missing = texrs()
+        .args(["-X", "bib", "absent.bib"])
+        .current_dir(&dir)
+        .output()
+        .expect("run texrs");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("absent.bib"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The bundle commands, without touching the network: what they refuse, and
 /// what an empty cache looks like.
 #[test]

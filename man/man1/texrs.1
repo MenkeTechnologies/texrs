@@ -187,6 +187,24 @@ carries: in cmr10, code 11 is the
 ligature.  For comparing two engines it does not matter, because both write the
 same code.
 .TP
+.BI \-X " bib \fIFILE\fR.bib"
+Read a bibliography database and print what is in it: the
+.B @string
+abbreviations it defines, then each entry with its type, key and fields.  Exits
+non-zero when something could not be read, so a harness need not grep for the
+word warning.
+.PP
+BibTeX is the other engine in TeX's world and the only one needing neither boxes
+nor fonts.  This is its reading half: the database format, with the corners that
+make it more than a split on commas \(em a braced value nests, a quoted one is
+protected by braces inside it, an abbreviation is expanded and may be
+concatenated with
+.BR # ,
+types and field names are case-insensitive while keys are not, and a key defined
+twice keeps the first as bibtex does.  A record that cannot be read is reported
+and the rest of the file still reads, because a database should not be lost to
+one typo.
+.TP
 .B \-X bundle list
 Print the bundles in the cache with the file each is stored in.
 .PP

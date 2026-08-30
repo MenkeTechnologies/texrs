@@ -80,6 +80,7 @@ const USAGE: &str = "\
   -X bundle list          // Say which bundles have been fetched
   -X dvi FILE.dvi         // Read what real tex shipped for a document
   -X dvi A.dvi B.dvi      // Say whether two files are the same document
+  -X bib FILE.bib         // Read a bibliography database
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 
@@ -442,6 +443,23 @@ fn run_document(args: &[String]) -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        "bib" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X bib` needs a .bib file");
+            };
+            match texrs::bib::Bib::open(file) {
+                Ok(bib) => {
+                    print!("{}", bib.summary());
+                    // A database that could not be read whole is worth an exit
+                    // status: a harness should not have to grep for "warning".
+                    match bib.warnings.is_empty() {
+                        true => ExitCode::SUCCESS,
+                        false => ExitCode::from(1),
+                    }
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "dvi" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X dvi` needs a .dvi file");

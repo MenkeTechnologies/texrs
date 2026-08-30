@@ -14,6 +14,7 @@
 pub mod aot;
 pub mod aot_runtime;
 pub mod banner;
+pub mod bib;
 pub mod bundle;
 pub mod catcode;
 pub mod cli;
