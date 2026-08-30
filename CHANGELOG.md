@@ -92,6 +92,14 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- The examples are frozen too. They are the documentation, they were checked
+  only against a live tex, and CI has none — so on every push the pages a reader
+  copies from were the least verified thing in the tree. `--freeze` now records
+  both corpora, and the replay knows the difference between them: an example
+  must match tex, an `examples/extensions/` one uses constructs tex does not
+  have and only has to run. The gate that pairs them caught its own gap first —
+  the freeze covered `examples/` and not `examples/extensions/`, and the test
+  said so by name.
 - Frozen parity, ported from the siblings: `cargo run --bin parity -- --freeze`
   records what the oracle said into `tests/data/parity_expected.txt`, and
   `tests/parity.rs` replays it with no TeX installed. CI has none, so the live

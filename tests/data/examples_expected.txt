@@ -1,0 +1,30 @@
+# Frozen output of tex 3.141592653, written by `cargo run --bin parity -- --freeze`.
+# One block per case in tests/cases; tests/parity.rs replays these with
+# no TeX installed. Regenerate when a case changes, and read the diff:
+# a changed block is a changed claim about what the reference engine does.
+#==# catcodes.tex
+[grouped] PRIVATE at-sign is @
+#==# conditionals-ifx.tex
+one=two one<>three undefined=undefined TWO MANY
+#==# conditionals.tex
+BIG ODD MANY ALWAYS
+#==# counters.tex
+count=18
+#==# csname.tex
+FROM-CSNAME \undefined
+#==# edef.tex
+frozen=1 live=2
+#==# groups.tex
+OUT-1 IN-2 OUT-1
+#==# hello.tex
+HELLO-WORLD
+#==# intercepts.tex
+! Undefined control sequence.l.17 \intercept               {before}{greet}{\trace}HELLO-WORLD! Undefined control sequence.l.20 \intercept               {after}{sec*}{\note}S:A! Undefined control sequence.l.26 {\intercept                {around}{greet}{\loud}\message{\greet{INSIDE}}}! Undefined control sequence.\loud -><<\proceed                    >>l.26 {\intercept{around}{greet}{\loud                                     }\message{\greet{INSIDE}}}HELLO-INSIDE HELLO-OUTSIDE [1] )(see the transcript file for additional information)Output written on case.dvi (1 page, 272 bytes
+#==# let.tex
+BLUE, was RED DEFINED-LATER
+#==# macros.tex
+HELLO-WORLD [1|2]
+#==# rust_ffi.tex
+! Undefined control sequence.l.12 \rust          {! You can't use `macro parameter character #' in vertical mode.l.13     #          [no_mangle]! Missing $ inserted.<inserted text>                 $<to be read again>                    _l.13     #[no_              mangle]! Missing $ inserted.<inserted text>                 $<to be read again>                    \par l.15      ! You can't use `macro parameter character #' in vertical mode.l.16     #          [no_mangle]! Missing $ inserted.<inserted text>                 $<to be read again>                    _l.16     #[no_              mangle]! Extra }, or forgotten $.l.18 }      ! Undefined control sequence.l.21 \message{twice=\rustcall                              texrs_example_twice \count1 \endrust}! Undefined control sequence.l.21 ...tcall texrs_example_twice \count1 \endrust                                                  }twice=texrs_example_twice \count 1 ! Undefined control sequence.l.22 \count2=\rustcall                       texrs_example_add \count1 21 \endrust! Missing number, treated as zero.<to be read again>                    tl.22 \count2=\rustcall t                        exrs_example_add \count1 21 \endrust! Undefined control sequence.l.22 ...call texrs_example_add \count1 21 \endrust                                                  sum=0! Undefined control sequence.l.24 \message{\ifnum\rustcall                              texrs_example_twice \count1 \endrust>41 BIG\el...! Missing number, treated as zero.<to be read again>                    tl.24 \message{\ifnum\rustcall t                               exrs_example_twice \count1 \endrust>41 BIG\el...! Missing = inserted for \ifnum.<to be read again>                    tl.24 \message{\ifnum\rustcall t                               exrs_example_twice \count1 \endrust>41 BIG\el...! Missing number, treated as zero.<to be read again>                    tl.24 \message{\ifnum\rustcall t                               exrs_example_twice \count1 \endrust>41 BIG\el...! Undefined control sequence.l.24 ...tcall texrs_example_twice \count1 \endrust                                                  >41 BIG\else SMALL\fi}texrs_example_twice \count 1 >41 BIG! Missing $ inserted.<inserted text>                 $<to be read again>                    \end l.25 \end         [1] )(\end occurred inside a group at level 1)(see the transcript file for additional information)Output written on case.dvi (1 page, 696 bytes
+#==# thenumber.tex
+the=42 number=42 frozen=42now=99

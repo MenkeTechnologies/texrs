@@ -196,6 +196,16 @@ pub fn freeze(oracle: &Oracle, cases: &[std::path::PathBuf]) -> String {
     out
 }
 
+/// The frozen file for a directory of cases.
+///
+/// `tests/cases` and `examples` each get one, because they are held to
+/// different contracts — a case may diverge if `tests/known_gaps.txt` says why,
+/// an example may not — and mixing them into one file would blur that.
+pub fn frozen_path(repo: &Path, dir_name: &str) -> std::path::PathBuf {
+    repo.join("tests/data")
+        .join(format!("{dir_name}_expected.txt"))
+}
+
 /// Parse a frozen file into `(case name, expected output)` pairs.
 pub fn thawed(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();

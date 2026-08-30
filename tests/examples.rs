@@ -61,6 +61,59 @@ fn every_example_runs_and_prints_something() {
     }
 }
 
+/// The same comparison with no TeX installed, from the outputs
+/// `cargo run --bin parity -- --freeze` recorded.
+///
+/// CI has no tex, so the live test below skips there — which meant the
+/// examples, which are the documentation, went unverified on every push. This
+/// is what actually runs in CI; the live one is what proves the frozen file
+/// still describes tex.
+#[test]
+fn every_example_still_prints_what_tex_printed() {
+    let frozen = texrs::parity::thawed(include_str!("data/examples_expected.txt"));
+    let on_disk: std::collections::BTreeSet<String> = examples()
+        .iter()
+        .chain(extensions().iter())
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    let recorded: std::collections::BTreeSet<String> =
+        frozen.iter().map(|(n, _)| n.clone()).collect();
+    assert_eq!(
+        on_disk, recorded,
+        "the frozen examples and the examples on disk disagree -- run \
+         `cargo run --bin parity -- --freeze`"
+    );
+
+    let extension_names: std::collections::BTreeSet<String> = extensions()
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+
+    let mut bad = Vec::new();
+    for (name, want) in frozen {
+        // An extension example uses constructs tex does not have, so what is
+        // frozen for it is tex failing to understand them -- not a claim about
+        // texrs. It still has to RUN, which the test above checks.
+        if extension_names.contains(&name) {
+            continue;
+        }
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(&name);
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {name}: {e}"));
+        let got = texrs::parity::subject(&src);
+        if got != want {
+            bad.push(format!("{name}\n  tex   : {want:?}\n  texrs : {got:?}"));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} example(s) no longer print what tex printed:\n\n{}",
+        bad.len(),
+        bad.join("\n\n")
+    );
+}
+
 #[test]
 fn every_example_matches_real_tex() {
     let Some(tex) = common::tex() else {

@@ -34,22 +34,37 @@ fn main() -> ExitCode {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--freeze") {
-        let cases = parity::cases_in(&repo.join("tests/cases"));
-        let out = repo.join("tests/data/parity_expected.txt");
-        if let Some(dir) = out.parent() {
-            let _ = std::fs::create_dir_all(dir);
+        // Both corpora, because both are checked against tex and both go
+        // unchecked in CI without this: the cases, and the examples that are
+        // documentation and must run.
+        for (dirs, label) in [
+            (vec!["tests/cases"], "parity"),
+            // The extensions are examples too: they must run, and freezing what
+            // tex made of a construct it does not have is what lets the replay
+            // tell "this is an extension" from "this example broke".
+            (vec!["examples", "examples/extensions"], "examples"),
+        ] {
+            let mut cases: Vec<std::path::PathBuf> = dirs
+                .iter()
+                .flat_map(|d| parity::cases_in(&repo.join(d)))
+                .collect();
+            cases.sort_by_key(|p| p.file_name().map(|n| n.to_os_string()));
+            let out = parity::frozen_path(&repo, label);
+            if let Some(parent) = out.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let text = parity::freeze(&oracle, &cases);
+            if let Err(e) = std::fs::write(&out, &text) {
+                eprintln!("parity: cannot write {}: {e}", out.display());
+                return ExitCode::from(2);
+            }
+            println!(
+                "froze {} {label} case(s) of tex {} -> {}",
+                cases.len(),
+                oracle.version,
+                out.display()
+            );
         }
-        let text = parity::freeze(&oracle, &cases);
-        if let Err(e) = std::fs::write(&out, &text) {
-            eprintln!("parity: cannot write {}: {e}", out.display());
-            return ExitCode::from(2);
-        }
-        println!(
-            "froze {} case(s) of tex {} -> {}",
-            cases.len(),
-            oracle.version,
-            out.display()
-        );
         return ExitCode::SUCCESS;
     }
 
