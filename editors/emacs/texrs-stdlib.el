@@ -65,6 +65,8 @@
     "\\proceed"
     "\\chardef"
     "\\countdef"
+    "\\long"
+    "\\outer"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -141,6 +143,8 @@
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
     (puthash "\\chardef" "\\chardef  —  Define a control sequence that IS a number: `\\chardef\\active=13` makes `\\active` usable wherever a number is scanned, which is how plain.tex writes `\\catcode`\\~=\\active`. [Registers]" table)
     (puthash "\\countdef" "\\countdef  —  Give a count register a name, usable in every position the register itself is: assignment, `\\advance` and `\\the` all reach the same register through either spelling. [Registers]" table)
+    (puthash "\\long" "\\long  —  A definition prefix: the macro's arguments may contain `\\par`. [Macro definition]" table)
+    (puthash "\\outer" "\\outer  —  A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. [Macro definition]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

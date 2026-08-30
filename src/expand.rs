@@ -20,6 +20,15 @@ use std::collections::HashMap;
 pub struct Macro {
     pub params: Vec<Token>,
     pub body: Vec<Token>,
+    /// `\long\def` — the argument may contain `\par`.
+    pub long: bool,
+    /// `\outer\def` — the macro may not appear in an argument, in a group
+    /// being scanned as text, or in skipped conditional text.
+    ///
+    /// Both flags are part of the MEANING, not decoration: tex's `\ifx` says
+    /// `\long\def\a{}` and `\def\a{}` differ, which falls out of deriving
+    /// `PartialEq` here.
+    pub outer: bool,
 }
 
 /// What a control sequence means. `\let` is why this is a value and not just a
@@ -84,6 +93,10 @@ pub struct Engine {
     conds: Vec<CondState>,
     /// Set by `\global`, cleared by the assignment it prefixes.
     global: bool,
+    /// Whether a `\long` prefix is in force for the definition being read.
+    long: bool,
+    /// Whether an `\outer` prefix is.
+    outer: bool,
     /// Advice registered with `\intercept`, woven into matching expansions.
     pub intercepts: crate::intercepts::Registry,
     /// How deep inside an advice body expansion currently is.
@@ -162,6 +175,8 @@ impl Engine {
             groups: Vec::new(),
             conds: Vec::new(),
             global: false,
+            long: false,
+            outer: false,
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
         }
@@ -281,6 +296,25 @@ impl Engine {
             }
             "let" => self.do_let(lx)?,
             "futurelet" => self.do_futurelet(lx, false)?,
+            // `\long` and `\outer` take a prefix each, exactly as `\global`
+            // does, and chain in any order: `\global\outer\long\def` is one
+            // definition with three of them.
+            "long" | "outer" => {
+                let which = name.name() == "long";
+                match which {
+                    true => self.long = true,
+                    false => self.outer = true,
+                }
+                let Some(next) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Missing control sequence".into()));
+                };
+                let out = self.step(lx, next);
+                match which {
+                    true => self.long = false,
+                    false => self.outer = false,
+                }
+                return out;
+            }
             "global" => {
                 self.global = true;
                 let Some(next) = lx.next_token(&self.cats) else {
@@ -617,8 +651,12 @@ impl Engine {
             false => raw,
         };
         let was = std::mem::replace(&mut self.global, global);
-        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
         self.global = was;
+        // A prefix applies to the definition it precedes and to nothing after
+        // it, so it is spent here rather than left to colour the next `\def`.
+        self.long = false;
+        self.outer = false;
         Ok(())
     }
 
@@ -678,7 +716,7 @@ impl Engine {
                 Cat::Other,
             ));
         }
-        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
         // The default is recorded but not yet honoured: a call that omits the
         // bracket would need the same peek `\@ifnextchar` does, at every use
         // site rather than at the definition. Recorded here so the definition
@@ -1728,6 +1766,26 @@ impl Engine {
     pub fn compile_time_end_group(&mut self) -> R<()> {
         self.end_group()
     }
+    /// A macro carrying whichever definition prefixes are in force.
+    fn new_macro(&self, params: Vec<Token>, body: Vec<Token>) -> Macro {
+        Macro {
+            params,
+            body,
+            long: self.long,
+            outer: self.outer,
+        }
+    }
+
+    /// `\long`, for a caller that is lowering rather than expanding.
+    pub fn set_long_prefix(&mut self, on: bool) {
+        self.long = on;
+    }
+
+    /// `\outer`, likewise.
+    pub fn set_outer_prefix(&mut self, on: bool) {
+        self.outer = on;
+    }
+
     pub fn set_global_prefix(&mut self, on: bool) {
         self.global = on;
     }
@@ -1762,13 +1820,7 @@ impl Engine {
     }
     /// Define a macro with no parameters, for `\edef`'s rewritten body.
     pub fn define_macro(&mut self, name: CsId, body: Vec<Token>) {
-        self.set_meaning(
-            name,
-            Meaning::Macro(Macro {
-                params: Vec::new(),
-                body,
-            }),
-        );
+        self.set_meaning(name, Meaning::Macro(self.new_macro(Vec::new(), body)));
     }
 
     /// The same, with a parameter text — validated as `\def`'s is.
@@ -1784,7 +1836,7 @@ impl Engine {
         body: Vec<Token>,
     ) -> R<()> {
         validate_params(&params)?;
-        self.set_meaning(name, Meaning::Macro(Macro { params, body }));
+        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
         Ok(())
     }
 }

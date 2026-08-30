@@ -1,0 +1,8 @@
+% An \outer macro may not appear inside a group being scanned as text: tex
+% reports `! Forbidden control sequence found while scanning text of \message.'
+% texrs records the prefix but does not police it, so it prints the body
+% instead. See BUGS.md, "Definition prefixes".
+\catcode`\{=1 \catcode`\}=2
+\outer\def\x{A}
+\message{[\x]}
+\end

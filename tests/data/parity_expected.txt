@@ -42,6 +42,8 @@ XY
 VALUE
 #==# def_in_conditional_arm.tex
 <a>
+#==# def_prefixes.tex
+[A] [B] [C] [diff]
 #==# delimited_params.tex
 [alpha|beta]
 #==# edef_expands_now.tex
@@ -86,6 +88,8 @@ one two
 42--17
 #==# number_too_big.tex
 ! Number too big.l.6 \count1=9999999999                      9[2147483647] )(see the transcript file for additional information
+#==# outer_forbidden_use.tex
+Runaway text?[! Forbidden control sequence found while scanning text of \message.<inserted text>                 }<to be read again>                    \x l.7 \message{[\x                ]}[ ! Too many }'s.l.7 \message{[\x]}                  [1] )(see the transcript file for additional information)Output written on case.dvi (1 page, 208 bytes
 #==# param_brace_delim.tex
 [X]{Y}
 #==# plain_count0.tex

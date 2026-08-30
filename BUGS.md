@@ -116,6 +116,20 @@ A file that cannot be found stops the run naming it, where tex prompts for a
 replacement. That is the error model recorded under "Not implemented" rather
 than anything specific to files.
 
+## Definition prefixes
+
+`\long` and `\outer` are recorded on the macro and are part of its meaning, so
+`\ifx` distinguishes a prefixed definition from a bare one exactly as tex does.
+The restrictions they describe are NOT enforced.
+
+`\outer` is only an error-detection feature: it forbids the macro in an
+argument, in a group being scanned as text, and in skipped conditional text, and
+every one of those is a position tex reports and recovers from while texrs
+stops. Enforcing it therefore could not reach parity either, and a false
+positive would refuse a document that works, so the difference is written down
+instead -- `tests/cases/outer_forbidden_use.tex` pins it. The same holds for the
+runaway-argument check `\long` lifts.
+
 ## Inline Rust
 
 - **Two runs compiling the same block at once can collide.** fusevm keys its FFI

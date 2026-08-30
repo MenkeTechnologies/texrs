@@ -8,6 +8,19 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\long` and `\outer`, the two definition prefixes texrs did not have (it had
+  `\global`). Both attach to the definition that follows and are spent by it,
+  and all three chain in any order. They are part of the MEANING, not
+  decoration, so `\ifx` tells `\long\def\a{}` from `\def\a{}` — measured, tex
+  says the same. `\outer`'s restriction is recorded but not policed; see
+  BUGS.md.
+- Reading a `\special`, ported from the `spc_*.c` family in `xdvipdfmx`:
+  dvips's colour stack, `papersize`, an included figure with its bounding box,
+  `pdf:` destinations and operators, HTML links, and anything else kept whole.
+  `-X special TEXT`. Held against tex both ways -- the specials a real document
+  carries are read back out of the DVI tex wrote, and the dimension arithmetic
+  is compared with tex's own for eighty-one dimensions, which is how it came to
+  be TeX's arithmetic rather than the one that looks right.
 - Reading the `CFF ` table, ported from `cff.c` and `cff_dict.c` in
   `xdvipdfmx`: the header, the INDEXes, the Top and Private DICTs with their
   packed operands and nybble reals, the charset in all three formats, the 391

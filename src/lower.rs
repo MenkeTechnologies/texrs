@@ -495,6 +495,10 @@ impl Lowerer {
                 "begingroup" => self.eng.compile_time_begin_group(),
                 "endgroup" => self.eng.compile_time_end_group()?,
                 "global" => self.eng.set_global_prefix(true),
+                // The other two definition prefixes. Like `\global` they set a
+                // flag the definition that follows reads and spends.
+                "long" => self.eng.set_long_prefix(true),
+                "outer" => self.eng.set_outer_prefix(true),
                 "relax" | "par" => {}
                 other => {
                     // TeX's loop idiom -- a macro whose last act is to call

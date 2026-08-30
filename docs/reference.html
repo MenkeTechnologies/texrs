@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">72</div>
+            <div class="stat-val">74</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">51</div>
+            <div class="stat-val">52</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -145,6 +145,8 @@
 \def\decide{\ifx\next[ OPTIONAL\else PLAIN\fi}</pre></td></tr>
             <tr><td><code>\global</code></td><td>Prefix making the following assignment global, so it survives the enclosing group.</td><td><pre>\global\count1=5
 \global\def\v{OUT}</pre></td></tr>
+            <tr><td><code>\long</code></td><td>A definition prefix: the macro's arguments may contain <code>\par</code>. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. texrs records the prefix and does not yet enforce the restriction it lifts.</td><td><pre>\long\def\note#1{[#1]}</pre></td></tr>
+            <tr><td><code>\outer</code></td><td>A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. It is an error-detection feature -- plain.tex marks its sectioning macros <code>\outer</code> so a missing brace is caught at the next section rather than at the end of the file. texrs records the prefix and does not police the restriction, so a use tex forbids is accepted here; <code>tests/cases/outer_forbidden_use.tex</code> pins the difference. Prefixes are part of the meaning, so <code>\ifx</code> tells a prefixed definition from a bare one.</td><td><pre>\outer\def\chapter{...}</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -426,6 +428,7 @@
             <tr><td><code>multiply_overflow.tex</code></td><td>Both engines raise `Arithmetic overflow` for a \multiply past the 32-bit range and leave the register alone -- the divergence is what happens NEXT. tex reports and carries on, so it still prints the message; texrs stops, which is the error model recorded above ("Errors"). Fixing the recovery fixes this case; the arithmetic itself already matches.</td></tr>
             <tr><td><code>number_too_big.tex</code></td><td>Both engines reject a constant above 2147483647 with `Number too big` (tex.web §445); the divergence is the recovery, exactly as in multiply_overflow.tex. tex clamps to 2147483647 and carries on, so it still prints the message; texrs stops. The limit and the rejection point already match -- before this case, texrs checked only for i64 overflow and accepted 99999999999 outright.</td></tr>
             <tr><td><code>chardef_bad_code.tex</code></td><td>Both engines reject a character code above 255 with the same words, `Bad character code (256)`; the divergence is the recovery, as in multiply_overflow.tex and number_too_big.tex. tex reports and carries on, texrs stops.</td></tr>
+            <tr><td><code>outer_forbidden_use.tex</code></td><td>texrs records \outer but does not police it. tex forbids an outer macro inside a group being scanned as text and reports `Forbidden control sequence found while scanning text of \message'; texrs expands it and prints the body. \outer is ONLY an error-detection feature, and every position it governs -- an argument, a text group, skipped conditional text -- is one tex reports and recovers from while texrs stops, so enforcing it cannot reach parity either. Recorded rather than half-enforced: a false positive here would refuse a document that works.</td></tr>
           </tbody>
         </table>
       </section>
@@ -468,6 +471,7 @@
             <tr><td><code>--build</code></td><td>Compile into the bytecode cache and stop, without running</td></tr>
             <tr><td><code>--text</code></td><td>Print the document text, not only the message stream</td></tr>
             <tr><td><code>--dvi</code></td><td>Typeset to FILE.dvi -- first-fit lines, no hyphenation</td></tr>
+            <tr><td><code>--pdf</code></td><td>Typeset to FILE.pdf, in the font the document asked for</td></tr>
             <tr><td><code>--no-cache</code></td><td>Compile this run rather than reading the bytecode cache</td></tr>
             <tr><td><code>--aot</code></td><td>Compile the document to a standalone native executable</td></tr>
           </tbody>

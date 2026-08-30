@@ -106,3 +106,14 @@ chardef_bad_code.tex
 #                  words, `Bad character code (256)`; the divergence is the
 #                  recovery, as in multiply_overflow.tex and number_too_big.tex.
 #                  tex reports and carries on, texrs stops.
+outer_forbidden_use.tex
+#                  texrs records \outer but does not police it. tex forbids an
+#                  outer macro inside a group being scanned as text and reports
+#                  `Forbidden control sequence found while scanning text of
+#                  \message'; texrs expands it and prints the body. \outer is
+#                  ONLY an error-detection feature, and every position it
+#                  governs -- an argument, a text group, skipped conditional
+#                  text -- is one tex reports and recovers from while texrs
+#                  stops, so enforcing it cannot reach parity either. Recorded
+#                  rather than half-enforced: a false positive here would
+#                  refuse a document that works.

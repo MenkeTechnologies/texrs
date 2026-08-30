@@ -45,6 +45,13 @@ enum MeaningRepr {
     Macro {
         params: Vec<TokenRepr>,
         body: Vec<TokenRepr>,
+        // Defaulted so a dump written before the prefixes existed still decodes
+        // -- belt as well as braces, since `Format::usable` already refuses a
+        // dump from another build.
+        #[serde(default)]
+        long: bool,
+        #[serde(default)]
+        outer: bool,
     },
     Primitive(String),
     Char(char, u8),
@@ -220,6 +227,8 @@ fn meaning_repr(meaning: &Meaning) -> MeaningRepr {
         Meaning::Macro(m) => MeaningRepr::Macro {
             params: m.params.iter().map(token_repr).collect(),
             body: m.body.iter().map(token_repr).collect(),
+            long: m.long,
+            outer: m.outer,
         },
         Meaning::Primitive(id) => MeaningRepr::Primitive(id.name().to_string()),
         Meaning::Char(c, cat) => MeaningRepr::Char(*c, cat_to_u8(*cat)),
@@ -230,9 +239,16 @@ fn meaning_repr(meaning: &Meaning) -> MeaningRepr {
 
 fn meaning_of(repr: &MeaningRepr) -> Meaning {
     match repr {
-        MeaningRepr::Macro { params, body } => Meaning::Macro(Macro {
+        MeaningRepr::Macro {
+            params,
+            body,
+            long,
+            outer,
+        } => Meaning::Macro(Macro {
             params: params.iter().map(token_of).collect(),
             body: body.iter().map(token_of).collect(),
+            long: *long,
+            outer: *outer,
         }),
         MeaningRepr::Primitive(name) => Meaning::Primitive(CsId::intern(name)),
         MeaningRepr::Char(c, cat) => Meaning::Char(*c, u8_to_cat(*cat)),

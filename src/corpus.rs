@@ -362,6 +362,18 @@ pub const CORPUS: &[Entry] = &[
         "Give a count register a name, usable in every position the register itself is: assignment, `\\advance` and `\\the` all reach the same register through either spelling. plain.tex's `\\pageno` is `\\countdef\\pageno=0`. The register number is 0..255 and a wider one is `! Bad register code (N).`.",
         "\\countdef\\pageno=0\n\\pageno=7\n\\advance\\pageno by 1",
     ),
+    (
+        "\\long",
+        "Macro definition",
+        "A definition prefix: the macro's arguments may contain `\\par`. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. texrs records the prefix and does not yet enforce the restriction it lifts.",
+        "\\long\\def\\note#1{[#1]}",
+    ),
+    (
+        "\\outer",
+        "Macro definition",
+        "A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. It is an error-detection feature -- plain.tex marks its sectioning macros `\\outer` so a missing brace is caught at the next section rather than at the end of the file. texrs records the prefix and does not police the restriction, so a use tex forbids is accepted here; `tests/cases/outer_forbidden_use.tex` pins the difference. Prefixes are part of the meaning, so `\\ifx` tells a prefixed definition from a bare one.",
+        "\\outer\\def\\chapter{...}",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

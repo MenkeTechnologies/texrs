@@ -1,0 +1,14 @@
+% \long and \outer are definition prefixes, like \global: they attach to the
+% definition that follows and are spent by it. All three chain in any order.
+% The prefixes are part of the MEANING, which is why the \ifx below says two
+% otherwise identical bodies differ.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\outer\def\x{\message{[A]}}
+\x
+\long\def\y#1{[#1]}
+\message{\y{B}}
+\global\outer\long\def\z{\message{[C]}}
+\z
+\long\def\a{}\def\b{}
+\message{[\ifx\a\b same\else diff\fi]}
+\end
