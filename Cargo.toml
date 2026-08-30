@@ -29,6 +29,10 @@ name = "texrs"
 path = "src/main.rs"
 
 [[bin]]
+name = "parity"
+path = "src/bin/parity.rs"
+
+[[bin]]
 name = "parity-fuzz"
 path = "src/bin/parity_fuzz.rs"
 

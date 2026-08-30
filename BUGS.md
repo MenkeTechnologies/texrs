@@ -4,8 +4,8 @@ texrs implements TeX's mouth and expander. What follows is what is deliberately
 not done, and what is done differently. Everything here was
 measured against **tex 3.141592653** (TeX Live 2026).
 
-That version string is not decoration: `scripts/lib.sh` reads it out of this file
-and refuses to run either parity harness against a different engine. A
+That version string is not decoration: `src/parity.rs` reads it out of this file
+and refuses to run any parity harness against a different engine. A
 mismatched oracle does not fail loudly — it reports a different set of
 divergences, which reads exactly like a regression in texrs. `TEX_VERSION_EXPECT`
 overrides it for a deliberate cross-version run.

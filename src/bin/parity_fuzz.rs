@@ -39,12 +39,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// The reference engine, and the version every expectation here was measured
-/// against.
-struct Oracle {
-    program: String,
-    version: String,
-}
+use texrs::parity::Oracle;
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -60,10 +55,10 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    let oracle = match find_oracle() {
+    let oracle = match texrs::parity::oracle(&repo()) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("parity-fuzz: {e}");
             return std::process::ExitCode::from(2);
         }
     };
@@ -175,39 +170,6 @@ impl Config {
         }
         Ok(cfg)
     }
-}
-
-/// The pinned oracle version, read out of BUGS.md so it cannot drift from the
-/// document that quotes it — the same gate `scripts/lib.sh` applies.
-fn find_oracle() -> Result<Oracle, String> {
-    let bugs = std::fs::read_to_string(repo().join("BUGS.md")).map_err(|e| e.to_string())?;
-    let want = bugs
-        .lines()
-        .find_map(|l| l.split("measured against **tex ").nth(1))
-        .and_then(|r| r.split("**").next())
-        .ok_or("parity-fuzz: no `measured against **tex X.Y**` line in BUGS.md")?;
-
-    let out = Command::new("tex")
-        .arg("--version")
-        .output()
-        .map_err(|_| "parity-fuzz: no `tex` on PATH — the fuzzer has no oracle".to_string())?;
-    let banner = String::from_utf8_lossy(&out.stdout);
-    let version = banner
-        .lines()
-        .next()
-        .and_then(|l| l.split("TeX ").nth(1))
-        .and_then(|v| v.split_whitespace().next())
-        .ok_or("parity-fuzz: `tex --version` did not report a version")?;
-    if version != want {
-        return Err(format!(
-            "parity-fuzz: oracle is tex {version}, but everything here was measured against {want}.\n\
-             A mismatched oracle reports a different divergence set, not an error."
-        ));
-    }
-    Ok(Oracle {
-        program: "tex".into(),
-        version: version.to_string(),
-    })
 }
 
 fn repo() -> PathBuf {
@@ -359,7 +321,10 @@ fn run_both(source: &str, oracle: &Oracle, dir: &Path, timeout: Duration) -> (St
         Command::new(texrs_binary()).arg(&path).current_dir(dir),
         timeout,
     );
-    (messages_of(&want), messages_of(&got))
+    (
+        texrs::parity::messages_of(&want),
+        texrs::parity::messages_of(&got),
+    )
 }
 
 /// This binary lives beside the `texrs` one cargo built.
@@ -392,25 +357,6 @@ fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> String {
         .map(|o| o.stdout)
         .unwrap_or_default();
     String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The `\message` stream out of `(./case.tex … )`.
-///
-/// The same extraction `tests/common/mod.rs` makes, for the same reason: two
-/// harnesses that extract differently are asking the oracle two questions.
-fn messages_of(out: &str) -> String {
-    let Some(at) = out.find("(./") else {
-        return String::new();
-    };
-    let rest = &out[at + 3..];
-    let Some((_, after)) = rest.split_once(".tex") else {
-        return String::new();
-    };
-    let body = match after.rfind(')') {
-        Some(end) => &after[..end],
-        None => after,
-    };
-    body.replace('\n', "").trim().to_string()
 }
 
 fn diverges(probes: &[String], oracle: &Oracle, dir: &Path, timeout: Duration) -> bool {

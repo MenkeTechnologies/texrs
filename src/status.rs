@@ -51,7 +51,7 @@ pub trait StatusBackend {
     }
 }
 
-/// stderr, in tex's form: `! reason.` — the shape `scripts/parity.sh` and every
+/// stderr, in tex's form: `! reason.` — the shape the parity harness and every
 /// TeX user's muscle memory expect.
 #[derive(Default)]
 pub struct TexStatus {

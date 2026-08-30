@@ -2,7 +2,7 @@
 //!
 //! Running a file prints the `\message` stream the way `tex` prints it on the
 //! terminal — `(./file.tex <messages> )` — which is the comparison
-//! `scripts/parity.sh` makes against the real engine. The introspection flags
+//! `cargo run --bin parity` makes against the real engine. The introspection flags
 //! stop earlier in the same pipeline: `--dump-tokens` after the mouth,
 //! `--disasm` after lowering, so each stage can be read on its own.
 

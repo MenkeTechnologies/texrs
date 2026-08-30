@@ -9,7 +9,7 @@
 //! It is NOT a typesetter yet: there are no boxes, no glue, no paragraphs and no
 //! DVI. `docs/ROADMAP.md` says what that would take. The parity contract for
 //! this milestone is the `\message` stream, compared byte-for-byte against real
-//! `tex` by `scripts/parity.sh`.
+//! `tex` by `cargo run --bin parity`.
 
 pub mod aot;
 pub mod aot_runtime;
@@ -36,6 +36,7 @@ pub mod lexer;
 pub mod lower;
 pub mod lsp;
 pub mod parallel;
+pub mod parity;
 pub mod repl;
 pub mod runtime;
 pub mod rust_ffi;

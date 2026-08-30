@@ -74,6 +74,13 @@ which is the release that carries it to crates.io and the Homebrew tap.
   in a page that claims a version the binary has not been for three releases,
   which is what had happened (v0.1.0 in the docs through v0.3.0, the man pages
   three behind at v0.3.1, the plugin at 0.1.0 against a 0.4.0 crate).
+- The oracle is one implementation, in `src/parity.rs`, shared by the
+  differential tests, the new `parity` binary and `parity-fuzz`. Two harnesses
+  that extract the message stream differently are asking the oracle two
+  different questions, and the shell versions kept that logic in bash and perl
+  beside the Rust copy — the arrangement that drifts. `scripts/parity.sh` and
+  `scripts/lib.sh` are gone with it; `cargo run --bin parity` is the same report
+  over `tests/cases` or any directory of `.tex` files.
 - `parity-fuzz`, the differential fuzzer as a binary, ported in shape from the
   sibling frontends' — and for their reason. The oracle is the expensive part:
   a `tex` invocation costs ~0.5s of process start and format load, so a fuzzer

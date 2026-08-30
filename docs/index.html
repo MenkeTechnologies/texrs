@@ -163,7 +163,7 @@
           <div class="cat-card"><h4>-X dvi FILE.dvi</h4><p>Read what real <code>tex</code> shipped for a document. Given two files it answers whether they are the same document &mdash; the comparison a parity harness makes.</p></div>
           <div class="cat-card"><h4>-X bib FILE.bib / FILE.aux</h4><p>Read a bibliography database, or, given an <code>.aux</code>, answer the different question: what this document cites and which of those entries are missing.</p></div>
           <div class="cat-card"><h4>TeX-compatible options</h4><p>The single-dash grammar real <code>tex</code> accepts, so a Makefile does not have to know which binary it is calling: <code>-interaction=MODE</code>, <code>-jobname=NAME</code>, <code>-output-directory=DIR</code>, <code>-progname=NAME</code>, <code>-fmt=NAME</code>, <code>-ini</code>, <code>-halt-on-error</code>, <code>-file-line-error</code> / <code>-no-file-line-error</code>, <code>-recorder</code>. The <code>&amp;FMT</code> and <code>\FIRST-LINE</code> argument forms work too.</p></div>
-          <div class="cat-card"><h4>scripts/parity.sh</h4><p>Diff the committed corpus against the real <code>tex</code> binary. No expectation is written by hand.</p></div>
+          <div class="cat-card"><h4>the parity binary</h4><p>Diff the committed corpus against the real <code>tex</code> binary. No expectation is written by hand.</p></div>
           <div class="cat-card"><h4>the parity-fuzz binary</h4><p>Generate seeded random programs in the implemented subset, run both engines, and reduce whatever diverges to a minimal case.</p></div>
         </div>
       </section>
@@ -201,7 +201,7 @@
 cargo test
 
 # the same comparison as a script
-bash scripts/parity.sh
+cargo run --bin parity
 
 # random programs in the implemented subset, both engines, reduced on divergence
 cargo run --bin parity-fuzz -- --programs 500

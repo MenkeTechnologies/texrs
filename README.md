@@ -283,8 +283,8 @@ The contract is the `\message` stream, compared byte-for-byte against the real
 `tex` binary. No expectation is written by hand:
 
 ```sh
-bash scripts/parity.sh          # the committed corpus
-bash scripts/parity.sh case.tex # one ad-hoc case
+cargo run --bin parity          # the committed corpus
+cargo run --bin parity -- case.tex   # one file or directory
 cargo test                      # the same comparison, as a gate
 ```
 
