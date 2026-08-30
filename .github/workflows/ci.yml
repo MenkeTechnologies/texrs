@@ -17,6 +17,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         run: rustup update stable && rustup default stable && rustup component add rustfmt clippy
+      # tests/typeset.rs measures in the font the driver will measure in, which
+      # means reading cmr10.tfm and cmsy10.tfm off a real installation:
+      # `find_font` asks `kpsewhich` and then walks the texmf trees, and on a
+      # runner with neither it answers None and thirteen tests panic before
+      # they assert anything. texlive-base carries both metrics and pulls
+      # texlive-binaries for `kpsewhich`, which is the whole of what is needed
+      # -- no formats, no engines, ~44 MB.
+      - name: Install TeX font metrics
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends texlive-base
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
