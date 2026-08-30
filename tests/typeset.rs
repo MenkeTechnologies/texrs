@@ -211,3 +211,62 @@ fn a_colour_marker_takes_no_space_on_the_line() {
         "the markers must measure zero"
     );
 }
+
+#[test]
+fn the_font_a_document_asks_for_is_the_font_it_gets() {
+    // The complaint this answers: everything set in Computer Modern however
+    // loudly the document said \setmainfont. The mapping is by what the face
+    // IS -- Arimo carries Arial's metrics and Arial carries Helvetica's -- not
+    // by matching the name.
+    use texrs::typeset::base14_for;
+    assert_eq!(base14_for("Arimo"), "Helvetica");
+    assert_eq!(base14_for("Liberation Sans"), "Helvetica");
+    assert_eq!(base14_for("ShareTechMono"), "Courier");
+    assert_eq!(base14_for("JetBrains Mono"), "Courier");
+    assert_eq!(base14_for("Times New Roman"), "Times-Roman");
+    assert_eq!(base14_for("STIX Two Text"), "Times-Roman");
+    // A face nothing is known about still is not a book font: a document that
+    // named one at all was asking not to be set in Computer Modern.
+    assert_eq!(base14_for("Orbitron"), "Helvetica");
+}
+
+#[test]
+fn setmainfont_reaches_the_pdf() {
+    let src = |f: &str| {
+        format!(
+            "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\\setmainfont{{{f}}}\n\
+             \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n"
+        )
+    };
+    let mono = texrs::run_pdf(&src("ShareTechMono")).expect("pdf");
+    assert!(
+        String::from_utf8_lossy(&mono).contains("/Courier"),
+        "a monospace request must reach the file as Courier"
+    );
+    let serif = texrs::run_pdf(&src("Times New Roman")).expect("pdf");
+    assert!(String::from_utf8_lossy(&serif).contains("/Times-Roman"));
+}
+
+#[test]
+fn colour_survives_the_pdf_path_as_pdfs_own_operator() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               plain \\textcolor[rgb]{1.00,0.00,0.00}{RED} plain\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let s = String::from_utf8_lossy(&pdf);
+    assert!(s.contains("1 0 0 rg"), "the colour is set");
+    assert!(s.contains("0 g"), "and put back after");
+}
+
+#[test]
+fn a_line_is_split_into_runs_where_the_colour_changes() {
+    // A colour marker turns colour on part way ALONG a line, so a line is not
+    // one string in one colour. Treating it as one drew no colour at all: the
+    // closing marker put the state back before anything was emitted.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               before \\textcolor[rgb]{0,0,1}{middle} after\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let s = String::from_utf8_lossy(&pdf);
+    assert!(s.contains("(before )"), "the run before the colour: {s:?}");
+    assert!(s.contains("(middle)"), "the coloured run");
+    assert!(s.contains("0 0 1 rg"), "with the colour set for it");
+}

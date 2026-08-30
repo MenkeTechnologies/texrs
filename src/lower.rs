@@ -33,6 +33,14 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
+    /// The typefaces the document asked for, by `\setmainfont` and its
+    /// siblings.
+    ///
+    /// A document says `\setmainfont{Arimo}` and means it; setting the whole
+    /// book in Computer Modern regardless is the complaint this exists to
+    /// answer. Recorded while lowering because that is where the preamble is
+    /// read, and handed to the typesetter, which decides what it can honour.
+    pub fonts: crate::typeset::Families,
     /// Carry the document's own text into the program.
     ///
     /// Off by default: the terminal output of a `tex` run is its `\message`
@@ -77,6 +85,7 @@ impl Lowerer {
             eng: Engine::new(),
             ended: false,
             next_scratch: 255,
+            fonts: crate::typeset::Families::default(),
             text_output: false,
             depth: 0,
         }
@@ -318,7 +327,7 @@ impl Lowerer {
                     let v = self.number(lx)?;
                     out.push(Cmd::SetCount(reg, v));
                 }
-                // `\pageno=7`, where `\pageno` was `\countdef`'d: the name IS
+                // `\pageno=7`, where `\pageno` was `\countdef`'d: the name is
                 // the register, so this is the `\count0=7` arm reached by
                 // another spelling.
                 _ if matches!(
@@ -453,6 +462,19 @@ impl Lowerer {
                 // Preamble directives naming files texrs cannot load. Their
                 // arguments are consumed so the body of the document is still
                 // read; see compile_time_preamble_directive.
+                // The font the document asked for. Its argument is consumed
+                // either way; the difference is that the name is kept.
+                k @ ("setmainfont" | "setsansfont" | "setmonofont" | "setromanfont") => {
+                    let _ = self.eng.read_optional_bracket(lx)?;
+                    let name = self.eng.read_group_text_pub(lx)?;
+                    let _ = self.eng.read_optional_bracket(lx)?;
+                    let slot = match k {
+                        "setsansfont" => &mut self.fonts.sans,
+                        "setmonofont" => &mut self.fonts.mono,
+                        _ => &mut self.fonts.main,
+                    };
+                    *slot = Some(name.trim().to_string());
+                }
                 "documentclass" | "usepackage" | "RequirePackage" => {
                     self.eng.compile_time_preamble_directive(lx, 1)?
                 }

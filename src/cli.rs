@@ -124,6 +124,8 @@ pub struct Cli {
     pub text: bool,
     /// Typeset to a DVI file beside the source.
     pub dvi_out: bool,
+    /// Typeset straight to a PDF, in the font the document asked for.
+    pub pdf_out: bool,
     pub jobs: Option<usize>,
 }
 
@@ -152,6 +154,7 @@ impl Default for Cli {
             no_cache: false,
             text: false,
             dvi_out: false,
+            pdf_out: false,
             jobs: None,
         }
     }
@@ -248,6 +251,7 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
             "no-cache" => cli.no_cache = true,
             "text" => cli.text = true,
             "dvi" => cli.dvi_out = true,
+            "pdf" => cli.pdf_out = true,
             "jobs" => {
                 let v = value("--jobs")?;
                 match v.parse::<usize>() {
@@ -338,6 +342,8 @@ pub const USAGE: &str = "\
           // Print the document text, not only the message stream
   --dvi
           // Typeset to FILE.dvi -- first-fit lines, no hyphenation
+  --pdf
+          // Typeset to FILE.pdf, in the font the document asked for
   --no-cache
           // Compile this run rather than reading the bytecode cache
   --aot

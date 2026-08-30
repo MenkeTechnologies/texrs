@@ -182,9 +182,11 @@
 % `\setmainfont[features]{Font}' and `\setmainfont{Font}[features]' are
 % written, and these books write the second. The declared optional covers the
 % first, \@gobbleopt after the mandatory one covers the second.
-\newcommand{\setmainfont}[2][]{\@gobbleopt}
-\newcommand{\setmonofont}[2][]{\@gobbleopt}
-\newcommand{\setsansfont}[2][]{\@gobbleopt}
+% \setmainfont and its siblings are NOT defined here on purpose. The lowerer
+% handles them, because it keeps the family name: a document that says
+% \setmainfont{Arimo} is asking not to be set in a book face, and swallowing
+% the argument here threw that request away. A macro defined in this file would
+% win over the lowerer's own arm, which is exactly what it used to do.
 % `\newfontfamily\f[features]{Font}': the optional argument is the SECOND,
 % which a declared parameter list cannot say, so the command name is taken
 % here and the rest by a helper whose optional one is first.

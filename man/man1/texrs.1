@@ -52,6 +52,27 @@ the conditionals.  Only after that does the
 .I stomach
 build boxes and ship DVI.  texrs implements the first two, which is the half a
 macro\-heavy document spends its time in, and a deliberately small third:
+.B \-\-pdf
+Typeset to
+.I FILE.pdf
+beside the source, honouring the typeface the document asked for. A DVI can
+only name a
+.I .tfm
+font, so the \fB\-\-dvi\fR path sets everything in Computer Modern however
+loudly a document says \fB\\setmainfont\fR; a PDF can name the fourteen faces
+every reader has, so the request is honoured here. The mapping is by what the
+face IS rather than by its name -- Arimo carries Arial's metrics and Arial
+carries Helvetica's, so all three set at the same widths -- and a monospace
+request goes to Courier whatever it was called.
+.IP
+Colour is honoured too: \fB\\textcolor\fR becomes PDF's own colour operator
+around the words it covers.
+.IP
+The fourteen faces are named rather than embedded, so the file is small and
+opens anywhere, and the document is NOT set in the font file it names. Line
+breaking still measures in Computer Modern's widths, so a line may run a little
+long or short of the measure.
+.TP
 .B \-\-dvi
 measures the text in a real
 .IR .tfm ,

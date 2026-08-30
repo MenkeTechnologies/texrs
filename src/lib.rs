@@ -181,6 +181,33 @@ fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chun
 /// publication scripts required LuaTeX at all. cmsy10 carries the arrows and the
 /// set operators cmr10 has no slot for; what neither has -- box drawing, chiefly
 /// -- is set as an ASCII stand-in rather than dropped.
+/// Typeset straight to PDF, in the font the document asked for.
+///
+/// The DVI path can only name `.tfm` fonts, so it sets everything in Computer
+/// Modern however loudly a document says `\setmainfont`. A PDF can name the
+/// fourteen faces every reader has, so this is where that request is honoured:
+/// Arimo asks for Arial's metrics, which are Helvetica's, and a monospace
+/// request goes to Courier whatever it was called.
+pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
+    let src_d = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
+    if crate::latex::looks_like_latex(&src_d) {
+        lowerer.preload(crate::latex::PRELUDE)?;
+    }
+    let cmds = lowerer.lower(&src_d)?;
+    // The families are read while lowering, because that is where the preamble
+    // is; they have to be taken from the lowerer before it is dropped.
+    let families = lowerer.fonts.clone();
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    let text = crate::runtime::take_text();
+    Ok(crate::typeset::to_pdf(
+        &text,
+        &families,
+        &crate::typeset::Layout::default(),
+    ))
+}
+
 pub fn run_dvi_fallback(
     path: Option<&std::path::Path>,
     src: &str,

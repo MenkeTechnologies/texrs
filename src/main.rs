@@ -232,6 +232,21 @@ fn main() -> ExitCode {
 
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
+    if cli.pdf_out {
+        return match texrs::run_pdf(&src) {
+            Ok(bytes) => {
+                let out = std::path::Path::new(&path).with_extension("pdf");
+                match std::fs::write(&out, &bytes) {
+                    Ok(()) => {
+                        println!("({path} -> {} [{} bytes])", out.display(), bytes.len());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(&format!("{}: {e}", out.display())),
+                }
+            }
+            Err(e) => fail(&e.0),
+        };
+    }
     if cli.dvi_out {
         // A page, at last. The font is plain TeX's own; without a .tfm there
         // are no widths and so no line breaking, which is why a missing one is

@@ -457,3 +457,205 @@ impl FontChain {
         total
     }
 }
+
+/// The typefaces a document asked for.
+///
+/// `\setmainfont{Arimo}` is a statement about the book, and setting it in
+/// Computer Modern anyway is the thing this exists to stop. What texrs can
+/// honour depends on the output: a DVI names `.tfm` fonts and cannot carry an
+/// OpenType one at all, while a PDF can name the fourteen fonts every reader
+/// has. Arimo is metric-compatible with Arial, which is metric-compatible with
+/// Helvetica, so that substitution is a real one rather than a shrug.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Families {
+    pub main: Option<String>,
+    pub sans: Option<String>,
+    pub mono: Option<String>,
+}
+
+/// What a requested family maps to among the fourteen fonts a PDF reader has.
+///
+/// The mapping is by what the face IS, not by its name: Arimo is Arial's
+/// metrics, Liberation Sans is Arial's metrics, and Arial is Helvetica's, so
+/// all three set at the same widths as Helvetica. A monospace request goes to
+/// Courier whatever it was called. A name nothing is known about falls to
+/// Helvetica rather than to Computer Modern, because a document that asked for
+/// a font at all was asking not to be set in a book face.
+pub fn base14_for(family: &str) -> &'static str {
+    let f = family.to_ascii_lowercase();
+    let mono = [
+        "mono",
+        "courier",
+        "consolas",
+        "menlo",
+        "inconsolata",
+        "sharetechmono",
+        "jetbrains",
+        "fira code",
+        "source code",
+    ];
+    if mono.iter().any(|m| f.contains(m)) {
+        return "Courier";
+    }
+    let serif = [
+        "times",
+        "serif",
+        "georgia",
+        "garamond",
+        "minion",
+        "palatino",
+        "book",
+        "charter",
+        "libertine",
+        "stix",
+    ];
+    if serif.iter().any(|m| f.contains(m)) {
+        return "Times-Roman";
+    }
+    "Helvetica"
+}
+
+/// Set a document straight to PDF, honouring the font it asked for.
+///
+/// The DVI path names `.tfm` fonts and so can only ever set in Computer Modern;
+/// a PDF can name the fourteen faces every reader has, which is how
+/// `\setmainfont{Arimo}` becomes Helvetica's metrics rather than a book face.
+/// Colour travels the same markers the DVI path reads and comes out as PDF's
+/// own `rg` operator.
+pub fn to_pdf(text: &str, families: &Families, layout: &Layout) -> Vec<u8> {
+    use crate::pdf::{document, Font, Page};
+
+    let main = Font::Base14(
+        families
+            .main
+            .as_deref()
+            .map(base14_for)
+            .unwrap_or("Helvetica")
+            .to_string(),
+    );
+    // The widths of the fourteen are not carried here, so lines are measured
+    // with cmr10's if it is installed and with a flat estimate if it is not.
+    // That is honest about what it is: the line breaking is approximate, and a
+    // line may run a little long or short of the measure.
+    let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
+    let width_of = |word: &str| -> f64 {
+        match &metrics {
+            Some(f) => f.width_of(word) * layout.size,
+            None => word.chars().count() as f64 * layout.size * 0.5,
+        }
+    };
+
+    let lines = break_lines_measured(text, layout, &width_of);
+    let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
+
+    let mut pages = Vec::new();
+    for chunk in lines.chunks(per_page) {
+        let mut page = Page::letter();
+        let mut y = layout.height + layout.margin - layout.leading;
+        for line in chunk {
+            // A line is a sequence of RUNS, each with its own colour: the
+            // markers turn colour on and off part way along it. Collapsing the
+            // line to one colour state was the first attempt and drew none at
+            // all, because the closing marker put the state back before
+            // anything was emitted.
+            let mut x = layout.margin;
+            for (plain, colour) in colour_runs(line) {
+                if plain.is_empty() {
+                    continue;
+                }
+                if let Some((r, g, b)) = &colour {
+                    page.content.push_str(&format!("{r} {g} {b} rg\n"));
+                }
+                page.text_in(main.clone(), layout.size, x, y, &plain);
+                if colour.is_some() {
+                    page.content.push_str("0 g\n");
+                }
+                x += width_of(&plain);
+            }
+            y -= layout.leading;
+        }
+        pages.push(page);
+    }
+    document(&pages)
+}
+
+/// Break lines with a caller-supplied measurer.
+fn break_lines_measured(
+    text: &str,
+    layout: &Layout,
+    width_of: &dyn Fn(&str) -> f64,
+) -> Vec<String> {
+    let space = width_of(" ");
+    let mut lines = Vec::new();
+    for para in text.split("\n\n") {
+        let mut line = String::new();
+        let mut width = 0.0f64;
+        for word in para.split_whitespace() {
+            let ww = width_of(word);
+            let need = match line.is_empty() {
+                true => ww,
+                false => width + space + ww,
+            };
+            if !line.is_empty() && need > layout.measure {
+                lines.push(std::mem::take(&mut line));
+                width = ww;
+                line.push_str(word);
+                continue;
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+            width = need;
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
+/// Split a line into runs of text that share a colour.
+///
+/// The markers the runtime writes turn colour on and off part way along a line,
+/// so a line is not one string in one colour: `let x` may be black and `= 1`
+/// blue. Each run is emitted with its own colour and its own position, which is
+/// why the caller advances x by the width of what it just drew.
+fn colour_runs(line: &str) -> Vec<(String, Option<(String, String, String)>)> {
+    let mut runs = Vec::new();
+    let mut current: Option<(String, String, String)> = None;
+    let mut text = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\u{1}' => {
+                if !text.is_empty() {
+                    runs.push((std::mem::take(&mut text), current.clone()));
+                }
+                let mut spec = String::new();
+                for c in chars.by_ref() {
+                    if c == '\u{2}' {
+                        break;
+                    }
+                    spec.push(c);
+                }
+                let p: Vec<&str> = spec.split(',').collect();
+                current = match p.len() == 3 {
+                    true => Some((p[0].to_string(), p[1].to_string(), p[2].to_string())),
+                    false => None,
+                };
+            }
+            '\u{3}' => {
+                if !text.is_empty() {
+                    runs.push((std::mem::take(&mut text), current.clone()));
+                }
+                current = None;
+            }
+            c => text.push(c),
+        }
+    }
+    if !text.is_empty() {
+        runs.push((text, current));
+    }
+    runs
+}

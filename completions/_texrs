@@ -30,6 +30,7 @@ _texrs() {
     '--tiers[run it, then report which fusevm tier took its bytecode]' \
     '--jobs=[compile several documents at once: N threads (default: one per core)]:count:' \
     '--build[compile into the bytecode cache and stop, without running]' \
+    '--pdf[typeset to FILE.pdf, in the font the document asked for]' \
     '--dvi[typeset to FILE.dvi: first-fit lines in cmr10, no hyphenation]' \
     '--text[print the document text, not only its message stream]' \
     '--no-cache[compile this run rather than reading the bytecode cache]' \
