@@ -62,8 +62,29 @@ fn documented() -> BTreeSet<String> {
 }
 
 /// Dispatch arms that are not primitives a document can write: internal markers,
-/// and the `Arith` selector strings `lower.rs` re-matches on.
-const NOT_PRIMITIVES: &[&str] = &["endgroup\u{0}"];
+/// the `Arith` selector strings `lower.rs` re-matches on, and the verbatim
+/// ENVIRONMENT names.
+///
+/// The environment names are a false positive of the scanner, not an
+/// undocumented primitive. `lower.rs`'s `VERBATIM_ENVIRONMENTS` is a `const`
+/// table of bare `"name",` lines, which is the shape the scanner also uses to
+/// find the `CONDITIONALS` table, so it lifts them. A document writes
+/// `\begin{verbatim}` -- `verbatim` is the argument, and `\verbatim` is not a
+/// control sequence the engine resolves. Documenting them would put nine
+/// entries in `docs/reference.html` and in editor completion for things that do
+/// not exist.
+const NOT_PRIMITIVES: &[&str] = &[
+    "endgroup\u{0}",
+    "verbatim",
+    "Verbatim",
+    "BVerbatim",
+    "LVerbatim",
+    "SaveVerbatim",
+    "lstlisting",
+    "minted",
+    "alltt",
+    "filecontents",
+];
 
 /// Documented primitives that have no dispatch arm of their own because another
 /// primitive's scanner consumes them. They are still written in documents, so
