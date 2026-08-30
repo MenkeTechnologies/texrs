@@ -72,3 +72,62 @@ fn messages_are_not_the_text_and_the_text_is_not_the_messages() {
     assert!(t.contains("words"), "got {t:?}");
     assert!(!t.contains("announced"), "a message is not the text: {t:?}");
 }
+
+#[test]
+fn a_group_that_only_carries_text_does_not_break_the_run() {
+    // A group exists to save registers and scope the macro table; the table is
+    // a compile-time fact, so a group assigning no register has nothing to do
+    // at run time. Keeping it split the text either side into separate
+    // constants, and a document's braces are everywhere -- every
+    // `\NormalTok{...}` is one -- so a 4 MB book exhausted fusevm's
+    // 65,536-entry constant pool and the compile PANICKED.
+    let mut src = String::from("\\documentclass{article}\n\\begin{document}\n");
+    for i in 0..5000 {
+        src.push_str(&format!("{{word{i}}} "));
+    }
+    src.push_str("\n\\end{document}\n");
+    let got = text(&src);
+    assert!(got.contains("word0"), "the first group's text is there");
+    assert!(got.contains("word4999"), "and the last one's: {} bytes", got.len());
+}
+
+#[test]
+fn a_verbatim_body_is_characters_and_not_tex() {
+    // The point of the environment: a backslash in a listing is a backslash.
+    // Reading it as TeX is why a book of code samples could not be read --
+    // roff markup inside a listing, \fINAME, became a control sequence nobody
+    // defined.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{verbatim}\n\\fINAME \\not{TeX} 100% raw\n\\end{verbatim}\n\
+               after\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("\\fINAME"), "the backslash survives: {got:?}");
+    assert!(got.contains("100% raw"), "a per cent is not a comment: {got:?}");
+    assert!(got.contains("after"), "and the document continues: {got:?}");
+}
+
+#[test]
+fn pandoc_highlighting_expands_rather_than_passing_through() {
+    // Highlighting and Shaded LOOK like code environments and are not: Pandoc
+    // fills them with \NormalTok and friends, which have to expand for the code
+    // to come out as code rather than as markup.
+    let src = "\\documentclass{article}\n\\newcommand{\\NormalTok}[1]{#1}\n\
+               \\newenvironment{Highlighting}{}{}\n\\begin{document}\n\
+               \\begin{Highlighting}\n\\NormalTok{let x = 1;}\n\\end{Highlighting}\n\
+               \\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("let x = 1;"), "the code, not the markup: {got:?}");
+    assert!(!got.contains("NormalTok"), "markup must not survive: {got:?}");
+}
+
+#[test]
+fn a_character_above_latin1_ends_a_control_word() {
+    // TeX82 reads BYTES, so such a character is a run of Others and never part
+    // of a control word. Calling them Letters made `\textgreater→key` lex as
+    // ONE control sequence named `textgreater→key`, so a document full of
+    // arrows failed on names nobody wrote.
+    let src = "\\documentclass{article}\n\\begin{document}\n\\textgreater→key\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains('>'), "the macro resolved: {got:?}");
+    assert!(got.contains('→'), "and the arrow is text: {got:?}");
+}

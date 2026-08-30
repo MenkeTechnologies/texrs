@@ -189,7 +189,29 @@ impl Lowerer {
                         let body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
                         let saves = assigned_counts(&body);
-                        out.push(Cmd::Group { saves, body });
+                        // A group exists to save registers and to scope the
+                        // macro table. The macro table is a compile-time fact
+                        // and is already handled above, so a group that assigns
+                        // no register has nothing left to do at run time --
+                        // and keeping it breaks the text run either side of it.
+                        // A document's braces are everywhere (every
+                        // `\NormalTok{...}` is one), so each became its own
+                        // constant and a 4 MB book exhausted the 65,536-entry
+                        // pool. Flattening a group that only carries text keeps
+                        // one constant per stretch.
+                        let only_text = body
+                            .iter()
+                            .all(|c| matches!(c, Cmd::Text(_) | Cmd::Line(_)));
+                        if saves.is_empty() && only_text {
+                            for cmd in body {
+                                match (&cmd, out.last_mut()) {
+                                    (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
+                                    _ => out.push(cmd),
+                                }
+                            }
+                        } else {
+                            out.push(Cmd::Group { saves, body });
+                        }
                     }
                     Token::Char(_, Cat::EndGroup) => {
                         return Ok(Self::drop_empty_line_directives(out))
