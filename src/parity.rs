@@ -77,7 +77,7 @@ pub fn oracle(repo: &Path) -> Result<Oracle, String> {
 ///
 /// Continuation lines are joined with nothing between them: tex breaks its
 /// terminal output at `max_print_line` mid-token, adding no character of its
-/// own. [`reference`] raises that limit so a wrap should not happen at all;
+/// own. [`reference()`] raises that limit so a wrap should not happen at all;
 /// this is what keeps one from being read as an empty stream if it does. The
 /// cut is at the LAST paren, not the first, because a message can print one.
 pub fn messages_of(out: &str) -> String {
