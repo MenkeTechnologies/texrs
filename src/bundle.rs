@@ -7,7 +7,7 @@
 //! useful the moment a document is shared, because "here is my paper" is one
 //! file rather than a directory the recipient has to keep in order.
 //!
-//! A bundle is an [`InputProvider`](crate::io::InputProvider) like any other, so
+//! A bundle is a [`crate::io::InputProvider`] like any other, so
 //! it layers into the same stack: the document's own directory first, then its
 //! extra paths, then the bundle. That order is the policy — a file a document
 //! carries beside itself overrides the one in its bundle, which is what lets a
