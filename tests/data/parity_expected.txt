@@ -8,6 +8,8 @@
 AT
 #==# cond_ifcase.tex
 TWO
+#==# cond_ifcase_negative.tex
+DEFAULT
 #==# cond_ifnum.tex
 BIG SMALL EQ
 #==# cond_ifodd.tex
