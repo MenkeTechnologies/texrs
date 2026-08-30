@@ -8,6 +8,16 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading the `CFF ` table, ported from `cff.c` and `cff_dict.c` in
+  `xdvipdfmx`: the header, the INDEXes, the Top and Private DICTs with their
+  packed operands and nybble reals, the charset in all three formats, the 391
+  standard strings, and enough of a Type 2 interpreter to find each glyph's
+  width -- which means following `callsubr` and `callgsubr`, since most of a
+  font's glyphs begin by calling one. `Sfnt::glyph_names` now answers for a CFF
+  font as well as a TrueType one, which closes the hole the OpenType port left,
+  and every name of four fonts matches `otfinfo -g`. The widths are held
+  against `hmtx`: the same numbers, stated twice in one font by two parts of
+  the same tool, in entirely different ways.
 - Embedding a Type 1 font in a PDF, ported from `pdf_font_load_type1` in
   `xdvipdfmx`: the `FontFile` stream with the three lengths that divide a Type
   1 font into its cleartext, its encrypted body and its closing zeros, a

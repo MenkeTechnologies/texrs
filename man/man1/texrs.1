@@ -442,7 +442,16 @@ can place a glyph \(em
 .B cmap
 and
 .BR post .
-The outlines are not: a driver embeds those rather than interpreting them.
+A font with CFF outlines keeps its glyph names inside the
+.B CFF
+rather than in
+.BR post ,
+so that is read too \(em its INDEXes, its dictionaries and its charset \(em
+along with the width at the front of each Type 2 charstring, which is the same
+number
+.B hmtx
+states and arrives by an entirely different road.  The outlines themselves are
+not interpreted: a driver embeds those.
 .PP
 A font collection is read as its first font.  Every table, every name, every
 character of the

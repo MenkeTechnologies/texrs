@@ -249,6 +249,11 @@ impl Sfnt {
         Ok(out)
     }
 
+    /// The font's CFF outlines, when it has them.
+    pub fn cff(&self) -> Option<crate::cff::Cff> {
+        crate::cff::Cff::parse(self.table("CFF")?).ok()
+    }
+
     /// The `name` table, as it is stored.
     pub fn names(&self) -> Result<Vec<NameRecord>, String> {
         let name = self.table("name").ok_or("the font has no name table")?;
@@ -423,12 +428,18 @@ impl Sfnt {
         Ok(out)
     }
 
-    /// What the glyphs are called, from `post` version 2.0.
+    /// What the glyphs are called.
     ///
-    /// A TrueType font carries its glyph names here; a CFF font carries them
-    /// in the CFF charset instead, and this says so rather than inventing
-    /// them.
+    /// A TrueType font carries its names in `post`; a CFF font carries them in
+    /// the CFF charset, which [`crate::cff`] reads. Either way this answers,
+    /// because a driver asking what a glyph is called does not care which kind
+    /// of font it has.
     pub fn glyph_names(&self) -> Result<Vec<String>, String> {
+        // The CFF is asked first, because a CFF font's `post` is version 3.0
+        // and carries no names at all.
+        if let Some(table) = self.table("CFF") {
+            return Ok(crate::cff::Cff::parse(table)?.glyph_names);
+        }
         let post = self.table("post").ok_or("the font has no post table")?;
         let version = u32_at(post, 0)?;
         if version != 0x0002_0000 {

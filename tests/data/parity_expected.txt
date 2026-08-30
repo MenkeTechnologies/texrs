@@ -12,6 +12,10 @@
 [11]
 #==# catcode_midfile.tex
 AT
+#==# chardef_bad_code.tex
+! Bad character code (256).l.6 \chardef\x=256                  [0] )(see the transcript file for additional information
+#==# chardef_constant.tex
+[13][13]
 #==# cond_ifcase.tex
 TWO
 #==# cond_ifcase_negative.tex
@@ -30,6 +34,8 @@ ABD
 count=18
 #==# count_group_restore.tex
 in=99 out=1
+#==# countdef_alias.tex
+[10][10]
 #==# csname.tex
 XY
 #==# csname_from_macro.tex

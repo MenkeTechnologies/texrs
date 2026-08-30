@@ -1,0 +1,8 @@
+% A character code is 0..255 and tex names the limit it broke: `! Bad character
+% code (256).', against `! Bad register code' for \countdef. Both engines
+% report; tex then carries on and texrs stops, which is the error model in
+% BUGS.md.
+\catcode`\{=1 \catcode`\}=2
+\chardef\x=256
+\message{[\the\x]}
+\end

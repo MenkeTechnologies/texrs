@@ -1,0 +1,10 @@
+% \countdef makes a name for a count register, and it has to work in every
+% position \count<n> works: assignment, arithmetic and \the. plain.tex's
+% \pageno is this, and reading it back through \count0 is what shows the two
+% names reach the same register rather than two registers that agree.
+\catcode`\{=1 \catcode`\}=2
+\countdef\pageno=0
+\pageno=7
+\advance\pageno by 3
+\message{[\the\pageno][\the\count0]}
+\end

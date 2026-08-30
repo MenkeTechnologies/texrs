@@ -350,6 +350,18 @@ pub const CORPUS: &[Entry] = &[
         "Inside an `around` handler, what the intercepted macro would have expanded to. A handler with no `\\proceed` replaces the call outright, which is how advice suppresses one. Outside an `around` handler it means nothing.",
         "\\def\\loud{<<\\proceed>>}\n\\intercept{around}{greet}{\\loud}\n\\message{\\greet{WORLD}}   % => <<HELLO-WORLD>>",
     ),
+    (
+        "\\chardef",
+        "Registers",
+        "Define a control sequence that IS a number: `\\chardef\\active=13` makes `\\active` usable wherever a number is scanned, which is how plain.tex writes `\\catcode`\\~=\\active`. The code is 0..255 and a wider one is `! Bad character code (N).`. The value is fixed when it is defined, so it folds while lowering rather than being read at run time.",
+        "\\chardef\\active=13\n\\catcode`\\~=\\active",
+    ),
+    (
+        "\\countdef",
+        "Registers",
+        "Give a count register a name, usable in every position the register itself is: assignment, `\\advance` and `\\the` all reach the same register through either spelling. plain.tex's `\\pageno` is `\\countdef\\pageno=0`. The register number is 0..255 and a wider one is `! Bad register code (N).`.",
+        "\\countdef\\pageno=0\n\\pageno=7\n\\advance\\pageno by 1",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

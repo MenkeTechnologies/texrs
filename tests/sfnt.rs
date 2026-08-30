@@ -199,22 +199,17 @@ fn the_glyph_names_are_the_ones_otfinfo_lists() {
                 assert_eq!(names, want, "{}", path.display());
                 checked += 1;
             }
-            Err(e) => {
-                // The only reason to have none is a post table that carries
-                // none, and a CFF font's is version 3.0.
-                assert!(
-                    e.contains("carries no names") || e.contains("no post"),
-                    "{}: {e}",
-                    path.display()
-                );
-                assert!(font.is_cff(), "{}: {e}", path.display());
-            }
+            Err(e) => panic!("{}: {e}", path.display()),
         }
     }
-    let truetype = Path::new(
-        "/usr/local/texlive/2026/texmf-dist/fonts/truetype/intel/clearsans/ClearSans-Regular.ttf",
-    );
-    if truetype.exists() {
-        assert_eq!(checked, 1, "the TrueType font's names were not compared");
+    // Every font, not just the TrueType one: a CFF font's names come out of
+    // its charset, which is the piece this used to be missing.
+    if !fonts().is_empty() {
+        assert_eq!(
+            checked,
+            fonts().len(),
+            "only {checked} of {} fonts had their names compared",
+            fonts().len()
+        );
     }
 }

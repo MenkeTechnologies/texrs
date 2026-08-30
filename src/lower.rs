@@ -318,6 +318,22 @@ impl Lowerer {
                     let v = self.number(lx)?;
                     out.push(Cmd::SetCount(reg, v));
                 }
+                // `\pageno=7`, where `\pageno` was `\countdef`'d: the name IS
+                // the register, so this is the `\count0=7` arm reached by
+                // another spelling.
+                _ if matches!(
+                    self.eng.numeric_cs(name),
+                    Some(crate::expand::NumericCs::Register(_))
+                ) =>
+                {
+                    let Some(crate::expand::NumericCs::Register(reg)) = self.eng.numeric_cs(name)
+                    else {
+                        unreachable!("guarded by the arm's own pattern")
+                    };
+                    self.eng.skip_equals_file(lx)?;
+                    let v = self.number(lx)?;
+                    out.push(Cmd::SetCount(reg, v));
+                }
                 "advance" | "multiply" | "divide" => {
                     let op = match name.name() {
                         "advance" => Arith::Add,
@@ -327,10 +343,20 @@ impl Lowerer {
                     let Some(Token::Cs(what)) = lx.next_token(&self.eng.cats) else {
                         return Err(TexError("You can't use this after \\advance".into()));
                     };
-                    if what.name() != "count" {
-                        return Err(TexError(format!("Unsupported register \\{}", what.name())));
-                    }
-                    let reg = self.eng.scan_number_file(lx)?;
+                    // `\advance\pageno by 1` names the register the same way
+                    // `\advance\count0 by 1` does.
+                    let reg = match self.eng.numeric_cs(what) {
+                        Some(crate::expand::NumericCs::Register(r)) => r,
+                        _ => {
+                            if what.name() != "count" {
+                                return Err(TexError(format!(
+                                    "Unsupported register \\{}",
+                                    what.name()
+                                )));
+                            }
+                            self.eng.scan_number_file(lx)?
+                        }
+                    };
                     self.eng.skip_by_file(lx)?;
                     let v = self.number(lx)?;
                     out.push(Cmd::Arith(op, reg, v));
@@ -417,6 +443,10 @@ impl Lowerer {
                     out.extend(cmds);
                 }
                 "let" => self.eng.compile_time_let(lx)?,
+                // Both define a control sequence that stands for a number, and
+                // both are compile-time: what they define changes how the rest
+                // of the file READS, exactly as `\def` does.
+                "chardef" | "countdef" => self.eng.compile_time_numeric_def(lx, name.name())?,
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
                     self.eng.compile_time_newcommand(lx, name.name())?
                 }
@@ -939,6 +969,21 @@ impl Lowerer {
                     if n.name() == "the" {
                         match work.pending.pop() {
                             Some(Token::Cs(w)) if w.name() == "count" => {}
+                            // `\the\pageno` reads the register the name stands
+                            // for, and `\the\active` is the constant itself --
+                            // known already, so it is rendered here rather than
+                            // asked of the run.
+                            Some(Token::Cs(w)) => match self.eng.numeric_cs(w) {
+                                Some(crate::expand::NumericCs::Register(r)) => {
+                                    out.push(MsgOp::Number(Num::Count(r)));
+                                    continue;
+                                }
+                                Some(crate::expand::NumericCs::Value(v)) => {
+                                    text.push_str(&v.to_string());
+                                    continue;
+                                }
+                                None => return Err(TexError("Unsupported \\the".into())),
+                            },
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
                         let reg = self.eng.scan_number_pending(work)?;

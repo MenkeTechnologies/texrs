@@ -31,6 +31,22 @@ pub enum Meaning {
     Primitive(CsId),
     /// `\let\a=b` — a character token.
     Char(char, Cat),
+    /// `\chardef\a=65` — a character code, standing for a number wherever one
+    /// is scanned. plain.tex builds its constants this way: `\chardef\active=13`
+    /// is what makes `\catcode`\~=\active` readable.
+    CharDef(i64),
+    /// `\countdef\pageno=0` — another name for a count register, in every
+    /// position `\count0` itself works: assignment, arithmetic and `\the`.
+    CountDef(i64),
+}
+
+/// What a control sequence contributes when a number is being scanned.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum NumericCs {
+    /// A constant, already known while lowering.
+    Value(i64),
+    /// A count register, whose value is only known at run time.
+    Register(i64),
 }
 
 /// One undo record. TeX's save stack restores individual changes at group end
@@ -806,6 +822,46 @@ impl Engine {
     /// it was. That non-destructive peek is the whole basis of LaTeX's
     /// `\@ifnextchar`, and so of every optional argument in the language --
     /// `\newcommand{\x}[1]{...}` cannot be written without it.
+    /// What `name` contributes to a number, if anything.
+    ///
+    /// The two definitions differ in WHEN the value is known: a `\chardef`
+    /// constant is fixed at definition time and can be folded while lowering,
+    /// while a `\countdef` name is a register whose value the run may change.
+    pub fn numeric_cs(&self, name: CsId) -> Option<NumericCs> {
+        match self.meanings.get(&name) {
+            Some(Meaning::CharDef(v)) => Some(NumericCs::Value(*v)),
+            Some(Meaning::CountDef(r)) => Some(NumericCs::Register(*r)),
+            _ => None,
+        }
+    }
+
+    /// `\chardef\a=65` and `\countdef\pageno=0`, which differ only in what the
+    /// number means and in the message tex reports when it is out of range.
+    pub fn compile_time_numeric_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        let Some(Token::Cs(name)) = self.take(lx, false) else {
+            return Err(TexError("Missing control sequence inserted".into()));
+        };
+        self.skip_equals_file(lx)?;
+        let v = self.scan_number_file(lx)?;
+        // Both are limited to 0..255, and tex names the limit differently for
+        // each: `! Bad character code (256).` against `! Bad register code
+        // (256).`. Measured, and worth keeping apart -- the message is how a
+        // document author finds which of the two they got wrong.
+        if !(0..=255).contains(&v) {
+            let what = match kind {
+                "chardef" => "character",
+                _ => "register",
+            };
+            return Err(TexError(format!("Bad {what} code ({v})")));
+        }
+        let meaning = match kind {
+            "chardef" => Meaning::CharDef(v),
+            _ => Meaning::CountDef(v),
+        };
+        self.set_meaning(name, meaning);
+        Ok(())
+    }
+
     fn do_futurelet(&mut self, lx: &mut Lexer, pending_only: bool) -> R<()> {
         let Some(Token::Cs(name)) = self.take(lx, pending_only) else {
             return Err(TexError("Missing control sequence inserted".into()));
@@ -1255,6 +1311,16 @@ impl Engine {
             if name.name() == "count" {
                 let reg = self.scan_number(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
+            }
+            // A `\chardef` constant IS a number here, and a `\countdef` name is
+            // the register it stands for -- which is the whole reason plain.tex
+            // can write `\catcode`\~=\active`.
+            match self.numeric_cs(name) {
+                Some(NumericCs::Value(v)) => return Ok(sign * v),
+                Some(NumericCs::Register(r)) => {
+                    return Ok(sign * *self.count.get(&r).unwrap_or(&0));
+                }
+                None => {}
             }
             // A macro in numeric position expands and the scan resumes.
             if self.try_expand(lx, name, pending_only)? {

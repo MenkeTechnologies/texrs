@@ -101,3 +101,8 @@ number_too_big.tex
 #                  texrs stops. The limit and the rejection point already match
 #                  -- before this case, texrs checked only for i64 overflow and
 #                  accepted 99999999999 outright.
+chardef_bad_code.tex
+#                  Both engines reject a character code above 255 with the same
+#                  words, `Bad character code (256)`; the divergence is the
+#                  recovery, as in multiply_overflow.tex and number_too_big.tex.
+#                  tex reports and carries on, texrs stops.

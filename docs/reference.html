@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">70</div>
+            <div class="stat-val">72</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -235,6 +235,11 @@
 \count1=7 \multiply\count1 by 3   % =&gt; 21</pre></td></tr>
             <tr><td><code>\divide</code></td><td>Divide a register, truncating toward zero as TeX's does.</td><td><pre>\divide\count&lt;N&gt; by &lt;number&gt;
 \count1=7 \divide\count1 by 2   % =&gt; 3</pre></td></tr>
+            <tr><td><code>\chardef</code></td><td>Define a control sequence that IS a number: <code>\chardef\active=13</code> makes <code>\active</code> usable wherever a number is scanned, which is how plain.tex writes <code>\catcode</code>\~=\active<code>. The code is 0..255 and a wider one is </code>! Bad character code (N).<code>. The value is fixed when it is defined, so it folds while lowering rather than being read at run time.</code></td><td><pre>\chardef\active=13
+\catcode`\~=\active</pre></td></tr>
+            <tr><td><code>\countdef</code></td><td>Give a count register a name, usable in every position the register itself is: assignment, <code>\advance</code> and <code>\the</code> all reach the same register through either spelling. plain.tex's <code>\pageno</code> is <code>\countdef\pageno=0</code>. The register number is 0..255 and a wider one is <code>! Bad register code (N).</code>.</td><td><pre>\countdef\pageno=0
+\pageno=7
+\advance\pageno by 1</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -420,6 +425,7 @@
             <tr><td><code>cond_ifcase_negative.tex</code></td><td>A NEGATIVE `\ifcase' selector takes case 0 instead of the `\else' branch. tex.web 509 skips n cases and takes the (n+1)th, so a selector below zero or past the last `\or' matches nothing and `\else' runs; do_ifcase counts down with `while remaining &gt; 0', which a negative n never enters, so it falls straight through to case 0. tex prints DEFAULT where texrs prints ZERO. Like def_in_conditional_arm.tex this is a wrong answer rather than a refusal: nothing errors. Found by writing the reference manual's conditionals chapter.</td></tr>
             <tr><td><code>multiply_overflow.tex</code></td><td>Both engines raise `Arithmetic overflow` for a \multiply past the 32-bit range and leave the register alone -- the divergence is what happens NEXT. tex reports and carries on, so it still prints the message; texrs stops, which is the error model recorded above ("Errors"). Fixing the recovery fixes this case; the arithmetic itself already matches.</td></tr>
             <tr><td><code>number_too_big.tex</code></td><td>Both engines reject a constant above 2147483647 with `Number too big` (tex.web §445); the divergence is the recovery, exactly as in multiply_overflow.tex. tex clamps to 2147483647 and carries on, so it still prints the message; texrs stops. The limit and the rejection point already match -- before this case, texrs checked only for i64 overflow and accepted 99999999999 outright.</td></tr>
+            <tr><td><code>chardef_bad_code.tex</code></td><td>Both engines reject a character code above 255 with the same words, `Bad character code (256)`; the divergence is the recovery, as in multiply_overflow.tex and number_too_big.tex. tex reports and carries on, texrs stops.</td></tr>
           </tbody>
         </table>
       </section>

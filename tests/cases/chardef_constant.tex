@@ -1,0 +1,9 @@
+% \chardef defines a control sequence that IS a number wherever one is scanned
+% (tex.web §1224). plain.tex builds its constants this way, and line 19 of it is
+% `\chardef\active=13 \catcode`\~=\active' -- which is the case that matters,
+% because the constant is used as the VALUE of another assignment.
+\catcode`\{=1 \catcode`\}=2
+\chardef\active=13
+\catcode`\~=\active
+\message{[\the\active][\number\active]}
+\end
