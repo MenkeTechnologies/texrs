@@ -119,6 +119,16 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- Glyph names on a machine with no TeX installation. The Adobe glyph list is
+  found with `kpsewhich`, so a developer machine resolves every name out of the
+  installed `glyphlist.txt` and the built-in map is never reached. The built-in
+  map had no entry for any of the 52 letters -- the names a font uses more than
+  any others -- so without a TeX installation `A` did not resolve to `A`. The
+  letters are seeded from the range now (the list really does carry `A;0041`),
+  and the built-in map is built by its own function so a test can read it
+  directly rather than through whatever the machine happens to have installed:
+  the two tests that covered this passed locally and failed only on CI.
+
 - `^^` notation reads its hex form. `tex.web` §352 has two: `^^` and two
   LOWERCASE hex digits is that hex code, and `^^` and anything else is one
   character shifted by 64. Only the second was implemented, so `^^41` read as

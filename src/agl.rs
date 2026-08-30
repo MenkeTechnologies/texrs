@@ -80,13 +80,32 @@ fn constructed(name: &str) -> Option<String> {
 }
 
 /// Adobe's list, from the installation, read once.
+/// What the map holds with no `glyphlist.txt`: everything the crate knows on
+/// its own.
+///
+/// Separate from [`table`] so a test can read it without depending on whether
+/// the machine running the test has a TeX installation. On a machine that has
+/// one every name resolves out of the installed list and a hole here never
+/// shows; the CI runner has no TeX, which is the case this has to be right for.
+fn built_in_table() -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    // The 52 letters name themselves -- the list really does carry `A;0041` --
+    // and they are the names a font uses more than any others. Leaving them to
+    // the installed list means a machine without one cannot read the commonest
+    // glyph name there is.
+    for letter in ('A'..='Z').chain('a'..='z') {
+        out.insert(letter.to_string(), letter.to_string());
+    }
+    for (name, text) in BUILT_IN {
+        out.insert(name.to_string(), text.to_string());
+    }
+    out
+}
+
 fn table() -> &'static BTreeMap<String, String> {
     static TABLE: OnceLock<BTreeMap<String, String>> = OnceLock::new();
     TABLE.get_or_init(|| {
-        let mut out = BTreeMap::new();
-        for (name, text) in BUILT_IN {
-            out.insert(name.to_string(), text.to_string());
-        }
+        let mut out = built_in_table();
         if let Some(text) = installed_list() {
             for line in text.lines() {
                 if line.starts_with('#') {
@@ -248,6 +267,42 @@ mod tests {
         assert_eq!(unicode("uni00G1"), None);
         assert_eq!(unicode("u12"), None);
         assert_eq!(unicode(""), None);
+    }
+
+    /// The map has to be right on a machine with no TeX installation.
+    ///
+    /// `glyphlist.txt` is found with `kpsewhich`, so on a developer machine
+    /// every name resolves out of the installed list and a hole in the built-in
+    /// map is invisible. CI has no TeX and reads the built-in map alone -- which
+    /// is how the letters turned out to be missing from it, after the tests
+    /// above had passed locally for as long as they existed.
+    #[test]
+    fn the_names_resolve_without_a_tex_installation() {
+        let built = built_in_table();
+        for name in [
+            "A",
+            "a",
+            "Z",
+            "z",
+            "space",
+            "quoteright",
+            "ff",
+            "ffl",
+            "dotlessi",
+        ] {
+            assert!(
+                built.contains_key(name),
+                "{name} needs glyphlist.txt to resolve"
+            );
+        }
+        // The letters are themselves; the list carries them as `A;0041`.
+        assert_eq!(built.get("A").map(String::as_str), Some("A"));
+        assert_eq!(built.get("z").map(String::as_str), Some("z"));
+        // A digit is NOT named by itself -- it is `one`, and glyphlist.txt has
+        // no entry for `1` -- so guessing identity for every short name would
+        // invent a mapping the list does not have.
+        assert_eq!(built.get("1"), None);
+        assert_eq!(built.get("one").map(String::as_str), Some("1"));
     }
 
     /// The names a TeX font uses, which is why any of this exists.
