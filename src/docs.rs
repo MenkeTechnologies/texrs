@@ -14,6 +14,7 @@
 
 use std::fmt::Write as _;
 
+use crate::catcode::{Cat, CatTable};
 use crate::corpus::{Entry, CHAPTERS, CORPUS};
 
 /// The chrome above the generated chapters: head, header, scheme strip, title.
@@ -127,8 +128,10 @@ pub fn reference_html() -> String {
         head = HEAD
             .replace("__TEXRS_VERSION__", env!("CARGO_PKG_VERSION"))
             .replace("__TEXRS_STATS__", &stats(crate::cli::USAGE))
-            + &chapters(CORPUS),
-        cli = command_line(crate::cli::USAGE),
+            + &chapters(CORPUS)
+            + &category_codes()
+            + &divergences(),
+        cli = command_line(crate::cli::USAGE) + &environment(),
         foot = FOOT,
     )
 }
@@ -394,5 +397,170 @@ pub fn emacs_stdlib_el() -> String {
          (and (stringp name) (gethash name texrs-stdlib--docs)))\n\n\
          (provide 'texrs-stdlib)\n;;; texrs-stdlib.el ends here\n",
     );
+    out
+}
+
+/// INITEX's category table, one row per category.
+///
+/// Built by asking [`crate::catcode::CatTable::new`] what it holds rather than
+/// by transcribing `tex.web` §232, so the page states what this engine starts
+/// from — which is the whole point of the table for a reader whose document
+/// sets its own catcodes.
+fn category_codes() -> String {
+    let table = CatTable::new();
+    let mut out = String::from(
+        "      <section class=\"tutorial-section\" id=\"ref-catcodes\">\n        <h2>Category codes</h2>\n        <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>\n          <tbody>\n",
+    );
+    for cat in Cat::ALL {
+        let chars = initex_members(&table, cat);
+        let _ = writeln!(
+            out,
+            "            <tr><td><code>{code}</code></td><td>{name}</td><td>{chars}</td></tr>",
+            code = cat as u8,
+            name = escape(cat.name()),
+            chars = chars,
+        );
+    }
+    out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
+    out
+}
+
+/// Which characters INITEX assigns to one category, as a readable cell:
+/// contiguous runs collapse (`A`–`Z`), the ones with no printable form are
+/// named, and a category nothing starts in says so rather than showing blank.
+fn initex_members(table: &CatTable, cat: Cat) -> String {
+    let members: Vec<u8> = (0u8..=255).filter(|c| table.get(*c as char) == cat).collect();
+    if members.is_empty() {
+        return "&mdash;".to_string();
+    }
+    // `other` is everything left over; listing 200-odd codes helps nobody.
+    if members.len() > 64 {
+        return format!("every other code ({} of them)", members.len());
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < members.len() {
+        let start = members[i];
+        let mut end = start;
+        while i + 1 < members.len() && members[i + 1] == end + 1 {
+            i += 1;
+            end = members[i];
+        }
+        parts.push(if start == end {
+            named(start)
+        } else {
+            format!("{}&ndash;{}", named(start), named(end))
+        });
+        i += 1;
+    }
+    parts.join(", ")
+}
+
+/// A byte as a reader recognises it: printable ones as themselves in a
+/// `<code>`, the rest by the name TeX uses for them.
+fn named(c: u8) -> String {
+    match c {
+        0 => "NUL".to_string(),
+        b'\t' => "tab".to_string(),
+        b'\n' => "line feed".to_string(),
+        b'\r' => "carriage return".to_string(),
+        b' ' => "space".to_string(),
+        127 => "DEL".to_string(),
+        c if c.is_ascii_graphic() => format!("<code>{}</code>", escape(&(c as char).to_string())),
+        c => format!("code {c}"),
+    }
+}
+
+/// The divergence ledger, read from the file the parity gate reads.
+///
+/// `tests/known_gaps.txt` is the baseline `cargo test --test differential`
+/// holds the engine to: a case that diverges and is not listed fails the
+/// build, and so does a listed case that has started passing. Generating this
+/// section from that file is what stops the manual claiming parity the gate
+/// does not.
+fn divergences() -> String {
+    let mut out = String::from(
+        "      <section class=\"tutorial-section\" id=\"ref-divergences\">\n        <h2>Divergences from tex</h2>\n        <p>Where this engine and real <code>tex</code> disagree, taken from <code>tests/known_gaps.txt</code> &mdash; the baseline the differential gate enforces in both directions, so this list can neither grow silently nor go stale.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Case</th><th>What differs</th></tr></thead>\n          <tbody>\n",
+    );
+    for (case, reason) in known_gaps(include_str!("../tests/known_gaps.txt")) {
+        let _ = writeln!(
+            out,
+            "            <tr><td><code>{case}</code></td><td>{reason}</td></tr>",
+            case = escape(&case),
+            reason = escape(&reason),
+        );
+    }
+    out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
+    out
+}
+
+/// Parse `tests/known_gaps.txt`: a case name at column zero, then its reason,
+/// which may start on that line or on the `#`-prefixed lines under it.
+pub fn known_gaps(text: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('#') {
+            // A continuation of the entry above, or the file's own header.
+            if let Some(last) = out.last_mut() {
+                let note = line.trim_start_matches('#').trim();
+                if !note.is_empty() {
+                    if !last.1.is_empty() {
+                        last.1.push(' ');
+                    }
+                    last.1.push_str(note);
+                }
+            }
+            continue;
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let (case, rest) = match trimmed.split_once(char::is_whitespace) {
+            Some((c, r)) => (c, r.trim()),
+            None => (trimmed, ""),
+        };
+        out.push((case.to_string(), rest.to_string()));
+    }
+    out
+}
+
+/// The environment the binary reads.
+///
+/// Unlike the option grammar there is no one table in the source to lift these
+/// from — they are `env::var` calls in the modules that care — so the list is
+/// written here and `tests/docs_reference_sections.rs` fails if a `TEXRS_*`
+/// name appears in `src/` and not on the page.
+const ENVIRONMENT: &[(&str, &str)] = &[
+    (
+        "TEXRS_CACHE",
+        "Set to <code>0</code>, <code>false</code> or <code>no</code> to turn the bytecode cache off for a run; set to a path to put it somewhere else. A disabled cache is how you work around a cache you suspect.",
+    ),
+    (
+        "TEXRS_PARALLEL",
+        "Set to <code>1</code> to lex a document on several threads. Off by default: the mouth is 22% of the time on the documents measured, so the win did not pay for the coordination.",
+    ),
+    (
+        "TEXRS_PRELEX_STATS",
+        "Set to anything to print the pre-lexer's hit and miss counts when the run ends.",
+    ),
+    (
+        "TEXRS_STATICLIB",
+        "The <code>libtexrs.a</code> that <code>--aot</code> links against, when the installed copy is not the one you want.",
+    ),
+];
+
+/// The environment table.
+fn environment() -> String {
+    let mut out = String::from(
+        "      <section class=\"tutorial-section\" id=\"ref-environment\">\n        <h2>Environment</h2>\n        <table class=\"file-table\">\n          <thead><tr><th>Variable</th><th>What it does</th></tr></thead>\n          <tbody>\n",
+    );
+    for (name, note) in ENVIRONMENT {
+        let _ = writeln!(
+            out,
+            "            <tr><td><code>{name}</code></td><td>{note}</td></tr>",
+        );
+    }
+    out.push_str("          </tbody>\n        </table>\n      </section>\n\n");
     out
 }

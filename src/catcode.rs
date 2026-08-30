@@ -28,6 +28,52 @@ pub enum Cat {
     Invalid = 15,
 }
 
+impl Cat {
+    /// Every category, in `tex.web`'s numbering order.
+    pub const ALL: [Cat; 16] = [
+        Cat::Escape,
+        Cat::BeginGroup,
+        Cat::EndGroup,
+        Cat::MathShift,
+        Cat::AlignTab,
+        Cat::EndLine,
+        Cat::Param,
+        Cat::Superscript,
+        Cat::Subscript,
+        Cat::Ignored,
+        Cat::Space,
+        Cat::Letter,
+        Cat::Other,
+        Cat::Active,
+        Cat::Comment,
+        Cat::Invalid,
+    ];
+
+    /// The name `tex.web` gives this category, for a reference table or a
+    /// diagnostic. Not the Rust variant name: `tex.web` writes "end of line",
+    /// not "EndLine".
+    pub fn name(self) -> &'static str {
+        match self {
+            Cat::Escape => "escape",
+            Cat::BeginGroup => "begin group",
+            Cat::EndGroup => "end group",
+            Cat::MathShift => "math shift",
+            Cat::AlignTab => "alignment tab",
+            Cat::EndLine => "end of line",
+            Cat::Param => "parameter",
+            Cat::Superscript => "superscript",
+            Cat::Subscript => "subscript",
+            Cat::Ignored => "ignored",
+            Cat::Space => "space",
+            Cat::Letter => "letter",
+            Cat::Other => "other",
+            Cat::Active => "active",
+            Cat::Comment => "comment",
+            Cat::Invalid => "invalid",
+        }
+    }
+}
+
 /// The catcode of every character, mutable exactly as `\catcode` makes it.
 ///
 /// INITEX's defaults (`tex.web` §232) are deliberately sparse: only `\`, `%`,
