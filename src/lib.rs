@@ -48,6 +48,7 @@ pub mod status;
 pub mod tfm;
 pub mod tiers;
 pub mod token;
+pub mod type1;
 pub mod vf;
 
 pub use expand::{Engine, TexError};

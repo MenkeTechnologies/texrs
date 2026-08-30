@@ -316,6 +316,38 @@ around them \(em an entry inherits the fields of the entry it cross-references,
 and that entry joins the bibliography only if it was cited on its own or is
 pointed at twice.
 .TP
+.BI \-X " pfb \fIFILE\fR.pfb [" \fICHAR\fR ]
+Read a Type 1 font.  With no
+.I CHAR
+this prints its name, its matrix and bounding box, how many glyphs and
+subroutines it holds and whether it carries its own encoding; with one, which
+glyph that character is and how wide.
+.PP
+This is the font Computer Modern actually ships as, and the one nearly every
+.I .dvi
+of the last thirty years is drawn with.  It is a PostScript program in two
+halves \(em a cleartext header saying what the font is called and how it is
+encoded, and an encrypted body holding the outlines.  The encryption is Adobe's
+and was never a secret: the keys are published, and the point of them was to
+keep the outlines from being edited by hand.  It is applied twice, once to the
+body and again to each glyph.
+.PP
+A glyph's width is inside its charstring rather than beside it \(em the first
+thing a Type 1 glyph does is
+.BR hsbw ,
+which declares its left side bearing and its advance \(em so reading it means
+decrypting the charstring and decoding the numbers at the front of it.  The
+outlines are kept as they came: a driver embeds a charstring, it does not
+interpret one.
+.PP
+Every glyph of four Computer Modern fonts is compared with
+.BR t1disasm (1)
+in the test suite, and every width with the
+.I .afm
+beside the font and the
+.I .tfm
+TeX sets it with.
+.TP
 .BI \-X " otf \fIFILE\fR.otf [" \fICHAR\fR ]
 Read an OpenType or TrueType font.  With no
 .I CHAR

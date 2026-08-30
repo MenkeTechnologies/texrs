@@ -1,0 +1,541 @@
+//! Reading a Type 1 font, ported from `type1.c` and `t1_char.c` in tectonic's
+//! `xdvipdfmx`.
+//!
+//! This is the font Computer Modern actually ships as, and the one nearly
+//! every `.dvi` from the last thirty years is drawn with. It is a PostScript
+//! program in two halves: a cleartext header saying what the font is called
+//! and how its characters are encoded, and an encrypted body holding the
+//! outlines. The encryption is Adobe's, and it is not a secret -- the key is
+//! published, and the point of it was never to hide the outlines but to keep
+//! them from being edited by hand. It is applied twice over: once to the whole
+//! body with key 55665, and again to each glyph's charstring with key 4330.
+//!
+//! What is read here is what a driver needs before it can place a glyph: the
+//! font's name, its matrix, its own encoding, which glyphs it holds, and how
+//! wide each one is. The width is in the charstring rather than beside it --
+//! the first thing a Type 1 glyph does is `hsbw`, which declares its left side
+//! bearing and its advance -- so getting it out means decrypting the
+//! charstring and decoding the numbers at the front of it.
+//!
+//! The outlines themselves are kept as they came: a driver embeds a charstring,
+//! it does not interpret one, and texrs has nothing to draw with yet.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+/// One glyph: its name, what the font says it costs, and its charstring.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Glyph {
+    pub name: String,
+    /// The advance width, in the font's own units -- thousandths of an em for
+    /// every Type 1 font in practice.
+    pub width: f64,
+    /// How far the outline starts to the right of the origin.
+    pub left_side_bearing: f64,
+    /// The decrypted charstring, as it was.
+    pub charstring: Vec<u8>,
+}
+
+/// A Type 1 font.
+#[derive(Debug, Clone, Default)]
+pub struct Type1 {
+    pub font_name: String,
+    /// The matrix that takes the font's units to em units: `0.001 0 0 0.001 0
+    /// 0` for a font counting in thousandths.
+    pub font_matrix: [f64; 6],
+    pub font_bbox: [f64; 4],
+    /// The font's own encoding, when it carries one rather than naming
+    /// StandardEncoding.
+    pub encoding: BTreeMap<u8, String>,
+    pub uses_standard_encoding: bool,
+    /// How many subroutines the private part holds. They are what a charstring
+    /// calls, and a driver embeds them with it.
+    pub subroutines: usize,
+    glyphs: BTreeMap<String, Glyph>,
+}
+
+/// The key for the whole encrypted body (`eexec`), from the Type 1 book.
+const EEXEC_KEY: u16 = 55665;
+/// The key for one glyph's charstring.
+const CHARSTRING_KEY: u16 = 4330;
+
+/// Adobe's stream cipher, which both halves use: a running key, one byte at a
+/// time, with the first `skip` bytes of plaintext thrown away because they are
+/// random padding.
+fn decrypt(bytes: &[u8], key: u16, skip: usize) -> Vec<u8> {
+    let mut r = key;
+    let mut out = Vec::with_capacity(bytes.len().saturating_sub(skip));
+    for (i, &c) in bytes.iter().enumerate() {
+        let plain = c ^ (r >> 8) as u8;
+        r = (c as u16)
+            .wrapping_add(r)
+            .wrapping_mul(52845)
+            .wrapping_add(22719);
+        if i >= skip {
+            out.push(plain);
+        }
+    }
+    out
+}
+
+/// Where `needle` is in `haystack`, if anywhere.
+fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    (from..=haystack.len() - needle.len()).find(|&at| &haystack[at..at + needle.len()] == needle)
+}
+
+impl Type1 {
+    pub fn open(path: impl AsRef<Path>) -> Result<Type1, String> {
+        let path = path.as_ref();
+        let bytes =
+            std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Type1::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// Read a `.pfb` (segmented binary) or a `.pfa` (all text, with the body in
+    /// hexadecimal).
+    pub fn parse(bytes: &[u8]) -> Result<Type1, String> {
+        let joined = match bytes.first() {
+            // §  : a PFB is segments, each with a two-byte marker and a
+            // four-byte little-endian length -- the one place a font counts
+            // backwards.
+            Some(0x80) => {
+                let mut out = Vec::with_capacity(bytes.len());
+                let mut at = 0usize;
+                while at + 2 <= bytes.len() && bytes[at] == 0x80 {
+                    let kind = bytes[at + 1];
+                    if kind == 3 {
+                        break;
+                    }
+                    let length = bytes
+                        .get(at + 2..at + 6)
+                        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+                        .ok_or("a segment header past the end of the font")?;
+                    let start = at + 6;
+                    let end = start
+                        .checked_add(length)
+                        .filter(|&end| end <= bytes.len())
+                        .ok_or("a segment longer than the font")?;
+                    out.extend_from_slice(&bytes[start..end]);
+                    at = end;
+                }
+                out
+            }
+            Some(b'%') => bytes.to_vec(),
+            _ => return Err("does not begin with %! or a PFB segment".into()),
+        };
+
+        let eexec = find(&joined, b"eexec", 0).ok_or("the font has no eexec")?;
+        let clear = &joined[..eexec];
+        // The body starts after `eexec` and whatever whitespace follows it.
+        let mut start = eexec + 5;
+        while joined.get(start).is_some_and(|c| c.is_ascii_whitespace()) {
+            start += 1;
+        }
+        let body = &joined[start..];
+        // A PFA writes the body as hexadecimal; a PFB writes it as bytes. The
+        // first four bytes are random, so a body whose first four are all hex
+        // digits is text.
+        let is_hex = body.iter().take(4).all(|c| c.is_ascii_hexdigit());
+        let binary: Vec<u8> = match is_hex {
+            false => body.to_vec(),
+            true => {
+                let digits: Vec<u8> = body
+                    .iter()
+                    .copied()
+                    .filter(|c| c.is_ascii_hexdigit())
+                    .collect();
+                digits
+                    .chunks(2)
+                    .filter(|pair| pair.len() == 2)
+                    .map(|pair| {
+                        let value = |c: u8| (c as char).to_digit(16).unwrap_or(0) as u8;
+                        value(pair[0]) << 4 | value(pair[1])
+                    })
+                    .collect()
+            }
+        };
+        let private = decrypt(&binary, EEXEC_KEY, 4);
+
+        let mut font = Type1 {
+            font_name: text_after(clear, b"/FontName").unwrap_or_default(),
+            ..Type1::default()
+        };
+        font.font_matrix = numbers_after(clear, b"/FontMatrix")
+            .try_into()
+            .unwrap_or([0.001, 0.0, 0.0, 0.001, 0.0, 0.0]);
+        font.font_bbox = numbers_after(clear, b"/FontBBox")
+            .try_into()
+            .unwrap_or_default();
+        font.read_encoding(clear);
+
+        // §  : how many bytes of each charstring are random padding.
+        let len_iv = find(&private, b"/lenIV", 0)
+            .and_then(|at| numbers_after(&private[at..], b"/lenIV").first().copied())
+            .unwrap_or(4.0) as usize;
+        font.subroutines = find(&private, b"/Subrs", 0)
+            .and_then(|at| numbers_after(&private[at..], b"/Subrs").first().copied())
+            .unwrap_or(0.0) as usize;
+        font.read_charstrings(&private, len_iv)?;
+        Ok(font)
+    }
+
+    /// The font's own encoding: either it names StandardEncoding, or it builds
+    /// an array with a `dup <code> /<name> put` for each character it has.
+    fn read_encoding(&mut self, clear: &[u8]) {
+        let Some(at) = find(clear, b"/Encoding", 0) else {
+            return;
+        };
+        let rest = &clear[at..];
+        if find(rest, b"StandardEncoding", 0).is_some_and(|found| found < 40) {
+            self.uses_standard_encoding = true;
+            return;
+        }
+        let end = find(rest, b"readonly def", 0)
+            .or_else(|| find(rest, b" def", 0))
+            .unwrap_or(rest.len());
+        let mut from = 0usize;
+        while let Some(found) = find(&rest[..end], b"dup ", from) {
+            let after = &rest[found + 4..end];
+            let text: String = after.iter().take(64).map(|&b| b as char).collect();
+            let mut words = text.split_whitespace();
+            let code = words.next().and_then(|w| w.parse::<i64>().ok());
+            let name = words.next().and_then(|w| w.strip_prefix('/'));
+            if let (Some(code), Some(name)) = (code, name) {
+                if (0..=255).contains(&code) {
+                    self.encoding.insert(code as u8, name.to_string());
+                }
+            }
+            from = found + 4;
+        }
+    }
+
+    /// The glyphs. Each is `/name <length> RD <bytes> ND`, where `RD` and `ND`
+    /// are whatever the font called them -- `-|` and `|-` in a font squeezed
+    /// for space.
+    fn read_charstrings(&mut self, private: &[u8], len_iv: usize) -> Result<(), String> {
+        let at = find(private, b"/CharStrings", 0)
+            .ok_or("the decrypted body holds no /CharStrings, so the key was wrong")?;
+        let mut from = at;
+        // Each entry begins with a name, and the dictionary ends at `end`.
+        while let Some(slash) = find(private, b"/", from + 1) {
+            let mut cursor = slash + 1;
+            let mut name = String::new();
+            while let Some(&c) = private.get(cursor) {
+                if c.is_ascii_whitespace() || c == b'(' || c == b'/' || c == b'{' {
+                    break;
+                }
+                name.push(c as char);
+                cursor += 1;
+            }
+            // The length, then the token that introduces the bytes.
+            let text: String = private
+                .get(cursor..cursor + 32)
+                .unwrap_or_default()
+                .iter()
+                .map(|&b| b as char)
+                .collect();
+            let mut words = text.split_whitespace();
+            // A name with no length after it is not an entry: the
+            // dictionary's own name, or the `end` that closes it.
+            let Some(length) = words.next().and_then(|w| w.parse::<usize>().ok()) else {
+                from = slash;
+                continue;
+            };
+            let Some(token) = words.next() else {
+                from = slash;
+                continue;
+            };
+            // Where the bytes begin: after the token and the single space that
+            // follows it.
+            let Some(token_at) = find(private, token.as_bytes(), cursor) else {
+                from = slash;
+                continue;
+            };
+            let start = token_at + token.len() + 1;
+            let Some(bytes) = private.get(start..start + length) else {
+                from = slash;
+                continue;
+            };
+            let charstring = decrypt(bytes, CHARSTRING_KEY, len_iv);
+            let (left_side_bearing, width) = width_of(&charstring);
+            self.glyphs.insert(
+                name.clone(),
+                Glyph {
+                    name,
+                    width,
+                    left_side_bearing,
+                    charstring,
+                },
+            );
+            from = start + length;
+        }
+        match self.glyphs.is_empty() {
+            true => Err("the font's /CharStrings holds no glyphs".into()),
+            false => Ok(()),
+        }
+    }
+
+    /// The glyph of this name.
+    pub fn glyph(&self, name: &str) -> Option<&Glyph> {
+        self.glyphs.get(name)
+    }
+
+    /// Every glyph name the font holds, in order.
+    pub fn glyph_names(&self) -> Vec<&str> {
+        self.glyphs.keys().map(String::as_str).collect()
+    }
+
+    /// The glyph a character code means, through the font's own encoding.
+    pub fn encoded(&self, code: u8) -> Option<&Glyph> {
+        let name = match self.uses_standard_encoding {
+            true => crate::sfnt::MAC_GLYPH_NAMES
+                .get(code as usize)
+                .copied()
+                .unwrap_or_default(),
+            false => self.encoding.get(&code)?.as_str(),
+        };
+        self.glyph(name)
+    }
+
+    /// A summary a person reads.
+    pub fn summary(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("font name     {}\n", self.font_name));
+        out.push_str(&format!(
+            "matrix        {}\n",
+            self.font_matrix
+                .iter()
+                .map(|n| format!("{n}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
+        out.push_str(&format!(
+            "bounding box  {}\n",
+            self.font_bbox
+                .iter()
+                .map(|n| format!("{n}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
+        out.push_str(&format!("glyphs        {}\n", self.glyphs.len()));
+        out.push_str(&format!("subroutines   {}\n", self.subroutines));
+        out.push_str(&format!(
+            "encoding      {}\n",
+            match self.uses_standard_encoding {
+                true => "StandardEncoding".to_string(),
+                false => format!("{} characters, the font's own", self.encoding.len()),
+            }
+        ));
+        out
+    }
+
+    /// One character: which glyph it is, how wide, and how long its charstring
+    /// is.
+    pub fn describe(&self, code: u8) -> String {
+        let name = match self.uses_standard_encoding {
+            true => crate::sfnt::MAC_GLYPH_NAMES
+                .get(code as usize)
+                .copied()
+                .unwrap_or("")
+                .to_string(),
+            false => self.encoding.get(&code).cloned().unwrap_or_default(),
+        };
+        let shown = match (code as char).is_ascii_graphic() {
+            true => format!("'{}'", code as char),
+            false => format!("0o{code:o}"),
+        };
+        let Some(glyph) = self.glyph(&name) else {
+            return format!("{shown}: the font's encoding gives no glyph for it\n");
+        };
+        format!(
+            "{shown}  {}  width {}  side bearing {}  charstring {} bytes\n",
+            glyph.name,
+            glyph.width,
+            glyph.left_side_bearing,
+            glyph.charstring.len()
+        )
+    }
+}
+
+/// The value of a name in the cleartext header: `/FontName /CMR10 def` gives
+/// `CMR10`.
+fn text_after(bytes: &[u8], key: &[u8]) -> Option<String> {
+    let at = find(bytes, key, 0)? + key.len();
+    let text: String = bytes
+        .get(at..)?
+        .iter()
+        .take(128)
+        .map(|&b| b as char)
+        .collect();
+    let word = text.split_whitespace().next()?;
+    Some(word.trim_start_matches('/').to_string())
+}
+
+/// The numbers after a name: `/FontBBox {-40 -250 1009 750 }` gives four.
+fn numbers_after(bytes: &[u8], key: &[u8]) -> Vec<f64> {
+    let Some(at) = find(bytes, key, 0) else {
+        return Vec::new();
+    };
+    let text: String = bytes[at + key.len()..]
+        .iter()
+        .take(128)
+        .map(|&b| b as char)
+        .collect();
+    let text = text.replace(['[', ']', '{', '}'], " ");
+    let mut out = Vec::new();
+    for word in text.split_whitespace() {
+        match word.parse::<f64>() {
+            Ok(value) => out.push(value),
+            // The numbers run until something that is not one: `readonly def`,
+            // `array`, `dict`.
+            Err(_) if !out.is_empty() => break,
+            Err(_) => {}
+        }
+    }
+    out
+}
+
+/// The side bearing and width a charstring declares.
+///
+/// A Type 1 glyph's first operator is `hsbw` (13), taking its left side
+/// bearing and its advance; a glyph that moves vertically as well uses `sbw`
+/// (12 7), which takes four. The numbers before them are in Type 1's own
+/// encoding: one byte for the small ones, two for the middling, five for the
+/// rest.
+fn width_of(charstring: &[u8]) -> (f64, f64) {
+    let mut stack: Vec<f64> = Vec::new();
+    let mut at = 0usize;
+    while at < charstring.len() {
+        let byte = charstring[at];
+        at += 1;
+        match byte {
+            32..=246 => stack.push(byte as f64 - 139.0),
+            247..=250 => {
+                let Some(&low) = charstring.get(at) else {
+                    break;
+                };
+                at += 1;
+                stack.push((byte as f64 - 247.0) * 256.0 + low as f64 + 108.0);
+            }
+            251..=254 => {
+                let Some(&low) = charstring.get(at) else {
+                    break;
+                };
+                at += 1;
+                stack.push(-(byte as f64 - 251.0) * 256.0 - low as f64 - 108.0);
+            }
+            255 => {
+                let Some(bytes) = charstring.get(at..at + 4) else {
+                    break;
+                };
+                at += 4;
+                stack.push(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64);
+            }
+            // hsbw: side bearing, width.
+            13 => {
+                return match stack.len() >= 2 {
+                    true => (stack[stack.len() - 2], stack[stack.len() - 1]),
+                    false => (0.0, 0.0),
+                }
+            }
+            12 => {
+                let Some(&second) = charstring.get(at) else {
+                    break;
+                };
+                at += 1;
+                // sbw: side bearing x and y, width x and y.
+                if second == 7 {
+                    return match stack.len() >= 4 {
+                        true => (stack[stack.len() - 4], stack[stack.len() - 2]),
+                        false => (0.0, 0.0),
+                    };
+                }
+                stack.clear();
+            }
+            // Any other operator before hsbw means there is no width to read.
+            _ => break,
+        }
+    }
+    (0.0, 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn installed(name: &str) -> Option<Vec<u8>> {
+        let found = std::process::Command::new("kpsewhich")
+            .arg(name)
+            .output()
+            .ok()?;
+        let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+        std::fs::read(path).ok()
+    }
+
+    /// cmr10 as it actually ships: the Type 1 font every driver has drawn from
+    /// for thirty years.
+    #[test]
+    fn a_type1_font_gives_up_its_names_and_widths() {
+        let Some(bytes) = installed("cmr10.pfb") else {
+            return;
+        };
+        let font = Type1::parse(&bytes).expect("cmr10 reads");
+
+        assert_eq!(font.font_name, "CMR10");
+        assert_eq!(font.font_matrix, [0.001, 0.0, 0.0, 0.001, 0.0, 0.0]);
+        assert_eq!(font.font_bbox, [-40.0, -250.0, 1009.0, 750.0]);
+        assert!(
+            font.subroutines > 0,
+            "a Computer Modern font has subroutines"
+        );
+
+        // The decryption worked if the glyph names are words.
+        assert!(
+            font.glyph_names().len() > 100,
+            "{}",
+            font.glyph_names().len()
+        );
+        assert!(font.glyph("A").is_some() && font.glyph("space").is_some());
+        assert!(
+            font.glyph_names()
+                .iter()
+                .all(|name| name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')),
+            "a name with rubbish in it means the key was wrong"
+        );
+
+        // The width in the charstring is the width in the metrics: an A is 750
+        // thousandths of an em, which is cmr10.tfm's 0.750002.
+        let a = font.glyph("A").expect("an A");
+        assert_eq!(a.width, 750.0);
+        assert_eq!(a.left_side_bearing, 32.0);
+        assert!(!a.charstring.is_empty());
+
+        // The font carries its own encoding rather than naming Adobe's, which
+        // is why TeX can put a ligature at position 11.
+        assert!(!font.uses_standard_encoding);
+        assert_eq!(font.encoding.get(&65).map(String::as_str), Some("A"));
+        assert_eq!(font.encoding.get(&11).map(String::as_str), Some("ff"));
+        assert_eq!(font.encoded(65).map(|g| g.name.as_str()), Some("A"));
+    }
+
+    /// What is not a Type 1 font, and a font whose body will not decrypt.
+    #[test]
+    fn what_is_not_a_type1_font_is_refused() {
+        assert!(Type1::parse(b"").is_err());
+        assert!(Type1::parse(b"not a font").is_err());
+        // A PostScript file with no encrypted part.
+        assert!(Type1::parse(b"%!PS-AdobeFont-1.0\n/FontName /X def\n")
+            .unwrap_err()
+            .contains("eexec"));
+
+        // The right shape and the wrong key: rubbish after eexec decrypts to
+        // rubbish, and rubbish holds no /CharStrings.
+        let mut wrong = b"%!PS-AdobeFont-1.0\n/FontName /X def\neexec ".to_vec();
+        wrong.extend([0u8; 64]);
+        let e = Type1::parse(&wrong).unwrap_err();
+        assert!(e.contains("/CharStrings"), "{e}");
+    }
+}

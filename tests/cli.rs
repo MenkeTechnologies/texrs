@@ -1171,3 +1171,47 @@ fn the_otf_reader_says_which_glyph_a_character_becomes() {
     assert!(a.contains("width 750 of 1000"), "{a}");
     assert!(a.contains("0.7500 em"), "{a}");
 }
+
+/// `-X pfb` reads a Type 1 font, by name or by path.
+#[test]
+fn the_pfb_reader_says_what_a_glyph_costs() {
+    let missing = texrs()
+        .args(["-X", "pfb", "nosuchfont"])
+        .output()
+        .expect("run");
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("nosuchfont"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let Ok(found) = std::process::Command::new("kpsewhich")
+        .arg("cmr10.pfb")
+        .output()
+    else {
+        return;
+    };
+    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+
+    let by_path = stdout_of(texrs().args(["-X", "pfb", &path]));
+    let by_name = stdout_of(texrs().args(["-X", "pfb", "cmr10"]));
+    assert_eq!(by_path, by_name, "a name is looked up, not read as a path");
+    assert!(by_path.contains("font name     CMR10"), "{by_path}");
+    assert!(
+        by_path.contains("matrix        0.001 0 0 0.001 0 0"),
+        "{by_path}"
+    );
+    // Computer Modern carries its own encoding rather than Adobe's, which is
+    // what lets TeX put a ligature at position 11.
+    assert!(by_path.contains("the font's own"), "{by_path}");
+
+    // The width in the charstring is the width in the metrics: 750, which is
+    // cmr10.tfm's 0.750002 of the design size.
+    let a = stdout_of(texrs().args(["-X", "pfb", "cmr10", "A"]));
+    assert!(a.contains("width 750"), "{a}");
+    assert!(a.contains("side bearing 32"), "{a}");
+}

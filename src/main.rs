@@ -446,6 +446,31 @@ fn run_document(args: &[String]) -> ExitCode {
             };
             bibtex_run(std::path::Path::new(file))
         }
+        "pfb" => {
+            let Some(file) = args.get(1) else {
+                return fail("`-X pfb` needs a Type 1 font");
+            };
+            let found = match std::path::Path::new(file).exists() {
+                true => file.to_string(),
+                false => kpsewhich_named(&match file.contains('.') {
+                    true => file.to_string(),
+                    false => format!("{file}.pfb"),
+                }),
+            };
+            match texrs::type1::Type1::open(&found) {
+                Ok(font) => {
+                    match args.get(2).and_then(|c| c.chars().next()) {
+                        // A second argument asks what one character is: which
+                        // glyph the font's own encoding gives, and how wide.
+                        Some(c) if c.is_ascii() => print!("{}", font.describe(c as u8)),
+                        Some(c) => return fail(&format!("{c} is not an 8-bit character")),
+                        None => print!("{}", font.summary()),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "otf" => {
             let Some(file) = args.get(1) else {
                 return fail("`-X otf` needs an OpenType or TrueType font");

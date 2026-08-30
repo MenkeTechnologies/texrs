@@ -378,6 +378,7 @@ pub const USAGE: &str = "\
   -X vf FILE.vf [C]       // Read a virtual font: what it really sets
   -X pk FILE.pk [C]       // Read a packed bitmap font, and draw a character
   -X otf FILE.otf [C]     // Read an OpenType font: its tables and its cmap
+  -X pfb FILE.pfb [C]     // Read a Type 1 font: its glyphs and their widths
   --profile NAME          // Which output to build
   --interval MS           // How often -X watch looks (default 250)
 

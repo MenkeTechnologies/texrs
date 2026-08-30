@@ -56,6 +56,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Reading Type 1 fonts, ported from `type1.c` and `t1_char.c` in `xdvipdfmx`:
+  PFB segments and PFA hexadecimal, the eexec and charstring decryptions, the
+  cleartext header, the font's own encoding, and the `hsbw`/`sbw` at the front
+  of each charstring that declares its width. `-X pfb FILE.pfb [CHAR]`. Held
+  against `t1disasm` for every glyph of four Computer Modern fonts, and the
+  widths against both the `.afm` beside the font and the `.tfm` TeX sets it
+  with -- three formats by three authors agreeing to the unit.
 - Reading OpenType and TrueType fonts, ported from `sfnt.c`, `tt_table.c`,
   `tt_cmap.c` and `tt_post.c` in `xdvipdfmx`: the table directory (collections
   included), `head`, `hhea`, `maxp`, `hmtx`, `name`, `cmap` formats 0, 4, 6 and
