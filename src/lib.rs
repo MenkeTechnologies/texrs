@@ -24,6 +24,7 @@ pub mod docs;
 pub mod document;
 pub mod expand;
 pub mod format;
+pub mod geturl;
 pub mod intercepts;
 pub mod io;
 pub mod ir;

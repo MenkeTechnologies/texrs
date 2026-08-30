@@ -109,6 +109,30 @@ network is one that fails on an aeroplane and depends on a server still
 answering in ten years.  Fetch it with whatever fetches things and hand the file
 over.
 .PP
+A bundle may also be named by the digest of its bytes,
+.BR sha256: \fIDIGEST\fR ,
+which resolves to one that
+.B \-X bundle fetch
+has put in the cache.  A URL in that key is refused with the command that
+fetches it: a build never reaches the network, so what a document names has to
+be bytes that are already here.  Naming the digest rather than the address is
+also what makes a build reproducible \(em an address serves whatever it serves
+today, a digest is the file the document was written against.
+.TP
+.B \-X bundle fetch " \fIURL\fR"
+Download an archive over http or https and file it under the digest of its
+bytes, printing the
+.B sha256:
+name to put in
+.IR Texrs.toml .
+This is the only thing in texrs that uses the network, and it does so only when
+asked.  A response larger than a hundred megabytes is refused rather than
+written: a bundle is macro files, and anything that size is a mistake or a
+hostile server.
+.TP
+.B \-X bundle list
+Print the bundles in the cache with the file each is stored in.
+.PP
 A
 .B preamble
 key names files read before the inputs and kept as a FORMAT: a macro file is

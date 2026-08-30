@@ -9,30 +9,81 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// The option grammar, in the fleet's house style: `── SECTION ───` dividers
+/// and `//` descriptions, printed under the logo the way `tp -h` prints its own.
 const USAGE: &str = "\
-usage: texrs [OPTIONS] FILE.tex [FILE.tex ...]
-       texrs -X new [DIR]           make a document (Texrs.toml + index.tex)
-       texrs -X build [--profile P] build the document this directory is in
-       texrs -X watch [--profile P] rebuild it whenever an input changes
-       texrs -X init                make one here, named after this directory
-       texrs -X show                say what the document is and can produce
-       texrs -X dump [--profile P]  build to stdout, writing nothing
+\n  USAGE: texrs [OPTIONS] [FILE[.tex]]... [COMMANDS]
+         texrs [OPTIONS] \\FIRST-LINE      // the arguments are the input
+         texrs [OPTIONS] &FMT ARGS        // with a named format
+         texrs                            // no arguments: the prompt
 
-  --repl          start the interactive prompt
-  --lsp           speak the Language Server Protocol over stdio
-  --dap           speak the Debug Adapter Protocol over stdio
-  --dump-tokens   print the mouth's token stream and exit
-  --disasm        print the lowered fusevm bytecode and exit
-  --aot           compile the document to a standalone native executable
-  --tiers         run it, then report which fusevm tier took its bytecode
-  --profile NAME  which output of the document to build (-X build, -X watch)
-  --interval MS   how often -X watch looks for a change (default 250)
-  --jobs=N        compile N documents at once (default: one per core)
-  --no-cache      compile this run rather than reading the bytecode cache
-  --cache-stats   say what the cache holds and where, and exit
-  --cache-clear   delete the cache and exit
-  -h, --help      print this and exit
-  --version       print the version banner and exit
+  ── TEX OPTIONS ────────────────────────────────────────
+  -interaction=MODE
+          // batchmode, nonstopmode, scrollmode or errorstopmode
+  -jobname=NAME
+          // Set the job name
+  -output-directory=DIR
+          // Write files in DIR
+  -progname=NAME
+          // Set the program name
+  -fmt=NAME
+          // Use a named format
+  -ini
+          // Be initex
+  -halt-on-error
+          // Stop at the first error
+  -file-line-error, -no-file-line-error
+          // file:line:error style messages
+  -recorder
+          // Record the files read
+  -8bit
+          // Write 8-bit characters as themselves
+
+  ── RUNNING ────────────────────────────────────────────
+  --repl
+          // Start the interactive prompt
+  --jobs=N
+          // Compile N documents at once (default: one per core)
+  --no-cache
+          // Compile this run rather than reading the bytecode cache
+  --aot
+          // Compile the document to a standalone native executable
+
+  ── LOOKING INSIDE ─────────────────────────────────────
+  --dump-tokens
+          // Print the mouth's token stream and exit
+  --disasm
+          // Print the lowered fusevm bytecode and exit
+  --tiers
+          // Run it, then report which fusevm tier took its bytecode
+
+  ── EDITORS ────────────────────────────────────────────
+  --lsp
+          // Speak the Language Server Protocol over stdio
+  --dap
+          // Speak the Debug Adapter Protocol over stdio
+
+  ── CACHE ──────────────────────────────────────────────
+  --cache-stats
+          // Say what the bytecode cache holds and where
+  --cache-clear
+          // Delete it
+
+  ── DOCUMENTS ──────────────────────────────────────────
+  -X new [DIR]            // Make one (Texrs.toml + index.tex)
+  -X init                 // Make one here, named after this directory
+  -X build [--profile P]  // Build the document this directory is in
+  -X watch [--profile P]  // Rebuild it whenever an input changes
+  -X show                 // Say what the document is and can produce
+  -X dump [--profile P]   // Build to stdout, writing nothing
+  -X bundle fetch URL     // Download a bundle into the cache
+  -X bundle list          // Say which bundles have been fetched
+  --profile NAME          // Which output to build
+  --interval MS           // How often -X watch looks (default 250)
+
+  ── SYSTEM ─────────────────────────────────────────────
+  -h, --help              // Print this
+  --version               // Print the version banner
 ";
 
 fn main() -> ExitCode {
@@ -53,69 +104,74 @@ fn main() -> ExitCode {
         return run_document(&args[1..]);
     }
 
-    let mut paths: Vec<String> = Vec::new();
-    let mut dump_tokens = false;
-    let mut disasm = false;
-    let mut aot = false;
-    let mut tiers = false;
-    let mut no_cache = false;
-    let mut jobs: Option<usize> = None;
+    let cli = match texrs::cli::parse(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+    };
 
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "--version" => {
-                println!("{}", texrs::banner::version_banner());
-                return ExitCode::SUCCESS;
+    match cli.mode {
+        texrs::cli::Mode::Help => {
+            texrs::banner::print_banner(true);
+            print!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        texrs::cli::Mode::Version => {
+            println!("{}", texrs::banner::version_banner());
+            return ExitCode::SUCCESS;
+        }
+        texrs::cli::Mode::Repl => {
+            return match texrs::repl::run() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e),
             }
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return ExitCode::SUCCESS;
+        }
+        texrs::cli::Mode::Lsp => {
+            return match texrs::lsp::run() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e),
             }
-            "--repl" => {
-                return match texrs::repl::run() {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(e) => fail(&e),
-                }
+        }
+        texrs::cli::Mode::Dap => {
+            return match texrs::dap::run() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e),
             }
-            "--lsp" => {
-                return match texrs::lsp::run() {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(e) => fail(&e),
-                }
-            }
-            "--dap" => {
-                return match texrs::dap::run() {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(e) => fail(&e),
-                }
-            }
-            "--dump-tokens" => dump_tokens = true,
-            "--disasm" => disasm = true,
-            "--aot" => aot = true,
-            "--tiers" => tiers = true,
-            "--no-cache" => no_cache = true,
-            j if j.starts_with("--jobs=") => {
-                match j.trim_start_matches("--jobs=").parse::<usize>() {
-                    Ok(n) if n >= 1 => jobs = Some(n),
-                    _ => {
-                        eprintln!("texrs: --jobs needs a positive count");
-                        return ExitCode::from(1);
-                    }
-                }
-            }
-            "--cache-stats" => return cache_stats(),
-            "--cache-clear" => return cache_clear(),
-            other if other.starts_with('-') && other.len() > 1 => {
-                eprintln!("texrs: unknown option: {other}");
-                return ExitCode::from(1);
-            }
-            other => paths.push(other.to_string()),
+        }
+        texrs::cli::Mode::CacheStats => return cache_stats(),
+        texrs::cli::Mode::CacheClear => return cache_clear(),
+        texrs::cli::Mode::Run => {}
+    }
+
+    let (dump_tokens, disasm, aot, tiers, no_cache, jobs) = (
+        cli.dump_tokens,
+        cli.disasm,
+        cli.aot,
+        cli.tiers,
+        cli.no_cache,
+        cli.jobs,
+    );
+    let mut paths = cli.files.clone();
+
+    // `texrs '\message{hi}\end'` -- tex's second invocation form, where the
+    // arguments ARE the input. There is no file, so there is no `(./name.tex …)`
+    // wrapper either: tex prints the messages bare, and so does this.
+    if paths.is_empty() {
+        if let Some(src) = cli.command_line_source() {
+            return run_command_line(&src, cli.interaction);
         }
     }
 
+    // No file and nothing on the command line: the prompt. `tex` prompts for
+    // input here too -- an engine invoked with nothing to do should ask, not
+    // print its usage and quit.
     if paths.is_empty() {
-        eprint!("{USAGE}");
-        return ExitCode::from(1);
+        return match texrs::repl::run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => fail(&e),
+        };
     }
     // More than one document is the case that actually parallelises. Each is an
     // independent compile -- its own mouth, macro table and chunk -- sharing
@@ -200,6 +256,16 @@ fn main() -> ExitCode {
         };
     }
 
+    // tex reads the command line as more input AFTER the file -- but only if
+    // the file did not end the run. `\end` inside it stops everything, and the
+    // trailing arguments are never seen.
+    let trailing = cli
+        .command_line_source()
+        .filter(|_| !texrs::source_ends_run(&src));
+    if let Some(extra) = trailing {
+        return run_with_trailing(&path, &src, &extra, cli.interaction);
+    }
+
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
     let run = match no_cache {
@@ -208,11 +274,9 @@ fn main() -> ExitCode {
     };
     match run {
         Ok(msgs) => {
-            let body = match msgs.is_empty() {
-                true => String::new(),
-                false => format!(" {msgs}"),
-            };
-            println!("(./{path}{body} )");
+            if cli.interaction.prints() {
+                println!("{}", file_line(&path, &msgs, texrs::source_ends_run(&src)));
+            }
             ExitCode::SUCCESS
         }
         Err(e) => fail(&e.0),
@@ -336,6 +400,46 @@ fn run_document(args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "bundle" => match args.get(1).map(String::as_str) {
+            Some("fetch") => {
+                let Some(url) = args.get(2) else {
+                    return fail("`-X bundle fetch` needs a URL");
+                };
+                // The one place texrs uses the network, and only because it was
+                // asked to. A build never comes here.
+                match texrs::geturl::fetch(url) {
+                    Ok(got) => {
+                        println!("fetched {} bytes → {}", got.bytes, got.path.display());
+                        println!(
+                            "name it in Texrs.toml as: bundle = \"sha256:{}\"",
+                            got.digest
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(&e),
+                }
+            }
+            Some("list") => {
+                let fetched = texrs::geturl::fetched();
+                if fetched.is_empty() {
+                    println!("no bundles fetched");
+                }
+                for digest in fetched {
+                    match texrs::geturl::path_for(&digest) {
+                        Some(path) => println!("sha256:{digest}  {}", path.display()),
+                        None => println!("sha256:{digest}"),
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            other => {
+                eprintln!(
+                    "texrs: `-X bundle` takes fetch or list, not {}",
+                    other.unwrap_or("nothing")
+                );
+                ExitCode::from(1)
+            }
+        },
         "show" => {
             let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             match texrs::document::Document::find_from(here) {
@@ -473,6 +577,73 @@ fn cache_clear() -> ExitCode {
             eprintln!("texrs: {}: {e}", path.display());
             ExitCode::from(1)
         }
+    }
+}
+
+/// The `(./doc.tex …)` line tex prints for a file.
+///
+/// The trailing space belongs to `\end`: tex prints `(./doc.tex MSGS )` when
+/// `\end` stopped the run inside the file, and `(./doc.tex MSGS)` when the file
+/// simply ran out. The difference is visible in any build log that greps for
+/// one, so it is reproduced rather than normalised away.
+fn file_line(path: &str, msgs: &str, ended: bool) -> String {
+    let body = match msgs.is_empty() {
+        true => String::new(),
+        false => format!(" {msgs}"),
+    };
+    let close = match ended {
+        true => " )",
+        false => ")",
+    };
+    format!("(./{path}{body}{close}")
+}
+
+/// A file, then the command line as more input after it.
+///
+/// The file is run twice: once alone, to learn where its own output ends, and
+/// once with the trailing input appended, because the two have to print on
+/// opposite sides of the closing paren and the engine reports one message list.
+/// It costs a second compile in the one case that asks for it -- a document
+/// followed by command-line input -- and nothing at all otherwise.
+fn run_with_trailing(
+    path: &str,
+    src: &str,
+    extra: &str,
+    interaction: texrs::cli::Interaction,
+) -> ExitCode {
+    let from_file = match texrs::run_messages_list(src) {
+        Ok(m) => m,
+        Err(e) => return fail(&e.0),
+    };
+    let all = match texrs::run_messages_list(&format!("{src}\n{extra}")) {
+        Ok(m) => m,
+        Err(e) => return fail(&e.0),
+    };
+    if interaction.prints() {
+        let after = all[from_file.len().min(all.len())..].join(" ");
+        let line = file_line(path, &from_file.join(" "), false);
+        match after.is_empty() {
+            true => println!("{line}"),
+            false => println!("{line} {after}"),
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Run TeX source that came from the command line rather than from a file.
+///
+/// tex prints the messages bare here — there is no file to open, so there is no
+/// `(./name.tex …)` to print — which is what makes
+/// `texrs '\catcode`\{=1 \message{hi}\end'` usable from a Makefile.
+fn run_command_line(src: &str, interaction: texrs::cli::Interaction) -> ExitCode {
+    match texrs::run_messages(src) {
+        Ok(msgs) => {
+            if interaction.prints() && !msgs.is_empty() {
+                println!("{msgs}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e.0),
     }
 }
 

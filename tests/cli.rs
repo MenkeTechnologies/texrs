@@ -57,7 +57,18 @@ fn options_from_usage() -> Vec<String> {
             let word = word.trim_end_matches(',');
             // `--jobs=N` is the flag `--jobs`; the `N` is its value.
             let word = word.split('=').next().unwrap_or(word);
-            if word.starts_with("--") && word.len() > 2 {
+            // Both spellings count. tex's own options take one dash
+            // (`-interaction`, `-jobname`), texrs's take two, and a user types
+            // whichever the usage text showed them -- so both have to be
+            // documented and completed.
+            let is_long = word.starts_with("--") && word.len() > 2;
+            let is_tex_style = word.starts_with('-')
+                && !word.starts_with("--")
+                && word.len() > 2
+                && word[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-');
+            if is_long || is_tex_style {
                 out.push(word.to_string());
             }
         }
@@ -457,6 +468,49 @@ fn a_document_is_made_and_built_from_anywhere_inside_it() {
     let _ = std::fs::remove_dir_all(&bare);
 }
 
+/// The bundle commands, without touching the network: what they refuse, and
+/// what an empty cache looks like.
+#[test]
+fn the_bundle_commands_say_what_they_need() {
+    let dir = scratch_cache("bundles");
+    let run = |args: &[&str]| -> std::process::Output {
+        texrs()
+            .args(args)
+            .current_dir(&dir)
+            .env("XDG_CACHE_HOME", &dir)
+            .env("HOME", &dir)
+            .output()
+            .expect("run texrs")
+    };
+
+    // Nothing fetched yet, and saying so beats printing nothing.
+    let listed = run(&["-X", "bundle", "list"]);
+    assert!(listed.status.success());
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("no bundles fetched"));
+
+    // A fetch needs a URL, and only http(s) is one. Neither reaches the
+    // network: the first is refused for want of an argument, the second by
+    // scheme.
+    let bare = run(&["-X", "bundle", "fetch"]);
+    assert!(!bare.status.success());
+    assert!(String::from_utf8_lossy(&bare.stderr).contains("needs a URL"));
+
+    let local = run(&["-X", "bundle", "fetch", "/tmp/support.zip"]);
+    assert!(!local.status.success());
+    assert!(
+        String::from_utf8_lossy(&local.stderr).contains("only http and https"),
+        "{}",
+        String::from_utf8_lossy(&local.stderr)
+    );
+
+    // An unknown subcommand names the two there are.
+    let wrong = run(&["-X", "bundle", "frobnicate"]);
+    assert!(!wrong.status.success());
+    assert!(String::from_utf8_lossy(&wrong.stderr).contains("fetch or list"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
     let out = texrs().arg("--nope").output().expect("run");
@@ -472,11 +526,25 @@ fn an_unknown_option_is_refused_and_a_missing_file_is_reported() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("/no/such/file.tex"), "{err}");
 
-    // No arguments at all prints the usage rather than doing nothing.
-    let out = texrs().output().expect("run");
-    assert!(!out.status.success());
+    // No arguments at all starts the prompt, which is what `tex` does too --
+    // it asks for input rather than printing its usage and quitting. With stdin
+    // closed there is nothing to read, so the session ends immediately and
+    // successfully, having printed nothing.
+    let mut child = texrs()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    let out = child.wait_with_output().expect("run");
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("usage: texrs"),
-        "no usage on stderr"
+        out.status.success(),
+        "no arguments should open the prompt, not fail: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "a prompt reading from a closed stdin prints nothing: {:?}",
+        String::from_utf8_lossy(&out.stdout)
     );
 }

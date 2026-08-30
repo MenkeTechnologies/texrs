@@ -1,6 +1,6 @@
 [package]
 name = "texrs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["MenkeTechnologies <linux.dev25@gmail.com>"]
 description = "A TeX engine: Knuth's mouth and expander, lowered for a bytecode VM"
@@ -91,6 +91,11 @@ once_cell = "1"
 # written, and every other codec zip can carry is one more thing to keep
 # building in ten years.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# Fetching a bundle (src/geturl.rs), the other half of tectonic's `bundles`.
+# ureq rather than reqwest: a blocking client is what a one-shot download wants,
+# and rustls with webpki-roots means no system OpenSSL to keep working. Fetching
+# happens ONLY on `-X bundle fetch` — never inside a build.
+ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 
 [[bench]]
 name = "pipeline"

@@ -226,6 +226,41 @@ impl Document {
         }
     }
 
+    /// The file a `bundle` key names.
+    ///
+    /// A path is taken as one, relative to the document. A URL or a
+    /// `sha256:<digest>` names something in the fetch cache and is NOT
+    /// downloaded here: a build never reaches the network, so an archive that
+    /// has not been fetched is an error saying which command fetches it. That
+    /// keeps a build reproducible and offline, while still letting a document
+    /// say where its bundle came from.
+    pub fn bundle_path(&self, bundle: &Path) -> Result<PathBuf, String> {
+        let name = bundle.to_string_lossy();
+        let digest = if let Some(digest) = name.strip_prefix("sha256:") {
+            digest.to_string()
+        } else if name.starts_with("https://") || name.starts_with("http://") {
+            // A URL is not a name in the cache — what is fetched is filed under
+            // its digest — so the document has to say which bytes it meant.
+            return Err(format!(
+                "{name} is a URL: fetch it with `texrs -X bundle fetch {name}`, \
+                 then name the bundle it prints as sha256:<digest>"
+            ));
+        } else {
+            return Ok(match bundle.is_absolute() {
+                true => bundle.to_path_buf(),
+                false => self.src_dir.join(bundle),
+            });
+        };
+        let path = crate::geturl::path_for(&digest).ok_or("no cache directory")?;
+        if !path.is_file() {
+            return Err(format!(
+                "the bundle sha256:{digest} is not in the cache; \
+                 fetch it with `texrs -X bundle fetch <url>`"
+            ));
+        }
+        Ok(path)
+    }
+
     /// Where the format for `digests` lives: one file per distinct preamble,
     /// beside the bytecode cache.
     fn format_path(&self, digests: &[String]) -> Option<PathBuf> {
@@ -270,11 +305,9 @@ impl Document {
         // the one it was shipped with — which is what lets a recipient change
         // a macro without unpacking the archive.
         if let Some(bundle) = &self.file.doc.bundle {
-            let path = match bundle.is_absolute() {
-                true => bundle.clone(),
-                false => self.src_dir.join(bundle),
-            };
-            stack.push(Box::new(crate::bundle::Bundle::open(&path)?));
+            stack.push(Box::new(crate::bundle::Bundle::open(
+                self.bundle_path(bundle)?,
+            )?));
         }
 
         let mut source = String::new();
@@ -832,6 +865,28 @@ mod tests {
             "{}",
             doc.show()
         );
+
+        // A URL is not resolved during a build: the document has to name the
+        // bytes it meant, and the error says which command produces them.
+        let by_url = Document::parse(
+            &dir,
+            "[doc]\nname=\"b\"\nbundle=\"https://example.invalid/support.zip\"\n\
+             inputs=[\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+        let err = by_url.assemble().unwrap_err();
+        assert!(err.contains("-X bundle fetch"), "{err}");
+
+        // Nor is one named by a digest nobody has fetched.
+        let by_digest = Document::parse(
+            &dir,
+            "[doc]\nname=\"b\"\nbundle=\"sha256:0000000000000000\"\ninputs=[\"index.tex\"]\n\
+             [[output]]\nname=\"default\"\ntype=\"messages\"\n",
+        )
+        .unwrap();
+        let err = by_digest.assemble().unwrap_err();
+        assert!(err.contains("not in the cache"), "{err}");
 
         // A bundle that is not there stops the build rather than quietly
         // building a document missing half its inputs.
