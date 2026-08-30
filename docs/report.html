@@ -158,7 +158,7 @@
 
       <section class="tutorial-section">
         <h2>Gaps, stated plainly</h2>
-        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: no stomach; no registers other than <code>\count</code>; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence prints its name instead of raising; <code>\edef</code> does not decide a conditional at definition time; <code>#{</code> parameter text is refused; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
+        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: only the smallest stomach — <code>--dvi</code> ships a first-fit page where tex minimises badness across the whole paragraph, so byte-identical DVI parity is not approached; no registers other than <code>\count</code>; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence prints its name instead of raising; <code>\edef</code> does not decide a conditional at definition time; <code>#{</code> parameter text is refused; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
       </section>
 
       <hr class="section-rule">

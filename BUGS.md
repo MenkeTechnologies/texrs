@@ -1,7 +1,8 @@
 # Known gaps
 
-texrs implements TeX's mouth and expander. What follows is what is deliberately
-not done, and what is done differently. Everything here was
+texrs implements TeX's mouth and expander, and enough of a stomach to ship a
+page. What follows is what is deliberately not done, and what is done
+differently. Everything here was
 measured against **tex 3.141592653** (TeX Live 2026).
 
 That version string is not decoration: `src/parity.rs` reads it out of this file
@@ -19,9 +20,18 @@ passing, so the list is a claim the harness enforces rather than a note.
 
 ## Not implemented
 
-- **The stomach.** No boxes, glue, paragraphs, fonts or DVI. `\end` stops the
-  run; it does not ship a page. `tex` prints `No pages of output.` for the
-  corpus here, which is why the parity contract is the `\message` stream.
+- **`tex.web`'s stomach.** `--dvi` measures the text in a real `.tfm`, breaks it
+  into lines with the first break that fits, stacks them at a fixed leading and
+  ships DVI (`src/typeset.rs`). That is the whole of it. TeX chooses breakpoints
+  by minimising total badness over every feasible sequence (§813-§890); there is
+  no hyphenation, no glue stretching or shrinking, no page breaking by
+  penalties, no maths, and no boxes a document can nest. So a paragraph set here
+  and the same paragraph set by `tex` do not agree line for line, and the
+  milestone's real parity bar — byte-identical DVI — is not approached.
+
+  Without `--dvi`, `\end` stops the run and ships nothing. `tex` prints
+  `No pages of output.` for the corpus here, which is why the parity contract
+  for the committed cases is still the `\message` stream rather than the page.
 - **Registers other than `\count`.** No `\dimen`, `\skip`, `\muskip`, `\toks`,
   `\box`, so `\ifdim`, `\ifvoid`, `\ifhbox` and `\ifvbox` are recognised as
   conditionals for skipping purposes but cannot be evaluated.

@@ -49,15 +49,56 @@ For a shorter quick\-reference page see
 .BR texrs (1).
 .SH "1.  INVOCATION"
 .B texrs
-takes one file and any of the introspection flags:
+takes tex's own command line in all three of its forms, any number of files, and
+its own flags on top:
 .RS
 .nf
 texrs FILE.tex          run it, print the \emessage stream
+texrs A.tex B.tex       compile a batch, one document per core
+texrs '\emessage{hi}\eend'  the arguments ARE the input, as in tex
+texrs \-\-text F          print the document's text, not only its messages
+texrs \-\-dvi F           typeset it: FILE.dvi, first\-fit lines
 texrs \-\-dump\-tokens F   print the mouth's token stream, then exit
 texrs \-\-dump\-ast F      print the lowered command stream, then exit
 texrs \-\-disasm F        print the lowered fusevm bytecode, then exit
+texrs \-\-tiers F         run it, then say which fusevm tier took it
+texrs \-\-aot F           compile it to a standalone native executable
+texrs \-\-repl            the interactive prompt
+texrs \-\-lsp             Language Server Protocol over stdio
+texrs \-\-dap             Debug Adapter Protocol over stdio
 texrs \-\-help            print the option grammar
 texrs \-\-version         print the version banner
+.fi
+.RE
+.PP
+.B \-X
+is the second half of the command line: the document commands, and a reader for
+each binary format a TeX installation is made of.  Each reader prints what it
+read rather than acting on it, which is what makes them usable for finding out
+why a build is wrong.
+.RS
+.nf
+texrs \-X new [DIR]      make a document (Texrs.toml + index.tex)
+texrs \-X init           make one here, named after this directory
+texrs \-X build          build the document this directory is in
+texrs \-X watch          rebuild it whenever an input changes
+texrs \-X show           say what the document is and can produce
+texrs \-X dump           build to stdout, writing nothing
+texrs \-X bundle fetch U download a support\-file bundle into the cache
+texrs \-X bundle list    say which bundles have been fetched
+texrs \-X dvi F.dvi      read what real tex shipped, or diff two files
+texrs \-X bib F.bib      read a bibliography database
+texrs \-X bib F.aux      say what a document cites, and what is missing
+texrs \-X bst F.bst      read a bibliography style, and check its names
+texrs \-X bibtex F.aux   run the style: write the .bbl a document reads
+texrs \-X tfm F.tfm [C]  read a font's metrics, or one character's
+texrs \-X vf F.vf [C]    read a virtual font: what it really sets
+texrs \-X pk F.pk [C]    read a packed bitmap font, and draw a character
+texrs \-X otf F.otf [C]  read an OpenType font: its tables and its cmap
+texrs \-X pfb F.pfb [C]  read a Type 1 font: its glyphs and their widths
+texrs \-X map F.map      read a font map: what a TeX font name means
+texrs \-X enc F.enc      read an encoding: what each code is called
+texrs \-X itar F.tar     index a tar bundle, or read one file out of it
 .fi
 .RE
 .PP
@@ -263,7 +304,15 @@ Both shell harnesses read the tex version they were measured against out of
 and refuse to run against a different engine: a mismatched oracle does not fail
 loudly, it reports a different divergence set that reads like a regression.
 .SH "8.  GAPS"
-No stomach: no boxes, glue, paragraphs, fonts or DVI.  No registers other than
+Only the smallest stomach.
+.B \-\-dvi
+measures the text in a real
+.IR .tfm ,
+breaks it into lines with the first break that fits, and ships DVI; tex chooses
+breakpoints by minimising badness across a whole paragraph, so the two do not
+agree line for line and byte\-identical DVI parity is not approached.  No
+hyphenation, no glue stretching or shrinking, no page breaking by penalties, no
+maths, no boxes a document can nest.  No registers other than
 .BR \ecount .
 No format is preloaded, so every register starts at zero as INITEX leaves them,
 while the reference

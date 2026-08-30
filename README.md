@@ -308,7 +308,8 @@ of `\newcommand`s compiled into the binary, and a document that writes
 `\newcommand`, `\renewcommand`, `\providecommand` and `\DeclareRobustCommand`
 are dispatched natively; `\documentclass`, `\usepackage`, `\RequirePackage` and
 the `\PassOptionsTo*` pair are consumed and produce nothing, because a package is
-TeX that builds boxes and there is no stomach to build them in. `\makeatletter`
+TeX that builds boxes and nothing here builds boxes — `--dvi` sets lines of text,
+which is not the same thing and is not enough to run a package. `\makeatletter`
 is a catcode change and works as one.
 
 What that buys, and what it does not: a macro that would have drawn something

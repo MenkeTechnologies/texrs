@@ -8,6 +8,26 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `--dvi` typesets: the join between reading a document and writing one that had
+  been missing. texrs could say what a document's words were, and could read and
+  write DVI, and nothing called one from the other, so a book "ran" and produced
+  no page. `src/typeset.rs` measures each character in a real `.tfm`, breaks the
+  text into lines at a measure, stacks them down a page at a fixed leading, and
+  ships a file `dvitype` reads. It is NOT `tex.web`'s stomach: TeX chooses
+  breakpoints by minimising total badness over every feasible sequence
+  (§813-§890) and this takes the first break that fits, which is what every word
+  processor before TeX did and what TeX was written to improve on. No
+  hyphenation, no glue stretching or shrinking, no page breaking by penalties,
+  no maths, no boxes a document can nest. A page you can open, which is the
+  difference between producing nothing and producing something imperfect.
+- Per-glyph font fallback while typesetting: a character the current font does
+  not have is set from one that does, rather than dropped or set as a missing
+  glyph. This is the piece LuaTeX was previously required for.
+- `scripts/texrs-pdf`, texrs as a `pandoc --pdf-engine`: `texrs --dvi` then
+  `dvipdfmx`, which is the pair tex itself has always used. The script states
+  what a publication build gives up by pointing at it — Computer Modern whatever
+  `\setmainfont` asked for, no TikZ, no colour, first-fit lines — because that
+  is the trade it exists to offer, not a detail to discover afterwards.
 - Writing PDF (`pdf::Pdf`, `pdf::document`), ported from `pdfobj.c` and
   `pdfdoc.c` in `xdvipdfmx`: the object model, the writer with its
   cross-reference table, and enough document structure to make a page --
