@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <meta name="description" content="texrs — a TeX engine in Rust. Knuth's mouth and expander: category codes, macro expansion and the conditionals, lowered to fusevm bytecode and run on the shared VM with a three-tier Cranelift JIT. Not a typesetter. MIT licensed.">
+  <meta name="description" content="texrs — a TeX engine in Rust. Knuth's mouth and expander: category codes, macro expansion and the conditionals, lowered to fusevm bytecode and run on the shared VM with a three-tier Cranelift JIT, plus a first-fit line breaker that ships DVI. MIT licensed.">
   <title>texrs — Documentation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,7 +52,7 @@
             <span class="sep">/</span>
             <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
           </nav>
-          <p class="docs-build-line">texrs v0.4.1 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · no interpreter, no DVI output yet (it reads DVI: <code>-X dvi</code>) · a fusevm language host (with zshrs, stryke, rubylang, pythonrs, scalars) · MIT · in active development</p>
+          <p class="docs-build-line">texrs v0.4.1 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · no interpreter, DVI out via <code>--dvi</code> and in via <code>-X dvi</code> · a fusevm language host (with zshrs, stryke, rubylang, pythonrs, scalars) · MIT · in active development</p>
         </div>
         <div class="tutorial-toolbar">
           <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
@@ -74,13 +74,13 @@
 
     <main class="tutorial-main">
       <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>TEXRS REFERENCE</h2>
-      <p class="tutorial-subtitle">A TeX engine written in Rust. Source is tokenised under a mutable category-code table, macros are expanded, and what is left is lowered to <code>fusevm</code> bytecode and executed on the same language-agnostic VM and three-tier Cranelift JIT that hosts <code>zshrs</code>, <code>stryke</code>, <code>rubylang</code>, <code>pythonrs</code> and <code>scalars</code>. <strong>In active development — the mouth and the expander, not the stomach.</strong></p>
+      <p class="tutorial-subtitle">A TeX engine written in Rust. Source is tokenised under a mutable category-code table, macros are expanded, and what is left is lowered to <code>fusevm</code> bytecode and executed on the same language-agnostic VM and three-tier Cranelift JIT that hosts <code>zshrs</code>, <code>stryke</code>, <code>rubylang</code>, <code>pythonrs</code> and <code>scalars</code>. <strong>In active development — the mouth, the expander, and the smallest stomach that ships a page.</strong></p>
 
       <section class="tutorial-section">
         <h2>What it is</h2>
         <p>TeX is two machines. The <em>mouth</em> turns bytes into tokens under a category-code table the document itself can change; the <em>expander</em> turns tokens into other tokens — <code>\def</code>, <code>\csname</code>, <code>\the</code>, the conditionals. Only after that does the <em>stomach</em> build boxes and ship DVI.</p>
         <p><code>texrs</code> implements the first two. That is the half a macro-heavy document spends its time in, and the half where a compiled implementation has something to prove: every mainstream engine — pdfTeX, XeTeX, LuaTeX — descends from <code>tex.web</code> through web2c and <em>interprets</em> the expander.</p>
-        <p><strong>Scope today.</strong> It is not a typesetter: no boxes, no glue, no paragraph breaking, no fonts, no DVI. <code>\end</code> stops the run rather than shipping a page, which is why the parity contract for this milestone is the <code>\message</code> stream. See <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> for the ledger of what is not carried.</p>
+        <p><strong>Scope today.</strong> <code>--dvi</code> measures the text in a real <code>.tfm</code>, breaks it into lines with the first break that fits, and ships a page a driver will open — but it is not <code>tex.web</code>'s stomach: no hyphenation, no glue stretching or shrinking, no page breaking by penalties, no maths, no boxes a document can nest, and lines chosen first-fit where TeX minimises badness across the whole paragraph. Without <code>--dvi</code>, <code>\end</code> stops the run rather than shipping a page, and the parity contract for this milestone is still the <code>\message</code> stream. See <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> for the ledger of what is not carried.</p>
       </section>
 
       <section class="tutorial-section">

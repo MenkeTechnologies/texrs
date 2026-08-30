@@ -51,10 +51,18 @@ turns tokens into other tokens \(em
 the conditionals.  Only after that does the
 .I stomach
 build boxes and ship DVI.  texrs implements the first two, which is the half a
-macro\-heavy document spends its time in.  It is
+macro\-heavy document spends its time in, and a deliberately small third:
+.B \-\-dvi
+measures the text in a real
+.IR .tfm ,
+breaks it into lines with the first break that fits, and ships a page a driver
+will open.  It is
 .B not
-a typesetter: there are no boxes, no glue, no paragraph breaking, no fonts and
-no DVI, and
+.IR tex.web 's
+stomach \(em no hyphenation, no glue stretching or shrinking, no page breaking
+by penalties, no maths, no boxes a document can nest, and lines chosen first\-fit
+where TeX minimises badness across a whole paragraph.  Without
+.B \-\-dvi
 .B \eend
 stops the run rather than shipping a page.
 .PP

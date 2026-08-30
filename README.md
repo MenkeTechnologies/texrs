@@ -59,6 +59,13 @@ its time in, and the half where a compiled implementation has something to prove
 every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends from `tex.web` through
 web2c and *interprets* the expander.
 
+There is now a third piece, deliberately small: `--dvi` measures the text in a
+real font, breaks it into lines at a measure, stacks them down a page and ships
+DVI. It is not `tex.web`'s stomach — first-fit lines where TeX minimises badness
+across the whole paragraph, no hyphenation, no glue, no boxes a document can
+nest — and [0x06] says exactly what that costs. It is the difference between a
+document that produces nothing and one that produces something imperfect.
+
 ## [0x01] Install
 
 ```sh
@@ -146,6 +153,8 @@ texrs --dump-tokens file   # the mouth's token stream, no expansion
 texrs --dump-ast file      # the command stream the frontend lowered to
 texrs --disasm file        # the lowered fusevm bytecode
 texrs --tiers file         # run it, then say which fusevm tier took it
+texrs --text file          # print the document's text, not only its messages
+texrs --dvi file           # typeset it: FILE.dvi, first-fit lines, no hyphenation
 texrs --build file         # compile into the bytecode cache and stop
 texrs --aot file           # compile it to a standalone native executable
 texrs --no-cache file      # compile this run instead of reading the cache
@@ -153,6 +162,35 @@ texrs --cache-stats        # what the bytecode cache holds, and where
 texrs --cache-clear        # delete it; it holds only what can be recompiled
 texrs --help
 texrs --version
+```
+
+`-X` is the second half of the command line: the document commands, and a reader
+for each binary format a TeX installation is made of. Every one of them prints
+what it read rather than acting on it, which is what makes them usable to find
+out why a build is wrong.
+
+```sh
+texrs -X new [DIR]         # make a document (Texrs.toml + index.tex)
+texrs -X init              # make one here, named after this directory
+texrs -X build             # build the document this directory is in
+texrs -X watch             # rebuild it whenever an input changes
+texrs -X show              # say what the document is and can produce
+texrs -X dump              # build to stdout, writing nothing
+texrs -X bundle fetch URL  # download a support-file bundle into the cache
+texrs -X bundle list       # say which bundles have been fetched
+texrs -X dvi FILE.dvi      # read what real tex shipped, or diff two files
+texrs -X bib FILE.bib      # read a bibliography database
+texrs -X bib FILE.aux      # say what a document cites, and what is missing
+texrs -X bst FILE.bst      # read a bibliography style, and check its names
+texrs -X bibtex FILE.aux   # run the style: write the .bbl a document reads
+texrs -X tfm FILE.tfm [C]  # read a font's metrics, or one character's
+texrs -X vf FILE.vf [C]    # read a virtual font: what it really sets
+texrs -X pk FILE.pk [C]    # read a packed bitmap font, and draw a character
+texrs -X otf FILE.otf [C]  # read an OpenType font: its tables and its cmap
+texrs -X pfb FILE.pfb [C]  # read a Type 1 font: its glyphs and their widths
+texrs -X map FILE.map      # read a font map: what a TeX font name means
+texrs -X enc FILE.enc      # read an encoding: what each code is called
+texrs -X itar FILE.tar     # index a tar bundle, or read one file out of it
 ```
 
 Two places the grammar departs from `tex`, both because texrs takes several
@@ -191,6 +229,19 @@ than none.
 - Groups, which scope the macro table AND the count registers they write.
 - `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
 - `\message`.
+- `\input`, which is what every real document does first: the file is read where
+  it is named, and its own `(./name.tex …)` nests inside the outer one's.
+- Verbatim environments — `verbatim`, `Verbatim` and the fancyvrb family,
+  `lstlisting`, `minted`, `alltt`, `filecontents` — where the catcodes are
+  suspended, so `#`, `&` and `\` inside one are characters rather than markup.
+- The LaTeX layer of [0x06]: `\newcommand` and its three relatives dispatched
+  natively, the preamble directives consumed, `\makeatletter` as the catcode
+  change it is.
+- `--dvi`: a page. Text measured in a real font (`.tfm`), first-fit lines at a
+  measure, stacked at a leading, shipped as DVI that `dvitype` reads.
+- Readers for the binary formats a TeX installation is made of, each printing
+  what it read: `.tfm`, `.vf`, `.pk`, `.otf`, `.pfb`, `.map`, `.enc`, `.dvi`,
+  `.bib`/`.aux`/`.bst`, and tar bundles.
 
 ## [0x04] Intercepts
 
@@ -239,8 +290,16 @@ diagnostic rather than a missing-function error later.
 
 ## [0x06] What does not
 
-No boxes, no glue, no paragraph breaking, no fonts, no DVI. This is not a
-typesetter yet — see `docs/ROADMAP.md`.
+There is a stomach now, and it is the smallest honest one. `--dvi` measures
+characters in a real `.tfm`, breaks a paragraph into lines with the first break
+that fits, stacks the lines down a page at a fixed leading, and ships DVI a
+driver will open. What it is NOT is `tex.web`'s stomach: TeX considers every
+feasible sequence of breakpoints and minimises total badness (§813-§890), and
+this takes the first fit, which is what every word processor before TeX did and
+what TeX was written to improve on. No hyphenation, no glue stretching or
+shrinking, no page breaking by penalties, no maths, no boxes a document can
+nest. A paragraph set here and the same paragraph set by `tex` will not agree
+line for line — see `docs/ROADMAP.md`.
 
 **Some LaTeX, no Lua.** texrs carries the part of LaTeX that lives in the mouth
 and the expander, as TeX rather than as Rust: `src/latex/prelude.tex` is a file
@@ -279,10 +338,14 @@ tests pin behaviour a sentence at a time and `tests/cases` pins byte-for-byte
 parity with `tex`, and neither of them says whether a 16,000-line book
 compiles.
 
-"Run" is the exact claim. The mouth and the expander read the whole document and
-produce what its text says; nothing is typeset, and pages, fonts, boxes and TikZ
-pictures do not exist. Getting from here to a typeset page is the stomach, and
-it is on `docs/ROADMAP.md` rather than done.
+"Run" is the exact claim: the mouth and the expander read the whole document and
+produce what its text says. With `--dvi` there is also a page, set in Computer
+Modern at whatever measure was asked for — and a document that said
+`\setmainfont` gets Computer Modern anyway, because fontspec is not loaded.
+Boxes a document nests, TikZ pictures, colour and maths do not exist. A draft
+reads correctly; a book being sold on its typography should still be set by an
+engine with a real stomach, and `scripts/texrs-pdf` says the same thing where a
+`pandoc --pdf-engine` build would meet it.
 
 ## [0x07] How it runs
 
