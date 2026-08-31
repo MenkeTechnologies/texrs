@@ -2360,8 +2360,8 @@ impl Engine {
         self.do_newcommand(lx, kind)
     }
 
-    /// Consume a LaTeX preamble directive that takes `[options]{arguments}` and
-    /// produces nothing here.
+    /// Consume a LaTeX preamble directive that takes `[options]{arguments}`,
+    /// and return what it said.
     ///
     /// `\documentclass`, `\usepackage` and `\PassOptionsToPackage` load files
     /// texrs has no way to run -- a package is TeX that builds boxes, and there
@@ -2369,13 +2369,28 @@ impl Engine {
     /// failing on them lets the REST of a document be read, which is the
     /// difference between "cannot open this file at all" and "read it, minus
     /// what the packages would have drawn".
-    pub fn compile_time_preamble_directive(&mut self, lx: &mut Lexer, args: usize) -> R<()> {
-        let _ = self.scan_optional_bracket(lx)?;
+    ///
+    /// The options and the argument names come back rather than being dropped
+    /// on the floor, because some of what a preamble says needs no package to
+    /// honour: `[11pt]` is a type size and `[margin=0.95in]{geometry}` is a
+    /// page, and both are numbers the typesetter can simply use. Discarding
+    /// them set every book on plain.tex's page.
+    pub fn compile_time_preamble_directive(
+        &mut self,
+        lx: &mut Lexer,
+        args: usize,
+    ) -> R<(String, Vec<String>)> {
+        let options = match self.scan_optional_bracket(lx)? {
+            Some(toks) => toks.iter().map(|t| t.to_text(self.escape)).collect(),
+            None => String::new(),
+        };
+        let mut names = Vec::with_capacity(args);
         for _ in 0..args {
             self.skip_spaces(lx);
-            let _ = self.read_group_tokens(lx)?;
+            let toks = self.read_group_tokens(lx)?;
+            names.push(toks.iter().map(|t| t.to_text(self.escape)).collect());
         }
-        Ok(())
+        Ok((options, names))
     }
 
     /// `\makeatletter` / `\makeatother`: @ becomes a letter, or stops being

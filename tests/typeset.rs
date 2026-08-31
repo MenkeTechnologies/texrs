@@ -11,7 +11,9 @@
 //! font and no maths.
 
 use texrs::tfm::Tfm;
-use texrs::typeset::{break_lines, find_font, to_dvi, to_dvi_chain, FontChain, Layout};
+use texrs::typeset::{
+    break_lines, find_font, to_dvi, to_dvi_chain, FontChain, Layout, LISTING_BREAK,
+};
 
 /// The text font these tests measure in, or `None` where TeX is not installed.
 ///
@@ -626,4 +628,219 @@ fn a_coloured_word_costs_nothing_in_an_embedded_fonts_own_widths() {
     let preamble = format!("\\usepackage{{fontspec}}\n\\setmainfont{{{family}}}\n");
     let (plain, coloured) = coloured_and_plain(&preamble, 600);
     assert_eq!(coloured, plain, "the spec digits were charged as glyphs");
+}
+
+/// Every `... Tf 1 0 0 1 x y Tm` in a PDF this crate wrote, as
+/// `(size, x, baseline)`.
+///
+/// The content streams texrs writes are uncompressed, so the operators can be
+/// read straight out of the bytes; that is how the page it actually set is
+/// checked rather than how many pages came out.
+fn set_text(pdf: &[u8]) -> Vec<(f64, f64, f64)> {
+    let text = String::from_utf8_lossy(pdf).into_owned();
+    let mut out = Vec::new();
+    for run in text.split("BT /").skip(1) {
+        let mut words = run.split_whitespace();
+        let size = words.nth(1).and_then(|w| w.parse::<f64>().ok());
+        // `Tf 1 0 0 1 x y Tm`: five words between the size and x.
+        let x = words.nth(5).and_then(|w| w.parse::<f64>().ok());
+        let y = words.next().and_then(|w| w.parse::<f64>().ok());
+        if let (Some(size), Some(x), Some(y)) = (size, x, y) {
+            out.push((size, x, y));
+        }
+    }
+    out
+}
+
+/// A document that states a type size and a margin, with enough words in one
+/// paragraph to need several lines.
+fn sized_document(class_options: &str, margin: &str) -> String {
+    format!(
+        "\\documentclass[{class_options}]{{extreport}}\n\
+         \\usepackage[margin={margin}]{{geometry}}\n\
+         \\begin{{document}}\n{}\n\\end{{document}}\n",
+        "alpha bravo charlie delta echo foxtrot ".repeat(400)
+    )
+}
+
+#[test]
+fn the_type_size_and_margins_the_preamble_states_reach_the_page() {
+    // `\documentclass[11pt]` and `\usepackage[margin=0.95in]{geometry}` were
+    // consumed and thrown away, so every book was set at plain.tex's 10pt on
+    // 12pt leading with 1in margins whatever it asked for. Measured against
+    // the lualatex-built scifi2/docs/book.pdf, whose body lines begin at
+    // x=68.4 -- 0.95in of PDF points -- on baselines 13.549 apart, which is
+    // the 13.6pt size11.clo:48 pairs with 11pt type.
+    let pdf = texrs::run_pdf(&sized_document("11pt", "0.95in")).expect("pdf");
+    let set = set_text(&pdf);
+    let (size, x, first) = set[0];
+    assert!(
+        (x - 68.4).abs() < 1e-6,
+        "the text starts at {x}, not at the 0.95in margin geometry was given"
+    );
+    // 11 of TeX's points is 10.9589 of PDF's: TeX's point is 1/72.27in and the
+    // page is 612 by 792 of 1/72in.
+    assert!(
+        (size - 11.0 * 72.0 / 72.27).abs() < 1e-6,
+        "the type is {size}pt, not the 11pt the class was given"
+    );
+    let second = set
+        .iter()
+        .find(|(_, _, y)| *y < first)
+        .expect("a second line")
+        .2;
+    assert!(
+        (first - second - 13.6 * 72.0 / 72.27).abs() < 1e-6,
+        "the leading is {}, not the 13.6pt that goes with 11pt type",
+        first - second
+    );
+}
+
+#[test]
+fn bigger_type_needs_more_pages_for_the_same_words() {
+    // The size has to reach BOTH the measuring and the pagination, not just
+    // the `Tf`: type set larger takes more lines to say the same thing and
+    // fewer lines fit the page. Setting an 11pt book at 10pt is why texrs
+    // fitted a third more text on a page than lualatex does.
+    let small = texrs::run_pdf(&sized_document("10pt", "0.95in")).expect("pdf");
+    let big = texrs::run_pdf(&sized_document("11pt", "0.95in")).expect("pdf");
+    assert!(
+        count_pages(&big) > count_pages(&small),
+        "11pt type set in {} pages where 10pt took {}",
+        count_pages(&big),
+        count_pages(&small)
+    );
+}
+
+#[test]
+fn a_document_that_states_no_page_still_gets_plain_texs() {
+    // The other half of the contract: a document that asks for nothing is
+    // still set on plain.tex's page, so a reader comparing against a `tex` run
+    // does not first have to account for a different one.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "alpha bravo charlie\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let (size, x, _) = set_text(&pdf)[0];
+    assert_eq!(x, Layout::default().margin, "the margin moved");
+    assert_eq!(size, Layout::default().size, "the type size moved");
+}
+
+#[test]
+fn the_class_options_and_geometrys_are_read_where_they_are_written() {
+    // Read straight, so the failure says which of the two halves broke. The
+    // measure and the height come off 612 by 792 -- the paper `pdf::Page`
+    // makes and the paper every corpus book is set on.
+    let mut layout = Layout::default();
+    layout.absorb_class_options("\n  11pt,\n");
+    assert!((layout.size - 11.0 * 72.0 / 72.27).abs() < 1e-6);
+    assert!((layout.leading - 13.6 * 72.0 / 72.27).abs() < 1e-6);
+    layout.absorb_geometry_options("margin=0.95in");
+    assert!((layout.margin - 68.4).abs() < 1e-6);
+    assert!((layout.measure - (612.0 - 2.0 * 68.4)).abs() < 1e-6);
+    assert!((layout.height - (792.0 - 2.0 * 68.4)).abs() < 1e-6);
+    // An option that is not a size and a key that is not a margin change
+    // nothing: `\documentclass[oneside,10pt]` and geometry's `includehead`
+    // both arrive here.
+    let untouched = layout.clone();
+    layout.absorb_class_options("oneside,twocolumn");
+    layout.absorb_geometry_options("includehead,headheight=12pt");
+    assert_eq!(layout, untouched);
+}
+
+#[test]
+fn options_passed_to_the_class_and_to_geometry_reach_the_page_too() {
+    // `\PassOptionsToPackage` puts its options in the FIRST brace and names
+    // its target in the second -- there is no `[...]` on it at all -- so
+    // reading the bracket the other two directives carry would have found
+    // nothing here. Pandoc writes a stack of these above `\documentclass`.
+    let src = concat!(
+        "\\PassOptionsToClass{11pt}{extreport}\n",
+        "\\PassOptionsToPackage{margin=0.5in}{geometry}\n",
+        "\\documentclass{extreport}\n\\usepackage{geometry}\n",
+        "\\begin{document}\nalpha bravo charlie\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let (size, x, _) = set_text(&pdf)[0];
+    assert!(
+        (x - 36.0).abs() < 1e-6,
+        "the text starts at {x}, not at 0.5in"
+    );
+    assert!(
+        (size - 11.0 * 72.0 / 72.27).abs() < 1e-6,
+        "the type is {size}pt, not the 11pt passed to the class"
+    );
+}
+
+/// A pandoc code listing is a block of LINES, and the breaker used to reflow it
+/// into the prose around it.
+///
+/// `\begin{Highlighting}` is not verbatim -- its body is `\NormalTok` and
+/// siblings that have to expand -- so the code reached the breaker as ordinary
+/// text and `split_whitespace` welded it. Measured: rubyrs/docs/book.tex set a
+/// nine-line `dup_value` as three welded ones and came out in 208 pages where
+/// lualatex sets it in 332; elisprs's `$ elisp -e ...` transcripts ran on one
+/// line each, command and output together.
+#[test]
+fn a_code_listing_keeps_one_line_per_source_line() {
+    let font = font_or_skip!();
+    let src = "\\documentclass{article}\n\\newcommand{\\NormalTok}[1]{#1}\n\
+               \\begin{document}\nBefore the listing.\n\n\
+               \\begin{Shaded}\\begin{Highlighting}[]\n\
+               \\NormalTok{let x = 1;}\n\
+               \\NormalTok{let y = 2;}\n\
+               \n\
+               \\NormalTok{let z = 3;}\n\
+               \\end{Highlighting}\\end{Shaded}\n\n\
+               After the listing.\n\\end{document}\n";
+    let text = texrs::run_text_marked(src).expect("run");
+    let lines = break_lines(&text, &font, &Layout::default());
+    let at = |want: &str| lines.iter().position(|l| l == want);
+    let (Some(x), Some(y), Some(z)) = (at("let x = 1;"), at("let y = 2;"), at("let z = 3;")) else {
+        panic!("each code line is a line of its own: {lines:?}");
+    };
+    assert_eq!(y, x + 1, "two code lines are two lines: {lines:?}");
+    assert_eq!(
+        z,
+        y + 2,
+        "a blank line in a listing is a blank code line, not a paragraph: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("listing.") && l.contains("let")),
+        "code must not join the prose either side of it: {lines:?}"
+    );
+}
+
+/// Splitting a listing into lines must not cost it its colour.
+///
+/// Pandoc's `\NormalTok` and its siblings ARE `\textcolor` calls -- that is why
+/// `Highlighting` cannot be read as verbatim -- and the markers they leave are
+/// what round 1 had just got onto the page. Each code line is lowered on its
+/// own, so each one has to arrive carrying its own opening marker, its spec and
+/// its close.
+#[test]
+fn a_listings_colour_markers_survive_the_line_split() {
+    let src = "\\documentclass{article}\n\
+               \\newcommand{\\NormalTok}[1]{\\textcolor[rgb]{0.25,0.44,0.63}{#1}}\n\
+               \\begin{document}\n\
+               \\begin{Shaded}\\begin{Highlighting}[]\n\
+               \\NormalTok{let x = 1;}\n\
+               \\NormalTok{let y = 2;}\n\
+               \\end{Highlighting}\\end{Shaded}\n\\end{document}\n";
+    let text = texrs::run_text_marked(src).expect("run");
+    let para = text
+        .split("\n\n")
+        .find(|p| p.contains(LISTING_BREAK))
+        .expect("the listing is a paragraph of its own");
+    let lines: Vec<&str> = para.split_terminator(LISTING_BREAK).collect();
+    assert_eq!(lines.len(), 2, "two code lines: {lines:?}");
+    for line in &lines {
+        assert!(
+            line.contains('\u{1}') && line.contains("0.25,0.44,0.63") && line.contains('\u{3}'),
+            "the line opens, specifies and closes its colour: {line:?}"
+        );
+    }
 }

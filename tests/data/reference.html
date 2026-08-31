@@ -56,7 +56,7 @@
             <span class="sep">/</span>
             <a href="https://github.com/MenkeTechnologies/texrs" target="_blank" rel="noopener noreferrer">GitHub</a>
           </nav>
-          <p class="docs-build-line">texrs v0.5.0 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
+          <p class="docs-build-line">texrs v0.4.1 · TeX on fusevm · mouth → expander → command stream → bytecode → Cranelift JIT · MIT · in active development</p>
         </div>
         <div class="tutorial-toolbar">
           <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
@@ -81,11 +81,11 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">114</div>
+            <div class="stat-val">69</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">10</div>
+            <div class="stat-val">9</div>
             <div class="stat-label">Chapters</div>
           </div>
           <div class="stat-card">
@@ -93,7 +93,7 @@
             <div class="stat-label">Count registers</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">53</div>
+            <div class="stat-val">46</div>
             <div class="stat-label">Command-line options</div>
           </div>
         </div>
@@ -106,9 +106,8 @@
             <tr><td><code>\catcode</code></td><td>Set or read a character's category code. A character's category is a mutable table entry, not a property of the language: texrs starts from INITEX's sparse defaults, where <code>{</code> is an ordinary character until something makes it a group opener. Takes effect at COMPILE time, because it changes how the rest of the file reads.</td><td><pre>\catcode`\X=N
 \catcode`\{=1 \catcode`\}=2 \catcode`\#=6
 \message{now braces group}</pre></td></tr>
-            <tr><td><code>^^X</code></td><td>Control-character notation (tex.web §352), in two forms decided by what follows: <code>^^</code> and two LOWERCASE hex digits is that hex code, while <code>^^</code> and anything else is one character shifted by 64. So <code>^^41</code> is <code>A</code> and <code>^^4a</code> is <code>J</code>, but <code>^^4A</code> is <code>tA</code> — <code>A</code> is not a lowercase hex digit, so the shift applies to the <code>4</code> alone. The substitution belongs to the input processor (§353), which runs before anything is classified, so it applies inside a control sequence name too: plain.tex writes <code>\catcode</code>\^^K=7<code>. This is also how a line end is written inside a macro body.</code></td><td><pre>^^M   % carriage return
-^^I   % tab
-^^41  % the hex form: A</pre></td></tr>
+            <tr><td><code>^^X</code></td><td>Control-character notation (tex.web §352): a superscript character twice, then one character, denotes the control character 64 above or below it. This is how a line end is written inside a macro body.</td><td><pre>^^M   % carriage return
+^^I   % tab</pre></td></tr>
             <tr><td><code>`</code></td><td>A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence.</td><td><pre>\count1=`\A
 \message{\the\count1}   % =&gt; 65</pre></td></tr>
           </tbody>
@@ -120,7 +119,7 @@
         <table class="file-table">
           <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\def</code></td><td>Define a macro. Parameters may be undelimited (<code>#1</code>) or delimited (<code>\def\pair#1,#2.{...}</code>, where the argument is whatever precedes the delimiter), and <code>##</code> is a literal parameter character. The parameter text is validated as tex.web §476 validates it: every <code>#</code> must be followed by a digit, and the digits must run consecutively. Takes effect at COMPILE time. The name may be an ACTIVE CHARACTER as well as a control sequence (<code>tex.web</code> §1215): <code>\catcode</code>\~=13 \def~{...}<code> defines </code>~<code> itself, and an active </code>~<code> and the control sequence </code>\~<code> stay different things.</code></td><td><pre>\def\name&lt;parameter text&gt;{&lt;body&gt;}
+            <tr><td><code>\def</code></td><td>Define a macro. Parameters may be undelimited (<code>#1</code>) or delimited (<code>\def\pair#1,#2.{...}</code>, where the argument is whatever precedes the delimiter), and <code>##</code> is a literal parameter character. The parameter text is validated as tex.web §476 validates it: every <code>#</code> must be followed by a digit, and the digits must run consecutively. Takes effect at COMPILE time.</td><td><pre>\def\name&lt;parameter text&gt;{&lt;body&gt;}
 \def\greet#1{HELLO-#1}
 \def\pair#1,#2.{[#1|#2]}
 \message{\greet{WORLD}}   % =&gt; HELLO-WORLD
@@ -145,9 +144,6 @@
 \def\decide{\ifx\next[ OPTIONAL\else PLAIN\fi}</pre></td></tr>
             <tr><td><code>\global</code></td><td>Prefix making the following assignment global, so it survives the enclosing group.</td><td><pre>\global\count1=5
 \global\def\v{OUT}</pre></td></tr>
-            <tr><td><code>\long</code></td><td>A definition prefix: the macro's arguments may contain <code>\par</code>. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. texrs records the prefix and does not yet enforce the restriction it lifts.</td><td><pre>\long\def\note#1{[#1]}</pre></td></tr>
-            <tr><td><code>\outer</code></td><td>A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. It is an error-detection feature -- plain.tex marks its sectioning macros <code>\outer</code> so a missing brace is caught at the next section rather than at the end of the file. texrs records the prefix and does not police the restriction, so a use tex forbids is accepted here; <code>tests/cases/outer_forbidden_use.tex</code> pins the difference. Prefixes are part of the meaning, so <code>\ifx</code> tells a prefixed definition from a bare one.</td><td><pre>\outer\def\chapter{...}</pre></td></tr>
-            <tr><td><code>\protected</code></td><td>A definition prefix: the macro does not expand inside an <code>\edef</code>, it survives as itself and runs when the result does. Redefining it afterwards therefore changes what the <code>\edef</code>'d macro produces, which is the observable difference. An eTeX primitive, and the one LaTeX leans on to keep a fragile command safe in a moving argument.</td><td><pre>\protected\def\note#1{[#1]}</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -178,15 +174,9 @@
             <tr><td><code>\message</code></td><td>Write to the terminal. This is texrs's parity contract for the milestone: two host builtins, one appending a rendered piece and one flushing the assembled string, so a message reads its registers at run time.</td><td><pre>\message{&lt;text&gt;}
 \message{HELLO-WORLD}   % =&gt; (./file.tex HELLO-WORLD )</pre></td></tr>
             <tr><td><code>\relax</code></td><td>Do nothing. Accepted so a document can stop a number scan, or fill a slot that needs a token but no action — which is also what <code>\csname</code> makes of a name with no meaning.</td><td><pre>\relax</pre></td></tr>
-            <tr><td><code>\par</code></td><td>End a paragraph. A blank line produces one, which is why the line scanner tracks its state, and in a typesetting run it reaches the page: the breaker starts a fresh paragraph, so the line before it ends where the paragraph does however short that leaves it.</td><td><pre>\par</pre></td></tr>
+            <tr><td><code>\par</code></td><td>End a paragraph. Accepted and ignored: paragraphs belong to the stomach, which texrs does not have. A blank line produces one, which is why the line scanner tracks its state.</td><td><pre>\par</pre></td></tr>
             <tr><td><code>\ignorespaces</code></td><td>Skip the spaces that follow. Accepted and ignored in this milestone, because spacing only matters once there is a stomach to typeset it.</td><td><pre>\ignorespaces</pre></td></tr>
             <tr><td><code>\end</code></td><td>Stop the run. It does not ship a page: there is no stomach, which is why real tex reports <code>No pages of output.</code> for every case in the corpus.</td><td><pre>\end</pre></td></tr>
-            <tr><td><code>\detokenize</code></td><td>The tokens of <code>{...}</code> written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.</td><td><pre>\message{\detokenize{\a b}}   % =&gt; \a b</pre></td></tr>
-            <tr><td><code>\csstring</code></td><td><code>\string</code> without the escape character: <code>\csstring\foo</code> is <code>foo</code> where <code>\string\foo</code> is <code>\foo</code>. A LuaTeX primitive.</td><td><pre>\message{\csstring\foo}   % =&gt; foo</pre></td></tr>
-            <tr><td><code>\Uchar</code></td><td>The character with the given code: <code>\Uchar65</code> is <code>A</code>. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.</td><td><pre>\message{\Uchar65\Uchar97}   % =&gt; Aa</pre></td></tr>
-            <tr><td><code>\expanded</code></td><td>Expand the group's contents completely, here and now, and put the result back. Inside an <code>\edef</code> it is the wrapper coming off, since everything there expands anyway; in running text it forces the expansion a macro would otherwise have deferred. An eTeX primitive.</td><td><pre>\message{\expanded{\body}}</pre></td></tr>
-            <tr><td><code>\unexpanded</code></td><td>The opposite: the group's tokens are used as they stand. Inside an <code>\edef</code> they survive as TOKENS, so a macro among them is called when the body runs rather than when it is defined -- which is where this and <code>\expanded</code> part company. In a message the two render alike, by the token-list rule. An eTeX primitive.</td><td><pre>\edef\keep{\unexpanded{\later}}</pre></td></tr>
-            <tr><td><code>\begincsname</code></td><td><code>\csname</code> that does not define what it does not find: an unknown name expands to nothing, where <code>\csname</code> would make it <code>\relax</code> and leave it defined ever after. A LuaTeX primitive, and the one that makes "is this defined?" answerable without changing the answer.</td><td><pre>\begincsname maybe\endcsname</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -225,7 +215,6 @@
             <tr><td><code>\ifinner</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifeof</code></td><td>RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifcsname</code></td><td>RECOGNISED BUT NOT EVALUATED. Use <code>\ifdefined</code> on a <code>\csname</code>-built token instead. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifcsname &lt;characters&gt;\endcsname &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
-            <tr><td><code>\unless</code></td><td>Negate the conditional that follows: <code>\unless\ifnum 1&gt;2 A\else B\fi</code> runs A. An eTeX primitive. A negated conditional is the same conditional with its arms exchanged, which is how it is lowered.</td><td><pre>\unless\ifnum \count0&gt;2 few\else many\fi</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -245,35 +234,6 @@
 \count1=7 \multiply\count1 by 3   % =&gt; 21</pre></td></tr>
             <tr><td><code>\divide</code></td><td>Divide a register, truncating toward zero as TeX's does.</td><td><pre>\divide\count&lt;N&gt; by &lt;number&gt;
 \count1=7 \divide\count1 by 2   % =&gt; 3</pre></td></tr>
-            <tr><td><code>\chardef</code></td><td>Define a control sequence that IS a number: <code>\chardef\active=13</code> makes <code>\active</code> usable wherever a number is scanned, which is how plain.tex writes <code>\catcode</code>\~=\active<code>. The code is 0..255 and a wider one is </code>! Bad character code (N).<code>. The value is fixed when it is defined, so it folds while lowering rather than being read at run time.</code></td><td><pre>\chardef\active=13
-\catcode`\~=\active</pre></td></tr>
-            <tr><td><code>\countdef</code></td><td>Give a count register a name, usable in every position the register itself is: assignment, <code>\advance</code> and <code>\the</code> all reach the same register through either spelling. plain.tex's <code>\pageno</code> is <code>\countdef\pageno=0</code>. The register number is 0..255 and a wider one is <code>! Bad register code (N).</code>.</td><td><pre>\countdef\pageno=0
-\pageno=7
-\advance\pageno by 1</pre></td></tr>
-            <tr><td><code>\mathcode</code></td><td>How a character is set in math mode, as a 15-bit code: class, family and position. INITEX gives a letter §7100+c, a digit §7000+c and everything else its own code, so <code>\mathcode</code>\A<code> is "7141 and </code>\mathcode<code>\+</code> is 43. Written and read like <code>\catcode</code>, and restored at the end of a group the same way.</td><td><pre>\mathcode`\x="2201</pre></td></tr>
-            <tr><td><code>\lccode</code></td><td>A character's lowercase form, which is what <code>\lowercase</code> consults. INITEX sets it for the letters and leaves it 0 for everything else -- a character with no case is not lowercased to a null, it is left alone.</td><td><pre>\lccode`\A=`\a</pre></td></tr>
-            <tr><td><code>\uccode</code></td><td>The same for uppercase, consulted by <code>\uppercase</code>. Also 0 for a character with no case.</td><td><pre>\uccode`\a=`\A</pre></td></tr>
-            <tr><td><code>\sfcode</code></td><td>The space factor a character leaves behind, which stretches the space after it. INITEX gives every character 1000 except an uppercase letter, which gets 999 -- that is what stops a sentence appearing to end at the full stops in "N.A.S.A.".</td><td><pre>\sfcode`\A=999</pre></td></tr>
-            <tr><td><code>\delcode</code></td><td>A character's meaning as a delimiter, as a 24-bit code naming a small and a large variant. INITEX gives -1 everywhere, meaning "not a delimiter", except the period, whose code is 0.</td><td><pre>\delcode`\(="161361</pre></td></tr>
-            <tr><td><code>\mathchardef</code></td><td>Define a control sequence standing for a math code, as <code>\chardef</code> does for a character code. The range runs to "7FFF and a wider value is <code>! Bad mathchar (N).</code>.</td><td><pre>\mathchardef\half="2201
-\mathcode`\y=\half</pre></td></tr>
-            <tr><td><code>"</code></td><td>A hexadecimal constant, and <code>'</code> an octal one (tex.web \u{a7}445). The hex digits are UPPERCASE: <code>"FF</code> is 255 and <code>"ff</code> is an error -- the opposite of <code>^^</code> notation, which takes lowercase. plain.tex writes every <code>\mathcode</code> as a hexadecimal constant.</td><td><pre>\count1="FF   % 255
-\count2='777  % 511</pre></td></tr>
-            <tr><td><code>\dimen</code></td><td>A dimension register. A dimension is an integer count of scaled points, 65536 to the printer's point, and a unit is an exact integer ratio to a point (tex.web §458) rather than a float -- which is why <code>1in</code> is 72.26999pt. The units are pt, in, pc, cm, mm, bp, dd, cc and sp. <code>\the</code> writes one back by Knuth's print_scaled (§103), the fewest digits that read back as the same integer, and <code>\number</code> gives the scaled points instead.</td><td><pre>\dimen0=1in
-\message{\the\dimen0}   % =&gt; 72.26999pt</pre></td></tr>
-            <tr><td><code>\dimendef</code></td><td>Give a dimension register a name, as <code>\countdef</code> does for a count. The name behaves as the register does on both sides: an assignment through it reads a dimension, and <code>\the</code> through it writes one.</td><td><pre>\dimendef\dimen@=0
-\dimen@=2pt</pre></td></tr>
-            <tr><td><code>\skip</code></td><td>A glue register: a natural dimension that can stretch and shrink. The stretch and shrink may be infinite -- <code>fil</code>, <code>fill</code>, <code>filll</code> -- and an infinite component beats any finite one however large, which is what <code>\hfil</code> is made of. <code>\the</code> writes the components back with <code>plus</code> and <code>minus</code>, omitting a zero one, and <code>\number</code> gives the natural component alone.</td><td><pre>\skip0=1pt plus 2pt minus 3pt
-\skip1=0pt plus 1fil</pre></td></tr>
-            <tr><td><code>\skipdef</code></td><td>Give a glue register a name, as <code>\countdef</code> and <code>\dimendef</code> do for theirs. An assignment through the name reads a whole glue, not the dimension at the front of one.</td><td><pre>\skipdef\skip@=0
-\skip@=1pt plus 2pt</pre></td></tr>
-            <tr><td><code>\toks</code></td><td>A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why <code>\toks0={\x}</code> reads back as <code>\x</code> whatever <code>\x</code> means. <code>\toks1=\toks0</code> copies one register to another. <code>\the</code> writes the list back by the token-list rule rather than <code>\string</code>'s: a control word carries a trailing space however short, a one-character control sequence does not.</td><td><pre>\toks0={a\b c}
-\message{\the\toks0}   % =&gt; a\b c</pre></td></tr>
-            <tr><td><code>\toksdef</code></td><td>Give a token register a name, as <code>\countdef</code> does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.</td><td><pre>\toksdef\toks@=0
-\toks@={...}</pre></td></tr>
-            <tr><td><code>\numexpr</code></td><td>An integer expression, closed by an optional <code>\relax</code>: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code> with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so <code>\numexpr 7/2</code> is 4 where <code>\divide</code> gives 3 -- the two are different operations and texrs keeps them apart. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; <code>tests/etex.rs</code> holds the comparison.</td><td><pre>\count0=\numexpr (2+3)*4\relax   % =&gt; 20</pre></td></tr>
-            <tr><td><code>\dimexpr</code></td><td>The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so <code>\dimexpr 1pt*3</code> is three points. The arithmetic happens in scaled points, which is the only form a dimension has.</td><td><pre>\dimen0=\dimexpr 1pt+2pt\relax   % =&gt; 3.0pt</pre></td></tr>
-            <tr><td><code>\glueexpr</code></td><td>A glue expression, the same grammar as <code>\numexpr</code> over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while <code>*</code> and <code>/</code> scale every component. An eTeX primitive.</td><td><pre>\skip0=\glueexpr 1pt plus 2pt+3pt plus 4fil\relax</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -331,17 +291,6 @@
         </table>
       </section>
 
-      <section class="tutorial-section" id="ch-files">
-        <h2>Files</h2>
-        <table class="file-table">
-          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
-          <tbody>
-            <tr><td><code>\input</code></td><td>Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a <code>\catcode</code> it sets stays set. The name runs to the first space or end of line (tex.web §537) and <code>.tex</code> is supplied when it carries no extension. texrs searches the working directory and then <code>TEXINPUTS</code>, and does not shell out to <code>kpsewhich</code>, so running a document never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.</td><td><pre>\input macros
-\input chapters/one.tex</pre></td></tr>
-          </tbody>
-        </table>
-      </section>
-
       <section class="tutorial-section" id="ch-latex">
         <h2>LaTeX</h2>
         <table class="file-table">
@@ -361,56 +310,17 @@
             <tr><td><code>\DeclareRobustCommand</code></td><td>Define a macro. Robustness is a property of LaTeX's expansion-in-moving-arguments machinery, which has no counterpart here, so this behaves exactly as <code>\newcommand</code>.</td><td><pre>\DeclareRobustCommand{\NAME}[ARGC]{BODY}
 \DeclareRobustCommand{\x}{text}
 \message{\x}   % =&gt; text</pre></td></tr>
-            <tr><td><code>\documentclass</code></td><td>Consumed, with its arguments, and produces nothing except the page. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one. The TYPE SIZE among its options is kept, because it needs no class to honour: <code>[11pt]</code> sets the text at 11pt on the 13.6pt leading <code>size11.clo</code> pairs with it, and <code>--pdf</code> sets the page from that.</td><td><pre>\documentclass[OPTIONS]{CLASS}
+            <tr><td><code>\documentclass</code></td><td>Consumed, with its optional arguments, and produces nothing. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one.</td><td><pre>\documentclass[OPTIONS]{CLASS}
 \documentclass[12pt]{article}
 \message{the body still runs}</pre></td></tr>
-            <tr><td><code>\usepackage</code></td><td>Consumed with its arguments, producing nothing, for the same reason as <code>\documentclass</code>: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn. One exception: <code>[margin=...]{geometry}</code> is a page rather than a drawing, and <code>--pdf</code> sets the margins, the measure and the text height from it.</td><td><pre>\usepackage[OPTIONS]{PACKAGE}
-\usepackage[margin=0.95in]{geometry}</pre></td></tr>
+            <tr><td><code>\usepackage</code></td><td>Consumed with its optional arguments, producing nothing, for the same reason as <code>\documentclass</code>: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn.</td><td><pre>\usepackage[OPTIONS]{PACKAGE}
+\usepackage[utf8]{inputenc}</pre></td></tr>
             <tr><td><code>\RequirePackage</code></td><td>Consumed with its optional arguments, producing nothing. Same treatment as <code>\usepackage</code>; the difference between them is where LaTeX allows each, which does not matter to an engine that loads neither.</td><td><pre>\RequirePackage[OPTIONS]{PACKAGE}
 \RequirePackage{amsmath}</pre></td></tr>
             <tr><td><code>\PassOptionsToPackage</code></td><td>Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded.</td><td><pre>\PassOptionsToPackage{OPTIONS}{PACKAGE}
 \PassOptionsToPackage{dvipsnames}{xcolor}</pre></td></tr>
             <tr><td><code>\PassOptionsToClass</code></td><td>Consumed with both of its arguments, producing nothing. The class counterpart of <code>\PassOptionsToPackage</code>.</td><td><pre>\PassOptionsToClass{OPTIONS}{CLASS}
 \PassOptionsToClass{a4paper}{article}</pre></td></tr>
-            <tr><td><code>\begin</code></td><td>Open an environment. Most environments are the prelude's business, but a VERBATIM one is the lowerer's: it is caught here, before <code>\begin</code> expands, because expanding is exactly what must not happen to the body. A code listing is full of backslashes that are not control sequences, and reading them as control sequences is why a book of code samples could not be read at all. The body is taken as raw characters up to the matching <code>\end</code>.</td><td><pre>\begin{ENVIRONMENT}
-\begin{verbatim}
-\this is text, not a command
-\end{verbatim}</pre></td></tr>
-            <tr><td><code>\newpage</code></td><td>Start a new page. The prelude defined this to expand to nothing, so a book's title page, copyright page and first chapter ran together as one stream of prose and the page count came out at roughly half what the document asks for. Carried through the text as a form feed, which is what the character means, and split out before words are because Rust counts it as whitespace.</td><td><pre>\newpage
-first page
-\newpage
-second page</pre></td></tr>
-            <tr><td><code>\clearpage</code></td><td>Start a new page, after placing any pending floats. There are no floats here, so it is <code>\newpage</code>. Two breaks in a row are one break: <code>\clearpage</code> straight after <code>\newpage</code> does not leave a blank sheet between them.</td><td><pre>\clearpage</pre></td></tr>
-            <tr><td><code>\cleardoublepage</code></td><td>Start a new page, and in a two-sided document a new RIGHT-hand one. The blank verso a two-sided run would insert is not written, so this is <code>\clearpage</code> here.</td><td><pre>\cleardoublepage</pre></td></tr>
-            <tr><td><code>\pagebreak</code></td><td>Break the page. <code>\pagebreak[0-4]</code> takes an optional strength, which is advice about how badly the break is wanted rather than a break itself; the break is taken either way, because the document asked for one.</td><td><pre>\pagebreak
-\pagebreak[4]</pre></td></tr>
-            <tr><td><code>\chapter</code></td><td>Begin a chapter, on a new page. The prelude defined this as its own argument -- the heading text and nothing else -- so no chapter began a page. <code>\chapter*{...}</code> is the unnumbered form and <code>\chapter[short]{long}</code> carries a running-head title; both start a page and both set the long title. The heading is not yet set in a larger face, and the number is not printed.</td><td><pre>\chapter{TITLE}
-\chapter*{Preface}
-\chapter[Short]{A Longer Title}</pre></td></tr>
-            <tr><td><code>\definecolor</code></td><td>Name a colour: <code>\definecolor{neonCyan}{HTML}{05D9E8}</code>. The models read are <code>HTML</code> (six hex digits), <code>rgb</code> (three components in 0..=1), <code>RGB</code> (the same in 0..=255), <code>gray</code> and <code>cmyk</code>. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later <code>\color</code> names something unknown and the page comes out black.</td><td><pre>\definecolor{NAME}{MODEL}{SPEC}
-\definecolor{neonCyan}{HTML}{05D9E8}</pre></td></tr>
-            <tr><td><code>\providecolor</code></td><td>Define a colour only if that name is not already defined. Otherwise <code>\definecolor</code>.</td><td><pre>\providecolor{NAME}{MODEL}{SPEC}
-\providecolor{link}{HTML}{05D9E8}</pre></td></tr>
-            <tr><td><code>\colorlet</code></td><td>Give an existing colour another name. A name nothing has defined yet defines nothing.</td><td><pre>\colorlet{NEW}{OLD}
-\definecolor{brand}{HTML}{FF2A6D}
-\colorlet{heading}{brand}</pre></td></tr>
-            <tr><td><code>\color</code></td><td>Switch the colour of everything that follows, until the group holding it closes -- a switch rather than a wrapper, which is why <code>{\color{red}...}</code> colours only what is inside the braces. Takes a defined name, or a model and a spec: <code>\color[rgb]{1,0,0}</code>. A second <code>\color</code> in one group replaces the first rather than nesting, because TeX has one current colour and not a stack. A name nothing defined leaves the text in the colour it already had.</td><td><pre>\color{NAME}
-\color[MODEL]{SPEC}
-{\color{neonCyan}cyan words}</pre></td></tr>
-            <tr><td><code>\textcolor</code></td><td>Colour exactly one argument: <code>\textcolor{neonCyan}{words}</code>. Takes the same two forms as <code>\color</code>. Unlike <code>\color</code> it puts the previous colour back afterwards, so it never leaks into the text beside it.</td><td><pre>\textcolor{NAME}{TEXT}
-\textcolor[MODEL]{SPEC}{TEXT}
-\textcolor{red}{warning}</pre></td></tr>
-            <tr><td><code>\pagecolor</code></td><td>Paint the page. Drawn under everything else, which is the only order that leaves the words on top of it -- and it has to be honoured, because a document that sets a dark page also sets light text to go on it, and doing one without the other leaves white on white.</td><td><pre>\pagecolor{NAME}
-\definecolor{bgPrimary}{HTML}{05050A}
-\pagecolor{bgPrimary}</pre></td></tr>
-            <tr><td><code>\setmainfont</code></td><td>Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names <code>.tfm</code> fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed.</td><td><pre>\setmainfont[OPTIONS]{FAMILY}[OPTIONS]
-\setmainfont{Arimo}   % embedded if Arimo is installed, else Helvetica's metrics</pre></td></tr>
-            <tr><td><code>\setromanfont</code></td><td>The older fontspec spelling of <code>\setmainfont</code>, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps.</td><td><pre>\setromanfont[OPTIONS]{FAMILY}
-\setromanfont{Arimo}   % identical in effect to \setmainfont{Arimo}</pre></td></tr>
-            <tr><td><code>\setsansfont</code></td><td>Record the document's sans-serif family. The name is read and kept and its bracketed options are consumed, but no backend selects it yet: the PDF page is set in the main family throughout, so this records an intention rather than changing the output. Documented because a preamble writes it and the engine resolves it.</td><td><pre>\setsansfont[OPTIONS]{FAMILY}[OPTIONS]
-\setsansfont{Arimo}</pre></td></tr>
-            <tr><td><code>\setmonofont</code></td><td>Record the document's monospace family, the counterpart of <code>\setsansfont</code>. Read and kept, its options consumed, and likewise not yet selected by either backend — the PDF page is set in the main family throughout.</td><td><pre>\setmonofont[OPTIONS]{FAMILY}[OPTIONS]
-\setmonofont{Cousine}</pre></td></tr>
             <tr><td><code>\makeatletter</code></td><td>Make <code>@</code> a letter (category code 11), so LaTeX's internal names like <code>\@ifnextchar</code> become spellable as single control sequences. This is a catcode change, so it takes effect at COMPILE time, exactly as <code>\catcode</code>\@=11<code> does.</code></td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
             <tr><td><code>\makeatother</code></td><td>Make <code>@</code> an ordinary character again (category code 12), closing a <code>\makeatletter</code> region. After it, <code>\@x</code> is the control sequence <code>\</code> followed by the characters <code>@x</code> rather than one name.</td><td><pre>\makeatletter &lt;internal names&gt; \makeatother</pre></td></tr>
           </tbody>
@@ -418,7 +328,7 @@ second page</pre></td></tr>
       </section>
 
       <section class="tutorial-section" id="tbl-catcodes">
-        <h2>INITEX category codes</h2>
+        <h2>Category codes</h2>
         <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>
         <table class="file-table">
           <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>
@@ -456,11 +366,6 @@ second page</pre></td></tr>
             <tr><td><code>FFI_CALL</code></td><td><code>4004</code></td><td>Call a function a block exported: the name, then its arguments.</td></tr>
             <tr><td><code>TEXT</code></td><td><code>4005</code></td><td>Append a run of the document's own text.</td></tr>
             <tr><td><code>ARITH_CHECKED</code></td><td><code>4006</code></td><td>`\multiply` / `\divide` under TeX's overflow rule: the old value, the operand, and 0 for multiply or 1 for divide.</td></tr>
-            <tr><td><code>MSG_CLOSE</code></td><td><code>4007</code></td><td>Close an `\input` file: append `)` to the message already recorded, rather than record one, because tex writes the paren hard against what came before it while the stream is joined with spaces. No arguments.</td></tr>
-            <tr><td><code>MSG_DIMEN</code></td><td><code>4008</code></td><td>Append a dimension, written as TeX writes one: one argument, the value in scaled points.</td></tr>
-            <tr><td><code>MSG_GLUE</code></td><td><code>4009</code></td><td>Append a glue, written as TeX writes one: four arguments -- natural, stretch, shrink, and the packed orders.</td></tr>
-            <tr><td><code>COLOR_PUSH</code></td><td><code>4010</code></td><td>Open a colour: three components follow. 4010 and 4011, not 4006 and 4007: those are ARITH_CHECKED and MSG_CLOSE. Registering a builtin twice silently keeps the LAST one, so the colour ops were compiled, called, and quietly handled by somebody else's function -- the chunk was right and the page had no colour in it.</td></tr>
-            <tr><td><code>COLOR_POP</code></td><td><code>4011</code></td><td>Close the innermost colour.</td></tr>
           </tbody>
         </table>
       </section>
@@ -499,9 +404,6 @@ second page</pre></td></tr>
             <tr><td><code>def_in_conditional_arm.tex</code></td><td>A `\def' inside an arm of a RUN-TIME conditional is executed while lowering, and lowering emits both arms because neither is decided yet -- so the else arm's definition overwrites the then arm's and the losing branch wins. tex interprets and runs only the arm it took: it prints `&lt;a&gt;' where texrs prints `[a]'. This is a miscompile rather than a refusal, which is what makes it worth a case: nothing errors, the answer is just wrong. It blocks LaTeX's `\newcommand{\x}[n]{...}', whose argument-count dispatch is exactly a chain of `\ifnum...\def...\else'. Fixing it needs the macro table to be run-time state, or the conditional to be decidable while lowering; neither is a small change.</td></tr>
             <tr><td><code>cond_ifcase_negative.tex</code></td><td>A NEGATIVE `\ifcase' selector takes case 0 instead of the `\else' branch. tex.web 509 skips n cases and takes the (n+1)th, so a selector below zero or past the last `\or' matches nothing and `\else' runs; do_ifcase counts down with `while remaining &gt; 0', which a negative n never enters, so it falls straight through to case 0. tex prints DEFAULT where texrs prints ZERO. Like def_in_conditional_arm.tex this is a wrong answer rather than a refusal: nothing errors. Found by writing the reference manual's conditionals chapter.</td></tr>
             <tr><td><code>multiply_overflow.tex</code></td><td>Both engines raise `Arithmetic overflow` for a \multiply past the 32-bit range and leave the register alone -- the divergence is what happens NEXT. tex reports and carries on, so it still prints the message; texrs stops, which is the error model recorded above ("Errors"). Fixing the recovery fixes this case; the arithmetic itself already matches.</td></tr>
-            <tr><td><code>number_too_big.tex</code></td><td>Both engines reject a constant above 2147483647 with `Number too big` (tex.web §445); the divergence is the recovery, exactly as in multiply_overflow.tex. tex clamps to 2147483647 and carries on, so it still prints the message; texrs stops. The limit and the rejection point already match -- before this case, texrs checked only for i64 overflow and accepted 99999999999 outright.</td></tr>
-            <tr><td><code>chardef_bad_code.tex</code></td><td>Both engines reject a character code above 255 with the same words, `Bad character code (256)`; the divergence is the recovery, as in multiply_overflow.tex and number_too_big.tex. tex reports and carries on, texrs stops.</td></tr>
-            <tr><td><code>outer_forbidden_use.tex</code></td><td>texrs records \outer but does not police it. tex forbids an outer macro inside a group being scanned as text and reports `Forbidden control sequence found while scanning text of \message'; texrs expands it and prints the body. \outer is ONLY an error-detection feature, and every position it governs -- an argument, a text group, skipped conditional text -- is one tex reports and recovers from while texrs stops, so enforcing it cannot reach parity either. Recorded rather than half-enforced: a false positive here would refuse a document that works.</td></tr>
           </tbody>
         </table>
       </section>
@@ -543,8 +445,6 @@ second page</pre></td></tr>
             <tr><td><code>--jobs=N</code></td><td>Compile N documents at once (default: one per core)</td></tr>
             <tr><td><code>--build</code></td><td>Compile into the bytecode cache and stop, without running</td></tr>
             <tr><td><code>--text</code></td><td>Print the document text, not only the message stream</td></tr>
-            <tr><td><code>--dvi</code></td><td>Typeset to FILE.dvi -- first-fit lines, no hyphenation</td></tr>
-            <tr><td><code>--pdf</code></td><td>Typeset to FILE.pdf, in the font the document asked for</td></tr>
             <tr><td><code>--no-cache</code></td><td>Compile this run rather than reading the bytecode cache</td></tr>
             <tr><td><code>--aot</code></td><td>Compile the document to a standalone native executable</td></tr>
           </tbody>
@@ -609,11 +509,6 @@ second page</pre></td></tr>
             <tr><td><code>-X vf FILE.vf [C]</code></td><td>Read a virtual font: what it really sets</td></tr>
             <tr><td><code>-X pk FILE.pk [C]</code></td><td>Read a packed bitmap font, and draw a character</td></tr>
             <tr><td><code>-X otf FILE.otf [C]</code></td><td>Read an OpenType font: its tables and its cmap</td></tr>
-            <tr><td><code>-X pfb FILE.pfb [C]</code></td><td>Read a Type 1 font: its glyphs and their widths</td></tr>
-            <tr><td><code>-X map FILE.map [NAME]</code></td><td>Read a font map: what a TeX font name means</td></tr>
-            <tr><td><code>-X enc FILE.enc</code></td><td>Read an encoding: what each code is called</td></tr>
-            <tr><td><code>-X itar FILE.tar [NAME]</code></td><td>Index a tar bundle, or read one file out of it</td></tr>
-            <tr><td><code>-X special TEXT</code></td><td>Say what a \special means to a driver</td></tr>
             <tr><td><code>--profile NAME</code></td><td>Which output to build</td></tr>
             <tr><td><code>--interval MS</code></td><td>How often -X watch looks (default 250)</td></tr>
           </tbody>

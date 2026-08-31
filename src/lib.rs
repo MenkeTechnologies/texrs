@@ -87,14 +87,19 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 /// it can say what the document's words are after every macro has been
 /// expanded, which is the difference between a book compiling to a program that
 /// prints nothing and one that prints the book.
-/// Strip the colour markers, leaving the words.
+/// Strip the typesetting markers, leaving the words.
 ///
-/// The runtime writes them where `\textcolor` was: U+0001 opens (`r,g,b`
-/// follows, closed by U+0002) and U+0003 closes. They are instructions to a DVI
-/// driver, not characters of the document, so they are carried on the
+/// The runtime writes the colour ones where `\textcolor` was: U+0001 opens
+/// (`r,g,b` follows, closed by U+0002) and U+0003 closes. They are instructions
+/// to a DVI driver, not characters of the document, so they are carried on the
 /// typesetting path and stripped everywhere else -- a caller asking for the
 /// TEXT of a document should not have to know they exist.
-fn without_color_marks(text: &str) -> String {
+///
+/// A listing's line break is the one marker that has a plain-text spelling: it
+/// says a code line ended, and a newline is what that is in text. Dropping it
+/// instead would put a program's statements back on one line, which is the
+/// weld this marker exists to undo.
+fn without_marks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_spec = false;
     for ch in text.chars() {
@@ -102,6 +107,7 @@ fn without_color_marks(text: &str) -> String {
             '\u{1}' => in_spec = true,
             '\u{2}' => in_spec = false,
             '\u{3}' => {}
+            crate::typeset::LISTING_BREAK => out.push('\n'),
             c if in_spec => {
                 let _ = c;
             }
@@ -119,7 +125,7 @@ pub fn run_text_marked(src: &str) -> Result<String, TexError> {
 }
 
 pub fn run_text(src: &str) -> Result<String, TexError> {
-    Ok(without_color_marks(&run_text_marked(src)?))
+    Ok(without_marks(&run_text_marked(src)?))
 }
 
 /// The bytecode [`run_text`] runs: the same pipeline, with the document's own
@@ -149,7 +155,7 @@ pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
 /// an unedited file. Reading the chunk back instead of rebuilding it is the
 /// difference between setting a book in a second and setting it in a tenth.
 pub fn run_text_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
-    Ok(without_color_marks(&run_text_marked_cached(path, src)?))
+    Ok(without_marks(&run_text_marked_cached(path, src)?))
 }
 
 /// The same, keeping the colour markers, for the typesetter.
@@ -220,13 +226,17 @@ pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
     let families = lowerer.fonts.clone();
     // `\pagecolor` is read in the same place and for the same reason.
     let page_colour = lowerer.page_colour;
+    // So is the page itself: `\documentclass[11pt]` and geometry's margins are
+    // preamble, and until they were read every document was set on plain.tex's
+    // 10pt-on-12pt, 1in-margin page whatever it asked for.
+    let layout = lowerer.layout.clone();
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     let _ = crate::runtime::run(chunk).map_err(TexError)?;
     let text = crate::runtime::take_text();
     Ok(crate::typeset::to_pdf(
         &text,
         &families,
-        &crate::typeset::Layout::default(),
+        &layout,
         page_colour,
         path.and_then(|p| p.parent()),
     ))

@@ -24,6 +24,7 @@ use crate::tfm::Tfm;
 const SP: f64 = 65536.0;
 
 /// The page and paragraph shape, in points.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layout {
     /// Text width, TeX's `\hsize`.
     pub measure: f64,
@@ -50,6 +51,108 @@ impl Default for Layout {
             size: 10.0,
         }
     }
+}
+
+/// The paper the corpus is set on, and the only paper `pdf::Page` makes: 8.5
+/// by 11 inches, in PDF's points.
+const PAPER_WIDTH: f64 = 612.0;
+const PAPER_HEIGHT: f64 = 792.0;
+
+/// PDF's point is 1/72in; TeX's is 1/72.27in, and every dimension a LaTeX
+/// preamble states is in TeX's. The page they land on is 612 by 792 of PDF's,
+/// so the two cannot be used interchangeably. Measured, in the content stream
+/// of the lualatex-built scifi2/docs/book.pdf: every body line begins at
+/// x=68.4, which is 0.95in of PDF points and not of TeX's 68.66.
+const BP_PER_PT: f64 = 72.0 / 72.27;
+
+impl Layout {
+    /// Take the type size from `\documentclass[11pt]{extreport}`, and with it
+    /// the leading LaTeX pairs with that size.
+    ///
+    /// Every book in the corpus states a size and texrs set all of them at
+    /// plain TeX's 10pt on 12pt leading regardless, so an 11pt book got 53
+    /// lines on a page where lualatex gives it 48 -- and came out short by
+    /// that ratio.
+    pub fn absorb_class_options(&mut self, options: &str) {
+        for option in options.split(',') {
+            let Some(size) = option
+                .trim()
+                .strip_suffix("pt")
+                .and_then(|n| n.parse::<f64>().ok())
+                .filter(|size| *size > 0.0)
+            else {
+                continue;
+            };
+            self.size = size * BP_PER_PT;
+            self.leading = normal_leading(size) * BP_PER_PT;
+        }
+    }
+
+    /// Take the margins from `\usepackage[margin=0.95in]{geometry}`, and with
+    /// them the measure and the text height they leave on the paper.
+    ///
+    /// Only `margin`, which sets all four sides at once: that is what pandoc
+    /// writes and what every book in the corpus asks for. `left`, `top` and
+    /// their siblings can each differ, and a `Layout` has ONE margin for all
+    /// four sides, so honouring them here would put the text somewhere the
+    /// document did not ask for rather than leave it where it was.
+    pub fn absorb_geometry_options(&mut self, options: &str) {
+        for option in options.split(',') {
+            let Some((key, value)) = option.split_once('=') else {
+                continue;
+            };
+            if key.trim() != "margin" {
+                continue;
+            }
+            let Some(margin) = dimen_bp(value.trim()) else {
+                continue;
+            };
+            self.margin = margin;
+            self.measure = PAPER_WIDTH - 2.0 * margin;
+            self.height = PAPER_HEIGHT - 2.0 * margin;
+        }
+    }
+}
+
+/// The leading LaTeX sets a type size on, taken from the class option files
+/// that decide it: `size10.clo:48` sets 10pt on 12, `size11.clo:48` sets 11pt
+/// on 13.6, `size12.clo:48` sets 12pt on 14.5, and extsizes' own
+/// `size8/9/14/17/20.clo:12` carry the sizes `extreport` adds. A size no file
+/// names is set on 1.2 of itself, which is what those files come to and what
+/// TeX's `\baselineskip` assumes.
+fn normal_leading(size: f64) -> f64 {
+    let named = [
+        (8.0, 9.5),
+        (9.0, 11.0),
+        (10.0, 12.0),
+        (11.0, 13.6),
+        (12.0, 14.5),
+        (14.0, 17.0),
+        (17.0, 22.0),
+        (20.0, 25.0),
+    ];
+    match named.iter().find(|(pt, _)| *pt == size) {
+        Some((_, on)) => *on,
+        None => size * 1.2,
+    }
+}
+
+/// A LaTeX dimension -- `0.95in`, `25mm`, `72bp` -- in PDF points.
+///
+/// Every TeX unit is two letters, so the suffix that matches is the only one
+/// that can.
+fn dimen_bp(text: &str) -> Option<f64> {
+    let units = [
+        ("in", 72.0),
+        ("bp", 1.0),
+        ("pt", BP_PER_PT),
+        ("pc", 12.0 * BP_PER_PT),
+        ("mm", 72.0 / 25.4),
+        ("cm", 72.0 / 2.54),
+    ];
+    let (unit, per_unit) = units.iter().find(|(unit, _)| text.ends_with(unit))?;
+    let number: f64 = text.strip_suffix(unit)?.trim().parse().ok()?;
+    Some(number * per_unit)
 }
 
 /// Set `text` in `font`, and return a DVI file.
@@ -205,6 +308,11 @@ pub fn break_lines_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<
 
 /// One paragraph, first-fit.
 fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String> {
+    // A code listing is already broken, by the author. Its lines are what the
+    // program is; the measure has no say in where they end.
+    if let Some(code) = listing_lines(para) {
+        return code.map(str::to_string).collect();
+    }
     let space = chain.width(' ', layout.size);
     let mut lines = Vec::new();
     let mut line = String::new();
@@ -773,6 +881,12 @@ fn break_lines_measured(
     let space = width_of(" ");
     let mut lines = Vec::new();
     for para in text.split("\n\n") {
+        // A code listing is already broken, by the author -- see
+        // `listing_lines`, which the DVI breaker reads the same way.
+        if let Some(code) = listing_lines(para) {
+            lines.extend(code.map(str::to_string));
+            continue;
+        }
         // A forced break is its own line, so the paginator can see one. It has
         // to come out here because `split_whitespace` below counts a form feed
         // as whitespace and would silently drop it.
@@ -847,6 +961,35 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
 /// the run because it is not a word, and it is split out of the text BEFORE
 /// words are, since Rust counts it as whitespace and would otherwise drop it.
 pub const PAGE_BREAK: char = '\u{c}';
+
+/// The end of a line INSIDE a code listing, carried through the text the way a
+/// page break is.
+///
+/// Pandoc wraps every code block in `Highlighting`, and that body is real TeX --
+/// `\NormalTok{…}` and its siblings have to expand -- so it cannot be read as
+/// verbatim and its newlines reached the breaker as ordinary spaces.
+/// `split_whitespace` then reflowed the program into the prose around it.
+/// Measured: rubyrs/docs/book.tex set a nine-line `dup_value` as three, one of
+/// them `... => v.clone(), Some(obj) => { let copy = obj.clone();
+/// self.alloc(copy) } None =>`, and the book came out in 208 pages where
+/// lualatex sets it in 332. A vertical tab is a line separator by definition,
+/// it survives the run because it is not a word, and like the page break it is
+/// split out BEFORE words are.
+pub const LISTING_BREAK: char = '\u{b}';
+
+/// The lines of a code listing, or `None` when the paragraph is prose.
+///
+/// A listing arrives as `LISTING_BREAK`-TERMINATED lines, so an empty segment
+/// is an empty code line and is kept: a blank line in a program is part of the
+/// program, and a paragraph break -- which is what the lexer would have made of
+/// it -- is not. Prose holds no break and is broken to the measure as before.
+///
+/// Both breakers ask this, so a listing is recognised the same way on the DVI
+/// and PDF paths rather than in two places that could drift apart.
+fn listing_lines(para: &str) -> Option<impl Iterator<Item = &str>> {
+    para.contains(LISTING_BREAK)
+        .then(|| para.split_terminator(LISTING_BREAK))
+}
 
 /// The r, g and b a marker carried, kept verbatim as written rather than
 /// parsed, because they are handed straight back to PDF's `rg` operator.

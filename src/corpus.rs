@@ -604,14 +604,14 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\documentclass",
         "LaTeX",
-        "Consumed, with its optional arguments, and produces nothing. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one.",
+        "Consumed, with its arguments, and produces nothing except the page. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one. The TYPE SIZE among its options is kept, because it needs no class to honour: `[11pt]` sets the text at 11pt on the 13.6pt leading `size11.clo` pairs with it, and `--pdf` sets the page from that.",
         "\\documentclass[OPTIONS]{CLASS}\n\\documentclass[12pt]{article}\n\\message{the body still runs}",
     ),
     (
         "\\usepackage",
         "LaTeX",
-        "Consumed with its optional arguments, producing nothing, for the same reason as `\\documentclass`: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn.",
-        "\\usepackage[OPTIONS]{PACKAGE}\n\\usepackage[utf8]{inputenc}",
+        "Consumed with its arguments, producing nothing, for the same reason as `\\documentclass`: the package cannot be loaded, and dropping it reads the document minus whatever the package would have drawn. One exception: `[margin=...]{geometry}` is a page rather than a drawing, and `--pdf` sets the margins, the measure and the text height from it.",
+        "\\usepackage[OPTIONS]{PACKAGE}\n\\usepackage[margin=0.95in]{geometry}",
     ),
     (
         "\\RequirePackage",

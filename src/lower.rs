@@ -54,6 +54,15 @@ pub struct Lowerer {
     /// also sets light text, and honouring the text without the page leaves
     /// white-on-white.
     pub page_colour: Option<crate::colour::Rgb>,
+    /// The page the document asked for: the type size in its class options,
+    /// the leading that goes with that size, and geometry's margins.
+    ///
+    /// Read while lowering for the same reason the families are -- that is
+    /// where the preamble is -- and handed to the typesetter, which sets the
+    /// page from it. Without this every document was set on plain.tex's page
+    /// however loudly it said otherwise, which fitted about a third more text
+    /// onto a page than the lualatex-built PDFs in the corpus carry.
+    pub layout: crate::typeset::Layout,
     /// Carry the document's own text into the program.
     ///
     /// Off by default: the terminal output of a `tex` run is its `\message`
@@ -118,6 +127,7 @@ impl Lowerer {
             fonts: crate::typeset::Families::default(),
             colours: crate::colour::Colours::new(),
             page_colour: None,
+            layout: crate::typeset::Layout::default(),
             text_output: false,
             depth: 0,
         }
@@ -332,7 +342,11 @@ impl Lowerer {
             // sequences is why a book of code samples could not be read.
             if name.name() == "begin" {
                 if let Some(env) = self.peek_environment_name(lx) {
-                    if VERBATIM_ENVIRONMENTS.contains(&env.as_str()) {
+                    // A listing is read raw for a DIFFERENT reason: its body is
+                    // TeX and must expand, but the LINES in it are the author's
+                    // and only the raw body still has them. See `lower_listing`.
+                    let listing = LISTING_ENVIRONMENTS.contains(&env.as_str());
+                    if listing || VERBATIM_ENVIRONMENTS.contains(&env.as_str()) {
                         // Consume the `{name}` that was only peeked at, or it
                         // lands in the output ahead of the body.
                         while let Some(t) = lx.next_token(&self.eng.cats) {
@@ -347,7 +361,10 @@ impl Lowerer {
                             )));
                         };
                         if self.text_output {
-                            out.push(Cmd::Text(body));
+                            match listing {
+                                true => self.lower_listing(&body, &mut out)?,
+                                false => out.push(Cmd::Text(body)),
+                            }
                         }
                         continue;
                     }
@@ -616,11 +633,34 @@ impl Lowerer {
                     };
                     *slot = Some(name.trim().to_string());
                 }
-                "documentclass" | "usepackage" | "RequirePackage" => {
-                    self.eng.compile_time_preamble_directive(lx, 1)?
+                // The class options carry the type size; geometry's options
+                // carry the margins. Both used to be consumed and dropped,
+                // which set an 11pt book on 0.95in margins as a 10pt book on
+                // plain.tex's 1in page.
+                "documentclass" => {
+                    let (options, _) = self.eng.compile_time_preamble_directive(lx, 1)?;
+                    self.layout.absorb_class_options(&options);
+                }
+                "usepackage" | "RequirePackage" => {
+                    let (options, packages) = self.eng.compile_time_preamble_directive(lx, 1)?;
+                    if packages.first().is_some_and(|p| p.trim() == "geometry") {
+                        self.layout.absorb_geometry_options(&options);
+                    }
                 }
                 "PassOptionsToPackage" | "PassOptionsToClass" => {
-                    self.eng.compile_time_preamble_directive(lx, 2)?
+                    let to_class = name.name() == "PassOptionsToClass";
+                    let (_, args) = self.eng.compile_time_preamble_directive(lx, 2)?;
+                    // `\PassOptionsToPackage{margin=1in}{geometry}` carries the
+                    // options in the FIRST brace and names its target in the
+                    // second -- there is no `[...]` here at all. What it passes
+                    // reaches the class or the package exactly as an option
+                    // list written on them would, so it is read the same way.
+                    let options = args.first().cloned().unwrap_or_default();
+                    if to_class {
+                        self.layout.absorb_class_options(&options);
+                    } else if args.get(1).is_some_and(|p| p.trim() == "geometry") {
+                        self.layout.absorb_geometry_options(&options);
+                    }
                 }
                 "makeatletter" => self.eng.compile_time_set_at_letter(true),
                 "makeatother" => self.eng.compile_time_set_at_letter(false),
@@ -916,12 +956,46 @@ impl Lowerer {
     fn lower_into(&mut self, raw: &[Token], out: &mut Vec<Cmd>) -> R<()> {
         let mut inner = Lexer::new("");
         inner.push_back(raw);
-        for cmd in self.block(&mut inner, None)? {
+        self.lower_lexer_into(&mut inner, out)
+    }
+
+    /// The same, for a source that is characters rather than tokens.
+    fn lower_lexer_into(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        for cmd in self.block(lx, None)? {
             match (&cmd, out.last_mut()) {
                 (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
                 _ => out.push(cmd),
             }
         }
+        Ok(())
+    }
+
+    /// Lower a code listing, one output line per source line.
+    ///
+    /// The body arrives raw, so the newlines the author wrote are still in it.
+    /// Each line is lowered ON ITS OWN -- `\NormalTok` and its siblings expand
+    /// exactly as they did, colour markers and all, because a line is a whole
+    /// TeX input -- and is terminated with `LISTING_BREAK`, which is what tells
+    /// the breaker the line ends there rather than where the measure runs out.
+    ///
+    /// A blank source line is a blank code line and is kept as one. Reaching
+    /// the lexer it would have been a `\par` instead, which ends the listing
+    /// and starts a paragraph -- and a program's blank lines are part of it.
+    ///
+    /// The block is fenced with a paragraph break either side, so the first
+    /// line cannot weld onto the sentence above nor the last onto the one
+    /// below.
+    fn lower_listing(&mut self, body: &str, out: &mut Vec<Cmd>) -> R<()> {
+        let body = without_environment_option(body);
+        // The newline that ENDS the `\begin` line is not a code line.
+        let body = body.strip_prefix('\n').unwrap_or(body);
+        self.push_text(out, "\n\n");
+        for line in body.lines() {
+            let mut lx = Lexer::new(line);
+            self.lower_lexer_into(&mut lx, out)?;
+            self.push_text(out, &crate::typeset::LISTING_BREAK.to_string());
+        }
+        self.push_text(out, "\n\n");
         Ok(())
     }
 
@@ -1665,6 +1739,36 @@ const VERBATIM_ENVIRONMENTS: &[&str] = &[
     "filecontents",
     "filecontents*",
 ];
+
+/// The environments whose body is TeX but whose LINES are the author's.
+///
+/// Pandoc's `Highlighting` is the whole list: the corpus opens it 68,360 times
+/// and puts 220,638 lines of code inside, its body must expand -- the
+/// `\NormalTok` family is what colours the code -- and its newlines are the
+/// only thing saying where a statement ends. Read as ordinary text they became
+/// spaces and the breaker reflowed the program into the prose around it.
+///
+/// `Shaded` is deliberately not here. It wraps `Highlighting` and holds no code
+/// of its own, so reading it raw as well would set the inner `\begin` and
+/// `\end` as two blank code lines around every listing in the book.
+const LISTING_ENVIRONMENTS: &[&str] = &["Highlighting"];
+
+/// Drop the `[...]` an environment's `\begin` carries, if it has one.
+///
+/// `\begin{Highlighting}[]` is how pandoc opens every code block. The stub in
+/// the prelude declares the option and eats it, but a listing's body is read
+/// raw before any of that runs, so without this the brackets are the first
+/// code line of every listing.
+fn without_environment_option(body: &str) -> &str {
+    let rest = body.trim_start_matches([' ', '\t']);
+    let Some(rest) = rest.strip_prefix('[') else {
+        return body;
+    };
+    match rest.find(']') {
+        Some(at) => &rest[at + 1..],
+        None => body,
+    }
+}
 
 impl Lowerer {
     /// The file name after `\input`, per `tex.web` §537: leading spaces are

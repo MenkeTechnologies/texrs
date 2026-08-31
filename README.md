@@ -307,10 +307,13 @@ of `\newcommand`s compiled into the binary, and a document that writes
 `\documentclass` or `\usepackage` is recognised as LaTeX and lowered against it.
 `\newcommand`, `\renewcommand`, `\providecommand` and `\DeclareRobustCommand`
 are dispatched natively; `\documentclass`, `\usepackage`, `\RequirePackage` and
-the `\PassOptionsTo*` pair are consumed and produce nothing, because a package is
+the `\PassOptionsTo*` pair are consumed rather than loaded, because a package is
 TeX that builds boxes and nothing here builds boxes — `--dvi` sets lines of text,
-which is not the same thing and is not enough to run a package. `\makeatletter`
-is a catcode change and works as one.
+which is not the same thing and is not enough to run a package. What is kept out
+of them is the page: a type size in the class options sets the text at that size
+on the leading LaTeX pairs with it, and `[margin=...]{geometry}` sets the margins
+and the measure and text height they leave on the paper. `\makeatletter` is a
+catcode change and works as one.
 
 What that buys, and what it does not: a macro that would have drawn something
 yields its text instead, and a document whose meaning IS its layout will not
