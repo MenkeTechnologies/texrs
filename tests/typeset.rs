@@ -844,3 +844,132 @@ fn a_listings_colour_markers_survive_the_line_split() {
         );
     }
 }
+
+/// Every run a PDF draws, with the point it is drawn at.
+///
+/// `1 0 0 1 X Y Tm (text) Tj` is what the PDF path writes for a line, so the
+/// position a line was given can be read back out of the file -- which is the
+/// only way to ask whether a line was centred, as opposed to whether the
+/// engine believes it centred it.
+fn placed(pdf: &[u8]) -> Vec<(f64, f64, String)> {
+    let s = String::from_utf8_lossy(pdf).into_owned();
+    let mut runs = Vec::new();
+    for (at, _) in s.match_indices(" Tm (") {
+        let head = &s[..at];
+        let mut back = head.split_ascii_whitespace().rev();
+        let (Some(y), Some(x)) = (back.next(), back.next()) else {
+            continue;
+        };
+        let (Ok(x), Ok(y)) = (x.parse::<f64>(), y.parse::<f64>()) else {
+            continue;
+        };
+        let rest = &s[at + " Tm (".len()..];
+        let Some(end) = rest.find(") Tj") else {
+            continue;
+        };
+        runs.push((x, y, rest[..end].to_string()));
+    }
+    runs
+}
+
+/// Where a run containing `want` was drawn, and on what baseline.
+fn at(runs: &[(f64, f64, String)], want: &str) -> (f64, f64) {
+    runs.iter()
+        .find(|(_, _, text)| text.contains(want))
+        .map(|(x, y, _)| (*x, *y))
+        .unwrap_or_else(|| panic!("nothing drawn containing {want:?}: {runs:?}"))
+}
+
+#[test]
+fn a_centred_line_is_drawn_by_its_width_and_not_at_the_margin() {
+    // `\begin{center}` expanded to nothing, so "centred line" and "left line"
+    // were filled into ONE line at the margin. A title page is built out of
+    // nothing but centred pieces, which is a large part of why a novel's front
+    // matter collapsed into the prose after it.
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "\\begin{center}\ncentred line\n\\end{center}\n",
+        "left line\n\\end{document}\n"
+    );
+    let runs = placed(&texrs::run_pdf(src).expect("pdf"));
+    let (centred_x, centred_y) = at(&runs, "centred line");
+    let (left_x, left_y) = at(&runs, "left line");
+    assert!(
+        centred_y > left_y,
+        "the centred line is its own line, above the next one: {runs:?}"
+    );
+    assert_eq!(left_x, 72.0, "an ordinary line starts at the margin");
+    assert!(
+        centred_x > left_x + 50.0,
+        "a centred line is placed by its measured width, not at the margin: \
+         got x={centred_x} against a margin of {left_x}"
+    );
+}
+
+#[test]
+fn centring_ends_with_the_environment_that_switched_it_on() {
+    // `\centering` is a switch, and every LaTeX environment is a group that
+    // ends it. Environments here are a macro pair rather than a group, so
+    // without the `\end{...}` closing the region one `\centering` on a title
+    // page would centre every remaining page of the book.
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "\\begin{minipage}{\\linewidth}\\centering\ncentred line\n",
+        "\\end{minipage}\n\nplain line\n\\end{document}\n"
+    );
+    let runs = placed(&texrs::run_pdf(src).expect("pdf"));
+    assert!(at(&runs, "centred line").0 > 72.0, "centred: {runs:?}");
+    assert_eq!(
+        at(&runs, "plain line").0,
+        72.0,
+        "the region ended with the environment: {runs:?}"
+    );
+}
+
+#[test]
+fn a_heading_is_given_vertical_space_above_and_below_it() {
+    // A heading set hard against its paragraphs is indistinguishable from
+    // them, and the page then holds lines that a real run spends on white
+    // space: lualatex leaves 3.5ex above a section and 2.3ex below it.
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "before the heading\n\\section{A Heading}\nafter the heading\n",
+        "\\end{document}\n"
+    );
+    let runs = placed(&texrs::run_pdf(src).expect("pdf"));
+    let leading = 12.0;
+    let above = at(&runs, "before").1 - at(&runs, "A Heading").1;
+    let below = at(&runs, "A Heading").1 - at(&runs, "after").1;
+    assert!(
+        above > leading && below > leading,
+        "a heading sat one ordinary line from its paragraphs: above {above}, \
+         below {below}, leading {leading}"
+    );
+}
+
+#[test]
+fn vertical_space_is_space_and_not_a_character() {
+    // The space a heading asks for travels in the text as a vertical tab, the
+    // way a forced break travels as a form feed. Drawn rather than skipped it
+    // would come out as whatever the font has in that slot, in the middle of
+    // the white space it was asked for.
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "before\n\\section{Head}\nafter\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    for (_, _, text) in placed(&pdf) {
+        assert!(
+            !text.chars().any(|c| c == texrs::typeset::VERTICAL_SPACE),
+            "the marker was drawn as a glyph: {text:?}"
+        );
+    }
+    let plain = texrs::run_text(src).expect("run");
+    assert!(
+        !plain.chars().any(|c| matches!(
+            c,
+            texrs::typeset::VERTICAL_SPACE | texrs::typeset::CENTRE | texrs::typeset::CENTRE_END
+        )),
+        "a --text run must not emit the markers: {plain:?}"
+    );
+}

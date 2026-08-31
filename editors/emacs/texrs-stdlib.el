@@ -115,6 +115,13 @@
     "\\cleardoublepage"
     "\\pagebreak"
     "\\chapter"
+    "\\section"
+    "\\subsection"
+    "\\subsubsection"
+    "\\center"
+    "\\endcenter"
+    "\\centering"
+    "\\centerline"
     "\\definecolor"
     "\\providecolor"
     "\\colorlet"
@@ -233,6 +240,13 @@
     (puthash "\\cleardoublepage" "\\cleardoublepage  —  Start a new page, and in a two-sided document a new RIGHT-hand one. [LaTeX]" table)
     (puthash "\\pagebreak" "\\pagebreak  —  Break the page. [LaTeX]" table)
     (puthash "\\chapter" "\\chapter  —  Begin a chapter, on a new page. [LaTeX]" table)
+    (puthash "\\section" "\\section  —  Begin a section: the heading text, with a line of vertical space above it and a line below. [LaTeX]" table)
+    (puthash "\\subsection" "\\subsection  —  Begin a subsection. [LaTeX]" table)
+    (puthash "\\subsubsection" "\\subsubsection  —  Begin a subsubsection, set as `\\section` and `\\subsection` are: its own lines, with a line of vertical space above and below. [LaTeX]" table)
+    (puthash "\\center" "\\center  —  Start centring the lines that follow. [LaTeX]" table)
+    (puthash "\\endcenter" "\\endcenter  —  Stop centring: what `\\end{center}` runs, and the close of the region `\\center` opened. [LaTeX]" table)
+    (puthash "\\centering" "\\centering  —  Centre every line up to the end of the group or the environment that holds it. [LaTeX]" table)
+    (puthash "\\centerline" "\\centerline  —  Centre exactly its argument, on a line of its own. [LaTeX]" table)
     (puthash "\\definecolor" "\\definecolor  —  Name a colour: `\\definecolor{neonCyan}{HTML}{05D9E8}`. [LaTeX]" table)
     (puthash "\\providecolor" "\\providecolor  —  Define a colour only if that name is not already defined. [LaTeX]" table)
     (puthash "\\colorlet" "\\colorlet  —  Give an existing colour another name. [LaTeX]" table)

@@ -87,7 +87,7 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 /// it can say what the document's words are after every macro has been
 /// expanded, which is the difference between a book compiling to a program that
 /// prints nothing and one that prints the book.
-/// Strip the typesetting markers, leaving the words.
+/// Strip the markers the typesetting path reads, leaving the words.
 ///
 /// The runtime writes the colour ones where `\textcolor` was: U+0001 opens
 /// (`r,g,b` follows, closed by U+0002) and U+0003 closes. They are instructions
@@ -107,7 +107,16 @@ fn without_marks(text: &str) -> String {
             '\u{1}' => in_spec = true,
             '\u{2}' => in_spec = false,
             '\u{3}' => {}
+            // A listing's break IS a newline in the text -- that is what the
+            // listing said -- so it comes back as one.
             crate::typeset::LISTING_BREAK => out.push('\n'),
+            // The centring and vertical-space markers are the same kind of
+            // thing -- where a line sits and how much room is left around it,
+            // not characters the document wrote -- so they come out here too.
+            // The paragraph breaks a heading's space is written between are
+            // what says the same thing in text.
+            crate::typeset::CENTRE | crate::typeset::CENTRE_END => {}
+            crate::typeset::VERTICAL_SPACE => {}
             c if in_spec => {
                 let _ = c;
             }

@@ -495,6 +495,11 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
             false
         }
         '\u{3}' => false,
+        // The centring and vertical-space markers are instructions to the
+        // page, not glyphs: a centred line carries one at its head, and
+        // measuring it would push the line off centre by whatever the font
+        // happens to have in that slot.
+        CENTRE | CENTRE_END | VERTICAL_SPACE => false,
         _ => !in_spec,
     })
 }
@@ -848,12 +853,30 @@ pub fn to_pdf(
         }
         let mut y = layout.height + layout.margin - layout.leading;
         for line in chunk {
+            // A line of vertical space is space: the baseline moves down and
+            // nothing is drawn on it. Falling through to the run loop below
+            // would draw the marker itself as a character.
+            if !line.is_empty() && line.chars().all(|c| c == VERTICAL_SPACE) {
+                y -= layout.leading;
+                continue;
+            }
+            // A centred line is positioned by its measured width rather than
+            // at the margin -- that is the whole of what centring is here.
+            // The marker is a PREFIX the breaker put on, so it comes off
+            // before the line is measured or drawn.
+            let (centred, line) = match line.strip_prefix(CENTRE) {
+                Some(rest) => (true, rest),
+                None => (false, line),
+            };
             // A line is a sequence of RUNS, each with its own colour: the
             // markers turn colour on and off part way along it. Collapsing the
             // line to one colour state was the first attempt and drew none at
             // all, because the closing marker put the state back before
             // anything was emitted.
-            let mut x = layout.margin;
+            let mut x = match centred {
+                true => layout.margin + (layout.measure - width_of(line)).max(0.0) / 2.0,
+                false => layout.margin,
+            };
             for (plain, (r, g, b)) in colour_runs(line, &mut colours) {
                 if plain.is_empty() {
                     continue;
@@ -880,6 +903,11 @@ fn break_lines_measured(
 ) -> Vec<String> {
     let space = width_of(" ");
     let mut lines = Vec::new();
+    // Centring is a REGION and outlives the paragraph its marker landed in: a
+    // title page is one `\begin{center}` holding half a dozen `\par`-separated
+    // pieces, so the flag is carried across the loops rather than reset in
+    // them.
+    let mut centred = false;
     for para in text.split("\n\n") {
         // A code listing is already broken, by the author -- see
         // `listing_lines`, which the DVI breaker reads the same way.
@@ -894,32 +922,83 @@ fn break_lines_measured(
             if part_number > 0 {
                 lines.push(PAGE_BREAK.to_string());
             }
-            let mut line = String::new();
-            let mut width = 0.0f64;
-            for word in part.split_whitespace() {
-                let ww = width_of(word);
-                let need = match line.is_empty() {
-                    true => ww,
-                    false => width + space + ww,
-                };
-                if !line.is_empty() && need > layout.measure {
-                    lines.push(std::mem::take(&mut line));
-                    width = ww;
-                    line.push_str(word);
-                    continue;
+            // Vertical space is its own line for the same reason: a vertical
+            // tab is whitespace to Rust, so the space a heading asked for
+            // would vanish into the gap between two words.
+            for (space_number, part) in part.split(VERTICAL_SPACE).enumerate() {
+                if space_number > 0 {
+                    lines.push(VERTICAL_SPACE.to_string());
                 }
-                if !line.is_empty() {
-                    line.push(' ');
-                }
-                line.push_str(word);
-                width = need;
-            }
-            if !line.is_empty() {
-                lines.push(line);
+                fill(part, &mut centred, layout, space, width_of, &mut lines);
             }
         }
     }
     lines
+}
+
+/// Fill one stretch of text into lines at the measure, first-fit, marking each
+/// line the centring markers put it inside.
+///
+/// The markers are cut out BEFORE words are counted because a region opens
+/// against the text it centres -- `\centering` is followed straight by the
+/// title -- so a word carrying one would be measured with it and set with it.
+/// Cutting there also ends the line in hand, which is what a change of
+/// alignment means: LaTeX's own `\centering` applies to whole paragraphs.
+fn fill(
+    text: &str,
+    centred: &mut bool,
+    layout: &Layout,
+    space: f64,
+    width_of: &dyn Fn(&str) -> f64,
+    lines: &mut Vec<String>,
+) {
+    let mut rest = text;
+    loop {
+        let (stretch, marker) = match rest.find([CENTRE, CENTRE_END]) {
+            Some(at) => (&rest[..at], rest[at..].chars().next()),
+            None => (rest, None),
+        };
+        let mut line = String::new();
+        let mut width = 0.0f64;
+        // A centred line says so in its first character, so the page can
+        // position it by what it measures. The alternative -- a parallel list
+        // of which lines are centred -- would have to survive pagination, and
+        // the form feed a forced break travels as is the pattern already here.
+        let start = |centred: bool| match centred {
+            true => CENTRE.to_string(),
+            false => String::new(),
+        };
+        for word in stretch.split_whitespace() {
+            let ww = width_of(word);
+            let need = match line.is_empty() {
+                true => ww,
+                false => width + space + ww,
+            };
+            if !line.is_empty() && need > layout.measure {
+                lines.push(std::mem::take(&mut line));
+                width = ww;
+                line = start(*centred);
+                line.push_str(word);
+                continue;
+            }
+            match line.is_empty() {
+                true => line = start(*centred),
+                false => line.push(' '),
+            }
+            line.push_str(word);
+            width = need;
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+        match marker {
+            Some(m) => {
+                *centred = m == CENTRE;
+                rest = &rest[stretch.len() + m.len_utf8()..];
+            }
+            None => return,
+        }
+    }
 }
 
 /// Split a line into runs of text that share a colour.
@@ -990,6 +1069,31 @@ fn listing_lines(para: &str) -> Option<impl Iterator<Item = &str>> {
     para.contains(LISTING_BREAK)
         .then(|| para.split_terminator(LISTING_BREAK))
 }
+
+/// The start of a centred region, and, on a broken line, that the line is
+/// centred.
+///
+/// `\begin{center}` and `\centering` were defined by the prelude to expand to
+/// nothing, so "centred line" and "left line" came out as one flowing line and
+/// a title page -- which is built entirely out of centred pieces -- collapsed
+/// into the prose after it. Centring is carried the way a forced break is,
+/// in the text itself: a region marker the breaker consumes, and then one
+/// character at the head of each line it produced, which is what survives
+/// pagination without a second structure beside the lines saying which of them
+/// were centred.
+pub const CENTRE: char = '\u{e}';
+
+/// The end of a centred region, back to the margin.
+pub const CENTRE_END: char = '\u{f}';
+
+/// A line's worth of vertical space with nothing drawn on it.
+///
+/// `\chapter` and `\section` set their heading hard against the paragraph
+/// after it, so a heading was indistinguishable from the text it introduces
+/// and the page held lines that lualatex spends on white space. A vertical tab
+/// is what the character means; like the form feed it is split out of the text
+/// before words are, because Rust counts it as whitespace too.
+pub const VERTICAL_SPACE: char = '\u{10}';
 
 /// The r, g and b a marker carried, kept verbatim as written rather than
 /// parsed, because they are handed straight back to PDF's `rg` operator.

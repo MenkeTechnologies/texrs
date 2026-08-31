@@ -244,6 +244,10 @@ impl Lowerer {
         // not a wrapper: it colours everything after it until the group that
         // holds it closes, so the run is ended here rather than by the command.
         let mut colour_open = false;
+        // Whether a `\centering` in THIS group is still in force. Like colour
+        // it is a switch that lasts until the group closes, so it is ended
+        // here rather than by the command.
+        let mut centre_open = false;
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
@@ -304,6 +308,7 @@ impl Lowerer {
                     }
                     Token::Char(_, Cat::EndGroup) => {
                         self.close_colour(&mut out, &mut colour_open);
+                        self.close_centre(&mut out, &mut centre_open);
                         return Ok(Self::drop_empty_line_directives(out));
                     }
                     // An alignment tab is a cell BOUNDARY, not a character the
@@ -331,6 +336,7 @@ impl Lowerer {
                 if stops.contains(&name.name()) {
                     lx.push_back(&[Token::Cs(name)]);
                     self.close_colour(&mut out, &mut colour_open);
+                    self.close_centre(&mut out, &mut centre_open);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
             }
@@ -379,6 +385,12 @@ impl Lowerer {
             }
             // Page structure, for the same reason and in the same place.
             if self.text_output && self.lower_page_break(lx, name, &mut out)? {
+                continue;
+            }
+            // Centring, likewise: the prelude answers `\centering` with
+            // nothing, which is why a centred line and the line after it came
+            // out as one.
+            if self.text_output && self.lower_centre(lx, name, &mut out, &mut centre_open)? {
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -736,6 +748,7 @@ impl Lowerer {
             }
         }
         self.close_colour(&mut out, &mut colour_open);
+        self.close_centre(&mut out, &mut centre_open);
         Ok(Self::drop_empty_line_directives(out))
     }
 
@@ -842,14 +855,122 @@ impl Lowerer {
                 self.eng.skip_optional_star(lx);
                 let _ = self.eng.read_optional_bracket(lx)?;
                 self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
-                let raw = self.eng.read_balanced_group(lx)?;
-                self.lower_into(&raw, out)?;
-                // The heading owns its line rather than running into the
-                // paragraph after it.
-                self.push_text(out, "\n\n");
+                self.push_heading(out, 3, 2, lx)?;
+                Ok(true)
+            }
+            // The section headings. Same treatment and for the same reason as
+            // `\chapter`: the prelude set each to its own argument, so a
+            // heading was the first words of the paragraph under it.
+            "section" | "subsection" | "subsubsection" => {
+                self.eng.skip_optional_star(lx);
+                let _ = self.eng.read_optional_bracket(lx)?;
+                self.push_heading(out, 1, 1, lx)?;
                 Ok(true)
             }
             _ => Ok(false),
+        }
+    }
+
+    /// A heading's text, with `above` and `below` lines of vertical space
+    /// around it.
+    ///
+    /// The space is counted in LINES because a line is the unit this page
+    /// breaker has: it stacks lines a leading apart and knows no other length.
+    /// LaTeX spends 50pt above a chapter title and 40pt below it, and roughly
+    /// a line and a half either side of a section; a heading set with none of
+    /// that is indistinguishable from the paragraph it introduces, and the
+    /// page holds lines that lualatex spends on white space.
+    fn push_heading(
+        &mut self,
+        out: &mut Vec<Cmd>,
+        above: usize,
+        below: usize,
+        lx: &mut Lexer,
+    ) -> R<()> {
+        let space = crate::typeset::VERTICAL_SPACE.to_string();
+        // The heading owns its own lines rather than running into the
+        // paragraphs either side of it, so the space is bracketed by the
+        // paragraph breaks that end them.
+        self.push_text(out, "\n\n");
+        self.push_text(out, &space.repeat(above));
+        self.push_text(out, "\n\n");
+        let raw = self.eng.read_balanced_group(lx)?;
+        self.lower_into(&raw, out)?;
+        self.push_text(out, "\n\n");
+        self.push_text(out, &space.repeat(below));
+        self.push_text(out, "\n\n");
+        Ok(())
+    }
+
+    /// Centring, before the prelude's stubs can swallow it.
+    ///
+    /// `\begin{center}` and `\centering` were defined to expand to nothing, so
+    /// "centred line" and "left line" came out as one flowing line -- and a
+    /// title page, which is built out of nothing but centred pieces, ran into
+    /// the prose after it. The region reaches the page as the markers in
+    /// `typeset`, which is where a line finds out it is positioned by its
+    /// width rather than at the margin.
+    ///
+    /// Returns whether the command was one of these and has been dealt with.
+    fn lower_centre(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+        centre_open: &mut bool,
+    ) -> R<bool> {
+        let open = crate::typeset::CENTRE.to_string();
+        let close = crate::typeset::CENTRE_END.to_string();
+        match name.name() {
+            // `\begin{center}` runs `\center`, as latex.ltx has it, and
+            // `\end{center}` runs `\endcenter`. `\centering` is the switch
+            // form: it centres everything up to the end of the group or the
+            // environment holding it, which is what the arm below closes.
+            "center" | "centering" => {
+                self.push_text(out, &open);
+                *centre_open = true;
+                Ok(true)
+            }
+            "endcenter" => {
+                self.push_text(out, &close);
+                *centre_open = false;
+                Ok(true)
+            }
+            // `\centerline{...}` centres exactly its argument, on its own
+            // line: it is a box, not a switch.
+            "centerline" => {
+                self.push_text(out, &format!("\n\n{open}"));
+                let raw = self.eng.read_balanced_group(lx)?;
+                self.lower_into(&raw, out)?;
+                self.push_text(out, &format!("{close}\n\n"));
+                Ok(true)
+            }
+            // Every LaTeX environment is a group, and `\centering` lasts until
+            // the group holding it closes. Environments here are a macro pair
+            // rather than a group, so the `\end{...}` of whichever one is open
+            // -- `minipage`, `titlepage`, `figure` -- is what ends the region.
+            // Without this a single `\centering` in a title page centred every
+            // remaining page of the book. The command itself is left to the
+            // ordinary dispatch: this closes a region, it does not consume an
+            // environment.
+            //
+            // `\endcsname` is spelt like one and is not one -- it is the
+            // second half of the `\csname` that BUILDS the `\end...` about to
+            // arrive, so counting it closed every region one command early and
+            // wrote the marker twice.
+            other if *centre_open && other.starts_with("end") && other != "endcsname" => {
+                self.push_text(out, &close);
+                *centre_open = false;
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// End a centred region that is still in force, if there is one.
+    fn close_centre(&self, out: &mut Vec<Cmd>, centre_open: &mut bool) {
+        if std::mem::take(centre_open) {
+            self.push_text(out, &crate::typeset::CENTRE_END.to_string());
         }
     }
 

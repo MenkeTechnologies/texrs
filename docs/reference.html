@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">114</div>
+            <div class="stat-val">121</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -387,6 +387,24 @@ second page</pre></td></tr>
             <tr><td><code>\chapter</code></td><td>Begin a chapter, on a new page. The prelude defined this as its own argument -- the heading text and nothing else -- so no chapter began a page. <code>\chapter*{...}</code> is the unnumbered form and <code>\chapter[short]{long}</code> carries a running-head title; both start a page and both set the long title. The heading is not yet set in a larger face, and the number is not printed.</td><td><pre>\chapter{TITLE}
 \chapter*{Preface}
 \chapter[Short]{A Longer Title}</pre></td></tr>
+            <tr><td><code>\section</code></td><td>Begin a section: the heading text, with a line of vertical space above it and a line below. The prelude defined this as its own argument, so a heading was simply the first words of the paragraph under it and the page held lines that a real run spends on white space. <code>\section*{...}</code> and <code>\section[short]{long}</code> are read the same way as <code>\chapter</code>'s. The number is not printed and the heading is not yet set in a larger face.</td><td><pre>\section{TITLE}
+\section*{Unnumbered}
+\section[Short]{A Longer Title}</pre></td></tr>
+            <tr><td><code>\subsection</code></td><td>Begin a subsection. Set exactly as <code>\section</code> is -- its own lines, with vertical space around them -- because nothing here sets a heading in a different size yet, and the depth of a heading is otherwise invisible on the page.</td><td><pre>\subsection{TITLE}
+\subsection*{Unnumbered}</pre></td></tr>
+            <tr><td><code>\subsubsection</code></td><td>Begin a subsubsection, set as <code>\section</code> and <code>\subsection</code> are: its own lines, with a line of vertical space above and below.</td><td><pre>\subsubsection{TITLE}
+\subsubsection*{Unnumbered}</pre></td></tr>
+            <tr><td><code>\center</code></td><td>Start centring the lines that follow. This is what <code>\begin{center}</code> runs, the way latex.ltx has it: <code>\begin{x}</code> is <code>\csname x\endcsname</code> here, so the environment IS this control sequence. Each line inside is positioned by the width it measures rather than at the left margin. Without it a centred line and the line after it were filled into one flowing line, which is most of why a title page collapsed into the prose under it.</td><td><pre>\begin{center}
+centred
+\end{center}</pre></td></tr>
+            <tr><td><code>\endcenter</code></td><td>Stop centring: what <code>\end{center}</code> runs, and the close of the region <code>\center</code> opened. Lines after it go back to the left margin.</td><td><pre>\begin{center}
+centred
+\end{center}
+at the margin</pre></td></tr>
+            <tr><td><code>\centering</code></td><td>Centre every line up to the end of the group or the environment that holds it. The switch form of <code>\begin{center}</code>: a title page is regularly one <code>\centering</code> inside a <code>titlepage</code> or a <code>minipage</code> rather than a centred environment. Environments here are a macro pair rather than a group, so the region ends at the <code>\end{...}</code> of whichever one is open -- otherwise a single <code>\centering</code> would centre every remaining page of the book.</td><td><pre>{\centering centred}
+at the margin</pre></td></tr>
+            <tr><td><code>\centerline</code></td><td>Centre exactly its argument, on a line of its own. The box form rather than the switch: what follows it is not centred. The prelude answered it with its argument alone, which set an imprint or a colophon flush left in the middle of the page.</td><td><pre>\centerline{TEXT}
+\centerline{a colophon}</pre></td></tr>
             <tr><td><code>\definecolor</code></td><td>Name a colour: <code>\definecolor{neonCyan}{HTML}{05D9E8}</code>. The models read are <code>HTML</code> (six hex digits), <code>rgb</code> (three components in 0..=1), <code>RGB</code> (the same in 0..=255), <code>gray</code> and <code>cmyk</code>. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later <code>\color</code> names something unknown and the page comes out black.</td><td><pre>\definecolor{NAME}{MODEL}{SPEC}
 \definecolor{neonCyan}{HTML}{05D9E8}</pre></td></tr>
             <tr><td><code>\providecolor</code></td><td>Define a colour only if that name is not already defined. Otherwise <code>\definecolor</code>.</td><td><pre>\providecolor{NAME}{MODEL}{SPEC}

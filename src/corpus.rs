@@ -668,6 +668,49 @@ pub const CORPUS: &[Entry] = &[
         "Begin a chapter, on a new page. The prelude defined this as its own argument -- the heading text and nothing else -- so no chapter began a page. `\\chapter*{...}` is the unnumbered form and `\\chapter[short]{long}` carries a running-head title; both start a page and both set the long title. The heading is not yet set in a larger face, and the number is not printed.",
         "\\chapter{TITLE}\n\\chapter*{Preface}\n\\chapter[Short]{A Longer Title}",
     ),
+    (
+        "\\section",
+        "LaTeX",
+        "Begin a section: the heading text, with a line of vertical space above it and a line below. The prelude defined this as its own argument, so a heading was simply the first words of the paragraph under it and the page held lines that a real run spends on white space. `\\section*{...}` and `\\section[short]{long}` are read the same way as `\\chapter`'s. The number is not printed and the heading is not yet set in a larger face.",
+        "\\section{TITLE}\n\\section*{Unnumbered}\n\\section[Short]{A Longer Title}",
+    ),
+    (
+        "\\subsection",
+        "LaTeX",
+        "Begin a subsection. Set exactly as `\\section` is -- its own lines, with vertical space around them -- because nothing here sets a heading in a different size yet, and the depth of a heading is otherwise invisible on the page.",
+        "\\subsection{TITLE}\n\\subsection*{Unnumbered}",
+    ),
+    (
+        "\\subsubsection",
+        "LaTeX",
+        "Begin a subsubsection, set as `\\section` and `\\subsection` are: its own lines, with a line of vertical space above and below.",
+        "\\subsubsection{TITLE}\n\\subsubsection*{Unnumbered}",
+    ),
+    // ── Centring — lower::lower_centre ───────────────────────────────────
+    (
+        "\\center",
+        "LaTeX",
+        "Start centring the lines that follow. This is what `\\begin{center}` runs, the way latex.ltx has it: `\\begin{x}` is `\\csname x\\endcsname` here, so the environment IS this control sequence. Each line inside is positioned by the width it measures rather than at the left margin. Without it a centred line and the line after it were filled into one flowing line, which is most of why a title page collapsed into the prose under it.",
+        "\\begin{center}\ncentred\n\\end{center}",
+    ),
+    (
+        "\\endcenter",
+        "LaTeX",
+        "Stop centring: what `\\end{center}` runs, and the close of the region `\\center` opened. Lines after it go back to the left margin.",
+        "\\begin{center}\ncentred\n\\end{center}\nat the margin",
+    ),
+    (
+        "\\centering",
+        "LaTeX",
+        "Centre every line up to the end of the group or the environment that holds it. The switch form of `\\begin{center}`: a title page is regularly one `\\centering` inside a `titlepage` or a `minipage` rather than a centred environment. Environments here are a macro pair rather than a group, so the region ends at the `\\end{...}` of whichever one is open -- otherwise a single `\\centering` would centre every remaining page of the book.",
+        "{\\centering centred}\nat the margin",
+    ),
+    (
+        "\\centerline",
+        "LaTeX",
+        "Centre exactly its argument, on a line of its own. The box form rather than the switch: what follows it is not centred. The prelude answered it with its argument alone, which set an imprint or a colophon flush left in the middle of the page.",
+        "\\centerline{TEXT}\n\\centerline{a colophon}",
+    ),
     // ── Colour — lower::lower_colour, colour.rs ──────────────────────────
     (
         "\\definecolor",
