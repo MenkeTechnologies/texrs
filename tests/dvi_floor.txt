@@ -1,0 +1,14 @@
+# How far each document's DVI matches tex's, highest rung reached.
+# Rungs: NONE < PARSES < PAGES < TEXT < STRUCTURE < BYTES.
+# BYTES is the goal and a reachable one: DVI carries no fonts and
+# no compression. Re-record with `cargo run --bin dvi-parity -- --record`.
+PAGES a_paragraph.tex
+PAGES digits_and_case.tex
+NONE empty_document.tex
+PAGES groups_and_registers.tex
+PAGES long_paragraph.tex
+PAGES macro_expansion.tex
+PAGES nested_macros.tex
+PAGES punctuation.tex
+PAGES two_paragraphs.tex
+PAGES two_words.tex

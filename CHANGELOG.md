@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- A second parity axis: `cargo run --bin dvi-parity` compares texrs's DVI with
+  real `tex`'s. DVI carries no fonts and no compression, so byte-identical
+  output is a reachable goal — 224 bytes against 260 for `Hello world.`, where
+  the same document in PDF is 11,729 against 615. It reuses `Dvi::compare`,
+  which `-X dvi` already needed, and reports on its own ladder with its own
+  floor file.
 - The PDF parity harness grew a corpus and two rungs. Ten documents now rather
   than three, and the ladder gained LINES (the same words falling on the same
   lines, which is where line breaking shows) and FONTS (the same typefaces,

@@ -31,6 +31,7 @@ pub mod dimen;
 pub mod docs;
 pub mod document;
 pub mod dvi;
+pub mod dvi_parity;
 pub mod expand;
 pub mod fontmap;
 pub mod format;

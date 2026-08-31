@@ -131,6 +131,26 @@ probe like that one and diverge in every use the primitive actually has, which
 all turn on the file end and `\everyeof`. It needs the pseudo-file machinery,
 not a shortcut.
 
+## DVI output is not tex's, in three specific ways
+
+`cargo run --bin dvi-parity` compares against real `tex`, and DVI is the
+attainable axis: no fonts inside the file and no compression, 224 bytes against
+260 for `Hello world.` where the same document in PDF is 11,729 against 615.
+
+Every document stops at PAGES, and the reasons are three real typesetting
+decisions rather than one:
+
+- **Spaces.** A gap between words is a MOVEMENT in tex's DVI, not a character,
+  so tex's text reads `Helloworld.`. texrs sets a space glyph instead.
+- **Ligatures.** tex reaches for `fi` in cmr10 -- `The\u{c}rst` -- and texrs
+  sets `f` and `i` separately.
+- **The folio.** tex ships a page number and texrs does not, which is the same
+  difference the PDF ladder reports.
+
+`tests/dvi_parity.rs` pins all three as facts, so they are findings rather than
+a rung number whose meaning nobody remembers. An empty document is the fourth
+case: tex writes no DVI, texrs writes one.
+
 ## PDF output is not LuaTeX's
 
 The goal is byte-identical, and the distance is large: for `Hello world.`

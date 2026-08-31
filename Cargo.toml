@@ -36,6 +36,10 @@ exclude = [
 ]
 
 [[bin]]
+name = "dvi-parity"
+path = "src/bin/dvi_parity.rs"
+
+[[bin]]
 name = "pdf-parity"
 path = "src/bin/pdf_parity.rs"
 
