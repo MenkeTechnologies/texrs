@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- A PNG with an alpha channel now goes into a PDF as a picture and a soft
+  mask, which closes the gap the image port left open. It is the one picture
+  whose pixels are taken apart rather than copied: PNG interleaves the alpha
+  with the colour where PDF wants it separate, so the data is inflated, its row
+  filters undone, split in two and deflated again. `flate2` becomes a
+  dependency in its own right for it, having been in the tree beneath `zip`.
 - Glue: `\skip` registers, `\skipdef`, and the infinite orders. A glue is three
   dimensions and two orders, and an infinite stretch (`fil`, `fill`, `filll`)
   beats any finite one however large. `\the` writes the components back with

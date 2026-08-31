@@ -14,11 +14,11 @@
 //! dictionary: how big the picture is, how many components a pixel has, how
 //! many bits each takes, and where the pixels are.
 //!
-//! What is NOT here: an alpha channel. A PNG that carries one interleaves it
-//! with the colour, and PDF wants it as a separate soft mask, so the pixels
-//! have to be inflated, un-filtered, split and deflated again -- at which point
-//! the copying is no longer copying. That is a piece of its own, and until it
-//! is done such a PNG is refused by name rather than embedded wrongly.
+//! The one picture that cannot be copied is a PNG with an alpha channel. PNG
+//! interleaves the alpha with the colour and PDF wants it as a separate soft
+//! mask, so those pixels are inflated, un-filtered, split in two and deflated
+//! again -- the only case where a picture is taken apart, and the reason this
+//! module knows what a PNG row filter is.
 
 /// What a pixel is made of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +51,12 @@ pub struct Image {
     pub colours: Colours,
     /// The palette, for an indexed image: three bytes a colour.
     pub palette: Option<Vec<u8>>,
-    /// The pixels, exactly as they were in the file.
+    /// The pixels: exactly as they were in the file, or -- for a picture whose
+    /// alpha had to be taken out of them -- the colour on its own.
     pub data: Vec<u8>,
+    /// The alpha channel, when the picture had one, as a stream of its own:
+    /// one component a pixel, which is what PDF calls a soft mask.
+    pub alpha: Option<Vec<u8>>,
     /// Which of PDF's compressions the data is already in.
     pub compression: Compression,
 }
@@ -144,18 +148,14 @@ fn png(bytes: &[u8]) -> Result<Image, String> {
         return Err("no IHDR, so it is not a PNG".into());
     }
 
-    let colours =
-        match colour_type {
-            0 => Colours::Gray,
-            2 => Colours::Rgb,
-            3 => Colours::Indexed,
-            4 | 6 => return Err(
-                "carries an alpha channel, which has to be taken out of the pixels rather than \
-                 copied with them"
-                    .into(),
-            ),
-            other => return Err(format!("colour type {other} is not one a PNG has")),
-        };
+    let (colours, has_alpha) = match colour_type {
+        0 => (Colours::Gray, false),
+        2 => (Colours::Rgb, false),
+        3 => (Colours::Indexed, false),
+        4 => (Colours::Gray, true),
+        6 => (Colours::Rgb, true),
+        other => return Err(format!("colour type {other} is not one a PNG has")),
+    };
     if !matches!(bits, 1 | 2 | 4 | 8 | 16) {
         return Err(format!("{bits} is not a number of bits a PNG uses"));
     }
@@ -166,6 +166,16 @@ fn png(bytes: &[u8]) -> Result<Image, String> {
         return Err("carries no pixels".into());
     }
 
+    // A picture with no alpha goes across as it is; one with alpha is the only
+    // case where the pixels are touched at all.
+    let (data, alpha) = match has_alpha {
+        false => (data, None),
+        true => {
+            let (colour, alpha) = split_alpha(&data, width, height, bits, colours)?;
+            (colour, Some(alpha))
+        }
+    };
+
     Ok(Image {
         width,
         height,
@@ -173,6 +183,7 @@ fn png(bytes: &[u8]) -> Result<Image, String> {
         colours,
         palette,
         data,
+        alpha,
         compression: Compression::Flate,
     })
 }
@@ -215,6 +226,7 @@ fn jpeg(bytes: &[u8]) -> Result<Image, String> {
                     bits,
                     colours,
                     palette: None,
+                    alpha: None,
                     // A JPEG goes into a PDF whole: the marker structure is
                     // what a reader's decoder expects to see.
                     data: bytes.to_vec(),
@@ -229,6 +241,116 @@ fn jpeg(bytes: &[u8]) -> Result<Image, String> {
         at += 2 + length;
     }
     Err("no frame header, so its size is not stated".into())
+}
+
+/// Take the alpha out of a PNG's pixels.
+///
+/// The data is a zlib stream of rows, each beginning with the number of the
+/// filter it was written with, and each filter is defined against the bytes to
+/// the left and in the row above -- so undoing them means walking the picture
+/// once, in order, keeping the row before. What comes back is two streams, the
+/// colour and the alpha, each written as rows filtered with nothing, so the
+/// predictor a reader is told about has nothing left to undo.
+fn split_alpha(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    bits: u8,
+    colours: Colours,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    use std::io::{Read, Write};
+
+    if bits != 8 && bits != 16 {
+        return Err(format!(
+            "{bits} bits a component with an alpha channel is not something a PNG writes"
+        ));
+    }
+    let mut pixels = Vec::new();
+    flate2::read::ZlibDecoder::new(data)
+        .read_to_end(&mut pixels)
+        .map_err(|e| format!("the pixels are not a zlib stream: {e}"))?;
+
+    let sample = bits as usize / 8;
+    let components = colours.components();
+    // A pixel is its colour and one more component for the alpha.
+    let pixel = (components + 1) * sample;
+    let row = width as usize * pixel;
+    let expected = (row + 1) * height as usize;
+    if pixels.len() < expected {
+        return Err(format!(
+            "the pixels are {} bytes where {expected} were promised",
+            pixels.len()
+        ));
+    }
+
+    let mut colour_out = Vec::with_capacity(expected);
+    let mut alpha_out = Vec::with_capacity(height as usize * (width as usize * sample + 1));
+    let mut previous = vec![0u8; row];
+    let mut current = vec![0u8; row];
+    for y in 0..height as usize {
+        let at = y * (row + 1);
+        let filter = pixels[at];
+        current.copy_from_slice(&pixels[at + 1..at + 1 + row]);
+        unfilter(filter, &mut current, &previous, pixel)?;
+
+        // Filtered with nothing, so what follows each of these bytes is the
+        // pixels themselves.
+        colour_out.push(0);
+        alpha_out.push(0);
+        for x in 0..width as usize {
+            let from = x * pixel;
+            colour_out.extend_from_slice(&current[from..from + components * sample]);
+            alpha_out.extend_from_slice(&current[from + components * sample..from + pixel]);
+        }
+        previous.copy_from_slice(&current);
+    }
+
+    let deflate = |bytes: &[u8]| -> Result<Vec<u8>, String> {
+        let mut out = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        out.write_all(bytes).map_err(|e| e.to_string())?;
+        out.finish().map_err(|e| e.to_string())
+    };
+    Ok((deflate(&colour_out)?, deflate(&alpha_out)?))
+}
+
+/// Undo one row's filter, in place.
+///
+/// §9.2 of the PNG specification: `a` is the byte one pixel to the left, `b`
+/// the one above, `c` the one above and to the left, and a byte before the
+/// start of the picture is zero.
+fn unfilter(filter: u8, row: &mut [u8], previous: &[u8], pixel: usize) -> Result<(), String> {
+    for i in 0..row.len() {
+        let a = match i >= pixel {
+            true => row[i - pixel] as i32,
+            false => 0,
+        };
+        let b = previous[i] as i32;
+        let c = match i >= pixel {
+            true => previous[i - pixel] as i32,
+            false => 0,
+        };
+        let value = row[i] as i32;
+        row[i] = match filter {
+            0 => value,
+            1 => value + a,
+            2 => value + b,
+            3 => value + (a + b) / 2,
+            4 => {
+                // Paeth: whichever of the three neighbours the gradient is
+                // nearest to.
+                let p = a + b - c;
+                let (pa, pb, pc) = ((p - a).abs(), (p - b).abs(), (p - c).abs());
+                value
+                    + match (pa <= pb && pa <= pc, pb <= pc) {
+                        (true, _) => a,
+                        (_, true) => b,
+                        _ => c,
+                    }
+            }
+            other => return Err(format!("{other} is not a PNG row filter")),
+        } as u8;
+    }
+    Ok(())
 }
 
 impl Image {
@@ -257,6 +379,9 @@ impl Image {
             }
         ));
         out.push_str(&format!("data          {} bytes\n", self.data.len()));
+        if let Some(alpha) = &self.alpha {
+            out.push_str(&format!("soft mask     {} bytes\n", alpha.len()));
+        }
         out
     }
 }
@@ -264,6 +389,150 @@ impl Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every row filter, undone.
+    ///
+    /// A real PNG uses whichever filter compressed each row best, so a picture
+    /// from a rendering tool may never use the awkward ones -- and Average and
+    /// Paeth are exactly the ones with arithmetic in them. So this builds a
+    /// picture whose five rows use the five filters, filtering it here with
+    /// the definitions read the other way round, and requires the split to
+    /// give the pixels back.
+    #[test]
+    fn every_row_filter_gives_the_pixels_back() {
+        use std::io::Write;
+
+        // Five rows of four RGBA pixels, with values that differ in every
+        // direction: a filter undone against the wrong neighbour cannot come
+        // out right by accident.
+        let width = 4usize;
+        let height = 5usize;
+        let pixel = 4usize;
+        let row = width * pixel;
+        let wanted: Vec<u8> = (0..height * row)
+            .map(|i| ((i * 37 + i / row * 11) % 251) as u8)
+            .collect();
+
+        // Filter a row the way a PNG writer does, which is the definition in
+        // §9.2 read forwards.
+        let filtered = |filter: u8, current: &[u8], previous: &[u8]| -> Vec<u8> {
+            (0..current.len())
+                .map(|i| {
+                    let a = match i >= pixel {
+                        true => current[i - pixel] as i32,
+                        false => 0,
+                    };
+                    let b = previous[i] as i32;
+                    let c = match i >= pixel {
+                        true => previous[i - pixel] as i32,
+                        false => 0,
+                    };
+                    let value = current[i] as i32;
+                    (match filter {
+                        0 => value,
+                        1 => value - a,
+                        2 => value - b,
+                        3 => value - (a + b) / 2,
+                        _ => {
+                            let p = a + b - c;
+                            let (pa, pb, pc) = ((p - a).abs(), (p - b).abs(), (p - c).abs());
+                            value
+                                - match (pa <= pb && pa <= pc, pb <= pc) {
+                                    (true, _) => a,
+                                    (_, true) => b,
+                                    _ => c,
+                                }
+                        }
+                    }) as u8
+                })
+                .collect()
+        };
+
+        let mut stream = Vec::new();
+        let zero = vec![0u8; row];
+        for y in 0..height {
+            let filter = y as u8;
+            let current = &wanted[y * row..(y + 1) * row];
+            let previous = match y {
+                0 => &zero[..],
+                _ => &wanted[(y - 1) * row..y * row],
+            };
+            stream.push(filter);
+            stream.extend(filtered(filter, current, previous));
+        }
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&stream).expect("deflate");
+        let data = encoder.finish().expect("deflate");
+
+        let (colour, alpha) =
+            split_alpha(&data, width as u32, height as u32, 8, Colours::Rgb).expect("the split");
+
+        // Both come back as rows filtered with nothing, so inflating them
+        // gives the pixels with a zero in front of each row.
+        let inflate = |bytes: &[u8]| {
+            let mut out = Vec::new();
+            std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(bytes), &mut out)
+                .expect("inflate");
+            out
+        };
+        let colour = inflate(&colour);
+        let alpha = inflate(&alpha);
+
+        for y in 0..height {
+            assert_eq!(
+                colour[y * (width * 3 + 1)],
+                0,
+                "row {y} says it was filtered"
+            );
+            assert_eq!(alpha[y * (width + 1)], 0, "row {y} of the mask");
+            for x in 0..width {
+                let from = y * row + x * pixel;
+                assert_eq!(
+                    &colour[y * (width * 3 + 1) + 1 + x * 3..][..3],
+                    &wanted[from..from + 3],
+                    "the colour at {x},{y}"
+                );
+                assert_eq!(
+                    alpha[y * (width + 1) + 1 + x],
+                    wanted[from + 3],
+                    "the alpha at {x},{y}"
+                );
+            }
+        }
+    }
+
+    /// Paeth, against numbers worked out by hand.
+    ///
+    /// The round trip above cannot catch an error in the Paeth predictor that
+    /// the test's own filtering makes too -- both would be wrong the same way
+    /// and cancel. So this is the one case with the answer written down: with
+    /// a row of 200 above and 0 filtered, the predictor must choose the byte
+    /// above and give 200 then 0. Adding the corner instead of subtracting it
+    /// chooses the byte to the left the second time and gives 200 twice.
+    #[test]
+    fn the_paeth_predictor_chooses_the_neighbour_the_gradient_is_nearest() {
+        let previous = [200u8, 0];
+        let mut row = [0u8, 0];
+        unfilter(4, &mut row, &previous, 1).expect("a filter");
+        assert_eq!(row, [200, 0]);
+
+        // And the three simple ones, which are addition and nothing else.
+        let mut row = [5u8, 5];
+        unfilter(1, &mut row, &[0, 0], 1).expect("sub");
+        assert_eq!(row, [5, 10], "each byte adds the one to its left");
+
+        let mut row = [5u8, 5];
+        unfilter(2, &mut row, &[10, 20], 1).expect("up");
+        assert_eq!(row, [15, 25], "each byte adds the one above");
+
+        let mut row = [5u8, 5];
+        unfilter(3, &mut row, &[10, 20], 1).expect("average");
+        assert_eq!(row, [10, 20], "and the average of the two");
+
+        // A filter that does not exist is refused rather than guessed at.
+        assert!(unfilter(9, &mut row, &[0, 0], 1).is_err());
+    }
 
     /// A PNG from the installation: chunks, header, pixels.
     #[test]
@@ -304,8 +573,8 @@ mod tests {
         let mut bare = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         assert!(read(&bare).unwrap_err().contains("IHDR"));
 
-        // One that says it carries an alpha channel: refused by name, because
-        // copying its pixels would put the alpha in the colour.
+        // One that says it carries an alpha channel and then carries no
+        // pixels: the alpha comes out of the pixels, so there have to be some.
         bare.extend([0, 0, 0, 13]);
         bare.extend(b"IHDR");
         bare.extend(10u32.to_be_bytes());
@@ -313,7 +582,7 @@ mod tests {
         bare.extend([8, 6, 0, 0, 0]); // depth 8, colour type 6 (RGBA)
         bare.extend([0, 0, 0, 0]); // checksum
         let e = read(&bare).unwrap_err();
-        assert!(e.contains("alpha"), "{e}");
+        assert!(e.contains("pixels"), "{e}");
 
         // And an interlaced one, whose rows are not in order.
         let mut interlaced = bare.clone();

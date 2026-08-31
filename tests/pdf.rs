@@ -570,3 +570,121 @@ fn a_picture_arrives_as_the_picture_it_was() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A picture with an alpha channel becomes a picture and a soft mask.
+///
+/// This is the one case where the pixels are taken apart rather than copied:
+/// PNG interleaves the alpha with the colour and PDF wants it separate. So the
+/// data is inflated, un-filtered, split and deflated again -- four chances to
+/// produce something the right size and full of noise, which is what the
+/// pixel check below is for.
+#[test]
+fn a_transparent_picture_keeps_its_transparency() {
+    let dir = scratch("alpha");
+    // Ghostscript's pngalpha device writes RGBA, with the page transparent
+    // where nothing was drawn.
+    let made = Command::new("gs")
+        .args([
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-sDEVICE=pngalpha",
+            "-r36",
+            "-g120x80",
+        ])
+        .arg(format!("-sOutputFile={}", dir.join("in.png").display()))
+        .arg("-c")
+        .arg("0 0 0 setrgbcolor 10 10 100 60 rectfill showpage")
+        .output();
+    let Ok(made) = made else { return };
+    if !made.status.success() {
+        return;
+    }
+    let png = texrs::image::open(dir.join("in.png")).expect("the png reads");
+    assert_eq!((png.width, png.height), (120, 80));
+    let alpha = png
+        .alpha
+        .clone()
+        .expect("the picture carries an alpha channel");
+    assert!(!alpha.is_empty());
+    // The colour is three components a pixel now, not four: the alpha is out
+    // of it.
+    assert_eq!(png.colours, texrs::image::Colours::Rgb);
+
+    let mut page = Page::letter();
+    page.image(png, 72.0, 500.0, 120.0, 80.0);
+    let path = write(&dir, &[page]);
+
+    if let Some(report) = info(&path) {
+        assert!(report.contains("Pages:          1"), "{report}");
+    }
+
+    // A reader sees two pictures: the colour and its mask, the same size.
+    let Ok(listed) = Command::new("pdfimages")
+        .arg("-listonly")
+        .arg(&path)
+        .output()
+    else {
+        return;
+    };
+    let listed = String::from_utf8_lossy(&listed.stdout).to_string();
+    let rows: Vec<&str> = listed
+        .lines()
+        .filter(|line| line.contains("width="))
+        .collect();
+    assert_eq!(rows.len(), 2, "the reader found {listed}");
+    assert!(
+        rows.iter()
+            .all(|row| row.contains("width=120") && row.contains("height=80")),
+        "{listed}"
+    );
+    // One of them is grey and one is colour: that is the mask and the picture.
+    assert!(
+        rows.iter().any(|row| row.contains("DeviceGray")),
+        "no soft mask: {listed}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("DeviceRGB")),
+        "no picture: {listed}"
+    );
+
+    // And the pixels. The picture is a black rectangle on a transparent
+    // ground, so the colour comes out mostly black and the mask mostly white
+    // where the rectangle is. A split that went wrong -- a filter undone with
+    // the wrong neighbour, a row read at the wrong offset -- gives noise at
+    // exactly this size, so this is the assertion that means anything.
+    let root = dir.join("out");
+    let taken = Command::new("pdfimages")
+        .arg(&path)
+        .arg(root.to_string_lossy().as_ref())
+        .output();
+    if let Ok(taken) = taken {
+        assert!(taken.status.success());
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&dir).expect("the directory") {
+            let path = entry.expect("an entry").path();
+            if !path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("out-"))
+            {
+                continue;
+            }
+            let bytes = std::fs::read(&path).expect("the picture");
+            // The mask is a PGM of one byte a pixel; the picture a PPM of
+            // three. Either way the ink is at one end of the range and the
+            // ground at the other, and noise would be spread across it.
+            let pixels = &bytes[bytes.len().saturating_sub(120 * 60)..];
+            let flat = pixels.iter().filter(|&&b| b == 0x00 || b == 0xff).count();
+            assert!(
+                flat * 10 > pixels.len() * 9,
+                "{}: only {flat} of {} bytes are black or white, so the split went wrong",
+                path.display(),
+                pixels.len()
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 2, "the reader wrote {checked} pictures");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

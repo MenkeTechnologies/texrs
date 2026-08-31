@@ -539,6 +539,37 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
             );
         }
     }
+    // A picture that carried an alpha channel carries it here as a picture of
+    // its own, in grey, the same size: §8.9.5.4, which is how PDF says
+    // transparency for an image.
+    if let Some(alpha) = &image.alpha {
+        let mask = pdf.add(Object::Stream {
+            dict: BTreeMap::from([
+                ("Type".to_string(), Object::name("XObject")),
+                ("Subtype".to_string(), Object::name("Image")),
+                ("Width".to_string(), Object::Integer(image.width as i64)),
+                ("Height".to_string(), Object::Integer(image.height as i64)),
+                (
+                    "BitsPerComponent".to_string(),
+                    Object::Integer(image.bits as i64),
+                ),
+                ("ColorSpace".to_string(), Object::name("DeviceGray")),
+                ("Filter".to_string(), Object::name("FlateDecode")),
+                (
+                    "DecodeParms".to_string(),
+                    Object::dict([
+                        ("Predictor", Object::Integer(15)),
+                        ("Colors", Object::Integer(1)),
+                        ("BitsPerComponent", Object::Integer(image.bits as i64)),
+                        ("Columns", Object::Integer(image.width as i64)),
+                    ]),
+                ),
+            ]),
+            data: alpha.clone(),
+        });
+        dict.insert("SMask".to_string(), mask);
+    }
+
     pdf.add(Object::Stream {
         dict,
         data: image.data.clone(),

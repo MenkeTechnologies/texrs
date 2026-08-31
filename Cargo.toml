@@ -103,6 +103,15 @@ once_cell = "1"
 # written, and every other codec zip can carry is one more thing to keep
 # building in ten years.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+# Taking a PNG's pixels apart (src/image.rs). A picture goes into a PDF
+# without being decoded -- PDF's compressions are PNG's -- except when it
+# carries an alpha channel, which PDF wants as a separate soft mask where PNG
+# interleaves it with the colour. That one case means inflating the pixels,
+# undoing PNG's row filters, splitting them and deflating both halves. flate2
+# is already in the tree beneath zip; this makes it a dependency in its own
+# right rather than borrowing one.
+flate2 = "1"
 # Fetching a bundle (src/geturl.rs), the other half of tectonic's `bundles`.
 # ureq rather than reqwest: a blocking client is what a one-shot download wants,
 # and rustls with webpki-roots means no system OpenSSL to keep working. Fetching
