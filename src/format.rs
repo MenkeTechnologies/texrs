@@ -52,6 +52,8 @@ enum MeaningRepr {
         long: bool,
         #[serde(default)]
         outer: bool,
+        #[serde(default)]
+        protected: bool,
     },
     Primitive(String),
     Char(char, u8),
@@ -230,6 +232,7 @@ fn meaning_repr(meaning: &Meaning) -> MeaningRepr {
             body: m.body.iter().map(token_repr).collect(),
             long: m.long,
             outer: m.outer,
+            protected: m.protected,
         },
         Meaning::Primitive(id) => MeaningRepr::Primitive(id.name().to_string()),
         Meaning::Char(c, cat) => MeaningRepr::Char(*c, cat_to_u8(*cat)),
@@ -246,11 +249,13 @@ fn meaning_of(repr: &MeaningRepr) -> Meaning {
             body,
             long,
             outer,
+            protected,
         } => Meaning::Macro(Macro {
             params: params.iter().map(token_of).collect(),
             body: body.iter().map(token_of).collect(),
             long: *long,
             outer: *outer,
+            protected: *protected,
         }),
         MeaningRepr::Primitive(name) => Meaning::Primitive(CsId::intern(name)),
         MeaningRepr::Char(c, cat) => Meaning::Char(*c, u8_to_cat(*cat)),

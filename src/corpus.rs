@@ -465,6 +465,36 @@ pub const CORPUS: &[Entry] = &[
         "The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. The arithmetic happens in scaled points, which is the only form a dimension has.",
         "\\dimen0=\\dimexpr 1pt+2pt\\relax   % => 3.0pt",
     ),
+    (
+        "\\unless",
+        "Conditionals",
+        "Negate the conditional that follows: `\\unless\\ifnum 1>2 A\\else B\\fi` runs A. An eTeX primitive. A negated conditional is the same conditional with its arms exchanged, which is how it is lowered.",
+        "\\unless\\ifnum \\count0>2 few\\else many\\fi",
+    ),
+    (
+        "\\protected",
+        "Macro definition",
+        "A definition prefix: the macro does not expand inside an `\\edef`, it survives as itself and runs when the result does. Redefining it afterwards therefore changes what the `\\edef`'d macro produces, which is the observable difference. An eTeX primitive, and the one LaTeX leans on to keep a fragile command safe in a moving argument.",
+        "\\protected\\def\\note#1{[#1]}",
+    ),
+    (
+        "\\detokenize",
+        "Expansion",
+        "The tokens of `{...}` written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.",
+        "\\message{\\detokenize{\\a b}}   % => \\a b",
+    ),
+    (
+        "\\csstring",
+        "Expansion",
+        "`\\string` without the escape character: `\\csstring\\foo` is `foo` where `\\string\\foo` is `\\foo`. A LuaTeX primitive.",
+        "\\message{\\csstring\\foo}   % => foo",
+    ),
+    (
+        "\\Uchar",
+        "Expansion",
+        "The character with the given code: `\\Uchar65` is `A`. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.",
+        "\\message{\\Uchar65\\Uchar97}   % => Aa",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

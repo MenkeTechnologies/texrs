@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">105</div>
+            <div class="stat-val">110</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -147,6 +147,7 @@
 \global\def\v{OUT}</pre></td></tr>
             <tr><td><code>\long</code></td><td>A definition prefix: the macro's arguments may contain <code>\par</code>. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. texrs records the prefix and does not yet enforce the restriction it lifts.</td><td><pre>\long\def\note#1{[#1]}</pre></td></tr>
             <tr><td><code>\outer</code></td><td>A definition prefix: the macro may not then appear in an argument, in a group being scanned as text, or in skipped conditional text. It is an error-detection feature -- plain.tex marks its sectioning macros <code>\outer</code> so a missing brace is caught at the next section rather than at the end of the file. texrs records the prefix and does not police the restriction, so a use tex forbids is accepted here; <code>tests/cases/outer_forbidden_use.tex</code> pins the difference. Prefixes are part of the meaning, so <code>\ifx</code> tells a prefixed definition from a bare one.</td><td><pre>\outer\def\chapter{...}</pre></td></tr>
+            <tr><td><code>\protected</code></td><td>A definition prefix: the macro does not expand inside an <code>\edef</code>, it survives as itself and runs when the result does. Redefining it afterwards therefore changes what the <code>\edef</code>'d macro produces, which is the observable difference. An eTeX primitive, and the one LaTeX leans on to keep a fragile command safe in a moving argument.</td><td><pre>\protected\def\note#1{[#1]}</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -180,6 +181,9 @@
             <tr><td><code>\par</code></td><td>End a paragraph. Accepted and ignored: paragraphs belong to the stomach, which texrs does not have. A blank line produces one, which is why the line scanner tracks its state.</td><td><pre>\par</pre></td></tr>
             <tr><td><code>\ignorespaces</code></td><td>Skip the spaces that follow. Accepted and ignored in this milestone, because spacing only matters once there is a stomach to typeset it.</td><td><pre>\ignorespaces</pre></td></tr>
             <tr><td><code>\end</code></td><td>Stop the run. It does not ship a page: there is no stomach, which is why real tex reports <code>No pages of output.</code> for every case in the corpus.</td><td><pre>\end</pre></td></tr>
+            <tr><td><code>\detokenize</code></td><td>The tokens of <code>{...}</code> written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.</td><td><pre>\message{\detokenize{\a b}}   % =&gt; \a b</pre></td></tr>
+            <tr><td><code>\csstring</code></td><td><code>\string</code> without the escape character: <code>\csstring\foo</code> is <code>foo</code> where <code>\string\foo</code> is <code>\foo</code>. A LuaTeX primitive.</td><td><pre>\message{\csstring\foo}   % =&gt; foo</pre></td></tr>
+            <tr><td><code>\Uchar</code></td><td>The character with the given code: <code>\Uchar65</code> is <code>A</code>. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.</td><td><pre>\message{\Uchar65\Uchar97}   % =&gt; Aa</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -218,6 +222,7 @@
             <tr><td><code>\ifinner</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifeof</code></td><td>RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifcsname</code></td><td>RECOGNISED BUT NOT EVALUATED. Use <code>\ifdefined</code> on a <code>\csname</code>-built token instead. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifcsname &lt;characters&gt;\endcsname &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\unless</code></td><td>Negate the conditional that follows: <code>\unless\ifnum 1&gt;2 A\else B\fi</code> runs A. An eTeX primitive. A negated conditional is the same conditional with its arms exchanged, which is how it is lowered.</td><td><pre>\unless\ifnum \count0&gt;2 few\else many\fi</pre></td></tr>
           </tbody>
         </table>
       </section>

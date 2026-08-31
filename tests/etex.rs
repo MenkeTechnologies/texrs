@@ -120,3 +120,50 @@ fn divide_still_truncates() {
     let got = texrs::run_messages(src).expect("run");
     assert_eq!(got, "[3][4]", "\\divide truncates, \\numexpr rounds");
 }
+
+#[test]
+fn unless_runs_the_other_arm() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // Both directions, because swapping the arms of a conditional is right
+    // only if it is the arms that swap and not the test.
+    for body in [
+        "\\message{[\\unless\\ifnum 1>2 A\\else B\\fi]}",
+        "\\message{[\\unless\\ifnum 3>2 A\\else B\\fi]}",
+        "\\message{[\\ifnum 1>2 A\\else B\\fi]}",
+    ] {
+        let (want, got) = both(&lua, body);
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn csstring_and_uchar_and_detokenize() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    for body in [
+        "\\def\\f{F}\\message{[\\csstring\\f][\\string\\f]}",
+        "\\message{[\\Uchar65][\\Uchar97]}",
+        "\\message{[\\detokenize{\\a b}]}",
+    ] {
+        let (want, got) = both(&lua, body);
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn a_protected_macro_is_not_frozen_by_edef() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // The observable difference without \meaning: redefine the macro after
+    // the \edef. A protected one is called afresh and yields the new body.
+    let body = "\\protected\\def\\p{P}\\edef\\e{\\p}\\def\\p{Z}\\message{[\\e]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want, "a protected macro survives \\edef as itself");
+}

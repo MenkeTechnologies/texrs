@@ -61,6 +61,11 @@ pub struct Lowerer {
     /// turns it on for a caller who wants what the document SAYS rather than
     /// what it announced.
     text_output: bool,
+    /// Whether an `\unless` is waiting for the conditional it negates.
+    ///
+    /// A negated conditional is the same conditional with its arms swapped,
+    /// which is why this is a flag rather than a second set of commands.
+    unless: bool,
     /// How many `\input` files are open above this one, so a file that inputs
     /// itself stops with a diagnostic instead of exhausting the host stack.
     input_depth: usize,
@@ -105,6 +110,7 @@ const MAX_LOWER_DEPTH: usize = 64;
 impl Lowerer {
     pub fn new() -> Self {
         Self {
+            unless: false,
             input_depth: 0,
             eng: Engine::new(),
             ended: false,
@@ -620,6 +626,9 @@ impl Lowerer {
                 // flag the definition that follows reads and spends.
                 "long" => self.eng.set_long_prefix(true),
                 "outer" => self.eng.set_outer_prefix(true),
+                "protected" => self.eng.set_protected_prefix(true),
+                // `\unless\ifnum ...` runs the ELSE arm when the test holds.
+                "unless" => self.unless = true,
                 "relax" | "par" => {}
                 other => {
                     // TeX's loop idiom -- a macro whose last act is to call
@@ -1059,6 +1068,7 @@ impl Lowerer {
     }
 
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
+        let negated = std::mem::take(&mut self.unless);
         let then_branch = self.block(lx, Some(&["else", "fi"]))?;
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
@@ -1075,7 +1085,11 @@ impl Lowerer {
                 return Err(TexError("Incomplete \\ifnum; missing \\fi".into()));
             }
         }
-        Ok((then_branch, else_branch))
+        // A negated conditional is this one with its arms exchanged.
+        match negated {
+            true => Ok((else_branch, then_branch)),
+            false => Ok((then_branch, else_branch)),
+        }
     }
 
     /// The base64 body of a `\rustcompile <base64>\endrust`.
@@ -1361,6 +1375,31 @@ impl Lowerer {
                     let call = self.rust_call(work, true)?;
                     out.push(MsgOp::Number(call));
                 }
+                // `\unless` negates the conditional that follows it here too.
+                "unless" => self.unless = true,
+                // `\csstring\f` is `\string\f` without the escape character.
+                "csstring" => {
+                    if let Some(next) = work.pending.pop() {
+                        text.push_str(&match &next {
+                            Token::Cs(cs) => cs.name().to_string(),
+                            other => other.to_text(self.eng.escape),
+                        });
+                    }
+                }
+                // `\Uchar<number>` is the character with that code.
+                "Uchar" => {
+                    let code = self.eng.scan_number_pending(work)?;
+                    match u32::try_from(code).ok().and_then(char::from_u32) {
+                        Some(c) => text.push(c),
+                        None => return Err(TexError(format!("Bad character code ({code})"))),
+                    }
+                }
+                // `\detokenize{...}` writes the tokens as text -- the same rule
+                // `\the\toks` uses, and the same renderer.
+                "detokenize" => {
+                    let group = self.eng.read_group_tokens(work)?;
+                    text.push_str(&self.eng.tokens_text(&group));
+                }
                 "string" => {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
@@ -1498,6 +1537,7 @@ impl Lowerer {
 
     /// The two arms of a conditional inside a message.
     fn msg_arms(&mut self, work: &mut Lexer) -> R<(Vec<MsgOp>, Vec<MsgOp>)> {
+        let negated = std::mem::take(&mut self.unless);
         let then_ops = self.msg_ops(work, &["else", "fi"])?;
         let mut else_ops = Vec::new();
         match work.pending.pop() {
@@ -1508,7 +1548,10 @@ impl Lowerer {
             Some(Token::Cs(n)) if n.name() == "fi" => {}
             _ => return Err(TexError("Incomplete \\if; missing \\fi".into())),
         }
-        Ok((then_ops, else_ops))
+        match negated {
+            true => Ok((else_ops, then_ops)),
+            false => Ok((then_ops, else_ops)),
+        }
     }
 
     /// A number operand inside a message body.

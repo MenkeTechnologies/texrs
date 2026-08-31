@@ -22,6 +22,9 @@ pub struct Macro {
     pub body: Vec<Token>,
     /// `\long\def` — the argument may contain `\par`.
     pub long: bool,
+    /// `\protected\def` — the macro does not expand inside an `\edef` or a
+    /// `\write`; it survives as itself and runs when the result does.
+    pub protected: bool,
     /// `\outer\def` — the macro may not appear in an argument, in a group
     /// being scanned as text, or in skipped conditional text.
     ///
@@ -123,6 +126,8 @@ pub struct Engine {
     long: bool,
     /// Whether an `\outer` prefix is.
     outer: bool,
+    /// Whether a `\protected` prefix is.
+    protected: bool,
     /// Advice registered with `\intercept`, woven into matching expansions.
     pub intercepts: crate::intercepts::Registry,
     /// How deep inside an advice body expansion currently is.
@@ -205,6 +210,7 @@ impl Engine {
             global: false,
             long: false,
             outer: false,
+            protected: false,
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
         }
@@ -336,19 +342,21 @@ impl Engine {
             // `\long` and `\outer` take a prefix each, exactly as `\global`
             // does, and chain in any order: `\global\outer\long\def` is one
             // definition with three of them.
-            "long" | "outer" => {
-                let which = name.name() == "long";
+            "long" | "outer" | "protected" => {
+                let which = name.name();
                 match which {
-                    true => self.long = true,
-                    false => self.outer = true,
+                    "long" => self.long = true,
+                    "outer" => self.outer = true,
+                    _ => self.protected = true,
                 }
                 let Some(next) = lx.next_token(&self.cats) else {
                     return Err(TexError("Missing control sequence".into()));
                 };
                 let out = self.step(lx, next);
                 match which {
-                    true => self.long = false,
-                    false => self.outer = false,
+                    "long" => self.long = false,
+                    "outer" => self.outer = false,
+                    _ => self.protected = false,
                 }
                 return out;
             }
@@ -794,6 +802,27 @@ impl Engine {
     /// What `\the\toks<n>` writes: the tokens as text, by the same rule
     /// `\string` uses -- a control word carries a trailing space, a
     /// single-character control sequence does not.
+    /// A token list as text, by the token-list rule: a control WORD carries a
+    /// trailing space, a one-character control sequence does not. Shared by
+    /// `\the\toks` and `\detokenize`, which write the same way.
+    pub fn tokens_text(&self, tokens: &[Token]) -> String {
+        let mut out = String::new();
+        for t in tokens {
+            match t {
+                Token::Char(c, _) => out.push(*c),
+                Token::Cs(id) => {
+                    let name = id.name();
+                    out.push(self.escape);
+                    out.push_str(name);
+                    if name.chars().all(|c| c.is_alphabetic()) {
+                        out.push(' ');
+                    }
+                }
+            }
+        }
+        out
+    }
+
     pub fn toks_text(&self, reg: i64) -> String {
         let Some(tokens) = self.toks.get(&reg) else {
             return String::new();
@@ -1104,6 +1133,7 @@ impl Engine {
         // it, so it is spent here rather than left to colour the next `\def`.
         self.long = false;
         self.outer = false;
+        self.protected = false;
         Ok(())
     }
 
@@ -1283,7 +1313,7 @@ impl Engine {
     }
 
     /// A `{...}` group's tokens, with the braces removed.
-    fn read_group_tokens(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+    pub fn read_group_tokens(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         loop {
             let Some(t) = lx.next_token(&self.cats) else {
                 return Err(TexError("Runaway argument".into()));
@@ -1965,7 +1995,15 @@ impl Engine {
             match &t {
                 Token::Cs(name) => {
                     let name = *name;
-                    if !self.try_expand(lx, name, true)? {
+                    // A `\protected` macro is NOT expanded here: that is the
+                    // whole point of the prefix. It goes into the body as
+                    // itself and runs when the body does, so redefining it
+                    // afterwards changes what the \edef'd macro produces.
+                    let protected = matches!(
+                        self.meanings.get(&name),
+                        Some(Meaning::Macro(m)) if m.protected
+                    );
+                    if protected || !self.try_expand(lx, name, true)? {
                         out.push(t);
                     }
                 }
@@ -2331,6 +2369,7 @@ impl Engine {
             body,
             long: self.long,
             outer: self.outer,
+            protected: self.protected,
         }
     }
 
@@ -2342,6 +2381,11 @@ impl Engine {
     /// `\outer`, likewise.
     pub fn set_outer_prefix(&mut self, on: bool) {
         self.outer = on;
+    }
+
+    /// `\protected`, likewise.
+    pub fn set_protected_prefix(&mut self, on: bool) {
+        self.protected = on;
     }
 
     pub fn set_global_prefix(&mut self, on: bool) {

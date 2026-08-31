@@ -82,6 +82,11 @@
     "\\toksdef"
     "\\numexpr"
     "\\dimexpr"
+    "\\unless"
+    "\\protected"
+    "\\detokenize"
+    "\\csstring"
+    "\\Uchar"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -191,6 +196,11 @@
     (puthash "\\toksdef" "\\toksdef  —  Give a token register a name, as `\\countdef` does for a count. [Registers]" table)
     (puthash "\\numexpr" "\\numexpr  —  An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. [Registers]" table)
     (puthash "\\dimexpr" "\\dimexpr  —  The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. [Registers]" table)
+    (puthash "\\unless" "\\unless  —  Negate the conditional that follows: `\\unless\\ifnum 1>2 A\\else B\\fi` runs A. [Conditionals]" table)
+    (puthash "\\protected" "\\protected  —  A definition prefix: the macro does not expand inside an `\\edef`, it survives as itself and runs when the result does. [Macro definition]" table)
+    (puthash "\\detokenize" "\\detokenize  —  The tokens of `{...}` written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. [Expansion]" table)
+    (puthash "\\csstring" "\\csstring  —  `\\string` without the escape character: `\\csstring\\foo` is `foo` where `\\string\\foo` is `\\foo`. [Expansion]" table)
+    (puthash "\\Uchar" "\\Uchar  —  The character with the given code: `\\Uchar65` is `A`. [Expansion]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

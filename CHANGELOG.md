@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Five more of LuaTeX's expander primitives: `\unless`, `\protected`,
+  `\detokenize`, `\csstring` and `\Uchar`. `\protected` joins `\long` and
+  `\outer` as a definition prefix and stops `\edef` expanding the macro;
+  `\unless` negates the conditional that follows, which is that conditional
+  with its arms exchanged. All compared against LuaTeX 1.24.0 in
+  `tests/etex.rs`.
 - Page structure. `\newpage`, `\clearpage`, `\cleardoublepage` and `\pagebreak`
   were defined by the prelude to expand to nothing, and `\chapter` was its own
   argument -- the heading text and nothing else. So no break in a document
