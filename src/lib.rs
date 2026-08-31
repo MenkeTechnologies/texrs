@@ -129,6 +129,9 @@ fn without_marks(text: &str) -> String {
             // what says the same thing in text.
             crate::typeset::CENTRE | crate::typeset::CENTRE_END => {}
             crate::typeset::VERTICAL_SPACE => {}
+            // A page break is a boundary in the text too, so it comes back as
+            // one rather than as a form feed nobody asked to read.
+            crate::typeset::PAGE_BREAK => out.push('\n'),
             crate::typeset::FACE_PUSH => face_code = true,
             crate::typeset::FACE_POP => {}
             _ if face_code => face_code = false,
@@ -139,6 +142,15 @@ fn without_marks(text: &str) -> String {
         }
     }
     out
+}
+
+/// The document's text with every typesetting marker taken out.
+///
+/// Public so the marker registry can be walked against it: see
+/// `typeset::MARKERS`, which exists because this is the function three
+/// implementations in a row forgot.
+pub fn text_without_marks(text: &str) -> String {
+    without_marks(text)
 }
 
 /// The document's text WITH the colour markers, for the typesetter.

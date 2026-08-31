@@ -1959,6 +1959,35 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
 /// words are, since Rust counts it as whitespace and would otherwise drop it.
 pub const PAGE_BREAK: char = '\u{c}';
 
+/// Every character the typesetting path reads as an INSTRUCTION rather than as
+/// text, and whether one character of argument follows it.
+///
+/// A marker says where a line sits, what face it is in, what colour it takes --
+/// none of which the document wrote. So none may ever reach a reader, and
+/// `without_marks` in lib.rs is the one place that decides what a reader gets.
+///
+/// The list exists because forgetting that place is the mistake this port keeps
+/// making. Three separate parallel implementations added a marker, taught
+/// `to_pdf` and the line breaker about it, and left `without_marks` alone: one
+/// of them put 122 raw control characters into a book's `--text` output, and
+/// the file's own comment already recorded the same fault as fixed once before.
+/// `every_marker_is_stripped_from_the_text_a_reader_gets` walks this list, so a
+/// constant added without an entry here fails a test rather than shipping.
+pub const MARKERS: &[(char, bool)] = &[
+    // The colour trio: a spec opens, runs to its close, and a pop ends the run.
+    ('\u{1}', false),
+    ('\u{2}', false),
+    ('\u{3}', false),
+    (LISTING_BREAK, false),
+    (PAGE_BREAK, false),
+    (CENTRE, false),
+    (CENTRE_END, false),
+    (VERTICAL_SPACE, false),
+    // The one that carries an argument: the character naming the face.
+    (FACE_PUSH, true),
+    (FACE_POP, false),
+];
+
 /// The end of a line INSIDE a code listing, carried through the text the way a
 /// page break is.
 ///

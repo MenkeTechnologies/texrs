@@ -220,3 +220,51 @@ fn csstring_reaches_running_text_as_string_does() {
     let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\def\\f{F}[\\csstring\\f][\\string\\f]\n\\end\n";
     assert_eq!(text(src).trim(), "[f][\\f]");
 }
+
+/// No marker may reach the text a reader gets, for every marker there is.
+///
+/// This is the check three parallel implementations of this port each needed
+/// and none had. Each added a marker to typeset.rs, taught the PDF path to draw
+/// it, and left `without_marks` alone -- so the control character and its
+/// argument were written straight into `texrs --text`: 122 of them in awkrs
+/// from one of them, against zero at the commit before. Walking the registry
+/// means the next one fails here instead.
+#[test]
+fn every_marker_is_stripped_from_the_text_a_reader_gets() {
+    for (marker, has_argument) in texrs::typeset::MARKERS {
+        let mut marked = String::from("alpha");
+        marked.push(*marker);
+        if *has_argument {
+            // The argument is a letter, so leaving it would put an `m` in the
+            // middle of the words either side.
+            marked.push('m');
+        }
+        marked.push_str("bravo");
+        let got = texrs::text_without_marks(&marked);
+        let leaked: Vec<char> = got
+            .chars()
+            .filter(|c| c.is_control() && *c != '\n')
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "U+{:04X} left {leaked:?} in the text a reader gets: {got:?}",
+            *marker as u32
+        );
+        assert!(
+            !got.contains("alphambravo"),
+            "U+{:04X} left its argument character in the words: {got:?}",
+            *marker as u32
+        );
+    }
+}
+
+/// The colour spec between its markers is not text either.
+#[test]
+fn a_colour_spec_does_not_reach_the_reader_as_digits() {
+    // `\u{1}0.5,0,0\u{2}words\u{3}` is one coloured run. The r,g,b between
+    // the first two markers is an instruction; printing it would put "0.5,0,0"
+    // in front of every coloured word.
+    let marked = "before\u{1}0.5,0,0\u{2}words\u{3}after";
+    let got = texrs::text_without_marks(marked);
+    assert_eq!(got, "beforewordsafter", "got {got:?}");
+}
