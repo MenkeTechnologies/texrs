@@ -28,6 +28,20 @@ fn dispatched() -> BTreeSet<String> {
     ] {
         for line in src.lines() {
             let line = line.trim();
+            // Dispatch is not always a match arm. `\numexpr` and `\dimexpr` are
+            // reached by `if name.name() == "numexpr"`, which has no `=>` in
+            // it, so the scan below could not see them and reported two
+            // primitives as undispatched while they demonstrably ran --
+            // `\count0=\numexpr 3*4\relax` gives 12. A comparison against a
+            // name IS a dispatch, and is read as one.
+            for hit in line.match_indices(".name() == \"") {
+                let rest = &line[hit.0 + hit.1.len()..];
+                if let Some(name) = rest.split('"').next() {
+                    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphabetic()) {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
             // A dispatch arm: `"name" => ...`, `"a" | "b" => ...`, or a bare
             // `"name",` inside the CONDITIONALS table.
             let is_arm = line.contains("=>") || line.ends_with("\",");
