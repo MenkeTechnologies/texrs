@@ -132,6 +132,12 @@
     "\\setromanfont"
     "\\setsansfont"
     "\\setmonofont"
+    "\\ttfamily"
+    "\\bfseries"
+    "\\itshape"
+    "\\rmfamily"
+    "\\sffamily"
+    "\\normalfont"
     "\\makeatletter"
     "\\makeatother")
   "Every primitive texrs resolves, for completion at point.")
@@ -256,7 +262,13 @@
     (puthash "\\setmainfont" "\\setmainfont  —  Record the document's body typeface, and keep the name rather than dropping it. [LaTeX]" table)
     (puthash "\\setromanfont" "\\setromanfont  —  The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps. [LaTeX]" table)
     (puthash "\\setsansfont" "\\setsansfont  —  Record the document's sans-serif family. [LaTeX]" table)
-    (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`. [LaTeX]" table)
+    (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`, and the face `\\ttfamily` selects. [LaTeX]" table)
+    (puthash "\\ttfamily" "\\ttfamily  —  Set in the monospace face, until the group holding the declaration closes. [LaTeX]" table)
+    (puthash "\\bfseries" "\\bfseries  —  Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. [LaTeX]" table)
+    (puthash "\\itshape" "\\itshape  —  Set in the italic face, until the group holding the declaration closes; `\\textit{...}` and `\\emph{...}` are both `{\\itshape ...}`. [LaTeX]" table)
+    (puthash "\\rmfamily" "\\rmfamily  —  Back to the body face, until the group holding the declaration closes. [LaTeX]" table)
+    (puthash "\\sffamily" "\\sffamily  —  Select the sans-serif family. [LaTeX]" table)
+    (puthash "\\normalfont" "\\normalfont  —  Undo every face declaration in force and set in the body face, to the end of the group. [LaTeX]" table)
     (puthash "\\makeatletter" "\\makeatletter  —  Make `@` a letter (category code 11), so LaTeX's internal names like `\\@ifnextchar` become spellable as single control sequences. [LaTeX]" table)
     (puthash "\\makeatother" "\\makeatother  —  Make `@` an ordinary character again (category code 12), closing a `\\makeatletter` region. [LaTeX]" table)
     table)

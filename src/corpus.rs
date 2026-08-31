@@ -751,7 +751,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\setmainfont",
         "LaTeX",
-        "Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names `.tfm` fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed.",
+        "Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names `.tfm` fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed — and read: `Path=` and `UprightFont=` name a file the document ships, and `BoldFont=` and `ItalicFont=` name the files `\\bfseries` and `\\itshape` are set from.",
         "\\setmainfont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmainfont{Arimo}   % embedded if Arimo is installed, else Helvetica's metrics",
     ),
     (
@@ -769,8 +769,44 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\setmonofont",
         "LaTeX",
-        "Record the document's monospace family, the counterpart of `\\setsansfont`. Read and kept, its options consumed, and likewise not yet selected by either backend — the PDF page is set in the main family throughout.",
-        "\\setmonofont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmonofont{Cousine}",
+        "Record the document's monospace family, the counterpart of `\\setsansfont`, and the face `\\ttfamily` selects. Its options are read the way `\\setmainfont`'s are, so a `Path=`/`UprightFont=` naming a file the document ships is what the PDF backend embeds — which is the usual case, since a book carries its monospace face beside itself rather than installing it. The DVI backend names `.tfm` fonts and still sets in Computer Modern throughout.",
+        "\\setmonofont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmonofont{Cousine}\n\\setmonofont{ShareTechMono}[Path=./.fonts/,Extension=.ttf,UprightFont=ShareTechMono-Regular]",
+    ),
+    (
+        "\\ttfamily",
+        "LaTeX",
+        "Set in the monospace face, until the group holding the declaration closes. This is what `\\texttt{...}` is made of — `{\\ttfamily ...}` — and it is honoured here rather than in the text command, because a document that redefines `\\texttt` to colour its inline code writes the declaration in the replacement. The face is the file or family `\\setmonofont` named, embedded when it can be found, Courier when it cannot, and the main face when the document named no monospace family at all.",
+        "{\\ttfamily fixed pitch}\n\\texttt{fixed pitch}",
+    ),
+    (
+        "\\bfseries",
+        "LaTeX",
+        "Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. The face is the file `BoldFont=` named in the main family's options, or the bold member of the fourteen — `Helvetica-Bold`, `Times-Bold` — and the main face where the document supplies neither. A variable font whose bold is the upright file at another weight is the SAME file, so it comes out as the main face: instantiating a weight axis is not something this does.",
+        "{\\bfseries heavy}\n\\textbf{heavy}",
+    ),
+    (
+        "\\itshape",
+        "LaTeX",
+        "Set in the italic face, until the group holding the declaration closes; `\\textit{...}` and `\\emph{...}` are both `{\\itshape ...}`. The face is the file `ItalicFont=` named in the main family's options, or the italic member of the fourteen — `Helvetica-Oblique`, `Times-Italic` — and the main face where the document supplies neither.",
+        "{\\itshape stressed}\n\\emph{stressed}",
+    ),
+    (
+        "\\rmfamily",
+        "LaTeX",
+        "Back to the body face, until the group holding the declaration closes. One face is in force at a time here rather than a family, a series and a shape combining, so this replaces whatever the group had selected rather than changing one axis of it.",
+        "{\\ttfamily code \\rmfamily prose}",
+    ),
+    (
+        "\\sffamily",
+        "LaTeX",
+        "Select the sans-serif family. `\\setsansfont` is read and kept, but no backend selects that family yet, so this sets in the main face — which is what a document asking for sans in a sans-set book wanted anyway. It is a declaration and runs to the end of its group.",
+        "{\\sffamily sans}",
+    ),
+    (
+        "\\normalfont",
+        "LaTeX",
+        "Undo every face declaration in force and set in the body face, to the end of the group. A heading writes it to start from the document's own face rather than from whatever was selected around it.",
+        "{\\bfseries heavy \\normalfont plain}",
     ),
     (
         "\\makeatletter",

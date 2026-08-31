@@ -36,15 +36,33 @@
 \def\outer{}
 %
 % ---- text that survives as its argument ---------------------------------
-\newcommand{\texttt}[1]{#1}
-\newcommand{\textbf}[1]{#1}
-\newcommand{\textit}[1]{#1}
-\newcommand{\textrm}[1]{#1}
-\newcommand{\textsf}[1]{#1}
+% The ones that name a FACE wrap their argument in the face MARKERS the
+% typesetter reads: U+000E and one character naming the face to open, U+000F to
+% close -- typeset.rs's FACE_PUSH and FACE_POP, and the same shape of thing as
+% the colour markers the lowerer writes. Defining them as `#1' is what set every
+% one of the corpus's 683,577 \texttt in the body font.
+%
+% latex.ltx writes these as `{\ttfamily #1}' instead, and that is not what is
+% wanted here: the group would reach \message as a pair of braces around the
+% argument, so a document's own diagnostics would come out `{a}' where they say
+% `\texttt{a}'. The markers travel the text and are stripped from everything
+% that is not a page, which braces cannot be.
+%
+% `^^11' is TeX's own notation for a control character (tex.web S352) and is
+% read only while `^' is a superscript character, which is what the catcodes
+% either side of these definitions are for. INITEX leaves `^' ordinary, so it
+% goes back to ordinary rather than to plain.tex's meaning.
+\catcode`\^=7
+\newcommand{\texttt}[1]{^^11m#1^^12}
+\newcommand{\textbf}[1]{^^11b#1^^12}
+\newcommand{\textit}[1]{^^11i#1^^12}
+\newcommand{\textrm}[1]{^^11r#1^^12}
+\newcommand{\textsf}[1]{^^11r#1^^12}
 \newcommand{\textsc}[1]{#1}
-\newcommand{\textsl}[1]{#1}
-\newcommand{\textnormal}[1]{#1}
-\newcommand{\emph}[1]{#1}
+\newcommand{\textsl}[1]{^^11i#1^^12}
+\newcommand{\textnormal}[1]{^^11r#1^^12}
+\newcommand{\emph}[1]{^^11i#1^^12}
+\catcode`\^=12
 \newcommand{\underline}[1]{#1}
 \newcommand{\mbox}[1]{#1}
 \newcommand{\hbox}[1]{#1}

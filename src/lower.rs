@@ -248,6 +248,11 @@ impl Lowerer {
         // it is a switch that lasts until the group closes, so it is ended
         // here rather than by the command.
         let mut centre_open = false;
+        // And whether a `\ttfamily` in this group is. The same kind of thing in
+        // the same place: a face declaration is a switch that runs to the end
+        // of its group, which is what `{\ttfamily code}` -- the body every book
+        // redefines `\texttt` to -- depends on.
+        let mut face_open = false;
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
@@ -309,6 +314,7 @@ impl Lowerer {
                     Token::Char(_, Cat::EndGroup) => {
                         self.close_colour(&mut out, &mut colour_open);
                         self.close_centre(&mut out, &mut centre_open);
+                        self.close_face(&mut out, &mut face_open);
                         return Ok(Self::drop_empty_line_directives(out));
                     }
                     // An alignment tab is a cell BOUNDARY, not a character the
@@ -337,6 +343,7 @@ impl Lowerer {
                     lx.push_back(&[Token::Cs(name)]);
                     self.close_colour(&mut out, &mut colour_open);
                     self.close_centre(&mut out, &mut centre_open);
+                    self.close_face(&mut out, &mut face_open);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
             }
@@ -381,6 +388,12 @@ impl Lowerer {
             // nothing, which is why a book full of `\color{neonCyan}` came out
             // entirely black.
             if self.text_output && self.lower_colour(lx, name, &mut out, &mut colour_open)? {
+                continue;
+            }
+            // The face, in the same place and for the same reason: the prelude
+            // defines `\ttfamily` and its siblings to expand to nothing, so
+            // every `\texttt` in every book was set in the body font.
+            if self.text_output && self.lower_face(name, &mut out, &mut face_open) {
                 continue;
             }
             // Page structure, for the same reason and in the same place.
@@ -638,6 +651,14 @@ impl Lowerer {
                     if k == "setmainfont" || k == "setromanfont" {
                         self.fonts.main_file = crate::typeset::FontFile::parse(&options);
                     }
+                    // The monospace face ships beside the document exactly as
+                    // the main one does -- `UprightFont=ShareTechMono-Regular`
+                    // in every corpus book -- so the family name on its own
+                    // resolves to nothing and `\texttt` falls back to the body
+                    // font it was meant to escape.
+                    if k == "setmonofont" {
+                        self.fonts.mono_file = crate::typeset::FontFile::parse(&options);
+                    }
                     let slot = match k {
                         "setsansfont" => &mut self.fonts.sans,
                         "setmonofont" => &mut self.fonts.mono,
@@ -749,6 +770,7 @@ impl Lowerer {
         }
         self.close_colour(&mut out, &mut colour_open);
         self.close_centre(&mut out, &mut centre_open);
+        self.close_face(&mut out, &mut face_open);
         Ok(Self::drop_empty_line_directives(out))
     }
 
@@ -1060,6 +1082,51 @@ impl Lowerer {
     fn close_colour(&self, out: &mut Vec<Cmd>, colour_open: &mut bool) {
         if std::mem::take(colour_open) {
             self.push_text(out, "\u{3}");
+        }
+    }
+
+    /// The face declarations, before the prelude's stubs can swallow them.
+    ///
+    /// These are LaTeX's font switches, and every one of them is what a text
+    /// command is made of: `\texttt{x}` is `{\ttfamily x}`, which is how a book
+    /// that redefines `\texttt` -- and the corpus books all do, to colour their
+    /// inline code -- still reaches the mono face. The face travels to the page
+    /// as a marker in the text, `\u{11}` and a code to open and `\u{12}` to
+    /// close, because a face wraps a run of characters rather than being one.
+    ///
+    /// Returns whether the command was one of these.
+    fn lower_face(
+        &self,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+        face_open: &mut bool,
+    ) -> bool {
+        use crate::typeset::Face;
+        let face = match name.name() {
+            "ttfamily" => Face::Mono,
+            "bfseries" => Face::Bold,
+            "itshape" => Face::Italic,
+            // Back to the body face. `\normalfont` is the one a heading writes
+            // to undo everything, and the two family switches are what a
+            // document says to leave the mono face inside a group that set it.
+            "rmfamily" | "sffamily" | "normalfont" => Face::Main,
+            _ => return false,
+        };
+        // A second switch in one group REPLACES the first, as a second `\color`
+        // does: there is one face in force, not a stack of them per group.
+        self.close_face(out, face_open);
+        self.push_text(
+            out,
+            &format!("{}{}", crate::typeset::FACE_PUSH, face.code()),
+        );
+        *face_open = true;
+        true
+    }
+
+    /// End a face declaration that is still in force, if there is one.
+    fn close_face(&self, out: &mut Vec<Cmd>, face_open: &mut bool) {
+        if std::mem::take(face_open) {
+            self.push_text(out, &crate::typeset::FACE_POP.to_string());
         }
     }
 

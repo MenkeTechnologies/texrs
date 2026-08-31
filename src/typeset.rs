@@ -238,6 +238,19 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
             w.special("color pop");
             continue;
         }
+        // A face marker names a font this path does not have: the chain is
+        // Computer Modern and its fallbacks, chosen by which glyph is where,
+        // not by what the document asked for. Skipping it is not just a
+        // refusal to honour it -- the code character after U+000E is a LETTER,
+        // so leaving the pair in the stream sets an `m` in the middle of every
+        // \texttt in the book.
+        if ch == FACE_PUSH {
+            let _ = chars.next();
+            continue;
+        }
+        if ch == FACE_POP {
+            continue;
+        }
         if let Some((f, slot)) = chain.resolve(ch) {
             // A font switch is an op in the file, so it is emitted only when the
             // font actually changes -- one per run of characters, not one per
@@ -472,8 +485,8 @@ const APPROXIMATIONS: &[(char, &str)] = &[
     ('’', "'"),
 ];
 
-/// The characters of `text` that will actually be SET, with the colour markers
-/// dropped.
+/// The characters of `text` that will actually be SET, with the colour and face
+/// markers dropped.
 ///
 /// A marker's SPEC -- the `r,g,b` between U+0001 and U+0002 -- has to be
 /// skipped whole. Charging the three control characters nothing is not enough:
@@ -483,8 +496,12 @@ const APPROXIMATIONS: &[(char, &str)] = &[
 /// PDF side kept charging for them, breaking its lines at a quarter of the
 /// measure -- so the skip lives here, where both measuring paths reach it,
 /// rather than being written out twice and drifting apart again.
+///
+/// A face marker is the same shape and skipped the same way: U+000E and the
+/// ONE character naming the face, U+000F on its own.
 pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut in_spec = false;
+    let mut face_code = false;
     text.chars().filter(move |&ch| match ch {
         '\u{1}' => {
             in_spec = true;
@@ -500,6 +517,15 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
         // measuring it would push the line off centre by whatever the font
         // happens to have in that slot.
         CENTRE | CENTRE_END | VERTICAL_SPACE => false,
+        FACE_PUSH => {
+            face_code = true;
+            false
+        }
+        FACE_POP => false,
+        _ if face_code => {
+            face_code = false;
+            false
+        }
         _ => !in_spec,
     })
 }
@@ -607,6 +633,10 @@ pub struct FontFile {
     pub path: Option<String>,
     /// `UprightFont=` -- the file's name, without its extension.
     pub upright: Option<String>,
+    /// `BoldFont=` -- the file `\textbf` is set from, when there is one.
+    pub bold: Option<String>,
+    /// `ItalicFont=` -- the file `\emph` and `\textit` are set from.
+    pub italic: Option<String>,
     /// `Extension=` -- `.ttf`, including the dot.
     pub extension: Option<String>,
 }
@@ -621,6 +651,13 @@ impl FontFile {
             match key.trim() {
                 "Path" => out.path = Some(value.to_string()),
                 "UprightFont" => out.upright = Some(value.to_string()),
+                // The faces `\textbf` and `\emph` ask for. A book names them in
+                // the same option list as the upright file and every one of the
+                // corpus books ships the files, so the only thing that ever
+                // stopped `\emph` from being italic was that these two keys
+                // were read past.
+                "BoldFont" => out.bold = Some(value.to_string()),
+                "ItalicFont" => out.italic = Some(value.to_string()),
                 "Extension" => out.extension = Some(value.to_string()),
                 _ => {}
             }
@@ -636,9 +673,27 @@ impl FontFile {
     /// document, so a path that has gone stale is retried by its last
     /// component against the document's own directory.
     pub fn resolve(&self, near: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-        let upright = self.upright.as_deref()?;
+        self.resolve_face(Face::Main, near)
+    }
+
+    /// The file for one face, looked for in the same two places.
+    ///
+    /// `BoldFont=` and `ItalicFont=` name a file the way `UprightFont=` does
+    /// and live in the same directory, so they are resolved by the same rules
+    /// rather than by a second copy of them. A face the document named no file
+    /// for resolves to nothing, and the caller falls back to the main face.
+    pub fn resolve_face(
+        &self,
+        face: Face,
+        near: Option<&std::path::Path>,
+    ) -> Option<std::path::PathBuf> {
+        let named = match face {
+            Face::Bold => self.bold.as_deref(),
+            Face::Italic => self.italic.as_deref(),
+            _ => self.upright.as_deref(),
+        }?;
         let extension = self.extension.as_deref().unwrap_or(".ttf");
-        let file = format!("{upright}{extension}");
+        let file = format!("{named}{extension}");
         if let Some(path) = &self.path {
             let full = std::path::Path::new(path).join(&file);
             if full.is_file() {
@@ -708,7 +763,76 @@ pub struct Families {
     pub main_file: FontFile,
     pub sans: Option<String>,
     pub mono: Option<String>,
+    /// The same for `\setmonofont`: every corpus book ships its monospace face
+    /// beside itself, so the family name alone resolves to nothing and
+    /// `\texttt` would be set in the body font after all.
+    pub mono_file: FontFile,
 }
+
+/// The face a stretch of text is set in.
+///
+/// `\texttt` appears 683,577 times in the corpus, `\emph` 35,369 and `\textbf`
+/// 34,159, and all three were set in the body face: nothing between the mouth
+/// and the page carried WHICH face was asked for, so a PDF came out with one
+/// font resource and one `Tf` operator, and every code identifier in every book
+/// was set in the prose font.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Face {
+    /// What `\setmainfont` named: the document's prose.
+    #[default]
+    Main,
+    /// `\ttfamily`, which is what `\texttt` is.
+    Mono,
+    /// `\bfseries`, which is what `\textbf` is.
+    Bold,
+    /// `\itshape`, which is what `\emph` and `\textit` are.
+    Italic,
+}
+
+impl Face {
+    /// The one character that names this face inside a marker.
+    pub fn code(self) -> char {
+        match self {
+            Face::Main => 'r',
+            Face::Mono => 'm',
+            Face::Bold => 'b',
+            Face::Italic => 'i',
+        }
+    }
+
+    /// The face a marker names. Anything else is the main face: a marker that
+    /// arrives damaged must not take the rest of the document with it.
+    pub fn from_code(code: char) -> Face {
+        match code {
+            'm' => Face::Mono,
+            'b' => Face::Bold,
+            'i' => Face::Italic,
+            _ => Face::Main,
+        }
+    }
+
+    /// Where this face's font sits in the four the page is set from.
+    fn index(self) -> usize {
+        match self {
+            Face::Main => 0,
+            Face::Mono => 1,
+            Face::Bold => 2,
+            Face::Italic => 3,
+        }
+    }
+}
+
+/// A face marker opens: U+000E and one [`Face::code`] character.
+///
+/// Colour travels the text as a marker because it wraps a run of characters
+/// rather than being one; a face is the same shape of thing and travels the
+/// same way. Two characters rather than colour's variable-length spec, because
+/// there are four faces and no spec to carry.
+pub const FACE_PUSH: char = '\u{11}';
+
+/// A face marker closes. The stack under it is what `\ttfamily` inside a
+/// `\textbf` needs: the outer face comes back when the inner one ends.
+pub const FACE_POP: char = '\u{12}';
 
 /// What a requested family maps to among the fourteen fonts a PDF reader has.
 ///
@@ -752,6 +876,26 @@ pub fn base14_for(family: &str) -> &'static str {
     "Helvetica"
 }
 
+/// The member of the fourteen that carries one face of `base`.
+///
+/// The fourteen are four faces of three families plus two symbol fonts, so a
+/// document that named a family but shipped no file for its bold or italic
+/// still gets a face that is bold or italic -- which is the whole request. The
+/// names are not built the same way for all three: Helvetica and Courier take
+/// `-Bold` and `-Oblique`, and Times-Roman's siblings drop the `Roman` for
+/// `Times-Bold` and `Times-Italic`. Getting that wrong names a font no reader
+/// has and the substitution is silent.
+pub fn base14_face(base: &str, face: Face) -> String {
+    match face {
+        Face::Main => base.to_string(),
+        Face::Mono => "Courier".to_string(),
+        Face::Bold if base == "Times-Roman" => "Times-Bold".to_string(),
+        Face::Italic if base == "Times-Roman" => "Times-Italic".to_string(),
+        Face::Bold => format!("{base}-Bold"),
+        Face::Italic => format!("{base}-Oblique"),
+    }
+}
+
 /// Set a document straight to PDF, honouring the font it asked for.
 ///
 /// The DVI path names `.tfm` fonts and so can only ever set in Computer Modern;
@@ -787,13 +931,54 @@ pub fn to_pdf(
         Font::Base14(requested.map(base14_for).unwrap_or("Helvetica").to_string())
     });
 
+    // The other three faces, in the order `Face::index` puts them: main, mono,
+    // bold, italic. Each is the file the document named for it, then the family
+    // it named, then the member of the fourteen that carries that face -- and
+    // the main font when the document asked for none of those, so a `\texttt`
+    // in a document with no monospace family still sets rather than vanishing.
+    let base = match &main {
+        Font::Base14(name) => name.clone(),
+        _ => requested.map(base14_for).unwrap_or("Helvetica").to_string(),
+    };
+    let mono = families
+        .mono_file
+        .resolve(near)
+        .and_then(|file| embed_file(&file))
+        .or_else(|| families.mono.as_deref().and_then(embed_family))
+        .or_else(|| {
+            families
+                .mono
+                .as_deref()
+                .map(|f| Font::Base14(base14_for(f).to_string()))
+        })
+        .unwrap_or_else(|| main.clone());
+    // A bold or italic FILE is what the corpus books ship: `BoldFont=Arimo-VF`
+    // beside `UprightFont=Arimo-VF`. Where the two name the same file the font
+    // is the same font, `Page::text_in` recognises it as one and the page is
+    // set in the main face -- which is the honest outcome, since a variable
+    // font's weight axis is not something this can instantiate.
+    let face_file = |face: Face| {
+        families
+            .main_file
+            .resolve_face(face, near)
+            .and_then(|file| embed_file(&file))
+    };
+    let bold =
+        face_file(Face::Bold).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Bold)));
+    let italic =
+        face_file(Face::Italic).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Italic)));
+    let fonts = [main.clone(), mono, bold, italic];
+
     // Measure in the face that will be printed. An embedded font carries its
     // own widths; without one, cmr10's are the closest thing installed, and a
     // line may then run a little long or short of the measure.
-    let embedded_widths = match &main {
-        Font::TrueType { widths, .. } => Some(widths.clone()),
-        _ => None,
-    };
+    let embedded_widths: Vec<Option<Vec<i64>>> = fonts
+        .iter()
+        .map(|f| match f {
+            Font::TrueType { widths, .. } => Some(widths.clone()),
+            _ => None,
+        })
+        .collect();
     let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
     // Every branch measures through `printing_chars`. A marker's spec is digits
     // and commas, which every one of these tables has a real width for, so a
@@ -801,8 +986,8 @@ pub fn to_pdf(
     // spec characters plus three markers -- and a line of them broke after four
     // words where the same line uncoloured holds seventeen. It cost whole
     // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
-    let width_of = |word: &str| -> f64 {
-        if let Some(w) = &embedded_widths {
+    let width_of = |word: &str, face: Face| -> f64 {
+        if let Some(Some(w)) = embedded_widths.get(face.index()) {
             // PDF widths are 1/1000 em, and codes below 32 are not in the table.
             return printing_chars(word)
                 .map(|c| {
@@ -838,6 +1023,9 @@ pub fn to_pdf(
         DEFAULT_COLOUR.1.to_string(),
         DEFAULT_COLOUR.2.to_string(),
     )];
+    // The face stack, for the same reason: `\ttfamily` holds until its group
+    // closes, and a group can hold a paragraph.
+    let mut faces: Vec<Face> = vec![Face::Main];
 
     let mut pages = Vec::new();
     for chunk in paginate(&lines, per_page) {
@@ -873,11 +1061,32 @@ pub fn to_pdf(
             // line to one colour state was the first attempt and drew none at
             // all, because the closing marker put the state back before
             // anything was emitted.
+            // A line is a sequence of RUNS, each with its own colour and face:
+            // the markers turn both on and off part way along it. Collapsing the
+            // line to one colour state was the first attempt and drew none at
+            // all, because the closing marker put the state back before
+            // anything was emitted.
+            //
+            // A centred line is measured the way it will be DRAWN, each run in
+            // its own face, because a line of code centred on the prose font's
+            // widths sits off centre by the difference. The splitter is asked
+            // on copies of the stacks so the drawing pass below still walks
+            // them for real.
+            let width: f64 = match centred {
+                true => {
+                    let (mut c, mut f) = (colours.clone(), faces.clone());
+                    styled_runs(line, &mut c, &mut f)
+                        .iter()
+                        .map(|(plain, _, face)| width_of(plain, *face))
+                        .sum()
+                }
+                false => 0.0,
+            };
             let mut x = match centred {
-                true => layout.margin + (layout.measure - width_of(line)).max(0.0) / 2.0,
+                true => layout.margin + (layout.measure - width).max(0.0) / 2.0,
                 false => layout.margin,
             };
-            for (plain, (r, g, b)) in colour_runs(line, &mut colours) {
+            for (plain, (r, g, b), face) in styled_runs(line, &mut colours, &mut faces) {
                 if plain.is_empty() {
                     continue;
                 }
@@ -885,8 +1094,9 @@ pub fn to_pdf(
                 // gets the colour it was NESTED IN back. Resetting to `0 g`
                 // instead is what drew the rest of a dark-paged book black.
                 page.content.push_str(&format!("{r} {g} {b} rg\n"));
-                page.text_in(main.clone(), layout.size, x, y, &plain);
-                x += width_of(&plain);
+                let font = fonts[face.index()].clone();
+                page.text_in(font, layout.size, x, y, &plain);
+                x += width_of(&plain, face);
             }
             y -= layout.leading;
         }
@@ -896,12 +1106,22 @@ pub fn to_pdf(
 }
 
 /// Break lines with a caller-supplied measurer.
+///
+/// The measurer is asked for a width IN A FACE, and the face is state the text
+/// carries: a `\ttfamily` holds until its group closes, so the stack has to
+/// live across words, lines and paragraphs here exactly as it does where the
+/// page is drawn. Measuring a monospace word in the prose font is how a line
+/// of code came out narrower than it sets.
 fn break_lines_measured(
     text: &str,
     layout: &Layout,
-    width_of: &dyn Fn(&str) -> f64,
+    width_of: &dyn Fn(&str, Face) -> f64,
 ) -> Vec<String> {
-    let space = width_of(" ");
+    // The breaker cares about the face and not about the colour, but the two
+    // markers are interleaved in one stream, so the same splitter reads both
+    // and the colour half goes on a stack nothing here looks at.
+    let mut colours: Vec<Spec> = Vec::new();
+    let mut faces: Vec<Face> = vec![Face::Main];
     let mut lines = Vec::new();
     // Centring is a REGION and outlives the paragraph its marker landed in: a
     // title page is one `\begin{center}` holding half a dozen `\par`-separated
@@ -929,7 +1149,15 @@ fn break_lines_measured(
                 if space_number > 0 {
                     lines.push(VERTICAL_SPACE.to_string());
                 }
-                fill(part, &mut centred, layout, space, width_of, &mut lines);
+                fill(
+                    part,
+                    &mut centred,
+                    layout,
+                    &mut colours,
+                    &mut faces,
+                    width_of,
+                    &mut lines,
+                );
             }
         }
     }
@@ -944,12 +1172,14 @@ fn break_lines_measured(
 /// title -- so a word carrying one would be measured with it and set with it.
 /// Cutting there also ends the line in hand, which is what a change of
 /// alignment means: LaTeX's own `\centering` applies to whole paragraphs.
+#[allow(clippy::too_many_arguments)]
 fn fill(
     text: &str,
     centred: &mut bool,
     layout: &Layout,
-    space: f64,
-    width_of: &dyn Fn(&str) -> f64,
+    colours: &mut Vec<Spec>,
+    faces: &mut Vec<Face>,
+    width_of: &dyn Fn(&str, Face) -> f64,
     lines: &mut Vec<String>,
 ) {
     let mut rest = text;
@@ -969,7 +1199,13 @@ fn fill(
             false => String::new(),
         };
         for word in stretch.split_whitespace() {
-            let ww = width_of(word);
+            // The space between two words is set in the face in force where it
+            // falls, which is the one the word BEFORE it left; and the word
+            // itself costs what it costs in the faces its own markers select.
+            // Measuring a monospace word in the prose font is how a line of
+            // code came out narrower than it sets.
+            let space = width_of(" ", current_face(faces));
+            let ww = word_width(word, colours, faces, width_of);
             let need = match line.is_empty() {
                 true => ww,
                 false => width + space + ww,
@@ -1001,8 +1237,6 @@ fn fill(
     }
 }
 
-/// Split a line into runs of text that share a colour.
-///
 /// Split broken lines into pages, at a forced break or when the page is full.
 ///
 /// `chunks(per_page)` alone cannot do this: it fills every page to the brim,
@@ -1099,11 +1333,12 @@ pub const VERTICAL_SPACE: char = '\u{10}';
 /// parsed, because they are handed straight back to PDF's `rg` operator.
 type Spec = (String, String, String);
 
-/// A stretch of a line and the colour it is drawn in.
+/// A stretch of a line, the colour it is drawn in and the face it is set in.
 ///
 /// Always a colour, never "none": the stack it comes off is seeded with the
-/// document's default, so every run says what it is drawn in.
-type ColourRun = (String, Spec);
+/// document's default, so every run says what it is drawn in. The face is the
+/// same -- the bottom of its stack is the main face.
+type StyledRun = (String, Spec, Face);
 
 /// The colour every LaTeX document starts in, as PDF wants it written.
 ///
@@ -1130,7 +1365,12 @@ const DEFAULT_COLOUR: (&str, &str, &str) = ("0", "0", "0");
 /// it, not just the one the marker landed on. Its bottom entry is the
 /// document's default and is never popped, so an unbalanced closing marker
 /// leaves that in force rather than nothing at all.
-fn colour_runs(line: &str, stack: &mut Vec<Spec>) -> Vec<ColourRun> {
+///
+/// The face markers are read in the SAME pass and split the line the same way,
+/// because the two nest inside each other: a book's `\texttt` is a mono face
+/// wrapped around a `\color`, and two passes would have to agree about where
+/// the other one's markers were.
+fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<StyledRun> {
     let mut runs = Vec::new();
     let mut text = String::new();
     let mut chars = line.chars().peekable();
@@ -1142,9 +1382,28 @@ fn colour_runs(line: &str, stack: &mut Vec<Spec>) -> Vec<ColourRun> {
     let top = |stack: &[Spec]| stack.last().cloned().unwrap_or_else(|| default.clone());
     while let Some(ch) = chars.next() {
         match ch {
+            FACE_PUSH => {
+                if !text.is_empty() {
+                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                }
+                // The code character belongs to the marker whatever it is: a
+                // marker read as one character would set the other as a glyph.
+                let code = chars.next().unwrap_or_else(|| Face::Main.code());
+                faces.push(Face::from_code(code));
+            }
+            FACE_POP => {
+                if !text.is_empty() {
+                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                }
+                // The bottom entry is the main face and is never popped, so an
+                // unbalanced close leaves the document in its own face.
+                if faces.len() > 1 {
+                    faces.pop();
+                }
+            }
             '\u{1}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack)));
+                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
                 }
                 let mut spec = String::new();
                 for c in chars.by_ref() {
@@ -1166,7 +1425,7 @@ fn colour_runs(line: &str, stack: &mut Vec<Spec>) -> Vec<ColourRun> {
             }
             '\u{3}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack)));
+                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
                 }
                 if stack.len() > 1 {
                     stack.pop();
@@ -1176,9 +1435,35 @@ fn colour_runs(line: &str, stack: &mut Vec<Spec>) -> Vec<ColourRun> {
         }
     }
     if !text.is_empty() {
-        runs.push((text, top(stack)));
+        runs.push((text, top(stack), current_face(faces)));
     }
     runs
+}
+
+/// The face in force, which is the main one when nothing has pushed.
+fn current_face(faces: &[Face]) -> Face {
+    faces.last().copied().unwrap_or_default()
+}
+
+/// What one word costs, in the faces it is set in.
+///
+/// A word can carry markers -- `\texttt{x}` is a marker, a letter and a marker
+/// -- so it is not necessarily one width in one face. The plain case is the
+/// one that runs a million times a book, so it is answered without splitting
+/// anything.
+fn word_width(
+    word: &str,
+    colours: &mut Vec<Spec>,
+    faces: &mut Vec<Face>,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> f64 {
+    if !word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP]) {
+        return width_of(word, current_face(faces));
+    }
+    styled_runs(word, colours, faces)
+        .iter()
+        .map(|(text, _, face)| width_of(text, *face))
+        .sum()
 }
 
 /// Find the file for a font family the document named.
@@ -1322,6 +1607,24 @@ mod font_file_tests {
             spec.path.as_deref(),
             Some("/private/tmp/build/scifi2/docs/.fonts/")
         );
+    }
+
+    #[test]
+    fn the_face_files_are_read_from_the_same_options() {
+        // `BoldFont=` and `ItalicFont=` sit in the option list `UprightFont=`
+        // does, and reading past them is why `\textbf` and `\emph` were set in
+        // the upright face. The corpus's bold IS the upright file at another
+        // weight, which is honest to report as such: what is asserted is that
+        // the key was READ, not that the file differs.
+        let spec = FontFile::parse(REAL);
+        assert_eq!(spec.bold.as_deref(), Some("Arimo-VF"));
+        assert_eq!(spec.italic.as_deref(), None, "this book names no italic");
+        let both = FontFile::parse("Extension=.ttf,UprightFont=A,ItalicFont=A-Italic");
+        assert_eq!(both.italic.as_deref(), Some("A-Italic"));
+        // A face the document named no file for resolves to nothing, whatever
+        // is beside the document, so the caller falls back to the main face
+        // rather than setting the italic in some file that happens to be there.
+        assert_eq!(both.resolve_face(super::Face::Bold, None), None);
     }
 
     #[test]

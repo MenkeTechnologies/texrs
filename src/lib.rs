@@ -71,9 +71,16 @@ pub use expand::{Engine, TexError};
 ///
 /// [`run_messages`] joins them the way the terminal line does; the REPL needs
 /// them apart, because it prints only the ones the newest line added.
+///
+/// The markers are stripped for the same reason they are stripped from the
+/// text: they are how a face and a colour reach a page, not characters of the
+/// document. `\message{\texttt{a}}` says `a`, and the prelude's `\texttt` wraps
+/// its argument in a face marker, so without this it would say it between two
+/// control characters.
 pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
     let chunk = compile(src)?;
-    crate::runtime::run(chunk).map_err(TexError)
+    let messages = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(messages.iter().map(|m| without_marks(m)).collect())
 }
 
 /// Compile `src` to fusevm bytecode and run it on the VM.
@@ -99,9 +106,14 @@ pub fn run_messages_list(src: &str) -> Result<Vec<String>, TexError> {
 /// says a code line ended, and a newline is what that is in text. Dropping it
 /// instead would put a program's statements back on one line, which is the
 /// weld this marker exists to undo.
+/// A face marker is the same kind of instruction and goes the same way:
+/// FACE_PUSH and the one character naming the face, FACE_POP on its own. The
+/// code character is a letter, so leaving it would put an `m` in front of every
+/// `\texttt`.
 fn without_marks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_spec = false;
+    let mut face_code = false;
     for ch in text.chars() {
         match ch {
             '\u{1}' => in_spec = true,
@@ -117,6 +129,9 @@ fn without_marks(text: &str) -> String {
             // what says the same thing in text.
             crate::typeset::CENTRE | crate::typeset::CENTRE_END => {}
             crate::typeset::VERTICAL_SPACE => {}
+            crate::typeset::FACE_PUSH => face_code = true,
+            crate::typeset::FACE_POP => {}
+            _ if face_code => face_code = false,
             c if in_spec => {
                 let _ = c;
             }
@@ -298,7 +313,7 @@ pub fn run_dvi(
 pub fn run_messages(src: &str) -> Result<String, TexError> {
     let chunk = compile(src)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;
-    Ok(msgs.join(" "))
+    Ok(without_marks(&msgs.join(" ")))
 }
 
 /// The same, for a document read from `path`: the bytecode comes from the cache
@@ -308,7 +323,7 @@ pub fn run_messages(src: &str) -> Result<String, TexError> {
 pub fn run_messages_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
     let chunk = compile_cached(path, src)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;
-    Ok(msgs.join(" "))
+    Ok(without_marks(&msgs.join(" ")))
 }
 
 /// The bytecode for the document at `path`, from the cache when the file has

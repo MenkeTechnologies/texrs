@@ -973,3 +973,203 @@ fn vertical_space_is_space_and_not_a_character() {
         "a --text run must not emit the markers: {plain:?}"
     );
 }
+
+/// Every `N 0 obj ... endobj` of a PDF, by its number.
+///
+/// The files texrs writes are uncompressed, so the objects can be read straight
+/// out of them -- which is what the reader below needs and what a PDF reader
+/// itself does.
+fn objects(pdf: &str) -> Vec<(u32, &str)> {
+    let mut out = Vec::new();
+    for chunk in pdf.split("endobj") {
+        let Some(at) = chunk.find(" 0 obj") else {
+            continue;
+        };
+        let Ok(number) = chunk[..at].trim().rsplit('\n').next().unwrap_or("").parse() else {
+            continue;
+        };
+        out.push((number, &chunk[at + " 0 obj".len()..]));
+    }
+    out.sort_by_key(|(n, _)| *n);
+    out
+}
+
+/// The value written after `key`, up to whatever ends it.
+fn value_of<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let rest = body.split_once(key)?.1.trim_start();
+    Some(rest.split([' ', '/', '>', '\n']).next().unwrap_or(rest))
+}
+
+/// Every run a PDF draws, with the `/BaseFont` it is drawn IN.
+///
+/// `drawn` above reads the colour operators; this reads the font ones, and the
+/// two halves of a font operator cannot be read apart: `Tf` names a page
+/// RESOURCE -- `/F2` -- and only that page's own resource dictionary says which
+/// font object it is, so the same `/F2` is one font on one page and another on
+/// the next.
+fn faces(pdf: &[u8]) -> Vec<(String, String)> {
+    let pdf = String::from_utf8_lossy(pdf).into_owned();
+    let objects = objects(&pdf);
+    let by_number = |number: &str| objects.iter().find(|(n, _)| n.to_string() == number);
+    let base = |number: &str| {
+        by_number(number)
+            .and_then(|(_, body)| value_of(body, "/BaseFont /"))
+            .unwrap_or("?")
+            .to_string()
+    };
+    let mut runs = Vec::new();
+    for (_, page) in objects.iter().filter(|(_, b)| b.contains("/Type /Page>>")) {
+        let Some((_, stream)) = value_of(page, "/Contents ").and_then(by_number) else {
+            continue;
+        };
+        // `/F1 3 0 R /F2 8 0 R` -- the resource dictionary of THIS page.
+        let named = |name: &str| {
+            value_of(page, &format!("/{name} "))
+                .map(base)
+                .unwrap_or_else(|| "?".to_string())
+        };
+        for line in stream.lines() {
+            let Some(at) = line.find(" Tf ") else {
+                continue;
+            };
+            // `BT /F1 10 Tf ...`: the resource name is the token after the last
+            // `/` before the operator, not everything after it.
+            let head = line[..at].rsplit('/').next().unwrap_or("");
+            let face = named(head.split_whitespace().next().unwrap_or(""));
+            if let Some((body, _)) = line.rsplit_once(") Tj") {
+                if let Some((_, text)) = body.rsplit_once('(') {
+                    runs.push((face, text.to_string()));
+                }
+            }
+        }
+    }
+    runs
+}
+
+/// The face a run of text came out in, found by what it says.
+fn face_of<'a>(runs: &'a [(String, String)], want: &str) -> &'a str {
+    runs.iter()
+        .find(|(_, text)| text.contains(want))
+        .map(|(face, _)| face.as_str())
+        .unwrap_or_else(|| panic!("nothing drawn containing {want:?}: {runs:?}"))
+}
+
+#[test]
+fn texttt_textbf_and_emph_are_set_in_the_faces_they_name() {
+    // `\texttt` appears 683,577 times in the corpus, `\emph` 35,369 and
+    // `\textbf` 34,159, and all three came out in the body face: a document
+    // with one of each produced ONE font resource and ONE Tf operator, so every
+    // code identifier in every book was set in the prose font.
+    //
+    // The families are named so that nothing installed can be found for them
+    // and the same fallback is taken on every machine: `NoSuchSerifFace` is a
+    // serif request and `NoSuchMonoFace` a monospace one, which is what
+    // `base14_for` reads them as.
+    let src = "\\documentclass{article}\n\\usepackage{fontspec}\n\
+               \\setmainfont{NoSuchSerifFace}\n\\setmonofont{NoSuchMonoFace}\n\
+               \\begin{document}\n\
+               plain \\texttt{mono} \\textbf{bold} \\emph{italic} plain\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = faces(&pdf);
+    assert_eq!(face_of(&runs, "plain"), "Times-Roman");
+    assert_eq!(face_of(&runs, "mono"), "Courier");
+    assert_eq!(face_of(&runs, "bold"), "Times-Bold");
+    assert_eq!(face_of(&runs, "italic"), "Times-Italic");
+    // Times' bold is not `Times-Roman-Bold`: the fourteen are named as they are
+    // named, and a name no reader has is substituted without saying so.
+    let s = String::from_utf8_lossy(&pdf);
+    assert!(s.contains("/BaseFont /Times-Bold"), "{s}");
+}
+
+#[test]
+fn a_book_that_redefines_texttt_still_reaches_the_mono_face() {
+    // Every book in the corpus redefines `\texttt` to colour its inline code,
+    // so dispatching on `\texttt` itself would never fire for the documents
+    // this is for -- and if it did it would drop that colour. What the
+    // redefinition writes is `{\ttfamily\color{...}#1}`, and the DECLARATION is
+    // where the face is honoured, so both survive. The line below is
+    // rubyrs/docs/book.tex:383 with its `\renewcommand` left out.
+    let src = "\\documentclass{article}\n\\usepackage{fontspec}\n\
+               \\setmainfont{NoSuchSerifFace}\n\\setmonofont{NoSuchMonoFace}\n\
+               \\definecolor{neonCyan}{HTML}{00E5FF}\n\
+               \\DeclareRobustCommand{\\texttt}[1]{{\\ttfamily\\color{neonCyan}#1}}\n\
+               \\begin{document}\nalpha \\texttt{code} beta\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = faces(&pdf);
+    assert_eq!(face_of(&runs, "code"), "Courier");
+    assert_eq!(
+        face_of(&runs, "beta"),
+        "Times-Roman",
+        "and the face ends with the group that set it"
+    );
+    let colour = drawn(&pdf)
+        .into_iter()
+        .find(|(_, text)| text.contains("code"))
+        .map(|(colour, _)| colour)
+        .expect("the code was drawn");
+    assert_ne!(colour, "0 0 0", "the colour the book gives it survives too");
+}
+
+#[test]
+fn a_face_marker_costs_nothing_on_the_line_and_is_never_set() {
+    // A face marker is U+000E, ONE character naming the face, and U+000F. The
+    // naming character is a LETTER: measured as text it pushes words onto later
+    // pages, and drawn as text it sets an `m` in front of every one of the
+    // 683,577 `\texttt`s in the corpus. With no monospace family named, the
+    // mono face IS the main face, so the two documents below must break alike.
+    let doc = |body: String| {
+        format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\n\\end{{document}}\n")
+    };
+    let plain = texrs::run_pdf(&doc("alpha ".repeat(600))).expect("pdf");
+    let faced = texrs::run_pdf(&doc("\\texttt{alpha} ".repeat(600))).expect("pdf");
+    assert_eq!(
+        count_pages(&faced),
+        count_pages(&plain),
+        "a face is not text and must not push words onto later pages"
+    );
+    for (_, text) in drawn(&faced) {
+        assert!(
+            !text.contains('\u{11}') && !text.contains('\u{12}') && !text.contains("malpha"),
+            "a marker reached the page as a glyph: {text:?}"
+        );
+    }
+}
+
+#[test]
+fn the_lowerer_keeps_the_files_the_preamble_named_for_every_face() {
+    // The bold and italic files are named in the SAME option list as the
+    // upright one, and the monospace family names its own. Reading past those
+    // three keys is why `\texttt` and `\emph` could not be honoured for the
+    // documents that matter: the family names alone resolve to nothing, since a
+    // book ships its faces beside itself rather than installing them.
+    let src = concat!(
+        "\\documentclass{article}\n\\usepackage{fontspec}\n",
+        "\\setmainfont{Arimo}[\n",
+        "    Path=/somewhere/.fonts/,\n",
+        "    Extension=.ttf,\n",
+        "    UprightFont=Arimo-VF,\n",
+        "    BoldFont=Arimo-VF,\n",
+        "    BoldFeatures={RawFeature={axis={wght=700}}},\n",
+        "    ItalicFont=Arimo-Italic-VF,\n",
+        "]\n",
+        "\\setmonofont{ShareTechMono}[\n",
+        "    Path=/somewhere/.fonts/,\n",
+        "    Extension=.ttf,\n",
+        "    UprightFont=ShareTechMono-Regular,\n",
+        "]\n",
+        "\\begin{document}\nwords\n\\end{document}\n"
+    );
+    let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
+    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer.lower(src).expect("lower");
+    assert_eq!(lowerer.fonts.main_file.bold.as_deref(), Some("Arimo-VF"));
+    assert_eq!(
+        lowerer.fonts.main_file.italic.as_deref(),
+        Some("Arimo-Italic-VF")
+    );
+    assert_eq!(
+        lowerer.fonts.mono_file.upright.as_deref(),
+        Some("ShareTechMono-Regular"),
+        "the monospace file, which is what \\texttt is set from"
+    );
+}
