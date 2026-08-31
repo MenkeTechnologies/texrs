@@ -62,12 +62,142 @@ pub fn print_glue(
     out
 }
 
+/// The five numbers a glue is.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Glue {
+    pub natural: i64,
+    pub stretch: i64,
+    pub stretch_order: Order,
+    pub shrink: i64,
+    pub shrink_order: Order,
+}
+
+/// Combine two stretch or shrink components.
+///
+/// An infinite one beats any finite one however large, and a higher infinity
+/// beats a lower: measured against LuaTeX, `2pt plus 4fil` is `4fil` and
+/// `2fill plus 4fil` is `2fill`. Only components of the SAME order add, which
+/// is why this cannot be a plain sum.
+fn combine(a: (i64, Order), b: (i64, Order)) -> (i64, Order) {
+    match a.1.cmp(&b.1) {
+        std::cmp::Ordering::Greater => a,
+        std::cmp::Ordering::Less => b,
+        std::cmp::Ordering::Equal => (a.0 + b.0, a.1),
+    }
+}
+
+impl Glue {
+    /// A finite length with no stretch or shrink.
+    pub fn fixed(natural: i64) -> Glue {
+        Glue {
+            natural,
+            ..Glue::default()
+        }
+    }
+
+    pub fn add(self, other: Glue) -> Glue {
+        let (stretch, stretch_order) = combine(
+            (self.stretch, self.stretch_order),
+            (other.stretch, other.stretch_order),
+        );
+        let (shrink, shrink_order) = combine(
+            (self.shrink, self.shrink_order),
+            (other.shrink, other.shrink_order),
+        );
+        Glue {
+            natural: self.natural + other.natural,
+            stretch,
+            stretch_order,
+            shrink,
+            shrink_order,
+        }
+    }
+
+    pub fn sub(self, other: Glue) -> Glue {
+        self.add(Glue {
+            natural: -other.natural,
+            stretch: -other.stretch,
+            shrink: -other.shrink,
+            ..other
+        })
+    }
+
+    /// Multiply every component, which is what a glue expression's `*` does.
+    pub fn scale(self, by: i64) -> Glue {
+        Glue {
+            natural: self.natural * by,
+            stretch: self.stretch * by,
+            shrink: self.shrink * by,
+            ..self
+        }
+    }
+
+    /// Divide every component, by the expression rule -- rounding, not
+    /// truncating, exactly as `\numexpr` divides.
+    pub fn divide(self, by: i64, round: impl Fn(i64, i64) -> i64) -> Glue {
+        Glue {
+            natural: round(self.natural, by),
+            stretch: round(self.stretch, by),
+            shrink: round(self.shrink, by),
+            ..self
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dimen::UNITY;
 
     /// Read off `tex -ini`, not computed here.
+    /// Read off LuaTeX 1.24.0, not derived here.
+    #[test]
+    fn an_infinite_component_beats_a_finite_one() {
+        let pt = |n: i64| n * UNITY;
+        // 1pt plus 2pt + 3pt plus 4fil => 4.0pt plus 4.0fil
+        let a = Glue {
+            natural: pt(1),
+            stretch: pt(2),
+            stretch_order: 0,
+            ..Glue::default()
+        };
+        let b = Glue {
+            natural: pt(3),
+            stretch: pt(4),
+            stretch_order: 1,
+            ..Glue::default()
+        };
+        let sum = a.add(b);
+        assert_eq!(
+            print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
+            "4.0pt plus 4.0fil"
+        );
+        // 1pt plus 2fill + 3pt plus 4fil => 4.0pt plus 2.0fill
+        let a = Glue {
+            natural: pt(1),
+            stretch: pt(2),
+            stretch_order: 2,
+            ..Glue::default()
+        };
+        let sum = a.add(b);
+        assert_eq!(
+            print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
+            "4.0pt plus 2.0fill"
+        );
+        // equal orders add
+        let a = Glue {
+            natural: pt(1),
+            stretch: pt(2),
+            stretch_order: 1,
+            ..Glue::default()
+        };
+        let sum = a.add(b);
+        assert_eq!(
+            print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
+            "4.0pt plus 6.0fil"
+        );
+    }
+
     #[test]
     fn a_glue_is_written_the_way_tex_writes_one() {
         assert_eq!(print_glue(UNITY, 0, 0, 0, 0), "1.0pt");

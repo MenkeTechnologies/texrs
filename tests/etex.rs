@@ -203,3 +203,26 @@ fn begincsname_does_not_define_what_it_does_not_find() {
         "an unknown name expands to nothing, not to \\relax"
     );
 }
+
+#[test]
+fn glueexpr_combines_components_by_order() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // The order rule is the part that is not arithmetic: an infinite component
+    // beats a finite one however large, a higher infinity beats a lower, and
+    // only equal orders add. All three are here because getting one right by
+    // accident is easy.
+    for body in [
+        "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4pt\\relax \\message{[\\the\\skip0]}",
+        "\\skip0=\\glueexpr 5pt plus 6pt-2pt plus 1pt\\relax \\message{[\\the\\skip0]}",
+        "\\skip0=\\glueexpr 2pt plus 1fil*3\\relax \\message{[\\the\\skip0]}",
+        "\\skip0=\\glueexpr 6pt plus 6pt/2\\relax \\message{[\\the\\skip0]}",
+        "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4fil\\relax \\message{[\\the\\skip0]}",
+        "\\skip0=\\glueexpr 1pt plus 2fill+3pt plus 4fil\\relax \\message{[\\the\\skip0]}",
+    ] {
+        let (want, got) = both(&lua, body);
+        assert_eq!(got, want, "{body}");
+    }
+}

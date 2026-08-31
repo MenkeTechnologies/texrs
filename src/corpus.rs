@@ -513,6 +513,12 @@ pub const CORPUS: &[Entry] = &[
         "`\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. A LuaTeX primitive, and the one that makes \"is this defined?\" answerable without changing the answer.",
         "\\begincsname maybe\\endcsname",
     ),
+    (
+        "\\glueexpr",
+        "Registers",
+        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. An eTeX primitive.",
+        "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4fil\\relax",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

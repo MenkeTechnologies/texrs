@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">113</div>
+            <div class="stat-val">114</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -273,6 +273,7 @@
 \toks@={...}</pre></td></tr>
             <tr><td><code>\numexpr</code></td><td>An integer expression, closed by an optional <code>\relax</code>: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code> with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so <code>\numexpr 7/2</code> is 4 where <code>\divide</code> gives 3 -- the two are different operations and texrs keeps them apart. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; <code>tests/etex.rs</code> holds the comparison.</td><td><pre>\count0=\numexpr (2+3)*4\relax   % =&gt; 20</pre></td></tr>
             <tr><td><code>\dimexpr</code></td><td>The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so <code>\dimexpr 1pt*3</code> is three points. The arithmetic happens in scaled points, which is the only form a dimension has.</td><td><pre>\dimen0=\dimexpr 1pt+2pt\relax   % =&gt; 3.0pt</pre></td></tr>
+            <tr><td><code>\glueexpr</code></td><td>A glue expression, the same grammar as <code>\numexpr</code> over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while <code>*</code> and <code>/</code> scale every component. An eTeX primitive.</td><td><pre>\skip0=\glueexpr 1pt plus 2pt+3pt plus 4fil\relax</pre></td></tr>
           </tbody>
         </table>
       </section>

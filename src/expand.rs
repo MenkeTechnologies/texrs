@@ -1053,8 +1053,101 @@ impl Engine {
         true
     }
 
+    /// `\glueexpr ...\relax` — the same expression grammar over glue.
+    ///
+    /// Addition is componentwise with TeX's order rule (an infinite component
+    /// beats a finite one, a higher infinity beats a lower, equal orders add),
+    /// and `*` and `/` scale every component. Division rounds, as it does in
+    /// `\numexpr`.
+    pub fn scan_glue_expr(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
+        let v = self.glue_expr_sum(lx)?;
+        if let Some(t) = self.take(lx, false) {
+            match &t {
+                Token::Cs(n) if n.name() == "relax" => {}
+                other => lx.push_back(std::slice::from_ref(other)),
+            }
+        }
+        Ok(v)
+    }
+
+    fn glue_expr_sum(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
+        let mut acc = self.glue_expr_term(lx)?;
+        loop {
+            match self.expr_operator(lx, false, &['+', '-']) {
+                Some('+') => acc = acc.add(self.glue_expr_term(lx)?),
+                Some('-') => acc = acc.sub(self.glue_expr_term(lx)?),
+                _ => return Ok(acc),
+            }
+        }
+    }
+
+    fn glue_expr_term(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
+        let mut acc = self.glue_expr_factor(lx)?;
+        loop {
+            match self.expr_operator(lx, false, &['*', '/']) {
+                // The multiplier and divisor are integers: a glue times a glue
+                // is not a glue.
+                Some('*') => acc = acc.scale(self.scan_number(lx, false)?),
+                Some('/') => {
+                    let by = self.scan_number(lx, false)?;
+                    if by == 0 {
+                        return Err(TexError("Arithmetic overflow".into()));
+                    }
+                    acc = acc.divide(by, round_div);
+                }
+                _ => return Ok(acc),
+            }
+        }
+    }
+
+    fn glue_expr_factor(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
+        loop {
+            let Some(t) = self.take(lx, false) else {
+                return Err(TexError("Missing number, treated as zero".into()));
+            };
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char('(', _) => {
+                    let v = self.glue_expr_sum(lx)?;
+                    match self.take(lx, false) {
+                        Some(Token::Char(')', _)) => return Ok(v),
+                        _ => return Err(TexError("Missing ) inserted".into())),
+                    }
+                }
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    let (natural, stretch, stretch_order, shrink, shrink_order) =
+                        self.scan_glue(lx)?;
+                    return Ok(crate::glue::Glue {
+                        natural,
+                        stretch,
+                        stretch_order,
+                        shrink,
+                        shrink_order,
+                    });
+                }
+            }
+        }
+    }
+
     /// `<dimen> [plus <dimen|fil>] [minus <dimen|fil>]` — a glue.
     pub fn scan_glue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
+        // `\glueexpr ...\relax` stands where a glue does.
+        if let Some(t) = self.take(lx, false) {
+            let is_expr = matches!(&t, Token::Cs(n) if n.name() == "glueexpr");
+            lx.push_back(std::slice::from_ref(&t));
+            if is_expr {
+                let _ = self.take(lx, false);
+                let g = self.scan_glue_expr(lx)?;
+                return Ok((
+                    g.natural,
+                    g.stretch,
+                    g.stretch_order,
+                    g.shrink,
+                    g.shrink_order,
+                ));
+            }
+        }
         let natural = self.scan_dimen(lx, false)?;
         let (stretch, stretch_order) = match self.scan_keyword(lx, "plus", false) {
             true => self.scan_dimen_or_fil(lx, false)?,

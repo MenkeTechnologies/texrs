@@ -116,6 +116,21 @@ A file that cannot be found stops the run naming it, where tex prompts for a
 replacement. That is the error model recorded under "Not implemented" rather
 than anything specific to files.
 
+## `\scantokens` is not implemented
+
+It is on the LuaTeX list and it is deliberately not done. `\scantokens` re-reads
+a token list AS A FILE, so the end of that list is a file end: it fires
+`\everyeof` and it closes whatever was being scanned. Measured, in luatex
+itself:
+
+    \message{[\scantokens{ab}]}
+    ! File ended while scanning text of \message.
+
+An implementation that merely re-tokenised the group would look right in a
+probe like that one and diverge in every use the primitive actually has, which
+all turn on the file end and `\everyeof`. It needs the pseudo-file machinery,
+not a shortcut.
+
 ## Definition prefixes
 
 `\long` and `\outer` are recorded on the macro and are part of its meaning, so

@@ -90,6 +90,7 @@
     "\\expanded"
     "\\unexpanded"
     "\\begincsname"
+    "\\glueexpr"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -207,6 +208,7 @@
     (puthash "\\expanded" "\\expanded  —  Expand the group's contents completely, here and now, and put the result back. [Expansion]" table)
     (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)
     (puthash "\\begincsname" "\\begincsname  —  `\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. [Expansion]" table)
+    (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

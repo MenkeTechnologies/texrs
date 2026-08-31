@@ -8,6 +8,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\glueexpr`, the expression grammar over glue. Addition is componentwise with
+  TeX's order rule — an infinite component beats a finite one however large, a
+  higher infinity beats a lower, and only equal orders add — while `*` and `/`
+  scale every component. Measured against LuaTeX 1.24.0.
 - `\expanded`, `\unexpanded` and `\begincsname`. The first two are opposites
   and only part company inside an `\edef`: `\unexpanded`'s group survives as
   tokens and is called when the body runs, while `\expanded`'s is expanded at
