@@ -216,6 +216,18 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- The lowering depth bound is re-measured, and the runaway it guards is bounded
+  again rather than crashing. The bound exists to stop a runaway before the
+  STACK does, so it is a measurement, and a measurement moves when a frame on
+  the recursive path grows. Adding a primitive to the number scanner made every
+  level fatter: 98 levels still lower and 100 abort, where it had been 128 and
+  192 when the bound was set to 100. The bound was therefore sitting exactly on
+  the cliff, and two mutually recursive macros died with a stack overflow
+  instead of reporting `capacity exceeded` -- which is precisely the crash the
+  bound is there to prevent. 64 restores the margin. If a document legitimately
+  nests deeper than that, the fix is a bigger stack for the lowering thread,
+  not a bigger number.
+
 - tests/typeset.rs no longer fails on a machine with no TeX installation. The
   metrics it measures in belong to an installation, not to this crate, so on a
   runner with neither `kpsewhich` nor a texmf tree all thirteen panicked before
