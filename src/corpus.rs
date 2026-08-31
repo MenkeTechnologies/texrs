@@ -790,6 +790,49 @@ pub const CORPUS: &[Entry] = &[
         "End longtable's LAST foot: what is set once, under the end of the table. This is the boundary pandoc writes, with `\\bottomrule` above it, in every markdown table it emits.",
         "\\begin{longtable}[]{@{}ll@{}}\n\\endhead\n\\bottomrule\n\\endlastfoot\nalpha & 1 \\\\\n\\end{longtable}",
     ),
+    // ── Lists — lower::lower_list, typeset::fill ─────────────────────────
+    (
+        "\\itemize",
+        "LaTeX",
+        "Open a bulleted list. `\\begin{itemize}` runs this, the way latex.ltx has it: `\\begin{x}` is `\\csname x\\endcsname` here, so the environment IS this control sequence. Each `\\item` inside it starts its own line, carries a bullet, and sets 2.5em in from the margin in a measure narrowed by the same amount, so a long item wraps inside the list. A list inside a list indents by that again. Without it a list was filled into the prose around it: an itemize of two items read back as `first item second item`.",
+        "\\begin{itemize}\n\\item first\n\\item second\n\\end{itemize}",
+    ),
+    (
+        "\\enditemize",
+        "LaTeX",
+        "Close a bulleted list: what `\\end{itemize}` runs. The lines after it go back to the margin, or to the indent of the list this one was nested inside.",
+        "\\begin{itemize}\n\\item only\n\\end{itemize}\nback at the margin",
+    ),
+    (
+        "\\enumerate",
+        "LaTeX",
+        "Open a numbered list, set exactly as `itemize` is except for the mark: each item carries its own number in the list, counted from one. Pandoc emits an `\\enumerate` with a `\\def\\labelenumi` above it for every ordered markdown list; the label definition is read as an ordinary `\\def` and the numbering here is arabic at every level.",
+        "\\begin{enumerate}\n\\item first\n\\item second\n\\end{enumerate}",
+    ),
+    (
+        "\\endenumerate",
+        "LaTeX",
+        "Close a numbered list: what `\\end{enumerate}` runs, and the same close `\\enditemize` is.",
+        "\\begin{enumerate}\n\\item only\n\\end{enumerate}\nback at the margin",
+    ),
+    (
+        "\\description",
+        "LaTeX",
+        "Open a list of terms. The mark of each item is the term in its own `\\item[...]`, set in the bold face and followed by the item's body on the same line. An item with no term has no mark, which is the honest reading of a description item that named nothing.",
+        "\\begin{description}\n\\item[term] what it means\n\\end{description}",
+    ),
+    (
+        "\\enddescription",
+        "LaTeX",
+        "Close a list of terms: what `\\end{description}` runs, and the same close the other two lists have.",
+        "\\begin{description}\n\\item[term] meaning\n\\end{description}\nback at the margin",
+    ),
+    (
+        "\\item",
+        "LaTeX",
+        "Start a list item: its own line, at the depth of the list holding it, with the mark that list sets -- a bullet, a number, or a bold term. `\\item[label]` gives the item an explicit label, which IS the term in a description list and REPLACES the mark elsewhere; the label is TeX and is expanded, so `\\item[\\texttt{--flag}]` sets in the monospace face. Outside any list this is the prelude's own `\\item`, which yields its optional argument and nothing else. 8,683 occurrences across the corpus.",
+        "\\item[LABEL] <text>\n\\begin{itemize}\n\\item plain\n\\item[!] labelled\n\\end{itemize}",
+    ),
     // ── Colour — lower::lower_colour, colour.rs ──────────────────────────
     (
         "\\definecolor",

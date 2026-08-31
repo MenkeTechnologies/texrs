@@ -91,6 +91,14 @@ pub struct Lowerer {
     /// inline copy, this bounds the nesting so the failure is TeX's own
     /// "capacity exceeded" rather than a segfault.
     depth: usize,
+    /// The list environments open, outermost first, each with the item number
+    /// it has reached.
+    ///
+    /// A field for the same reason `table_depth` is one: a group is lowered by
+    /// a recursive call, and it decides both what `\item` means -- a bullet, a
+    /// number, a term, or the prelude's own definition where no list is open --
+    /// and how far in the item sets.
+    lists: Vec<List>,
     /// How many `tabular` or `longtable` environments are open.
     ///
     /// A field rather than a local of `lower_into`, because a group is lowered
@@ -99,6 +107,23 @@ pub struct Lowerer {
     /// `\\` mean -- a cell boundary and a row end inside a table, a space and
     /// a line break outside one.
     table_depth: usize,
+}
+
+/// A list environment that is open, and how many items it has had.
+struct List {
+    kind: ListKind,
+    count: usize,
+}
+
+/// What a list puts in front of each of its items.
+#[derive(Clone, Copy)]
+enum ListKind {
+    /// `itemize`: a bullet.
+    Bullet,
+    /// `enumerate`: the item's number.
+    Number,
+    /// `description`: the term the item names, in bold.
+    Term,
 }
 
 /// The nesting `block` refuses to go past.
@@ -138,6 +163,7 @@ impl Lowerer {
             layout: crate::typeset::Layout::default(),
             text_output: false,
             depth: 0,
+            lists: Vec::new(),
             table_depth: 0,
         }
     }
@@ -424,6 +450,17 @@ impl Lowerer {
             // booktabs rule with nothing, so a table arrived at the breaker as
             // one paragraph of prose.
             if self.text_output && self.lower_table(lx, name, &mut out)? {
+                continue;
+            }
+            // Lists, likewise: the prelude answers `\begin{itemize}` with
+            // nothing and `\item` with its optional argument, so every item of
+            // every list ran into the one before it.
+            //
+            // AFTER centring, which reads the `\end...` of whichever
+            // environment is open to close a `\centering` region -- including
+            // this one's -- and hands the command back rather than consuming
+            // it.
+            if self.text_output && self.lower_list(lx, name, &mut out)? {
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -1125,6 +1162,110 @@ impl Lowerer {
             }
             _ => Ok(false),
         }
+    }
+
+    /// The list environments and the items in them, before the prelude's stubs
+    /// can swallow them.
+    ///
+    /// `\begin{itemize}` expanded to nothing and `\item` to its optional
+    /// argument, so a list of two items read back as "first item second item"
+    /// -- one line, no bullet, no break. `\item` is 8,683 occurrences across
+    /// the corpus, so this is the shape of a large part of every book in it.
+    ///
+    /// What reaches the typesetter is the STRUCTURE and not the setting: a
+    /// paragraph break so each item is its own line, the depth marker saying
+    /// which left edge that line hangs from, and the item's MARK as ordinary
+    /// text -- a bullet, a number, or a description's term in bold. How far in
+    /// a depth is, and how much of the measure is left after it, are decided
+    /// where the font is, in `typeset::fill`.
+    ///
+    /// Returns whether the command was one of these and has been dealt with.
+    fn lower_list(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
+        // As in `lower_table`, every arm that means something only inside a
+        // list asks so in its BODY rather than in a match guard: the corpus
+        // gate reads the HEAD of each arm, and a guard would hide every name
+        // after the first one from it.
+        match name.name() {
+            // `\begin{itemize}` runs `\itemize`, the way latex.ltx has it.
+            "itemize" | "enumerate" | "description" => {
+                let kind = match name.name() {
+                    "itemize" => ListKind::Bullet,
+                    "enumerate" => ListKind::Number,
+                    _ => ListKind::Term,
+                };
+                self.lists.push(List { kind, count: 0 });
+                self.start_list_line(out);
+                Ok(true)
+            }
+            // And `\end{itemize}` runs `\enditemize`. An `\end` with no list
+            // open is somebody else's -- `\end{document}` reaches here too --
+            // and is handed straight back.
+            "enditemize" | "endenumerate" | "enddescription" => {
+                if self.lists.pop().is_none() {
+                    return Ok(false);
+                }
+                self.start_list_line(out);
+                Ok(true)
+            }
+            // `\item` outside a list is the prelude's, which yields its
+            // optional argument: that is what a document's own `\item`-like
+            // macro expects, and it is not this to take.
+            "item" => {
+                let Some(list) = self.lists.last_mut() else {
+                    return Ok(false);
+                };
+                list.count += 1;
+                let (kind, count) = (list.kind, list.count);
+                // `\item[term]`. The term is TeX and is LOWERED rather than
+                // flattened -- pandoc writes `\item[\texttt{-{}-flag}]`, and
+                // flattening it would set the macro name.
+                let term = self.eng.read_optional_bracket(lx)?;
+                self.start_list_line(out);
+                match (kind, term) {
+                    // A description's term is the mark, and every description
+                    // list sets it bold.
+                    (ListKind::Term, Some(term)) => {
+                        let bold = crate::typeset::Face::Bold;
+                        self.push_text(
+                            out,
+                            &format!("{}{}", crate::typeset::FACE_PUSH, bold.code()),
+                        );
+                        self.lower_into(&term, out)?;
+                        self.push_text(out, &format!("{} ", crate::typeset::FACE_POP));
+                    }
+                    // Elsewhere an explicit label REPLACES the mark, which is
+                    // what `\item[$\ast$]` in an itemize asks for.
+                    (_, Some(term)) => {
+                        self.lower_into(&term, out)?;
+                        self.push_text(out, " ");
+                    }
+                    (ListKind::Bullet, None) => self.push_text(out, "\u{2022} "),
+                    (ListKind::Number, None) => self.push_text(out, &format!("{count}. ")),
+                    // A description item with no term has no mark: the body is
+                    // all it wrote.
+                    (ListKind::Term, None) => {}
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// End the line in hand and start the next one at the depth now open.
+    ///
+    /// The three list boundaries -- the `\begin`, each `\item`, the `\end` --
+    /// are one thing to the breaker: a line ends here, and what follows hangs
+    /// from that depth. Depth 0 is a list closing, and puts the prose after it
+    /// back at the margin.
+    fn start_list_line(&mut self, out: &mut Vec<Cmd>) {
+        self.push_text(out, "\n\n");
+        let mark = crate::typeset::indent_mark(self.lists.len());
+        self.push_text(out, &mark);
     }
 
     /// End a centred region that is still in force, if there is one.

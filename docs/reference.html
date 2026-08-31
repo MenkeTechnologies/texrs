@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">140</div>
+            <div class="stat-val">147</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -473,6 +473,34 @@ alpha &amp; 1 \\
 \endlastfoot
 alpha &amp; 1 \\
 \end{longtable}</pre></td></tr>
+            <tr><td><code>\itemize</code></td><td>Open a bulleted list. <code>\begin{itemize}</code> runs this, the way latex.ltx has it: <code>\begin{x}</code> is <code>\csname x\endcsname</code> here, so the environment IS this control sequence. Each <code>\item</code> inside it starts its own line, carries a bullet, and sets 2.5em in from the margin in a measure narrowed by the same amount, so a long item wraps inside the list. A list inside a list indents by that again. Without it a list was filled into the prose around it: an itemize of two items read back as <code>first item second item</code>.</td><td><pre>\begin{itemize}
+\item first
+\item second
+\end{itemize}</pre></td></tr>
+            <tr><td><code>\enditemize</code></td><td>Close a bulleted list: what <code>\end{itemize}</code> runs. The lines after it go back to the margin, or to the indent of the list this one was nested inside.</td><td><pre>\begin{itemize}
+\item only
+\end{itemize}
+back at the margin</pre></td></tr>
+            <tr><td><code>\enumerate</code></td><td>Open a numbered list, set exactly as <code>itemize</code> is except for the mark: each item carries its own number in the list, counted from one. Pandoc emits an <code>\enumerate</code> with a <code>\def\labelenumi</code> above it for every ordered markdown list; the label definition is read as an ordinary <code>\def</code> and the numbering here is arabic at every level.</td><td><pre>\begin{enumerate}
+\item first
+\item second
+\end{enumerate}</pre></td></tr>
+            <tr><td><code>\endenumerate</code></td><td>Close a numbered list: what <code>\end{enumerate}</code> runs, and the same close <code>\enditemize</code> is.</td><td><pre>\begin{enumerate}
+\item only
+\end{enumerate}
+back at the margin</pre></td></tr>
+            <tr><td><code>\description</code></td><td>Open a list of terms. The mark of each item is the term in its own <code>\item[...]</code>, set in the bold face and followed by the item's body on the same line. An item with no term has no mark, which is the honest reading of a description item that named nothing.</td><td><pre>\begin{description}
+\item[term] what it means
+\end{description}</pre></td></tr>
+            <tr><td><code>\enddescription</code></td><td>Close a list of terms: what <code>\end{description}</code> runs, and the same close the other two lists have.</td><td><pre>\begin{description}
+\item[term] meaning
+\end{description}
+back at the margin</pre></td></tr>
+            <tr><td><code>\item</code></td><td>Start a list item: its own line, at the depth of the list holding it, with the mark that list sets -- a bullet, a number, or a bold term. <code>\item[label]</code> gives the item an explicit label, which IS the term in a description list and REPLACES the mark elsewhere; the label is TeX and is expanded, so <code>\item[\texttt{--flag}]</code> sets in the monospace face. Outside any list this is the prelude's own <code>\item</code>, which yields its optional argument and nothing else. 8,683 occurrences across the corpus.</td><td><pre>\item[LABEL] &lt;text&gt;
+\begin{itemize}
+\item plain
+\item[!] labelled
+\end{itemize}</pre></td></tr>
             <tr><td><code>\definecolor</code></td><td>Name a colour: <code>\definecolor{neonCyan}{HTML}{05D9E8}</code>. The models read are <code>HTML</code> (six hex digits), <code>rgb</code> (three components in 0..=1), <code>RGB</code> (the same in 0..=255), <code>gray</code> and <code>cmyk</code>. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later <code>\color</code> names something unknown and the page comes out black.</td><td><pre>\definecolor{NAME}{MODEL}{SPEC}
 \definecolor{neonCyan}{HTML}{05D9E8}</pre></td></tr>
             <tr><td><code>\providecolor</code></td><td>Define a colour only if that name is not already defined. Otherwise <code>\definecolor</code>.</td><td><pre>\providecolor{NAME}{MODEL}{SPEC}

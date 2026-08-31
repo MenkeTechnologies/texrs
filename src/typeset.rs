@@ -251,6 +251,14 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         if ch == FACE_POP {
             continue;
         }
+        // The list indent names a position this path does not honour -- it sets
+        // every line at the margin -- and the depth digit after it is an
+        // ordinary character, so leaving the pair in would put a `1` in front
+        // of every list item.
+        if ch == LIST_INDENT {
+            let _ = chars.next();
+            continue;
+        }
         if let Some((f, slot)) = chain.resolve(ch) {
             // A font switch is an op in the file, so it is emitted only when the
             // font actually changes -- one per run of characters, not one per
@@ -820,6 +828,13 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
         // The table marks are instructions too: a cell boundary and a row end
         // are where the columns are, and a rule is drawn rather than set.
         TABLE_CELL | TABLE_ROW => false,
+        // The list indent is a position, not a character: it says how far in
+        // this line starts. Its depth digit is skipped the way a face code is,
+        // below.
+        LIST_INDENT => {
+            face_code = true;
+            false
+        }
         FACE_PUSH => {
             face_code = true;
             false
@@ -1731,6 +1746,11 @@ pub fn to_pdf(
                 Some(rest) => (true, rest),
                 None => (false, line),
             };
+            // A list item's lines start in from the margin, and every line of
+            // the item -- the one carrying the bullet and the three it wrapped
+            // onto -- carries the same depth, so they stack at one left edge.
+            let (depth, line) = strip_indent(line);
+            let indent = list_indent(depth, layout);
             // A line is a sequence of RUNS, each with its own colour: the
             // markers turn colour on and off part way along it. Collapsing the
             // line to one colour state was the first attempt and drew none at
@@ -1777,14 +1797,17 @@ pub fn to_pdf(
                         .sum();
                     match spaces {
                         0 => 0.0,
-                        n => (layout.measure - natural) / n as f64,
+                        // Against the NARROWED measure: a justified line inside
+                        // a list is set to the list's right edge, not out to
+                        // the page's, or the indent would be paid for twice.
+                        n => (layout.measure - indent - natural) / n as f64,
                     }
                 }
                 false => 0.0,
             };
             let mut x = match centred {
                 true => layout.margin + (layout.measure - width).max(0.0) / 2.0,
-                false => layout.margin,
+                false => layout.margin + indent,
             };
             for (plain, (r, g, b), face) in styled_runs(line, &mut colours, &mut faces) {
                 if plain.is_empty() {
@@ -1907,6 +1930,10 @@ fn break_lines_measured(
     // pieces, so the flag is carried across the loops rather than reset in
     // them.
     let mut centred = false;
+    // And so is the list depth: a `\begin{itemize}` opens a region that runs
+    // to its `\end`, and an item's own body is regularly several paragraphs.
+    // 0 is "not in a list".
+    let mut depth = 0usize;
     for para in text.split("\n\n") {
         // A code listing is already broken, by the author -- see
         // `listing_lines`, which the DVI breaker reads the same way.
@@ -1939,6 +1966,7 @@ fn break_lines_measured(
                 fill(
                     part,
                     &mut centred,
+                    &mut depth,
                     layout,
                     &mut colours,
                     &mut faces,
@@ -1963,6 +1991,7 @@ fn break_lines_measured(
 fn fill(
     text: &str,
     centred: &mut bool,
+    depth: &mut usize,
     layout: &Layout,
     colours: &mut Vec<Spec>,
     faces: &mut Vec<Face>,
@@ -1971,19 +2000,39 @@ fn fill(
 ) {
     let mut rest = text;
     loop {
-        let (stretch, marker) = match rest.find([CENTRE, CENTRE_END]) {
+        let (stretch, marker) = match rest.find([CENTRE, CENTRE_END, LIST_INDENT]) {
             Some(at) => (&rest[..at], rest[at..].chars().next()),
             None => (rest, None),
         };
         let mut line = String::new();
         let mut width = 0.0f64;
+        // A list narrows the measure by exactly what it moves the text in, so
+        // a long item wraps INSIDE the list rather than running back out to
+        // the right margin. A centred line is not moved in -- see `start` --
+        // so it is not narrowed either.
+        let indent = match *centred {
+            true => 0.0,
+            false => list_indent(*depth, layout),
+        };
+        let measure = layout.measure - indent;
         // A centred line says so in its first character, so the page can
         // position it by what it measures. The alternative -- a parallel list
         // of which lines are centred -- would have to survive pagination, and
         // the form feed a forced break travels as is the pattern already here.
-        let start = |centred: bool| match centred {
-            true => CENTRE.to_string(),
-            false => String::new(),
+        //
+        // Centring is asked FIRST and the indent second, because the two are
+        // not independent: a `\begin{center}` inside a list is still centred,
+        // over the whole measure. An earlier revision of this put the indent
+        // arm ahead of the centring one, so a centred line at any list depth
+        // lost its centring marker and set flush at the list indent instead of
+        // by its own width. A line can carry one prefix, and centring is the
+        // one that wins;
+        // `centring_inside_a_list_still_centres_over_the_whole_measure` in
+        // tests/typeset.rs is what holds the order.
+        let start = |centred: bool, depth: usize| match (centred, depth) {
+            (true, _) => CENTRE.to_string(),
+            (_, 0) => String::new(),
+            (_, deep) => indent_mark(deep),
         };
         for word in stretch.split_whitespace() {
             // The space between two words is set in the face in force where it
@@ -1997,7 +2046,7 @@ fn fill(
                 true => ww,
                 false => width + space + ww,
             };
-            if !line.is_empty() && need > layout.measure {
+            if !line.is_empty() && need > measure {
                 // A line pushed HERE is one the next word would not fit on, so
                 // it is a FULL line and is the one set to the measure. The last
                 // line of a paragraph falls out of this loop below and stays
@@ -2009,12 +2058,12 @@ fn fill(
                     false => format!("{JUSTIFY}{full}"),
                 });
                 width = ww;
-                line = start(*centred);
+                line = start(*centred, *depth);
                 line.push_str(word);
                 continue;
             }
             match line.is_empty() {
-                true => line = start(*centred),
+                true => line = start(*centred, *depth),
                 false => line.push(' '),
             }
             line.push_str(word);
@@ -2024,6 +2073,15 @@ fn fill(
             lines.push(line);
         }
         match marker {
+            // The depth marker carries the new depth as one digit, so a nested
+            // list opening and the outer list resuming after it are the same
+            // instruction with different arguments -- and nothing has to track
+            // a stack on this side.
+            Some(LIST_INDENT) => {
+                let (deeper, after) = strip_indent(&rest[stretch.len()..]);
+                *depth = deeper;
+                rest = after;
+            }
             Some(m) => {
                 *centred = m == CENTRE;
                 rest = &rest[stretch.len() + m.len_utf8()..];
@@ -2031,6 +2089,41 @@ fn fill(
             None => return,
         }
     }
+}
+
+/// How far in from the margin a list at `depth` sets, in points.
+///
+/// LaTeX's `\leftmargini` is 2.5em at the type size (`article.cls`), and each
+/// level in moves by the same again, so a nested item is visibly inside the one
+/// holding it rather than a hair off it.
+fn list_indent(depth: usize, layout: &Layout) -> f64 {
+    depth as f64 * 2.5 * layout.size
+}
+
+/// The marker that puts what follows it at `depth`, which is what the lowerer
+/// writes at every list boundary and what the breaker reads back.
+///
+/// The depth is ONE character, because that is what the marker registry
+/// declares and what every reader of these markers skips. Nine levels is far
+/// past anything a document nests -- LaTeX itself refuses past four -- and
+/// deeper lists set at the ninth level rather than being read as a depth of
+/// nothing. Depth 0 is the marker that ENDS a list: back at the margin.
+pub fn indent_mark(depth: usize) -> String {
+    let digit = char::from_digit(depth.min(9) as u32, 10).unwrap_or('0');
+    format!("{LIST_INDENT}{digit}")
+}
+
+/// The depth a marked line carries, and the line without the marker.
+///
+/// Both the breaker and the page ask this, so the pair is split in one place
+/// rather than in two that could disagree about how wide one level is.
+fn strip_indent(line: &str) -> (usize, &str) {
+    let Some(rest) = line.strip_prefix(LIST_INDENT) else {
+        return (0, line);
+    };
+    let mut chars = rest.chars();
+    let depth = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0) as usize;
+    (depth, chars.as_str())
 }
 
 /// Split broken lines into pages, at a forced break or when the page is full.
@@ -2060,6 +2153,21 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
     }
     pages
 }
+
+/// The left edge of a list item's lines, carried through the text the way
+/// centring is, with the nesting depth as the one character after it.
+///
+/// `\item` is 8,683 occurrences across the corpus and set inline: an itemize
+/// with two items read back as "first item second item" on one line, with no
+/// bullet and no break, because the prelude answered `\begin{itemize}` with
+/// nothing and `\item` with its optional argument. What a list needs from the
+/// page is a left edge and a narrower measure, and both follow from one number
+/// -- so the marker carries the depth and the page turns it into a position
+/// (`list_indent`).
+///
+/// U+0014 is the next free control character after U+0013 (JUSTIFY); the
+/// `MARKERS` registry below says what the rest are spent on.
+pub const LIST_INDENT: char = '\u{14}';
 
 /// A forced page break, carried through the text the way colour is.
 ///
@@ -2101,6 +2209,9 @@ pub const MARKERS: &[(char, bool)] = &[
     (FACE_POP, false),
     (TABLE_CELL, false),
     (TABLE_ROW, false),
+    // The list indent carries an argument too: the digit saying how deep the
+    // list holding this line is nested.
+    (LIST_INDENT, true),
     // The other one that carries an argument: the character saying which rule,
     // or which of longtable's section boundaries, this mark is.
     (TABLE_MARK, true),

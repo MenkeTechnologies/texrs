@@ -854,25 +854,16 @@ fn a_listings_colour_markers_survive_the_line_split() {
 /// position a line was given can be read back out of the file -- which is the
 /// only way to ask whether a line was centred, as opposed to whether the
 /// engine believes it centred it.
+///
+/// Read through `placed_faces` rather than by looking for `" Tm ("`: a
+/// JUSTIFIED line has its word spacing between the two, `... Tm 0.45 Tw (...)`,
+/// so that spelling saw only the ragged last line of every paragraph and
+/// reported a four-line paragraph as one line.
 fn placed(pdf: &[u8]) -> Vec<(f64, f64, String)> {
-    let s = String::from_utf8_lossy(pdf).into_owned();
-    let mut runs = Vec::new();
-    for (at, _) in s.match_indices(" Tm (") {
-        let head = &s[..at];
-        let mut back = head.split_ascii_whitespace().rev();
-        let (Some(y), Some(x)) = (back.next(), back.next()) else {
-            continue;
-        };
-        let (Ok(x), Ok(y)) = (x.parse::<f64>(), y.parse::<f64>()) else {
-            continue;
-        };
-        let rest = &s[at + " Tm (".len()..];
-        let Some(end) = rest.find(") Tj") else {
-            continue;
-        };
-        runs.push((x, y, rest[..end].to_string()));
-    }
-    runs
+    placed_faces(pdf)
+        .into_iter()
+        .map(|(x, y, _, text)| (x, y, text))
+        .collect()
 }
 
 /// Where a run containing `want` was drawn, and on what baseline.
@@ -926,6 +917,248 @@ fn centring_ends_with_the_environment_that_switched_it_on() {
         at(&runs, "plain line").0,
         72.0,
         "the region ended with the environment: {runs:?}"
+    );
+}
+
+/// A document holding `body` between `\begin{document}` and `\end{document}`.
+///
+/// The list tests are all "these words, in this environment, land here", and
+/// the preamble around them is the same every time.
+fn document(body: &str) -> String {
+    format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\n\\end{{document}}\n")
+}
+
+/// Every baseline a run at `x` was drawn on, nearest the top of the page first.
+fn baselines_at(runs: &[(f64, f64, String)], x: f64) -> Vec<f64> {
+    let mut ys: Vec<f64> = runs
+        .iter()
+        .filter(|(at, _, _)| (*at - x).abs() < 0.01)
+        .map(|(_, y, _)| *y)
+        .collect();
+    ys.sort_by(|a, b| b.partial_cmp(a).expect("a baseline is a number"));
+    ys.dedup();
+    ys
+}
+
+/// The margin and the list indent, at the default layout: plain.tex's inch
+/// margin, and `article.cls`'s `\leftmargini` of 2.5em at the 10pt type size.
+const MARGIN: f64 = 72.0;
+const FIRST_LEVEL: f64 = 97.0;
+const SECOND_LEVEL: f64 = 122.0;
+
+#[test]
+fn each_item_of_a_list_starts_its_own_line_with_a_bullet_and_an_indent() {
+    // `\begin{itemize}` expanded to nothing and `\item` to its optional
+    // argument, so an itemize of two items read back as "alpha item bravo
+    // item": one line, at the margin, with no bullet between them. `\item` is
+    // 8,683 occurrences across the corpus, so this was the shape of a large
+    // part of every book in it.
+    let src = document(concat!(
+        "before the list\n\n",
+        "\\begin{itemize}\n\\tightlist\n",
+        "\\item\n  alpha item\n",
+        "\\item\n  bravo item\n",
+        "\\end{itemize}\n\n",
+        "after the list"
+    ));
+    let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
+    let (alpha_x, alpha_y) = at(&runs, "alpha item");
+    let (bravo_x, bravo_y) = at(&runs, "bravo item");
+    assert!(
+        alpha_y > bravo_y,
+        "each item starts its own line, one under the other: {runs:?}"
+    );
+    assert_eq!(
+        (alpha_x, bravo_x),
+        (FIRST_LEVEL, FIRST_LEVEL),
+        "an item's line starts in from the margin: {runs:?}"
+    );
+    assert_eq!(
+        (
+            at(&runs, "before the list").0,
+            at(&runs, "after the list").0
+        ),
+        (MARGIN, MARGIN),
+        "the prose either side of the list is not moved: {runs:?}"
+    );
+    // WinAnsi puts the bullet at 0x95, and a PDF string spells a high byte as
+    // an octal escape -- so `\225` in the content stream IS the bullet drawn.
+    for want in ["alpha item", "bravo item"] {
+        let (_, _, text) = runs
+            .iter()
+            .find(|(_, _, text)| text.contains(want))
+            .expect("the item was drawn");
+        assert!(
+            text.starts_with("\\225 "),
+            "the item carries its bullet: {text:?}"
+        );
+    }
+}
+
+#[test]
+fn an_enumerate_numbers_its_items_and_a_description_sets_its_term_in_bold() {
+    let src = document(concat!(
+        "\\begin{enumerate}\n\\tightlist\n",
+        "\\item\n  alpha item\n",
+        "\\item\n  bravo item\n",
+        "\\end{enumerate}\n\n",
+        "\\begin{description}\n\\tightlist\n",
+        "\\item[the term]\n  its meaning\n",
+        "\\end{description}"
+    ));
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let runs = placed(&pdf);
+    for (number, want) in [("1. ", "alpha item"), ("2. ", "bravo item")] {
+        let (x, _, text) = runs
+            .iter()
+            .find(|(_, _, text)| text.contains(want))
+            .expect("the item was drawn");
+        assert!(
+            text.starts_with(number),
+            "an enumerate's item carries its number: {text:?}"
+        );
+        assert_eq!(*x, FIRST_LEVEL, "and sets at the list indent: {runs:?}");
+    }
+    // The term is the mark of a description item: it stands where the bullet
+    // stands, in the bold face every description list sets it in, and the body
+    // follows it on the same line.
+    let faces = placed_faces(&pdf);
+    let (term_x, term_y, term_face, _) = faces
+        .iter()
+        .find(|(_, _, _, text)| text.contains("the term"))
+        .expect("the term was drawn");
+    let (body_x, body_y, body_face, _) = faces
+        .iter()
+        .find(|(_, _, _, text)| text.contains("its meaning"))
+        .expect("the body was drawn");
+    assert_eq!(*term_x, FIRST_LEVEL, "the term is the mark: {faces:?}");
+    assert_eq!(term_y, body_y, "the body runs on from it: {faces:?}");
+    assert!(body_x > term_x, "and after it: {faces:?}");
+    assert!(
+        term_face.contains("Bold") && !body_face.contains("Bold"),
+        "the term is bold and its meaning is not: {term_face} / {body_face}"
+    );
+}
+
+/// The words of an item long enough to wrap several times.
+const LONG_ITEM: &str = concat!(
+    "a very long item that has to wrap because it runs well past the measure ",
+    "and keeps going with plenty more words after it so that the breaker has ",
+    "no choice at all but to put a second and a third and a fourth line under ",
+    "the first one, every one of them inside the list rather than back out at ",
+    "the page margin where the prose around the list is set"
+);
+
+/// A document set in big type inside big margins.
+///
+/// One level of indent is 2.5em, so at 20pt type it is a sixth of the 324pt
+/// measure `margin=2in` leaves -- which is what makes the line count below an
+/// assertion rather than a coin toss. The same words in the same measure would
+/// break identically; the whole question is whether the measure narrowed.
+fn wide_document(body: &str) -> String {
+    format!(
+        "\\documentclass[20pt]{{extreport}}\n\
+         \\usepackage[margin=2in]{{geometry}}\n\
+         \\begin{{document}}\n{body}\n\\end{{document}}\n"
+    )
+}
+
+#[test]
+fn a_long_item_wraps_inside_the_list_and_in_the_measure_the_indent_leaves() {
+    // Two documents, the same words: once as prose at the margin, once as one
+    // item. The item is set in a measure narrowed by exactly what it is moved
+    // in by, so it takes MORE lines than the prose does -- an item that wrapped
+    // back out to the page's right edge would take the same number.
+    let margin = 2.0 * 72.0;
+    // 2.5em at the 20pt the class asks for, in the PDF's points.
+    let indent = 2.5 * 20.0 * 72.0 / 72.27;
+    let prose = placed(&texrs::run_pdf(&wide_document(LONG_ITEM)).expect("pdf"));
+    let item = placed(
+        &texrs::run_pdf(&wide_document(&format!(
+            "\\begin{{itemize}}\n\\item\n  {LONG_ITEM}\n\\end{{itemize}}"
+        )))
+        .expect("pdf"),
+    );
+    let prose_lines = baselines_at(&prose, margin);
+    let item_lines = baselines_at(&item, margin + indent);
+    assert!(
+        prose_lines.len() > 2,
+        "the paragraph is long enough to wrap: {prose:?}"
+    );
+    assert_eq!(
+        baselines_at(&item, margin),
+        Vec::<f64>::new(),
+        "no line of the item is set at the margin: {item:?}"
+    );
+    assert!(
+        item_lines.len() > prose_lines.len(),
+        "the item wraps in the narrowed measure, so it takes more lines than \
+         the same words as prose: {} against {}",
+        item_lines.len(),
+        prose_lines.len()
+    );
+}
+
+#[test]
+fn a_list_inside_a_list_sets_one_level_further_in() {
+    let src = document(concat!(
+        "\\begin{itemize}\n",
+        "\\item outer item\n",
+        "  \\begin{itemize}\n",
+        "  \\item inner item\n",
+        "  \\end{itemize}\n",
+        "\\item second outer item\n",
+        "\\end{itemize}\n\n",
+        "after the lists"
+    ));
+    let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
+    assert_eq!(
+        (
+            at(&runs, "outer item").0,
+            at(&runs, "inner item").0,
+            at(&runs, "second outer item").0,
+            at(&runs, "after the lists").0
+        ),
+        (FIRST_LEVEL, SECOND_LEVEL, FIRST_LEVEL, MARGIN),
+        "each level indents further, and both are given back: {runs:?}"
+    );
+}
+
+#[test]
+fn centring_inside_a_list_still_centres_over_the_whole_measure() {
+    // The one thing an earlier revision of this got wrong, and the reason the
+    // order of the arms in `fill`'s `start` is spelt out there: the indent was
+    // tested before the centring, so a centred line at any list depth lost its
+    // centring marker and set flush at the list indent -- at 97.0 below rather
+    // than by its own width.
+    //
+    // The two documents hold the SAME centred words, so the x they are placed
+    // at is the same number, or the centring is being measured differently
+    // inside a list -- which is what centring over the narrowed measure would
+    // look like, and it is not what `\begin{center}` means.
+    let centred = "\\begin{center}\ncentred words\n\\end{center}";
+    let alone = placed(&texrs::run_pdf(&document(centred)).expect("pdf"));
+    let inside = placed(
+        &texrs::run_pdf(&document(&format!(
+            "\\begin{{itemize}}\n\\item an item\n{centred}\n\\end{{itemize}}"
+        )))
+        .expect("pdf"),
+    );
+    let alone_x = at(&alone, "centred words").0;
+    let inside_x = at(&inside, "centred words").0;
+    assert!(
+        alone_x > MARGIN + 50.0,
+        "the centred line is placed by its width: {alone:?}"
+    );
+    assert_eq!(
+        inside_x, alone_x,
+        "a centred line inside a list is centred exactly as it is outside one: \
+         {inside:?}"
+    );
+    assert_eq!(
+        at(&inside, "an item").0,
+        FIRST_LEVEL,
+        "and the item around it is still indented: {inside:?}"
     );
 }
 

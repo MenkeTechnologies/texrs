@@ -135,6 +135,13 @@
     "\\endfirsthead"
     "\\endfoot"
     "\\endlastfoot"
+    "\\itemize"
+    "\\enditemize"
+    "\\enumerate"
+    "\\endenumerate"
+    "\\description"
+    "\\enddescription"
+    "\\item"
     "\\definecolor"
     "\\providecolor"
     "\\colorlet"
@@ -279,6 +286,13 @@
     (puthash "\\endfirsthead" "\\endfirsthead  —  End longtable's FIRST head, when it differs from the one that repeats. [LaTeX]" table)
     (puthash "\\endfoot" "\\endfoot  —  End longtable's foot: what repeats at the bottom of each page the table runs onto. [LaTeX]" table)
     (puthash "\\endlastfoot" "\\endlastfoot  —  End longtable's LAST foot: what is set once, under the end of the table. [LaTeX]" table)
+    (puthash "\\itemize" "\\itemize  —  Open a bulleted list. [LaTeX]" table)
+    (puthash "\\enditemize" "\\enditemize  —  Close a bulleted list: what `\\end{itemize}` runs. [LaTeX]" table)
+    (puthash "\\enumerate" "\\enumerate  —  Open a numbered list, set exactly as `itemize` is except for the mark: each item carries its own number in the list, counted from one. [LaTeX]" table)
+    (puthash "\\endenumerate" "\\endenumerate  —  Close a numbered list: what `\\end{enumerate}` runs, and the same close `\\enditemize` is. [LaTeX]" table)
+    (puthash "\\description" "\\description  —  Open a list of terms. [LaTeX]" table)
+    (puthash "\\enddescription" "\\enddescription  —  Close a list of terms: what `\\end{description}` runs, and the same close the other two lists have. [LaTeX]" table)
+    (puthash "\\item" "\\item  —  Start a list item: its own line, at the depth of the list holding it, with the mark that list sets -- a bullet, a number, or a bold term. [LaTeX]" table)
     (puthash "\\definecolor" "\\definecolor  —  Name a colour: `\\definecolor{neonCyan}{HTML}{05D9E8}`. [LaTeX]" table)
     (puthash "\\providecolor" "\\providecolor  —  Define a colour only if that name is not already defined. [LaTeX]" table)
     (puthash "\\colorlet" "\\colorlet  —  Give an existing colour another name. [LaTeX]" table)

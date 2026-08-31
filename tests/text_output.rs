@@ -221,6 +221,54 @@ fn csstring_reaches_running_text_as_string_does() {
     assert_eq!(text(src).trim(), "[f][\\f]");
 }
 
+#[test]
+fn a_list_reads_back_as_marked_items_rather_than_as_one_run_of_words() {
+    // `\begin{itemize}` expanded to nothing and `\item` to its optional
+    // argument, so a list came back as "alpha item bravo item" -- one line,
+    // no mark, welded to the prose after it. The indent that separates them
+    // on the page is a position and leaves nothing here; the MARK is text the
+    // document means and stays.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{itemize}\n\\tightlist\n\\item\n  alpha item\n\
+               \\item\n  bravo item\n\\end{itemize}\n\
+               \\begin{enumerate}\n\\item\n  first\n\\item\n  second\n\
+               \\end{enumerate}\n\
+               \\begin{description}\n\\item[a term]\n  its meaning\n\
+               \\end{description}\n\
+               after the lists\n\\end{document}\n";
+    let got = text(src);
+    let lines: Vec<String> = got
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<&str>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect();
+    let has = |want: &str| lines.iter().any(|line| line == want);
+    assert!(
+        has("\u{2022} alpha item") && has("\u{2022} bravo item"),
+        "each item is a line of its own, carrying its bullet: {lines:?}"
+    );
+    assert!(
+        has("1. first") && has("2. second"),
+        "an enumerate's items carry their numbers: {lines:?}"
+    );
+    assert!(
+        has("a term its meaning"),
+        "a description's term is its mark: {lines:?}"
+    );
+    assert!(
+        has("after the lists"),
+        "and the prose after a list is not welded to its last item: {lines:?}"
+    );
+    // The indent marker says where a line starts on the page, which is not
+    // something a reader of the text asked for -- and neither is the digit
+    // after it, which would otherwise put a `1` in front of every item.
+    let leaked: Vec<char> = got
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n')
+        .collect();
+    assert!(leaked.is_empty(), "the markers left {leaked:?} in {got:?}");
+}
+
 /// No marker may reach the text a reader gets, for every marker there is.
 ///
 /// This is the check three parallel implementations of this port each needed
