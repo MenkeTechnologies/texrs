@@ -495,6 +495,24 @@ pub const CORPUS: &[Entry] = &[
         "The character with the given code: `\\Uchar65` is `A`. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.",
         "\\message{\\Uchar65\\Uchar97}   % => Aa",
     ),
+    (
+        "\\expanded",
+        "Expansion",
+        "Expand the group's contents completely, here and now, and put the result back. Inside an `\\edef` it is the wrapper coming off, since everything there expands anyway; in running text it forces the expansion a macro would otherwise have deferred. An eTeX primitive.",
+        "\\message{\\expanded{\\body}}",
+    ),
+    (
+        "\\unexpanded",
+        "Expansion",
+        "The opposite: the group's tokens are used as they stand. Inside an `\\edef` they survive as TOKENS, so a macro among them is called when the body runs rather than when it is defined -- which is where this and `\\expanded` part company. In a message the two render alike, by the token-list rule. An eTeX primitive.",
+        "\\edef\\keep{\\unexpanded{\\later}}",
+    ),
+    (
+        "\\begincsname",
+        "Expansion",
+        "`\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. A LuaTeX primitive, and the one that makes \"is this defined?\" answerable without changing the answer.",
+        "\\begincsname maybe\\endcsname",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

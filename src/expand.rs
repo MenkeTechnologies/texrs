@@ -2004,6 +2004,20 @@ impl Engine {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
+                // `\unexpanded{...}` is the one thing that stops this pass:
+                // its group goes into the body as tokens, so a macro inside it
+                // is called when the body runs rather than now.
+                Token::Cs(name) if name.name() == "unexpanded" => {
+                    let group = self.read_group_tokens(&mut work)?;
+                    out.extend(group);
+                }
+                // `\expanded{...}` is the opposite and needs no special case
+                // beyond dropping the wrapper: everything in the group is
+                // expanded because everything here is.
+                Token::Cs(name) if name.name() == "expanded" => {
+                    let group = self.read_group_tokens(&mut work)?;
+                    work.push_back(&group);
+                }
                 Token::Cs(name) => {
                     let name = *name;
                     let expandable = matches!(

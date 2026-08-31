@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">110</div>
+            <div class="stat-val">113</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -184,6 +184,9 @@
             <tr><td><code>\detokenize</code></td><td>The tokens of <code>{...}</code> written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.</td><td><pre>\message{\detokenize{\a b}}   % =&gt; \a b</pre></td></tr>
             <tr><td><code>\csstring</code></td><td><code>\string</code> without the escape character: <code>\csstring\foo</code> is <code>foo</code> where <code>\string\foo</code> is <code>\foo</code>. A LuaTeX primitive.</td><td><pre>\message{\csstring\foo}   % =&gt; foo</pre></td></tr>
             <tr><td><code>\Uchar</code></td><td>The character with the given code: <code>\Uchar65</code> is <code>A</code>. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.</td><td><pre>\message{\Uchar65\Uchar97}   % =&gt; Aa</pre></td></tr>
+            <tr><td><code>\expanded</code></td><td>Expand the group's contents completely, here and now, and put the result back. Inside an <code>\edef</code> it is the wrapper coming off, since everything there expands anyway; in running text it forces the expansion a macro would otherwise have deferred. An eTeX primitive.</td><td><pre>\message{\expanded{\body}}</pre></td></tr>
+            <tr><td><code>\unexpanded</code></td><td>The opposite: the group's tokens are used as they stand. Inside an <code>\edef</code> they survive as TOKENS, so a macro among them is called when the body runs rather than when it is defined -- which is where this and <code>\expanded</code> part company. In a message the two render alike, by the token-list rule. An eTeX primitive.</td><td><pre>\edef\keep{\unexpanded{\later}}</pre></td></tr>
+            <tr><td><code>\begincsname</code></td><td><code>\csname</code> that does not define what it does not find: an unknown name expands to nothing, where <code>\csname</code> would make it <code>\relax</code> and leave it defined ever after. A LuaTeX primitive, and the one that makes "is this defined?" answerable without changing the answer.</td><td><pre>\begincsname maybe\endcsname</pre></td></tr>
           </tbody>
         </table>
       </section>

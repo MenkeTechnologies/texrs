@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\expanded`, `\unexpanded` and `\begincsname`. The first two are opposites
+  and only part company inside an `\edef`: `\unexpanded`'s group survives as
+  tokens and is called when the body runs, while `\expanded`'s is expanded at
+  definition time and frozen. `\begincsname` is `\csname` that does not define
+  what it does not find, so asking whether a name exists no longer makes it
+  exist. Compared against LuaTeX 1.24.0 in `tests/etex.rs`.
 - Five more of LuaTeX's expander primitives: `\unless`, `\protected`,
   `\detokenize`, `\csstring` and `\Uchar`. `\protected` joins `\long` and
   `\outer` as a definition prefix and stops `\edef` expanding the macro;

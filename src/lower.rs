@@ -1412,6 +1412,31 @@ impl Lowerer {
                         });
                     }
                 }
+                // `\expanded{...}` puts the group back to be expanded, which
+                // is what this loop does to everything it meets anyway -- so
+                // the primitive is the wrapper coming off.
+                "expanded" => {
+                    let group = self.eng.read_group_tokens(work)?;
+                    work.push_back(&group);
+                }
+                // `\unexpanded{...}` writes the tokens as they stand. In a
+                // message that is the same rendering `\detokenize` gives, and
+                // the two only part company inside an `\edef`, where these
+                // tokens survive as tokens.
+                "unexpanded" => {
+                    let group = self.eng.read_group_tokens(work)?;
+                    text.push_str(&self.eng.tokens_text(&group));
+                }
+                // `\begincsname` is `\csname` that does not define what it does
+                // not find: an unknown name expands to nothing instead of to
+                // `\relax`.
+                "begincsname" => {
+                    let built = self.eng.read_csname_pending(work)?;
+                    let id = crate::token::CsId::intern(&built);
+                    if self.eng.meanings.contains_key(&id) {
+                        work.push_back(&[Token::Cs(id)]);
+                    }
+                }
                 "csname" => {
                     // The name is built from text and macros, all compile-time.
                     let built = self.eng.read_csname_pending(work)?;

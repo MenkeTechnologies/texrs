@@ -87,6 +87,9 @@
     "\\detokenize"
     "\\csstring"
     "\\Uchar"
+    "\\expanded"
+    "\\unexpanded"
+    "\\begincsname"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -201,6 +204,9 @@
     (puthash "\\detokenize" "\\detokenize  —  The tokens of `{...}` written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. [Expansion]" table)
     (puthash "\\csstring" "\\csstring  —  `\\string` without the escape character: `\\csstring\\foo` is `foo` where `\\string\\foo` is `\\foo`. [Expansion]" table)
     (puthash "\\Uchar" "\\Uchar  —  The character with the given code: `\\Uchar65` is `A`. [Expansion]" table)
+    (puthash "\\expanded" "\\expanded  —  Expand the group's contents completely, here and now, and put the result back. [Expansion]" table)
+    (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)
+    (puthash "\\begincsname" "\\begincsname  —  `\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. [Expansion]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

@@ -167,3 +167,39 @@ fn a_protected_macro_is_not_frozen_by_edef() {
     let (want, got) = both(&lua, body);
     assert_eq!(got, want, "a protected macro survives \\edef as itself");
 }
+
+#[test]
+fn expanded_and_unexpanded_are_opposites() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // The pair only parts company inside an \edef: there \unexpanded's group
+    // survives as tokens and is called later, so redefining afterwards changes
+    // the answer, while \expanded's is expanded now and frozen.
+    for body in [
+        "\\def\\q{Q}\\message{[\\expanded{\\q}]}",
+        "\\def\\a{A}\\def\\b{\\a}\\message{[\\expanded{\\b}]}",
+        "\\def\\q{Q}\\message{[\\unexpanded{\\q}]}",
+        "\\def\\q{Q}\\edef\\e{\\unexpanded{\\q}}\\def\\q{Z}\\message{[\\e]}",
+        "\\def\\q{Q}\\edef\\e{\\expanded{\\q}}\\def\\q{Z}\\message{[\\e]}",
+    ] {
+        let (want, got) = both(&lua, body);
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn begincsname_does_not_define_what_it_does_not_find() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let body =
+        "\\def\\foo{F}\\message{[\\begincsname foo\\endcsname][\\begincsname nope\\endcsname]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(
+        got, want,
+        "an unknown name expands to nothing, not to \\relax"
+    );
+}
