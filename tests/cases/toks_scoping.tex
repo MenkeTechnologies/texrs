@@ -1,0 +1,8 @@
+% A token register is scoped by a group as the category codes are, and a
+% \toksdef name reaches the same register on both sides.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\toksdef\toksA=0
+\toksA={a}
+{\toksA={b}\message{[\the\toksA]}}
+\message{[\the\toksA][\the\toks0]}
+\end

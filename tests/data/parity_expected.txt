@@ -112,5 +112,9 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 [Xy]
 #==# string_and_cs.tex
 \foo\!
+#==# toks_registers.tex
+[abc][a\b c][\.] [\x ][] [abc]
+#==# toks_scoping.tex
+[b] [a][a]
 #==# undefined_cs.tex
 ! Undefined control sequence.l.2 \message{A\undefinedxx                           B}AB )(see the transcript file for additional information

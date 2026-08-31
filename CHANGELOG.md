@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Token registers: `\toks`, `\toksdef`, register-to-register copying, and
+  `\the`. A token list is stored VERBATIM — nothing in the braces expands,
+  which is the difference between it and a macro — and is scoped by a group as
+  the category codes are. `\the` writes it back by the token-list rule rather
+  than `\string`'s: a control word carries a trailing space however short, a
+  one-character control sequence does not. Measured against `tex -ini`.
 - A PNG with an alpha channel now goes into a PDF as a picture and a soft
   mask, which closes the gap the image port left open. It is the one picture
   whose pixels are taken apart rather than copied: PNG interleaves the alpha

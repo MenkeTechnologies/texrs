@@ -60,6 +60,7 @@ enum MeaningRepr {
     // so adding at the end cannot change how an existing one decodes.
     CharDef(i64),
     CountDef(i64),
+    ToksDef(i64),
 }
 
 /// The dump itself.
@@ -234,6 +235,7 @@ fn meaning_repr(meaning: &Meaning) -> MeaningRepr {
         Meaning::Char(c, cat) => MeaningRepr::Char(*c, cat_to_u8(*cat)),
         Meaning::CharDef(v) => MeaningRepr::CharDef(*v),
         Meaning::CountDef(r) => MeaningRepr::CountDef(*r),
+        Meaning::ToksDef(r) => MeaningRepr::ToksDef(*r),
     }
 }
 
@@ -254,6 +256,7 @@ fn meaning_of(repr: &MeaningRepr) -> Meaning {
         MeaningRepr::Char(c, cat) => Meaning::Char(*c, u8_to_cat(*cat)),
         MeaningRepr::CharDef(v) => Meaning::CharDef(*v),
         MeaningRepr::CountDef(r) => Meaning::CountDef(*r),
+        MeaningRepr::ToksDef(r) => Meaning::ToksDef(*r),
     }
 }
 

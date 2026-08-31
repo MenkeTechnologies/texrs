@@ -373,6 +373,13 @@ impl Lowerer {
                 // slot file as the counts, offset past them, so everything that
                 // already works for a count -- assignment, a group's save and
                 // restore -- works for it with no second mechanism.
+                // `\toks0={...}`. A token list is frontend state like a macro
+                // body, so it is stored while lowering rather than in a slot,
+                // and nothing in the braces expands.
+                "toks" => {
+                    let reg = self.eng.scan_number_file(lx)?;
+                    self.eng.do_toks_assign(lx, reg)?;
+                }
                 // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
                 // together, so the whole glue is one assignment.
                 "skip" => {
@@ -396,6 +403,11 @@ impl Lowerer {
                 // `\pageno=7`, where `\pageno` was `\countdef`'d: the name is
                 // the register, so this is the `\count0=7` arm reached by
                 // another spelling.
+                // `\toks@={...}`, through a name \toksdef gave the register.
+                _ if self.eng.toks_cs(name).is_some() => {
+                    let reg = self.eng.toks_cs(name).expect("just matched");
+                    self.eng.do_toks_assign(lx, reg)?;
+                }
                 _ if matches!(
                     self.eng.numeric_cs(name),
                     Some(crate::expand::NumericCs::Register(_))
@@ -540,7 +552,7 @@ impl Lowerer {
                 // Both define a control sequence that stands for a number, and
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
-                "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" => {
+                "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "toksdef" => {
                     self.eng.compile_time_numeric_def(lx, name.name())?
                 }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
@@ -1179,6 +1191,18 @@ impl Lowerer {
                             // `\the\dimen0` is written as a DIMENSION -- 1.0pt,
                             // not 65536 -- which is the whole difference
                             // between the two registers at this level.
+                            // `\the\toks0` is the token list as text, and it
+                            // is known while lowering because the table is.
+                            Some(Token::Cs(w)) if w.name() == "toks" => {
+                                let reg = self.eng.scan_number_pending(work)?;
+                                text.push_str(&self.eng.toks_text(reg));
+                                continue;
+                            }
+                            Some(Token::Cs(w)) if self.eng.toks_cs(w).is_some() => {
+                                let reg = self.eng.toks_cs(w).expect("just matched");
+                                text.push_str(&self.eng.toks_text(reg));
+                                continue;
+                            }
                             Some(Token::Cs(w)) if w.name() == "skip" => {
                                 let reg = self.eng.scan_number_pending(work)?;
                                 let base =

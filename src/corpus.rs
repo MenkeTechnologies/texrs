@@ -440,6 +440,18 @@ pub const CORPUS: &[Entry] = &[
         "Give a glue register a name, as `\\countdef` and `\\dimendef` do for theirs. An assignment through the name reads a whole glue, not the dimension at the front of one.",
         "\\skipdef\\skip@=0\n\\skip@=1pt plus 2pt",
     ),
+    (
+        "\\toks",
+        "Registers",
+        "A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why `\\toks0={\\x}` reads back as `\\x` whatever `\\x` means. `\\toks1=\\toks0` copies one register to another. `\\the` writes the list back by the token-list rule rather than `\\string`'s: a control word carries a trailing space however short, a one-character control sequence does not.",
+        "\\toks0={a\\b c}\n\\message{\\the\\toks0}   % => a\\b c",
+    ),
+    (
+        "\\toksdef",
+        "Registers",
+        "Give a token register a name, as `\\countdef` does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.",
+        "\\toksdef\\toks@=0\n\\toks@={...}",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",

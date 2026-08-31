@@ -1,0 +1,16 @@
+% A token register holds a token list VERBATIM: nothing in the braces expands,
+% which is the whole difference between it and a macro. \the writes the list
+% back by the token-list rule, not \string's -- a control WORD carries a
+% trailing space however short (`\b ') and a one-character control sequence% does not (`\.').
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\toks0={abc}
+\toks1={a\b c}
+\toks2={\.}
+\message{[\the\toks0][\the\toks1][\the\toks2]}
+\def\x{X}
+\toks3={\x}
+\toks4={}
+\message{[\the\toks3][\the\toks4]}
+\toks5=\toks0
+\message{[\the\toks5]}
+\end

@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">95</div>
+            <div class="stat-val">97</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -259,6 +259,10 @@
 \skip1=0pt plus 1fil</pre></td></tr>
             <tr><td><code>\skipdef</code></td><td>Give a glue register a name, as <code>\countdef</code> and <code>\dimendef</code> do for theirs. An assignment through the name reads a whole glue, not the dimension at the front of one.</td><td><pre>\skipdef\skip@=0
 \skip@=1pt plus 2pt</pre></td></tr>
+            <tr><td><code>\toks</code></td><td>A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why <code>\toks0={\x}</code> reads back as <code>\x</code> whatever <code>\x</code> means. <code>\toks1=\toks0</code> copies one register to another. <code>\the</code> writes the list back by the token-list rule rather than <code>\string</code>'s: a control word carries a trailing space however short, a one-character control sequence does not.</td><td><pre>\toks0={a\b c}
+\message{\the\toks0}   % =&gt; a\b c</pre></td></tr>
+            <tr><td><code>\toksdef</code></td><td>Give a token register a name, as <code>\countdef</code> does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.</td><td><pre>\toksdef\toks@=0
+\toks@={...}</pre></td></tr>
           </tbody>
         </table>
       </section>

@@ -44,6 +44,8 @@ pub enum Meaning {
     /// is scanned. plain.tex builds its constants this way: `\chardef\active=13`
     /// is what makes `\catcode`\~=\active` readable.
     CharDef(i64),
+    /// `\toksdef\toks@=0` — another name for a token register.
+    ToksDef(i64),
     /// `\countdef\pageno=0` — another name for a count register, in every
     /// position `\count0` itself works: assignment, arithmetic and `\the`.
     CountDef(i64),
@@ -63,6 +65,8 @@ pub enum NumericCs {
 /// affordable; the same choice is made here.
 enum Save {
     Cat(char, Cat),
+    /// One token register as it stood before a group assigned to it.
+    Toks(i64, Option<Vec<Token>>),
     /// One entry of one character-code table, as it stood before a group
     /// changed it. The tables are scoped exactly as the category codes are --
     /// measured: 777 inside the group, 555 outside.
@@ -98,6 +102,10 @@ pub struct Engine {
     /// Set by `\global`, cleared by the assignment it prefixes.
     /// `\mathcode`, `\lccode`, `\uccode`, `\sfcode`, `\delcode`.
     pub charcodes: crate::charcodes::CharCodes,
+    /// `\toks` registers. A token list is frontend state like a macro body, not
+    /// a number in a slot, so it lives here and is scoped by the same save
+    /// stack -- measured: `{\toks0={b}}` leaves the outer value behind.
+    pub toks: std::collections::HashMap<i64, Vec<Token>>,
     global: bool,
     /// Whether a `\long` prefix is in force for the definition being read.
     long: bool,
@@ -181,6 +189,7 @@ impl Engine {
             groups: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
+            toks: std::collections::HashMap::new(),
             global: false,
             long: false,
             outer: false,
@@ -213,6 +222,12 @@ impl Engine {
         for save in frame.into_iter().rev() {
             match save {
                 Save::Cat(c, cat) => self.cats.set(c, cat),
+                Save::Toks(reg, was) => {
+                    match was {
+                        Some(v) => self.toks.insert(reg, v),
+                        None => self.toks.remove(&reg),
+                    };
+                }
                 Save::CharCode(t, c, v) => {
                     let _ = self.charcodes.set(t, c, v);
                 }
@@ -721,6 +736,77 @@ impl Engine {
         Ok((sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN))
     }
 
+    /// `\toks<n>={...}` or `\toks<n>=\toks<m>`.
+    ///
+    /// The braced form is stored VERBATIM: nothing in it expands, which is the
+    /// difference between a token register and a macro. Measured --
+    /// `\toks0={\x}` reads back as `\x`, whatever `\x` means.
+    pub fn do_toks_assign(&mut self, lx: &mut Lexer, reg: i64) -> R<()> {
+        self.skip_equals(lx)?;
+        let value = loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                return Err(TexError("Missing { inserted".into()));
+            };
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char(_, Cat::BeginGroup) => break self.read_balanced(lx)?,
+                // `\toks1=\toks0` copies, and `\toks1=\toksA` copies through a
+                // name defined by \toksdef.
+                Token::Cs(n) => {
+                    let from = match n.name() {
+                        "toks" => self.scan_number(lx, false)?,
+                        _ => match self.meanings.get(n) {
+                            Some(Meaning::ToksDef(r)) => *r,
+                            _ => return Err(TexError("Missing { inserted".into())),
+                        },
+                    };
+                    break self.toks.get(&from).cloned().unwrap_or_default();
+                }
+                _ => return Err(TexError("Missing { inserted".into())),
+            }
+        };
+        self.save(Save::Toks(reg, self.toks.get(&reg).cloned()));
+        self.toks.insert(reg, value);
+        Ok(())
+    }
+
+    /// What `\the\toks<n>` writes: the tokens as text, by the same rule
+    /// `\string` uses -- a control word carries a trailing space, a
+    /// single-character control sequence does not.
+    pub fn toks_text(&self, reg: i64) -> String {
+        let Some(tokens) = self.toks.get(&reg) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for t in tokens {
+            match t {
+                Token::Char(c, _) => out.push(*c),
+                Token::Cs(id) => {
+                    let name = id.name();
+                    out.push(self.escape);
+                    out.push_str(name);
+                    // A control WORD carries a trailing space here, however
+                    // short: `\b` prints as `\b `. A control sequence made of
+                    // one non-letter does not. Measured -- and it is not the
+                    // rule `\string` follows, which never adds the space, so
+                    // the two cannot share a renderer.
+                    if name.chars().all(|c| c.is_alphabetic()) {
+                        out.push(' ');
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The register a `\toksdef` name stands for.
+    pub fn toks_cs(&self, name: CsId) -> Option<i64> {
+        match self.meanings.get(&name) {
+            Some(Meaning::ToksDef(r)) => Some(*r),
+            _ => None,
+        }
+    }
+
     /// A dimension that may be infinite: the same number, but with `fil`,
     /// `fill` or `filll` accepted as its unit. Returns the value and its order,
     /// 0 being an ordinary finite dimension.
@@ -1133,7 +1219,7 @@ impl Engine {
         // stop at 255 and name the table they overran.
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
-            "dimendef" | "skipdef" => (255, "register code"),
+            "dimendef" | "skipdef" | "toksdef" => (255, "register code"),
             "chardef" => (255, "character code"),
             _ => (255, "register code"),
         };
@@ -1147,6 +1233,9 @@ impl Engine {
             // A dimension register is a register: the name stands for the slot,
             // and the slot is the one the dimensions live in.
             "dimendef" => Meaning::CountDef(crate::compiler::DIMEN_BASE + v),
+            // A token register is not a slot: the list lives in the frontend,
+            // so the name stands for the register number itself.
+            "toksdef" => Meaning::ToksDef(v),
             "skipdef" => {
                 Meaning::CountDef(crate::compiler::SKIP_BASE + v * crate::compiler::SKIP_STRIDE)
             }
