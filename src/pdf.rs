@@ -354,10 +354,19 @@ impl Page {
                 name
             }
         };
+        // A code above 126 is written as its octal escape, because a content
+        // stream is BYTES and a `char` pushed into a Rust string is written as
+        // UTF-8: the arrow at code 0xAE went into the file as three bytes, a
+        // reader drew the three letters that font has at 0xE2, 0x86 and 0x92,
+        // and `pdftotext` read the line back with three wrong characters in it.
+        // `\256` is the one byte the font's encoding was asked for.
         let escaped: String = text
             .chars()
             .flat_map(|c| match c {
                 '(' | ')' | '\\' => vec!['\\', c],
+                c if (c as u32) < 32 || (c as u32) > 126 => {
+                    format!("\\{:03o}", (c as u32) & 0xFF).chars().collect()
+                }
                 other => vec![other],
             })
             .collect();
@@ -633,12 +642,40 @@ fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
         ]));
     }
     let Font::Embedded(type1) = font else {
-        return pdf.add(Object::dict([
+        let name = font.name();
+        // Symbol and ZapfDingbats are the two of the fourteen that are NOT in
+        // any standard encoding: their codes mean what their own built-in
+        // encoding says, and overlaying WinAnsi on one of them tells a reader
+        // that code 174 is a guillemot where the font draws a right arrow.
+        // Every other one of the fourteen is written with WinAnsi, which is the
+        // encoding this driver addresses them in.
+        let built_in = name == "Symbol" || name == "ZapfDingbats";
+        let mut entries = vec![
             ("Type", Object::name("Font")),
             ("Subtype", Object::name("Type1")),
-            ("BaseFont", Object::name(&font.name())),
-            ("Encoding", Object::name("WinAnsiEncoding")),
-        ]));
+            ("BaseFont", Object::name(&name)),
+        ];
+        if !built_in {
+            entries.push(("Encoding", Object::name("WinAnsiEncoding")));
+        }
+        // What each of the fallback font's codes MEANS, as against which glyph
+        // it draws. Without it a page that draws an arrow is a page nobody can
+        // search for one -- `pdftotext` read the first of these back with the
+        // arrows simply absent from the text. The same thing is written beside
+        // an embedded Type 1 below, out of the same `agl`; only the table of
+        // what the codes mean is the font's own, and it lives beside the
+        // metrics it was read from.
+        if name == "Symbol" {
+            let meanings: Vec<(u8, String)> = (0u8..=255)
+                .filter_map(|code| Some((code, crate::typeset::symbol_unicode(code)?.to_string())))
+                .collect();
+            let map = pdf.add(Object::Stream {
+                dict: BTreeMap::new(),
+                data: crate::agl::to_unicode(&name, &meanings).into_bytes(),
+            });
+            entries.push(("ToUnicode", map));
+        }
+        return pdf.add(Object::dict(entries));
     };
 
     let (bytes, clear, binary, trailer) = type1.embeddable();

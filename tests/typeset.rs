@@ -1176,3 +1176,63 @@ fn the_lowerer_keeps_the_files_the_preamble_named_for_every_face() {
         "the monospace file, which is what \\texttt is set from"
     );
 }
+
+#[test]
+fn a_symbol_a_document_spells_as_a_macro_still_typesets_and_reaches_the_page() {
+    // `\rightarrow` was undefined, and an undefined control sequence is not a
+    // missing glyph: the run STOPS -- `! Undefined control sequence
+    // \rightarrow.` -- and the document produces no page at all. The corpus
+    // writes 2,123 arrows, and a document that draws a pipeline writes little
+    // else.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               step \\rightarrow next, at \\alpha\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("a document that writes an arrow still typesets");
+    let runs = faces(&pdf);
+    // No text face has an arrow and none ever will, so it comes from the
+    // fallback font at the code that font's own encoding gives it: 174 for
+    // `arrowright`, written into the content stream as the one byte `\256`.
+    assert!(
+        runs.iter()
+            .any(|(face, text)| face == "Symbol" && text == "\\256"),
+        "the arrow was not drawn from the fallback font: {runs:?}"
+    );
+    assert!(
+        runs.iter()
+            .any(|(face, text)| face == "Symbol" && text == "a"),
+        "nor was the alpha, which is code 97 there: {runs:?}"
+    );
+    // And the prose around it stays in the document's own face rather than
+    // being dragged into the fallback with it.
+    assert_ne!(face_of(&runs, "step"), "Symbol");
+}
+
+#[test]
+fn a_character_the_face_lacks_is_drawn_rather_than_written_out_as_its_utf8() {
+    // A `char` pushed into the content stream is written as UTF-8, so the arrow
+    // in `A -> B` went into the file as three bytes and a reader drew three
+    // letters of whatever the face has at 0xE2, 0x86 and 0x92 -- `pdftotext`
+    // read the page back with three wrong characters where the arrow was. Each
+    // of these is ONE glyph on the page now, and which font draws it depends on
+    // what the face has.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               dash \u{2014} arrow \u{2192} rule \u{2500} end\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = faces(&pdf);
+    let all: String = runs.iter().map(|(_, text)| text.as_str()).collect();
+    assert!(
+        !all.contains('\u{2192}') && !all.contains('\u{2014}'),
+        "a character reached the content stream as itself: {runs:?}"
+    );
+    // The em dash IS in WinAnsi, at 0x97, and Helvetica has it -- so it stays
+    // in the document's own face rather than being fetched from anywhere.
+    assert_eq!(face_of(&runs, "\\227"), "Helvetica");
+    // The arrow is in no text encoding at all and comes from the fallback.
+    assert_eq!(face_of(&runs, "\\256"), "Symbol");
+    // Box drawing is in neither, and Computer Modern has none of it either, so
+    // it is set as the stand-in that keeps the line readable -- which is what
+    // the DVI path has always done with the same character.
+    assert!(
+        all.contains("rule - end"),
+        "the rule was dropped instead of standing in: {runs:?}"
+    );
+}

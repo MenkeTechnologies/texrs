@@ -483,7 +483,293 @@ const APPROXIMATIONS: &[(char, &str)] = &[
     ('”', "''"),
     ('‘', "`"),
     ('’', "'"),
+    // The double rules, the blocks and the marks the corpus draws with, none of
+    // which any of the three sources above carries: not Computer Modern, not
+    // WinAnsi, not the Symbol font. Counted over the 41 books, U+2500 appears
+    // 9,134 times, U+2550 700 and U+2588 473, so without a stand-in the tables
+    // and the bars in them are holes on the page.
+    ('═', "="),
+    ('║', "|"),
+    ('╔', ",="),
+    ('╗', "=."),
+    ('╚', "`="),
+    ('╝', "='"),
+    ('╠', "|="),
+    ('╣', "=|"),
+    ('╦', "=,="),
+    ('╩', "='="),
+    ('╬', "=+="),
+    ('█', "#"),
+    ('▉', "#"),
+    ('▊', "#"),
+    ('▋', "#"),
+    ('▌', "|"),
+    ('▍', "|"),
+    ('▎', "|"),
+    ('▏', "|"),
+    ('▄', "_"),
+    ('▅', "_"),
+    ('▂', "_"),
+    ('●', "*"),
+    ('○', "o"),
+    ('◆', "*"),
+    ('◇', "o"),
+    ('★', "*"),
+    ('☆', "*"),
+    ('▲', "^"),
+    ('▼', "v"),
+    ('►', ">"),
+    ('▶', ">"),
+    ('◀', "<"),
+    ('❯', ">"),
+    // A tick and a cross, as a terminal writes them when it has no glyph
+    // either. A checklist whose ticks vanished reads as a list of things that
+    // were NOT done, which is the opposite of what it says.
+    ('✓', "+"),
+    ('✔', "+"),
+    ('✗', "x"),
+    ('✘', "x"),
+    // The arrows no font on either path carries. The length is part of what a
+    // long arrow says, so a long one is not set as a short one.
+    ('↕', "|"),
+    ('⟶', "-->"),
+    ('⟵', "<--"),
+    ('⟷', "<->"),
+    ('⟹', "==>"),
+    ('⟸', "<=="),
+    ('↦', "|->"),
+    ('↪', "->"),
+    ('↩', "<-"),
+    ('↗', "/"),
+    ('↘', "\\"),
+    ('↙', "/"),
+    ('↖', "\\"),
+    ('∓', "-+"),
+    ('∘', "o"),
+    ('↯', "!"),
+    ('⚠', "!"),
+    ('ℹ', "i"),
+    ('┤', "-|"),
+    ('╭', ",-"),
+    ('╮', "-."),
+    ('╰', "`-"),
+    ('╯', "-'"),
+    ('▁', "_"),
+    ('▃', "_"),
+    ('▆', "#"),
+    ('▇', "#"),
+    ('░', "."),
+    ('▒', ":"),
+    ('▓', "#"),
+    ('▸', ">"),
+    ('▹', ">"),
+    ('◂', "<"),
+    // The superscript and subscript digits. WinAnsi has ¹ ² ³ and stops, so
+    // the rest of a footnote's numbering came out as nothing at all.
+    ('⁰', "0"),
+    ('⁴', "4"),
+    ('⁵', "5"),
+    ('⁶', "6"),
+    ('⁷', "7"),
+    ('⁸', "8"),
+    ('⁹', "9"),
+    ('ⁿ', "n"),
+    ('₀', "0"),
+    ('₁', "1"),
+    ('₂', "2"),
+    ('₃', "3"),
+    ('₄', "4"),
+    // The Mac modifier keys, which these books name in every keybinding table.
+    // Spelling them is what a reader without the glyph needs; dropping them
+    // leaves a shortcut with no key in it.
+    ('⌘', "Cmd"),
+    ('⌥', "Opt"),
+    ('⌃', "Ctrl"),
+    ('⇧', "Shift"),
 ];
+
+/// The characters a document spells as a control sequence.
+///
+/// `\rightarrow` is not decoration: a document that writes one and meets an
+/// engine that has never heard of it stops dead -- `! Undefined control
+/// sequence \rightarrow.` -- and produces no page at all. Each name yields the
+/// CHARACTER it means and nothing else, so every table that decides how a
+/// character is DRAWN -- `CM_SYMBOLS` for the DVI path, `SYMBOL_FONT` and
+/// `APPROXIMATIONS` for the PDF one -- stays the only place that decides it. A
+/// name mapped straight to a font slot would be a second such table, and it
+/// would drift from the first the moment either was touched.
+///
+/// The characters are the ones LaTeX's own `fontmath.ltx` and `latex.ltx` give
+/// these names, read as Unicode: `\to` and `\rightarrow` are one macro in TeX
+/// and are one entry here.
+pub const SYMBOL_MACROS: &[(&str, char)] = &[
+    // Arrows. `\to` and `\gets` are plain TeX's names for the first two.
+    ("rightarrow", '→'),
+    ("to", '→'),
+    ("leftarrow", '←'),
+    ("gets", '←'),
+    ("uparrow", '↑'),
+    ("downarrow", '↓'),
+    ("leftrightarrow", '↔'),
+    ("updownarrow", '↕'),
+    ("Rightarrow", '⇒'),
+    ("Leftarrow", '⇐'),
+    ("Leftrightarrow", '⇔'),
+    ("Uparrow", '⇑'),
+    ("Downarrow", '⇓'),
+    ("longrightarrow", '⟶'),
+    ("longleftarrow", '⟵'),
+    ("longleftrightarrow", '⟷'),
+    ("Longrightarrow", '⟹'),
+    ("Longleftarrow", '⟸'),
+    ("mapsto", '↦'),
+    ("hookrightarrow", '↪'),
+    ("hookleftarrow", '↩'),
+    ("nearrow", '↗'),
+    ("searrow", '↘'),
+    ("swarrow", '↙'),
+    ("nwarrow", '↖'),
+    // Greek, lower case. TeX has no `\omicron`: it is the letter `o`, and a
+    // document writes it as one.
+    ("alpha", 'α'),
+    ("beta", 'β'),
+    ("gamma", 'γ'),
+    ("delta", 'δ'),
+    // `\epsilon` is the lunate U+03F5 in TeX and `\varepsilon` the open one;
+    // neither the Symbol font nor a text face carries the lunate, so both are
+    // read as U+03B5, which is the letter either way.
+    ("epsilon", 'ε'),
+    ("varepsilon", 'ε'),
+    ("zeta", 'ζ'),
+    ("eta", 'η'),
+    ("theta", 'θ'),
+    ("vartheta", 'ϑ'),
+    ("iota", 'ι'),
+    ("kappa", 'κ'),
+    ("lambda", 'λ'),
+    ("mu", 'μ'),
+    ("nu", 'ν'),
+    ("xi", 'ξ'),
+    ("pi", 'π'),
+    ("varpi", 'ϖ'),
+    ("rho", 'ρ'),
+    ("sigma", 'σ'),
+    ("varsigma", 'ς'),
+    ("tau", 'τ'),
+    ("upsilon", 'υ'),
+    ("phi", 'φ'),
+    ("varphi", 'ϕ'),
+    ("chi", 'χ'),
+    ("psi", 'ψ'),
+    ("omega", 'ω'),
+    // Greek, upper case. Only the letters that differ from a Latin capital
+    // have a name in TeX, which is why there is no `\Alpha`.
+    ("Gamma", 'Γ'),
+    ("Delta", 'Δ'),
+    ("Theta", 'Θ'),
+    ("Lambda", 'Λ'),
+    ("Xi", 'Ξ'),
+    ("Pi", 'Π'),
+    ("Sigma", 'Σ'),
+    ("Upsilon", 'Υ'),
+    ("Phi", 'Φ'),
+    ("Psi", 'Ψ'),
+    ("Omega", 'Ω'),
+    // Relations.
+    ("le", '≤'),
+    ("leq", '≤'),
+    ("ge", '≥'),
+    ("geq", '≥'),
+    ("ne", '≠'),
+    ("neq", '≠'),
+    ("approx", '≈'),
+    ("equiv", '≡'),
+    ("sim", '∼'),
+    ("cong", '≅'),
+    ("propto", '∝'),
+    ("subset", '⊂'),
+    ("supset", '⊃'),
+    ("subseteq", '⊆'),
+    ("supseteq", '⊇'),
+    ("in", '∈'),
+    ("notin", '∉'),
+    ("ni", '∋'),
+    ("perp", '⊥'),
+    // Operators and the rest of the mathematics these books write.
+    ("times", '×'),
+    ("div", '÷'),
+    ("pm", '±'),
+    ("mp", '∓'),
+    ("cdot", '⋅'),
+    ("bullet", '•'),
+    ("ast", '∗'),
+    ("circ", '∘'),
+    ("oplus", '⊕'),
+    ("otimes", '⊗'),
+    ("cup", '∪'),
+    ("cap", '∩'),
+    ("emptyset", '∅'),
+    ("varnothing", '∅'),
+    ("forall", '∀'),
+    ("exists", '∃'),
+    ("neg", '¬'),
+    ("lnot", '¬'),
+    ("land", '∧'),
+    ("wedge", '∧'),
+    ("lor", '∨'),
+    ("vee", '∨'),
+    ("sum", '∑'),
+    ("prod", '∏'),
+    ("int", '∫'),
+    ("partial", '∂'),
+    ("nabla", '∇'),
+    ("infty", '∞'),
+    ("surd", '√'),
+    ("angle", '∠'),
+    ("therefore", '∴'),
+    ("aleph", 'ℵ'),
+    ("prime", '′'),
+    ("diamond", '◆'),
+    ("star", '★'),
+    ("dagger", '†'),
+    ("ddagger", '‡'),
+    // The text symbols that are spelled as a control sequence and are not
+    // characters a keyboard has. `\S` and `\P` are Computer Modern's section
+    // and paragraph marks, which `CM_SYMBOLS` already places.
+    ("S", '§'),
+    ("P", '¶'),
+    ("dag", '†'),
+    ("ddag", '‡'),
+    ("copyright", '©'),
+    ("textcopyright", '©'),
+    ("textregistered", '®'),
+    ("texttrademark", '™'),
+    ("pounds", '£'),
+    ("textsterling", '£'),
+    ("texteuro", '€'),
+    ("euro", '€'),
+    ("textdegree", '°'),
+    ("textbullet", '•'),
+    ("textperiodcentered", '·'),
+    ("textemdash", '—'),
+    ("textendash", '–'),
+    ("textellipsis", '…'),
+    ("textmu", 'µ'),
+    ("textpm", '±'),
+    ("texttimes", '×'),
+    ("textdiv", '÷'),
+];
+
+/// The character `\name` stands for, if it is one of the symbols above.
+///
+/// Asked only where a control sequence would otherwise be undefined, so a
+/// document that defines its own `\star` keeps it.
+pub fn symbol_char(name: &str) -> Option<char> {
+    SYMBOL_MACROS
+        .iter()
+        .find(|(macro_name, _)| *macro_name == name)
+        .map(|(_, ch)| *ch)
+}
 
 /// The characters of `text` that will actually be SET, with the colour and face
 /// markers dropped.
@@ -609,6 +895,291 @@ impl FontChain {
     pub fn width_of(&self, text: &str, size: f64) -> f64 {
         printing_chars(text).map(|c| self.width(c, size)).sum()
     }
+}
+
+/// The name every PDF reader knows the fallback font by.
+///
+/// Symbol is one of the fourteen a reader is required to have, so naming it
+/// costs nothing in the file and works everywhere -- which is the only reason a
+/// per-glyph fallback can be had here at all: an arbitrary system font would
+/// have to be embedded AND addressed, and a simple font's encoding has 256
+/// slots to address it with.
+pub const SYMBOL_FONT_NAME: &str = "Symbol";
+
+/// The Symbol font's own encoding: the code that draws a character, and what
+/// that code advances, in 1/1000 em.
+///
+/// This IS the per-glyph fallback. `luaotfload.add_fallback` is what the
+/// publication scripts needed LuaTeX for -- a character the chosen face has no
+/// glyph for is fetched from another font, in every context including verbatim
+/// -- and this is the same thing with the other font fixed at the one every
+/// reader already has. It carries the arrows, the Greek and the relations,
+/// which is most of what a text face is missing.
+///
+/// Read off `psyr.afm`, Adobe's own metrics for the font, joined to Unicode
+/// through `glyphlist.txt`: `C 174 ; WX 987 ; N arrowright` and
+/// `arrowright;2192`. Both files ship with every TeX installation. A wrong code
+/// here draws a wrong glyph in silence, so they are not guessed.
+const SYMBOL_FONT: &[(char, u8, i64)] = &[
+    ('\u{AC}', 216, 713),    // logicalnot
+    ('\u{B0}', 176, 400),    // degree
+    ('\u{B1}', 177, 549),    // plusminus
+    ('\u{B5}', 109, 576),    // mu
+    ('\u{D7}', 180, 549),    // multiply
+    ('\u{F7}', 184, 549),    // divide
+    ('\u{192}', 166, 500),   // florin
+    ('\u{391}', 65, 722),    // Alpha
+    ('\u{392}', 66, 667),    // Beta
+    ('\u{393}', 71, 603),    // Gamma
+    ('\u{395}', 69, 611),    // Epsilon
+    ('\u{396}', 90, 611),    // Zeta
+    ('\u{397}', 72, 722),    // Eta
+    ('\u{398}', 81, 741),    // Theta
+    ('\u{399}', 73, 333),    // Iota
+    ('\u{39A}', 75, 722),    // Kappa
+    ('\u{39B}', 76, 686),    // Lambda
+    ('\u{39C}', 77, 889),    // Mu
+    ('\u{39D}', 78, 722),    // Nu
+    ('\u{39E}', 88, 645),    // Xi
+    ('\u{39F}', 79, 722),    // Omicron
+    ('\u{3A0}', 80, 768),    // Pi
+    ('\u{3A1}', 82, 556),    // Rho
+    ('\u{3A3}', 83, 592),    // Sigma
+    ('\u{3A4}', 84, 611),    // Tau
+    ('\u{3A5}', 85, 690),    // Upsilon
+    ('\u{3A6}', 70, 763),    // Phi
+    ('\u{3A7}', 67, 722),    // Chi
+    ('\u{3A8}', 89, 795),    // Psi
+    ('\u{3B1}', 97, 631),    // alpha
+    ('\u{3B2}', 98, 549),    // beta
+    ('\u{3B3}', 103, 411),   // gamma
+    ('\u{3B4}', 100, 494),   // delta
+    ('\u{3B5}', 101, 439),   // epsilon
+    ('\u{3B6}', 122, 494),   // zeta
+    ('\u{3B7}', 104, 603),   // eta
+    ('\u{3B8}', 113, 521),   // theta
+    ('\u{3B9}', 105, 329),   // iota
+    ('\u{3BA}', 107, 549),   // kappa
+    ('\u{3BB}', 108, 549),   // lambda
+    ('\u{3BD}', 110, 521),   // nu
+    ('\u{3BE}', 120, 493),   // xi
+    ('\u{3BF}', 111, 549),   // omicron
+    ('\u{3C0}', 112, 549),   // pi
+    ('\u{3C1}', 114, 549),   // rho
+    ('\u{3C2}', 86, 439),    // sigma1
+    ('\u{3C3}', 115, 603),   // sigma
+    ('\u{3C4}', 116, 439),   // tau
+    ('\u{3C5}', 117, 576),   // upsilon
+    ('\u{3C6}', 102, 521),   // phi
+    ('\u{3C7}', 99, 549),    // chi
+    ('\u{3C8}', 121, 686),   // psi
+    ('\u{3C9}', 119, 686),   // omega
+    ('\u{3D1}', 74, 631),    // theta1
+    ('\u{3D2}', 161, 620),   // Upsilon1
+    ('\u{3D5}', 106, 603),   // phi1
+    ('\u{3D6}', 118, 713),   // omega1
+    ('\u{2022}', 183, 460),  // bullet
+    ('\u{2026}', 188, 1000), // ellipsis
+    ('\u{2032}', 162, 247),  // minute
+    ('\u{2033}', 178, 411),  // second
+    ('\u{2044}', 164, 167),  // fraction
+    ('\u{2111}', 193, 686),  // Ifraktur
+    ('\u{2118}', 195, 987),  // weierstrass
+    ('\u{211C}', 194, 795),  // Rfraktur
+    ('\u{2126}', 87, 768),   // Omega
+    ('\u{2135}', 192, 823),  // aleph
+    ('\u{2190}', 172, 987),  // arrowleft
+    ('\u{2191}', 173, 603),  // arrowup
+    ('\u{2192}', 174, 987),  // arrowright
+    ('\u{2193}', 175, 603),  // arrowdown
+    ('\u{2194}', 171, 1042), // arrowboth
+    ('\u{21B5}', 191, 658),  // carriagereturn
+    ('\u{21D0}', 220, 987),  // arrowdblleft
+    ('\u{21D1}', 221, 603),  // arrowdblup
+    ('\u{21D2}', 222, 987),  // arrowdblright
+    ('\u{21D3}', 223, 603),  // arrowdbldown
+    ('\u{21D4}', 219, 1042), // arrowdblboth
+    ('\u{2200}', 34, 713),   // universal
+    ('\u{2202}', 182, 494),  // partialdiff
+    ('\u{2203}', 36, 549),   // existential
+    ('\u{2205}', 198, 823),  // emptyset
+    ('\u{2206}', 68, 612),   // Delta
+    ('\u{2207}', 209, 713),  // gradient
+    ('\u{2208}', 206, 713),  // element
+    ('\u{2209}', 207, 713),  // notelement
+    ('\u{220B}', 39, 439),   // suchthat
+    ('\u{220F}', 213, 823),  // product
+    ('\u{2211}', 229, 713),  // summation
+    ('\u{2212}', 45, 549),   // minus
+    ('\u{2217}', 42, 500),   // asteriskmath
+    ('\u{221A}', 214, 549),  // radical
+    ('\u{221D}', 181, 713),  // proportional
+    ('\u{221E}', 165, 713),  // infinity
+    ('\u{2220}', 208, 768),  // angle
+    ('\u{2227}', 217, 603),  // logicaland
+    ('\u{2228}', 218, 603),  // logicalor
+    ('\u{2229}', 199, 768),  // intersection
+    ('\u{222A}', 200, 768),  // union
+    ('\u{222B}', 242, 274),  // integral
+    ('\u{2234}', 92, 863),   // therefore
+    ('\u{223C}', 126, 549),  // similar
+    ('\u{2245}', 64, 549),   // congruent
+    ('\u{2248}', 187, 549),  // approxequal
+    ('\u{2260}', 185, 549),  // notequal
+    ('\u{2261}', 186, 549),  // equivalence
+    ('\u{2264}', 163, 549),  // lessequal
+    ('\u{2265}', 179, 549),  // greaterequal
+    ('\u{2282}', 204, 713),  // propersubset
+    ('\u{2283}', 201, 713),  // propersuperset
+    ('\u{2284}', 203, 713),  // notsubset
+    ('\u{2286}', 205, 713),  // reflexsubset
+    ('\u{2287}', 202, 713),  // reflexsuperset
+    ('\u{2295}', 197, 768),  // circleplus
+    ('\u{2297}', 196, 768),  // circlemultiply
+    ('\u{22A5}', 94, 658),   // perpendicular
+    ('\u{22C5}', 215, 250),  // dotmath
+    ('\u{2320}', 243, 686),  // integraltp
+    ('\u{2321}', 245, 686),  // integralbt
+    ('\u{2329}', 225, 329),  // angleleft
+    ('\u{232A}', 241, 329),  // angleright
+    ('\u{25CA}', 224, 494),  // lozenge
+    ('\u{2660}', 170, 753),  // spade
+    ('\u{2663}', 167, 753),  // club
+    ('\u{2665}', 169, 753),  // heart
+    ('\u{2666}', 168, 753),  // diamond
+    // Three glyphs the Adobe list names for their MATHEMATICAL character when
+    // the Greek letter is the same shape and the same slot: `mu` is U+00B5 the
+    // micro sign, `Delta` U+2206 the increment, `Omega` U+2126 the ohm. A
+    // document writing Greek writes U+03BC, U+0394 and U+03A9, and with only
+    // the names above those three fell past every table and were dropped --
+    // measured on zshrs/docs/book.tex, whose two U+03BC reached no page.
+    ('\u{3BC}', 109, 576), // mu, as the letter
+    ('\u{394}', 68, 612),  // Delta, as the letter
+    ('\u{3A9}', 87, 768),  // Omega, as the letter
+];
+
+/// WinAnsi's own codes, for the characters that are not where Unicode puts
+/// them.
+///
+/// A PDF font here is written with `/Encoding /WinAnsiEncoding`, so a code IS a
+/// WinAnsi code. From U+00A0 up WinAnsi is Latin-1 and the code is the
+/// codepoint; between 0x80 and 0x9F it is Windows' own set of punctuation, and
+/// that is where the em dash, the ellipsis and the curly quotes live -- 2,063
+/// em dashes and 3,486 ellipses in the corpus, every one of them written into
+/// the file as its UTF-8 bytes and drawn as two or three wrong letters.
+const WINANSI_PUNCTUATION: &[(char, u8)] = &[
+    ('€', 0x80),
+    ('‚', 0x82),
+    ('ƒ', 0x83),
+    ('„', 0x84),
+    ('…', 0x85),
+    ('†', 0x86),
+    ('‡', 0x87),
+    ('ˆ', 0x88),
+    ('‰', 0x89),
+    ('Š', 0x8A),
+    ('‹', 0x8B),
+    ('Œ', 0x8C),
+    ('Ž', 0x8E),
+    ('‘', 0x91),
+    ('’', 0x92),
+    ('“', 0x93),
+    ('”', 0x94),
+    ('•', 0x95),
+    ('–', 0x96),
+    ('—', 0x97),
+    ('˜', 0x98),
+    ('™', 0x99),
+    ('š', 0x9A),
+    ('›', 0x9B),
+    ('œ', 0x9C),
+    ('ž', 0x9E),
+    ('Ÿ', 0x9F),
+];
+
+/// The WinAnsi code for a character, if WinAnsi has one.
+pub fn winansi_code(ch: char) -> Option<u8> {
+    match ch {
+        ' '..='~' => Some(ch as u8),
+        '\u{A0}'..='\u{FF}' => Some(ch as u8),
+        _ => WINANSI_PUNCTUATION
+            .iter()
+            .find(|(c, _)| *c == ch)
+            .map(|(_, code)| *code),
+    }
+}
+
+/// What a WinAnsi code means, which is what a font's `cmap` has to be asked
+/// for.
+///
+/// A reader resolves a code in a non-symbolic TrueType font by its WinAnsi
+/// GLYPH NAME and that name's Unicode value, so the width written beside the
+/// code has to be looked up the same way. Reading code 0x97 as U+0097 finds
+/// nothing and writes `.notdef`'s width where the em dash's belongs.
+pub fn winansi_unicode(code: u8) -> Option<char> {
+    match code {
+        0x20..=0x7E => Some(code as char),
+        0xA0..=0xFF => Some(code as char),
+        _ => WINANSI_PUNCTUATION
+            .iter()
+            .find(|(_, c)| *c == code)
+            .map(|(ch, _)| *ch),
+    }
+}
+
+/// Where one character comes from when it is drawn.
+///
+/// The order the answer is looked for in is the chain: the face the document
+/// asked for, then the fallback font, then a stand-in built out of characters
+/// every face has. What it never does is drop the character -- a glyph that
+/// vanishes takes the meaning of the line with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Glyph {
+    /// A code in the face in force, which HAS the character.
+    Own(u8),
+    /// A code in the Symbol font, which has it where the face does not.
+    Fallback(u8),
+    /// ASCII the face draws itself, standing in for a shape nothing has.
+    StandIn(&'static str),
+}
+
+/// How `ch` reaches the page, given what the face in force can draw.
+///
+/// `covers` answers from the font file's own `cmap`, which `embed_file` already
+/// reads: whether a face HAS a codepoint is a question the file answers, and
+/// asking it is the difference between a glyph and a blank.
+pub fn glyph_for(ch: char, covers: &dyn Fn(char) -> bool) -> Option<Glyph> {
+    if let Some(code) = winansi_code(ch) {
+        if ch.is_ascii() || covers(ch) {
+            return Some(Glyph::Own(code));
+        }
+    }
+    if let Some((_, code, _)) = SYMBOL_FONT.iter().find(|(c, _, _)| *c == ch) {
+        return Some(Glyph::Fallback(*code));
+    }
+    FontChain::approximate(ch).map(Glyph::StandIn)
+}
+
+/// What a code in the fallback font MEANS, as against which glyph it draws.
+///
+/// A PDF says only the second, so a page that draws an arrow from the fallback
+/// is a page nobody can search for one: `pdftotext` on the first run of these
+/// came back with the arrow simply missing from the text. The driver writes
+/// this out as the font's `/ToUnicode`.
+pub fn symbol_unicode(code: u8) -> Option<char> {
+    SYMBOL_FONT
+        .iter()
+        .find(|(_, c, _)| *c == code)
+        .map(|(ch, _, _)| *ch)
+}
+
+/// What a Symbol code advances, in 1/1000 em.
+fn symbol_width(code: u8) -> i64 {
+    SYMBOL_FONT
+        .iter()
+        .find(|(_, c, _)| *c == code)
+        .map(|(_, _, w)| *w)
+        .unwrap_or(500)
 }
 
 /// The typefaces a document asked for.
@@ -979,20 +1550,31 @@ pub fn to_pdf(
             _ => None,
         })
         .collect();
+    // Which characters each face can actually draw, from the font file's own
+    // cmap. This is the question `luaotfload.add_fallback` asks per glyph, and
+    // it is the reason the publication scripts required LuaTeX at all: a
+    // character the face has no glyph for has to come from somewhere else, and
+    // it cannot be fetched without first knowing that it is missing.
+    let coverage: Vec<Option<std::collections::BTreeSet<u32>>> =
+        fonts.iter().map(face_coverage).collect();
+    // A face with no file to read is one of the fourteen, and carrying all of
+    // WinAnsi is what being one of them means.
+    let covers = |ch: char, face: Face| match &coverage[face.index()] {
+        Some(has) => has.contains(&(ch as u32)),
+        None => true,
+    };
     let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
-    // Every branch measures through `printing_chars`. A marker's spec is digits
-    // and commas, which every one of these tables has a real width for, so a
-    // word inside one \textcolor was charged for its five letters plus fourteen
-    // spec characters plus three markers -- and a line of them broke after four
-    // words where the same line uncoloured holds seventeen. It cost whole
-    // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
-    let width_of = |word: &str, face: Face| -> f64 {
+    // What a stretch the face draws ITSELF costs. The codes are what the file
+    // will hold and the characters are what the document wrote; the two differ
+    // wherever WinAnsi puts a character somewhere other than its codepoint, and
+    // each table is indexed by the one it is stated in.
+    let own_width = |codes: &str, source: &str, face: Face| -> f64 {
         if let Some(Some(w)) = embedded_widths.get(face.index()) {
             // PDF widths are 1/1000 em, and codes below 32 are not in the table.
-            return printing_chars(word)
+            return codes
+                .chars()
                 .map(|c| {
-                    let code = c as usize;
-                    let at = code.saturating_sub(32);
+                    let at = (c as usize).saturating_sub(32);
                     let mille = w.get(at).copied().unwrap_or(500);
                     mille as f64 / 1000.0 * layout.size
                 })
@@ -1001,9 +1583,43 @@ pub fn to_pdf(
         match &metrics {
             // The .tfm reader kerns and ligatures across neighbouring
             // characters, so it needs the string whole rather than an iterator.
-            Some(f) => f.width_of(&printing_chars(word).collect::<String>()) * layout.size,
-            None => printing_chars(word).count() as f64 * layout.size * 0.5,
+            Some(f) => f.width_of(source) * layout.size,
+            None => source.chars().count() as f64 * layout.size * 0.5,
         }
+    };
+    let piece_width = |piece: &Piece, face: Face| -> f64 {
+        match piece.fallback {
+            // The fallback font's metrics are its own, and they are nothing
+            // like the face's: `arrowright` is 987/1000 em where a letter is
+            // about 500. Charging the face's widths for it would push every
+            // line holding an arrow off the measure.
+            true => piece
+                .codes
+                .chars()
+                .map(|c| symbol_width(c as u8) as f64 / 1000.0 * layout.size)
+                .sum(),
+            false => own_width(&piece.codes, &piece.source, face),
+        }
+    };
+    // Every branch measures through `printing_chars`. A marker's spec is digits
+    // and commas, which every one of these tables has a real width for, so a
+    // word inside one \textcolor was charged for its five letters plus fourteen
+    // spec characters plus three markers -- and a line of them broke after four
+    // words where the same line uncoloured holds seventeen. It cost whole
+    // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
+    let width_of = |word: &str, face: Face| -> f64 {
+        // Plain ASCII is the case that runs a million times a book: every face
+        // draws it, and the code and the character are the same number, so
+        // there is nothing to decide per character. Answering it here keeps an
+        // ordinary word measured exactly as it was before any of this.
+        if word.is_ascii() {
+            let plain: String = printing_chars(word).collect();
+            return own_width(&plain, &plain, face);
+        }
+        drawn(word, &|c| covers(c, face))
+            .iter()
+            .map(|piece| piece_width(piece, face))
+            .sum()
     };
 
     let lines = break_lines_measured(text, layout, &width_of);
@@ -1094,15 +1710,83 @@ pub fn to_pdf(
                 // gets the colour it was NESTED IN back. Resetting to `0 g`
                 // instead is what drew the rest of a dark-paged book black.
                 page.content.push_str(&format!("{r} {g} {b} rg\n"));
-                let font = fonts[face.index()].clone();
-                page.text_in(font, layout.size, x, y, &plain);
-                x += width_of(&plain, face);
+                // A run is not necessarily one font either: a character the
+                // face cannot draw is drawn from the fallback, which is a
+                // different font resource and so a `Tf` of its own. The pieces
+                // are positioned exactly as the runs are, each one advancing x
+                // by what it just drew.
+                for piece in drawn(&plain, &|c| covers(c, face)) {
+                    let font = match piece.fallback {
+                        true => Font::Base14(SYMBOL_FONT_NAME.to_string()),
+                        false => fonts[face.index()].clone(),
+                    };
+                    page.text_in(font, layout.size, x, y, &piece.codes);
+                    x += piece_width(&piece, face);
+                }
             }
             y -= layout.leading;
         }
         pages.push(page);
     }
     document(&pages)
+}
+
+/// One stretch of a run that a single font draws.
+struct Piece {
+    /// What goes in the content stream: one byte a glyph, in that font's own
+    /// encoding, held as `char`s that are all under 256.
+    codes: String,
+    /// The document's own characters, for a face whose widths are not in the
+    /// file and are measured out of `cmr10` instead.
+    source: String,
+    /// Whether the codes are the fallback font's rather than the face's.
+    fallback: bool,
+}
+
+/// Resolve a run through the chain, into the stretches each font draws.
+///
+/// Neighbouring characters that land in the same font are one piece, so a line
+/// of prose is still one `Tj` and only the arrow in the middle of it is its
+/// own. A character that no face, no fallback and no stand-in has is left out,
+/// which is what the DVI path does with the same character.
+fn drawn(text: &str, covers: &dyn Fn(char) -> bool) -> Vec<Piece> {
+    let mut pieces: Vec<Piece> = Vec::new();
+    for ch in printing_chars(text) {
+        let Some(glyph) = glyph_for(ch, covers) else {
+            continue;
+        };
+        let (fallback, codes, source) = match glyph {
+            Glyph::Own(code) => (false, (code as char).to_string(), ch.to_string()),
+            Glyph::Fallback(code) => (true, (code as char).to_string(), ch.to_string()),
+            // A stand-in is measured as what it SETS and not as what it stands
+            // for: `Cmd` takes three letters' room wherever it lands.
+            Glyph::StandIn(text) => (false, text.to_string(), text.to_string()),
+        };
+        match pieces.last_mut() {
+            Some(last) if last.fallback == fallback => {
+                last.codes.push_str(&codes);
+                last.source.push_str(&source);
+            }
+            _ => pieces.push(Piece {
+                codes,
+                source,
+                fallback,
+            }),
+        }
+    }
+    pieces
+}
+
+/// Which characters a face can draw, out of the font file's own `cmap`.
+///
+/// `None` for one of the fourteen: it has no file to read, and carrying all of
+/// WinAnsi is what being one of them means.
+fn face_coverage(font: &crate::pdf::Font) -> Option<std::collections::BTreeSet<u32>> {
+    let crate::pdf::Font::TrueType { bytes, .. } = font else {
+        return None;
+    };
+    let sfnt = crate::sfnt::Sfnt::parse(bytes.clone()).ok()?;
+    Some(sfnt.cmap().ok()?.into_keys().collect())
 }
 
 /// Break lines with a caller-supplied measurer.
@@ -1566,9 +2250,19 @@ pub fn embed_file(path: &std::path::Path) -> Option<crate::pdf::Font> {
 
     // PDF wants a width for every code in the range, in 1/1000 em, so a code
     // the font has no glyph for still needs an entry.
+    //
+    // A code is a WinAnsi code -- that is the encoding the font is written with
+    // -- and a `cmap` is indexed by Unicode, so the two are joined by what the
+    // code MEANS. They agree from 0xA0 up, where WinAnsi is Latin-1, and part
+    // company between 0x80 and 0x9F: reading code 0x97 as U+0097 finds nothing
+    // and writes `.notdef`'s width where the em dash's belongs.
     let mut widths = Vec::with_capacity(224);
     for code in 32u32..=255 {
-        let gid = cmap.get(&code).copied().unwrap_or(0) as usize;
+        let character = u8::try_from(code).ok().and_then(winansi_unicode);
+        let gid = character
+            .and_then(|c| cmap.get(&(c as u32)))
+            .copied()
+            .unwrap_or(0) as usize;
         let adv = advances
             .get(gid)
             .or_else(|| advances.last())

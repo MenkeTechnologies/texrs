@@ -764,6 +764,22 @@ impl Lowerer {
                             continue;
                         }
                     }
+                    // A character the document spelled as a control sequence:
+                    // `\rightarrow`, `\alpha`, `\S`. Nothing above defines
+                    // them, so a document that writes one stopped dead with
+                    // `! Undefined control sequence \rightarrow.` and produced
+                    // no page at all. Asked LAST, so a document that defines
+                    // its own `\star` -- or lets one to something -- keeps it;
+                    // this only answers where the alternative is refusing the
+                    // document. The character is all that is decided here:
+                    // which font draws it is the typesetter's, and asking
+                    // `crate::typeset` for it keeps that one table.
+                    if let Some(ch) = crate::typeset::symbol_char(other) {
+                        if self.text_output {
+                            Self::push_text_char(&mut out, ch);
+                        }
+                        continue;
+                    }
                     return Err(TexError(format!("Undefined control sequence \\{other}")));
                 }
             }
