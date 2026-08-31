@@ -138,7 +138,13 @@ writes it back through `Dvi::rewrite`. Nothing to do with typesetting: it asks
 only whether what was read can be written. None of the nine documents survives,
 in two distinct ways.
 
-Six come back LONGER -- 380 bytes in, 456 out; 684 in, 872 out -- because the
+The corpus is fourteen documents: the ten the ladder uses, three in
+`tests/dvi_cases` carrying shapes the others lack -- a second font, rules, two
+pages, a `\special` -- and Knuth's `story.tex` where TeX Live is installed.
+None survives unchanged, and the richer shapes fail the same way the simple
+ones do, which says the cause is the encoding rather than any one construct.
+
+Ten come back LONGER -- 380 bytes in, 456 out; 680 in, 784 out -- because the
 writer does not choose the compact operand widths tex chose, so a movement tex
 wrote in two bytes is written back in four.
 

@@ -8,6 +8,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The round-trip corpus reaches documents texrs cannot yet set. Because that
+  axis only asks tex to typeset, it now also reads `tests/dvi_cases` — a second
+  font, rules, two pages, a `\special` — and Knuth's own `story.tex`, found
+  through `kpsewhich` rather than vendored. Fourteen documents, none of which
+  survives the round trip unchanged.
 - A round-trip axis: `cargo run --bin dvi-parity -- --roundtrip` reads a DVI
   real `tex` wrote, writes it back through texrs's own writer, and compares.
   It asks nothing of the typesetter, so IDENTICAL is reachable today — and
