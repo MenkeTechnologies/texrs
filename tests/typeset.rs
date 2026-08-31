@@ -659,7 +659,7 @@ fn sized_document(class_options: &str, margin: &str) -> String {
         "\\documentclass[{class_options}]{{extreport}}\n\
          \\usepackage[margin={margin}]{{geometry}}\n\
          \\begin{{document}}\n{}\n\\end{{document}}\n",
-        "alpha bravo charlie delta echo foxtrot ".repeat(400)
+        "alpha bravo charlie delta echo foxtrot ".repeat(1500)
     )
 }
 
@@ -702,13 +702,16 @@ fn bigger_type_needs_more_pages_for_the_same_words() {
     // the `Tf`: type set larger takes more lines to say the same thing and
     // fewer lines fit the page. Setting an 11pt book at 10pt is why texrs
     // fitted a third more text on a page than lualatex does.
-    let small = texrs::run_pdf(&sized_document("10pt", "0.95in")).expect("pdf");
-    let big = texrs::run_pdf(&sized_document("11pt", "0.95in")).expect("pdf");
+    // The sample is large deliberately. Where no TeX installation is present
+    // -- CI -- there is no cmr10.tfm to measure in and the widths fall back to
+    // an estimate; on a few pages that can round 10pt and 11pt to the same
+    // count and the property reads as false. Thousands of words apart, it
+    // cannot: the difference is pages, not a rounding.
+    let small = count_pages(&texrs::run_pdf(&sized_document("10pt", "0.95in")).expect("pdf"));
+    let big = count_pages(&texrs::run_pdf(&sized_document("11pt", "0.95in")).expect("pdf"));
     assert!(
-        count_pages(&big) > count_pages(&small),
-        "11pt type set in {} pages where 10pt took {}",
-        count_pages(&big),
-        count_pages(&small)
+        big > small,
+        "11pt type set in {big} pages where 10pt took {small}"
     );
 }
 
