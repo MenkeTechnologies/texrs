@@ -369,10 +369,18 @@ and three of the things a document controls survive the trip:
   scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
   patterns and shadings are not there.
 
-Boxes a document nests, and maths, still do not exist. A draft reads correctly;
-a book being sold on its typography should still be set by an engine with a real
-stomach, and `scripts/texrs-pdf` says the same thing where a `pandoc
---pdf-engine` build would meet it.
+Boxes a document nests, and maths, still do not exist. Lines break first-fit
+where tex minimises badness across a whole paragraph, and there is no
+hyphenation. A draft reads correctly; a book being sold on its typography
+should still be set by an engine with a real stomach, and `scripts/texrs-pdf`
+says the same thing where a build would meet it.
+
+That script is a `.tex` to a `.pdf`, not a `pandoc --pdf-engine`: pandoc
+validates that flag against a fixed list of engines it knows and refuses any
+other name, so texrs cannot be named there under any wrapper. It does not need
+to be — a pandoc book build already writes the `.tex` on its first pass, and
+that is the whole input an engine takes, so replacing the second pandoc call
+also drops a second markdown-to-LaTeX pass over the same document.
 
 ## [0x07] How it runs
 

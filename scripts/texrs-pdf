@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
-# texrs as a pandoc --pdf-engine.
+# A .tex to a .pdf with texrs, for a build that already has the .tex.
 #
-# pandoc hands its --pdf-engine a .tex file and expects a .pdf beside it, and a
-# pandoc book build already runs pandoc twice -- once for the .tex, once for the
-# .pdf. This replaces the second call.
+# NOT a pandoc --pdf-engine, whatever it is named: pandoc validates that flag
+# against a fixed list of engines it knows and refuses any other name --
 #
-#   pandoc book.md --pdf-engine=texrs-pdf -o book.pdf
+#   $ pandoc t.md --pdf-engine=texrs-pdf -o t.pdf
+#   Argument of --pdf-engine must be one of ...
 #
-# WHAT YOU GIVE UP by pointing a publication build at this. The face a document
-# asks for is honoured by METRICS, not by outline: \setmainfont{Arimo} sets in
-# Helvetica, which carries Arial's widths, which are Arimo's -- the same shapes
-# it is not. Lines break first-fit where tex minimises badness across a whole
-# paragraph, and there is no hyphenation. A draft reads correctly; a book being
-# SOLD on its typography should still be built by an engine with a stomach.
-# This exists because it is an order of magnitude faster, which is worth having
-# for the passes where you are reading the words rather than the page.
+# -- so texrs cannot be named there. It does not need to be. A pandoc book
+# build already runs pandoc twice, once for the .tex and once for the .pdf,
+# and the .tex from the first call is the whole input an engine needs. Point
+# the build at this instead of the second pandoc call and it does one
+# markdown->LaTeX pass rather than two.
+#
+# WHAT YOU GIVE UP by building a publication this way. Lines break first-fit
+# where tex minimises badness across a whole paragraph, and there is no
+# hyphenation, so the right-hand edge is looser than a tex page. There is no
+# per-glyph font fallback, so a character the chosen face lacks does not get
+# fetched from another one. A draft reads correctly; a book being SOLD on its
+# typography should still be built by an engine with a stomach.
+#
+# What you do NOT give up any more: the face the document asked for is embedded
+# rather than substituted, including a font shipped beside the document with
+# fontspec Path=/UprightFont=, and \definecolor/\color/\pagecolor reach the
+# page. This is an order of magnitude faster, which is what it is for.
 set -euo pipefail
 
 tex_in=""
