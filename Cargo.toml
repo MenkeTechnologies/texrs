@@ -36,6 +36,10 @@ exclude = [
 ]
 
 [[bin]]
+name = "pdf-parity"
+path = "src/bin/pdf_parity.rs"
+
+[[bin]]
 name = "texrs"
 path = "src/main.rs"
 

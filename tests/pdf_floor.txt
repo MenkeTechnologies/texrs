@@ -1,0 +1,7 @@
+# How far each document's PDF matches LuaTeX's, highest rung reached.
+# Rungs: NONE < PRODUCED < PAGES < PAGESIZE < TEXT < BYTES.
+# BYTES is the goal. Re-record with `cargo run --bin pdf-parity -- --record`
+# after a change that climbs; a case that DROPS is a regression.
+PAGESIZE a_paragraph.tex
+PAGESIZE macro_expansion.tex
+PAGESIZE two_words.tex

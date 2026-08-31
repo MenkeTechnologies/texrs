@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- A PDF parity harness: `cargo run --bin pdf-parity` puts a document through
+  LuaTeX and through texrs and reports how far the two files agree, on a ladder
+  — PRODUCED, PAGES, PAGESIZE, TEXT, BYTES. Byte-identical output is the goal
+  and nothing reaches it yet, so `tests/pdf_floor.txt` records the rung each
+  document currently reaches and `tests/pdf_parity.rs` fails when one drops.
+  Both engines run under a pinned `SOURCE_DATE_EPOCH`, without which luatex is
+  not byte-reproducible at all.
 - `\glueexpr`, the expression grammar over glue. Addition is componentwise with
   TeX's order rule — an infinite component beats a finite one however large, a
   higher infinity beats a lower, and only equal orders add — while `*` and `/`

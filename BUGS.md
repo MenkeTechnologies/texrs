@@ -131,6 +131,22 @@ probe like that one and diverge in every use the primitive actually has, which
 all turn on the file end and `\everyeof`. It needs the pseudo-file machinery,
 not a shortcut.
 
+## PDF output is not LuaTeX's
+
+The goal is byte-identical, and the distance is large: for `Hello world.`
+luatex writes 11,729 bytes and texrs writes 615. `cargo run --bin pdf-parity`
+measures it on a ladder rather than as a yes/no, because a harness that only
+answered "identical?" would say no every day and say nothing else.
+
+Where the three corpus documents stand: PAGESIZE — same page count, same page
+size, and the words differ by exactly one, the folio. luatex ships a page
+number and texrs does not. Above that lie TEXT and then BYTES, which needs the
+font embedding, the object layout and the compression to agree as well.
+
+Byte equality is only defined with `SOURCE_DATE_EPOCH` pinned: measured, luatex
+reproduces itself exactly when it is set and differs run to run when it is not,
+because the file carries `/CreationDate` and an `/ID`.
+
 ## Definition prefixes
 
 `\long` and `\outer` are recorded on the macro and are part of its meaning, so

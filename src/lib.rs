@@ -48,6 +48,7 @@ pub mod lsp;
 pub mod parallel;
 pub mod parity;
 pub mod pdf;
+pub mod pdf_parity;
 pub mod pk;
 pub mod repl;
 pub mod runtime;
