@@ -91,6 +91,14 @@ pub struct Lowerer {
     /// inline copy, this bounds the nesting so the failure is TeX's own
     /// "capacity exceeded" rather than a segfault.
     depth: usize,
+    /// How many `tabular` or `longtable` environments are open.
+    ///
+    /// A field rather than a local of `lower_into`, because a group is lowered
+    /// by a recursive call and pandoc wraps every longtable in one:
+    /// `{\def\LTcaptype{none} \begin{longtable}...}`. It decides what `&` and
+    /// `\\` mean -- a cell boundary and a row end inside a table, a space and
+    /// a line break outside one.
+    table_depth: usize,
 }
 
 /// The nesting `block` refuses to go past.
@@ -130,6 +138,7 @@ impl Lowerer {
             layout: crate::typeset::Layout::default(),
             text_output: false,
             depth: 0,
+            table_depth: 0,
         }
     }
 
@@ -322,11 +331,16 @@ impl Lowerer {
                     // every catcode, so each one reached the page as a literal
                     // ampersand: 8,941 of them in zmax-reference.pdf, where
                     // lualatex sets the same source with 23 -- the 24 escaped
-                    // `\&' it actually writes. Nothing here builds cells yet,
-                    // so the boundary is emitted as what separates two cells
-                    // when they are set side by side -- a space.
+                    // `\&' it actually writes. Inside a table the boundary is
+                    // now a boundary the typesetter builds columns from;
+                    // outside one there are no columns, so it stays what
+                    // separates two cells set side by side -- a space.
                     Token::Char(_, Cat::AlignTab) if self.text_output => {
-                        Self::push_text_char(&mut out, ' ');
+                        let boundary = match self.table_depth > 0 {
+                            true => crate::typeset::TABLE_CELL,
+                            false => ' ',
+                        };
+                        Self::push_text_char(&mut out, boundary);
                     }
                     // The document's own words. Dropping these is why a book
                     // used to compile to a program that printed nothing.
@@ -404,6 +418,12 @@ impl Lowerer {
             // nothing, which is why a centred line and the line after it came
             // out as one.
             if self.text_output && self.lower_centre(lx, name, &mut out, &mut centre_open)? {
+                continue;
+            }
+            // Tables, likewise: the prelude answers `\begin{tabular}` and every
+            // booktabs rule with nothing, so a table arrived at the breaker as
+            // one paragraph of prose.
+            if self.text_output && self.lower_table(lx, name, &mut out)? {
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -1000,6 +1020,108 @@ impl Lowerer {
                 self.push_text(out, &close);
                 *centre_open = false;
                 Ok(false)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// The table environments and the marks inside them, before the prelude's
+    /// stubs can swallow them.
+    ///
+    /// `\begin{tabular}` and `\begin{longtable}` expanded to nothing, `&` to a
+    /// space and `\\` to a newline, so a table reached the breaker as one
+    /// paragraph of prose -- "Name Value alpha 1 beta 2", welded to the
+    /// sentence after it. The corpus leans on this heavily: pandoc emits a
+    /// longtable for every markdown table, 132 of them in
+    /// groovyrs/docs/book.tex and 43 in awkrs/docs/book.tex.
+    ///
+    /// What reaches the typesetter is the STRUCTURE and not the setting: a cell
+    /// boundary, a row end, and a mark for each booktabs rule and each
+    /// longtable section boundary. Column widths are measured where the font
+    /// is, in `typeset::table_lines`.
+    ///
+    /// Returns whether the command was one of these and has been dealt with.
+    fn lower_table(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
+        use crate::typeset::{
+            FIRST_HEAD_END, FOOT_END, HEAD_END, RULE_BOTTOM, RULE_MID, RULE_TOP, TABLE_MARK,
+            TABLE_ROW,
+        };
+        // Every arm below that means something only inside a table asks this
+        // in its BODY rather than in a match guard, and hands the command back
+        // when there is no table open. The corpus gate reads the HEAD of each
+        // arm to check that everything the engine dispatches is documented,
+        // and a guard hides every name after the first one from it.
+        let inside = self.table_depth > 0;
+        match name.name() {
+            // `\begin{tabular}[pos]{cols}`, and longtable's identical shape.
+            // The arguments are read HERE because the prelude's stub is what
+            // would otherwise eat them and it is never reached: this returns
+            // first, exactly as `\centering` is taken before its stub.
+            "tabular" | "longtable" => {
+                let _ = self.eng.read_optional_bracket(lx)?;
+                let _ = self.eng.read_balanced_group(lx)?;
+                // A table is its own block, so the prose either side of it is
+                // not filled into its first and last row.
+                self.push_text(out, "\n\n");
+                self.table_depth += 1;
+                Ok(true)
+            }
+            "endtabular" | "endlongtable" => {
+                self.table_depth = self.table_depth.saturating_sub(1);
+                // A row end, in case the last row was written without one. A
+                // row of nothing but blank cells is dropped when the table is
+                // set, so one that was not needed costs nothing.
+                self.push_text(out, &format!("{TABLE_ROW}\n\n"));
+                Ok(true)
+            }
+            // booktabs' three rules, and `\hline`, which is the kernel's own
+            // spelling of the same line. `\midrule[width]` takes an optional
+            // thickness; the rule is drawn at booktabs' weight either way.
+            "toprule" | "midrule" | "bottomrule" | "hline" => {
+                if !inside {
+                    return Ok(false);
+                }
+                let code = match name.name() {
+                    "toprule" => RULE_TOP,
+                    "bottomrule" => RULE_BOTTOM,
+                    _ => RULE_MID,
+                };
+                let _ = self.eng.read_optional_bracket(lx)?;
+                self.push_text(out, &format!("{TABLE_MARK}{code}"));
+                Ok(true)
+            }
+            // longtable writes its head and its foot BEFORE its body, so these
+            // boundaries are what lets the table be set in the order a reader
+            // gets it rather than the order it was written.
+            "endhead" | "endfirsthead" | "endfoot" | "endlastfoot" => {
+                if !inside {
+                    return Ok(false);
+                }
+                let code = match name.name() {
+                    "endhead" => HEAD_END,
+                    "endfirsthead" => FIRST_HEAD_END,
+                    _ => FOOT_END,
+                };
+                self.push_text(out, &format!("{TABLE_MARK}{code}"));
+                Ok(true)
+            }
+            // A row ends at `\\`, which is a line break everywhere else and is
+            // one here too -- of a row rather than of a line. `\\*` forbids a
+            // break after it and `\\[2pt]` asks for extra space; neither
+            // changes where the row ends.
+            "\\" | "tabularnewline" => {
+                if !inside {
+                    return Ok(false);
+                }
+                self.eng.skip_optional_star(lx);
+                let _ = self.eng.read_optional_bracket(lx)?;
+                self.push_text(out, &TABLE_ROW.to_string());
+                Ok(true)
             }
             _ => Ok(false),
         }

@@ -1,0 +1,10 @@
+% Shapes the ten simple cases do not have: a second font, rules, and the
+% movements a wider page forces. tex sets this; texrs only has to read it back.
+\hsize=4in
+\font\big=cmr10 at 20pt
+\big A larger font, then \rm back to normal, and a rule:
+\hrule width 2in height 2pt
+\vskip 12pt
+Ordinary text after the rule, long enough to break across a line or two so the
+movement commands are not all small.
+\bye

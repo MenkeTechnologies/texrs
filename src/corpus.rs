@@ -711,6 +711,85 @@ pub const CORPUS: &[Entry] = &[
         "Centre exactly its argument, on a line of its own. The box form rather than the switch: what follows it is not centred. The prelude answered it with its argument alone, which set an imprint or a colophon flush left in the middle of the page.",
         "\\centerline{TEXT}\n\\centerline{a colophon}",
     ),
+    // ── Tables — lower::lower_table, typeset::table_lines ────────────────
+    (
+        "\\tabular",
+        "LaTeX",
+        "Open a table. `\\begin{tabular}` runs this, the way latex.ltx has it: `\\begin{x}` is `\\csname x\\endcsname` here, so the environment IS this control sequence. The optional position and the column specification are read and dropped -- columns are as wide as their content here, not as wide as the specification asks. Inside a table `&` is a cell boundary and `\\` ends a row; outside one both mean what they meant before. Without it a table was filled into the prose around it as one paragraph: `Name Value alpha 1 beta 2`.",
+        "\\begin{tabular}{ll}\nName & Value \\\\\nalpha & 1 \\\\\n\\end{tabular}",
+    ),
+    (
+        "\\endtabular",
+        "LaTeX",
+        "Close a table: what `\\end{tabular}` runs. It also ends the row in hand, so a last row written without a closing `\\` is still a row.",
+        "\\begin{tabular}{ll}\na & b \\\\\n\\end{tabular}",
+    ),
+    (
+        "\\longtable",
+        "LaTeX",
+        "Open a longtable, which is set exactly as `tabular` is. This is what pandoc emits for every markdown table, so it is the shape of nearly every table in a generated book. A longtable states its head, then its foot, then its body, and it is set head, body, foot -- see `\\endhead` and `\\endlastfoot`.",
+        "\\begin{longtable}[]{@{}lr@{}}\n\\toprule\nName & Value \\\\\n\\midrule\n\\endhead\n\\bottomrule\n\\endlastfoot\nalpha & 1 \\\\\n\\end{longtable}",
+    ),
+    (
+        "\\endlongtable",
+        "LaTeX",
+        "Close a longtable: what `\\end{longtable}` runs, and the same close `\\endtabular` is.",
+        "\\begin{longtable}[]{@{}ll@{}}\na & b \\\\\n\\end{longtable}",
+    ),
+    (
+        "\\toprule",
+        "LaTeX",
+        "booktabs' rule above a table, drawn as a filled rectangle the width of the table at booktabs' own `\\heavyrulewidth` of 0.08em. Written 3,455 times across the corpus and drawn none of them before this, because the prelude answered it with nothing.",
+        "\\begin{tabular}{ll}\n\\toprule\nName & Value \\\\\n\\bottomrule\n\\end{tabular}",
+    ),
+    (
+        "\\midrule",
+        "LaTeX",
+        "booktabs' rule between a table's head and its body, drawn at `\\lightrulewidth` -- 0.05em, thinner than the two outer rules, which is the whole visual difference between them. An optional width may follow and is read and dropped.",
+        "\\begin{tabular}{ll}\nName & Value \\\\\n\\midrule\nalpha & 1 \\\\\n\\end{tabular}",
+    ),
+    (
+        "\\bottomrule",
+        "LaTeX",
+        "booktabs' rule under a table, drawn at `\\heavyrulewidth` as `\\toprule` is. In a longtable it is written in the foot, before the body, and is set where a reader gets it: under the last row.",
+        "\\begin{tabular}{ll}\nalpha & 1 \\\\\n\\bottomrule\n\\end{tabular}",
+    ),
+    (
+        "\\hline",
+        "LaTeX",
+        "The kernel's own horizontal rule across a table, drawn the way `\\midrule` is. Outside a table it does nothing, which is what it did everywhere before tables were set.",
+        "\\begin{tabular}{ll}\n\\hline\na & b \\\\\n\\hline\n\\end{tabular}",
+    ),
+    (
+        "\\tabularnewline",
+        "LaTeX",
+        "End a table row. The unambiguous spelling of `\\\\` inside a table, for the places where `\\\\` would be read as something else; both end a row here, and both take the `*` and the optional extra space LaTeX allows after them.",
+        "\\begin{tabular}{ll}\na & b \\tabularnewline\nc & d \\tabularnewline\n\\end{tabular}",
+    ),
+    (
+        "\\endhead",
+        "LaTeX",
+        "End longtable's head: everything above it repeats at the top of each page the table runs onto. The table is set once here, so the head is set once -- above the body, which is where it is written.",
+        "\\begin{longtable}[]{@{}ll@{}}\n\\toprule\nName & Value \\\\\n\\midrule\n\\endhead\nalpha & 1 \\\\\n\\end{longtable}",
+    ),
+    (
+        "\\endfirsthead",
+        "LaTeX",
+        "End longtable's FIRST head, when it differs from the one that repeats. The first head is the one set; what stands between this and `\\endhead` is the repeating copy, and a table set once has no page to repeat it on.",
+        "\\begin{longtable}[]{@{}ll@{}}\nName & Value \\\\\n\\endfirsthead\nName & Value \\\\\n\\endhead\nalpha & 1 \\\\\n\\end{longtable}",
+    ),
+    (
+        "\\endfoot",
+        "LaTeX",
+        "End longtable's foot: what repeats at the bottom of each page the table runs onto. Written before the body and set after it, which is where a reader gets it.",
+        "\\begin{longtable}[]{@{}ll@{}}\n\\endhead\n\\bottomrule\n\\endfoot\nalpha & 1 \\\\\n\\end{longtable}",
+    ),
+    (
+        "\\endlastfoot",
+        "LaTeX",
+        "End longtable's LAST foot: what is set once, under the end of the table. This is the boundary pandoc writes, with `\\bottomrule` above it, in every markdown table it emits.",
+        "\\begin{longtable}[]{@{}ll@{}}\n\\endhead\n\\bottomrule\n\\endlastfoot\nalpha & 1 \\\\\n\\end{longtable}",
+    ),
     // ── Colour — lower::lower_colour, colour.rs ──────────────────────────
     (
         "\\definecolor",

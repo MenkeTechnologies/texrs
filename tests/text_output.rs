@@ -268,3 +268,42 @@ fn a_colour_spec_does_not_reach_the_reader_as_digits() {
     let got = texrs::text_without_marks(marked);
     assert_eq!(got, "beforewordsafter", "got {got:?}");
 }
+
+#[test]
+fn a_table_reads_back_as_rows_rather_than_as_one_run_of_words() {
+    // `&` was a space and `\\` a newline that `split_whitespace` swallowed, so
+    // a table came back as "Name Value alpha 1 beta 2" welded to the sentence
+    // after it. A row ends at a line in text, which is what the row marker
+    // means where there are no columns to set.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{tabular}{ll}\n\\toprule\nName & Value \\\\\n\\midrule\n\
+               alpha & 1 \\\\\nbeta & 2 \\\\\n\\bottomrule\n\\end{tabular}\n\
+               after the table\n\\end{document}\n";
+    let got = text(src);
+    // The spaces around the source's own `&` are the document's and stay; what
+    // is being asked here is which LINE each cell came out on.
+    let rows: Vec<String> = got
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<&str>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect();
+    let has = |want: &str| rows.iter().any(|row| row == want);
+    assert!(
+        has("Name Value") && has("alpha 1") && has("beta 2"),
+        "each row is a line of its own: {rows:?}"
+    );
+    assert!(
+        has("after the table"),
+        "and the prose after the table is not welded to its last row: {rows:?}"
+    );
+    // The rules are drawn on the page and are not words, so they leave nothing
+    // -- not the mark, and not the letter naming which rule it was.
+    let leaked: Vec<char> = got
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n')
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "control characters reached the reader: {leaked:?}"
+    );
+}

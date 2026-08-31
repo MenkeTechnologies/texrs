@@ -138,6 +138,14 @@ fn without_marks(text: &str) -> String {
             crate::typeset::PAGE_BREAK => out.push('\n'),
             crate::typeset::FACE_PUSH => face_code = true,
             crate::typeset::FACE_POP => {}
+            // A table's structure has a plain-text spelling, the way a
+            // listing's line break does: a cell boundary is the space that
+            // stands between two cells when they are not set in columns, and a
+            // row ends at a newline. A rule is drawn on the page and is not a
+            // character, so it and the code naming it come out here.
+            crate::typeset::TABLE_CELL => out.push(' '),
+            crate::typeset::TABLE_ROW => out.push('\n'),
+            crate::typeset::TABLE_MARK => face_code = true,
             _ if face_code => face_code = false,
             c if in_spec => {
                 let _ = c;

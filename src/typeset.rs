@@ -326,6 +326,20 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String
     if let Some(code) = listing_lines(para) {
         return code.map(str::to_string).collect();
     }
+    // A table's rows are lines too. This path has no column measure of its own
+    // and no way to draw a rule, so the cells are spaced and the rules left
+    // out -- but the rows stop running into one another, and no table mark
+    // reaches `set_line` to be drawn as whatever glyph the font has in that
+    // slot.
+    if para.contains(TABLE_ROW) {
+        return table_entries(para)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                Entry::Row(cells) => Some(cells.join("  ")),
+                Entry::Rule(_) => None,
+            })
+            .collect();
+    }
     let space = chain.width(' ', layout.size);
     let mut lines = Vec::new();
     let mut line = String::new();
@@ -803,11 +817,19 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
         // measuring it would push the line off centre by whatever the font
         // happens to have in that slot.
         CENTRE | CENTRE_END | VERTICAL_SPACE | JUSTIFY => false,
+        // The table marks are instructions too: a cell boundary and a row end
+        // are where the columns are, and a rule is drawn rather than set.
+        TABLE_CELL | TABLE_ROW => false,
         FACE_PUSH => {
             face_code = true;
             false
         }
         FACE_POP => false,
+        // Its code character goes the same way the face's does.
+        TABLE_MARK => {
+            face_code = true;
+            false
+        }
         _ if face_code => {
             face_code = false;
             false
@@ -1664,6 +1686,35 @@ pub fn to_pdf(
                 y -= layout.leading;
                 continue;
             }
+            // A booktabs rule is DRAWN, not set: the breaker's line carries the
+            // mark, the code saying which rule it is, and the spaces that
+            // measure how far the table runs. See `rule_line`.
+            if let Some(rest) = line.strip_prefix(TABLE_MARK) {
+                let mut rest = rest.chars();
+                let kind = rest.next().unwrap_or(RULE_MID);
+                let span = width_of(rest.as_str(), current_face(&faces));
+                // booktabs' own weights, relative to the type size:
+                // `\heavyrulewidth` above and below the table, `\lightrulewidth`
+                // between its head and its body (booktabs.sty).
+                let em = match kind == RULE_MID {
+                    true => 0.05,
+                    false => 0.08,
+                };
+                let weight = em * layout.size;
+                // In the colour the text around it is in, so a rule in a book
+                // with a dark page is not drawn in the black it inherited.
+                let (r, g, b) = colours.last().cloned().unwrap_or_else(|| {
+                    (
+                        DEFAULT_COLOUR.0.to_string(),
+                        DEFAULT_COLOUR.1.to_string(),
+                        DEFAULT_COLOUR.2.to_string(),
+                    )
+                });
+                page.content.push_str(&format!("{r} {g} {b} rg\n"));
+                page.rule(layout.margin, y + layout.size * 0.25, span, weight);
+                y -= layout.leading;
+                continue;
+            }
             // A centred line is positioned by its measured width rather than
             // at the margin -- that is the whole of what centring is here.
             // The marker is a PREFIX the breaker put on, so it comes off
@@ -1863,6 +1914,14 @@ fn break_lines_measured(
             lines.extend(code.map(str::to_string));
             continue;
         }
+        // A table is set as a table -- rows on their own lines, columns as
+        // wide as their content -- rather than filled into prose. A row end is
+        // what says a paragraph is one, the way a listing break says a
+        // paragraph is a listing.
+        if para.contains(TABLE_ROW) {
+            table_lines(para, layout, &colours, &faces, width_of, &mut lines);
+            continue;
+        }
         // A forced break is its own line, so the paginator can see one. It has
         // to come out here because `split_whitespace` below counts a form feed
         // as whitespace and would silently drop it.
@@ -2040,6 +2099,11 @@ pub const MARKERS: &[(char, bool)] = &[
     // The one that carries an argument: the character naming the face.
     (FACE_PUSH, true),
     (FACE_POP, false),
+    (TABLE_CELL, false),
+    (TABLE_ROW, false),
+    // The other one that carries an argument: the character saying which rule,
+    // or which of longtable's section boundaries, this mark is.
+    (TABLE_MARK, true),
 ];
 
 /// The end of a line INSIDE a code listing, carried through the text the way a
@@ -2069,6 +2133,345 @@ pub const LISTING_BREAK: char = '\u{b}';
 fn listing_lines(para: &str) -> Option<impl Iterator<Item = &str>> {
     para.contains(LISTING_BREAK)
         .then(|| para.split_terminator(LISTING_BREAK))
+}
+
+/// A cell boundary inside a table row: the `&` the document wrote, where a
+/// table is being SET rather than flattened.
+///
+/// ASCII's own unit separator, which is what a field boundary means.
+pub const TABLE_CELL: char = '\u{1f}';
+
+/// The end of a table row: the `\\` the document wrote inside a table. ASCII's
+/// record separator, for the same reason.
+///
+/// A paragraph holding one of these is a table, the way a paragraph holding a
+/// `LISTING_BREAK` is a listing -- so the region needs no marker of its own.
+pub const TABLE_ROW: char = '\u{1e}';
+
+/// A table mark that is not text: one of booktabs' three rules, or the end of
+/// one of longtable's sections. The character AFTER it says which.
+pub const TABLE_MARK: char = '\u{1d}';
+
+/// The codes `TABLE_MARK` carries. The three rules, then the boundaries that
+/// say where longtable's head and foot end.
+///
+/// Public because `lower.rs` writes them and this reads them, and one spelling
+/// in one place is what keeps the two agreeing.
+pub const RULE_TOP: char = 't';
+pub const RULE_MID: char = 'm';
+pub const RULE_BOTTOM: char = 'b';
+pub const HEAD_END: char = 'h';
+pub const FIRST_HEAD_END: char = 'H';
+pub const FOOT_END: char = 'f';
+
+/// One entry of a table: a rule across it, or a row of cells.
+enum Entry {
+    Rule(char),
+    Row(Vec<String>),
+}
+
+/// Split a table paragraph into its rules and rows, in the order they are SET.
+///
+/// That is not the order longtable WRITES them. A longtable states its head,
+/// then its foot, then its body -- `\endhead` closes the head and `\endlastfoot`
+/// the foot -- so the bottom rule is written before the first row of data, and
+/// setting the stream in arrival order would draw it there. Every markdown
+/// table pandoc emits has this shape.
+///
+/// A row whose cells are all blank is dropped: the newline between the last
+/// `\\` and `\end{longtable}` is one, and a blank line in the middle of a
+/// table is not something the document asked for.
+fn table_entries(para: &str) -> Vec<Entry> {
+    // Head, the repeating head that is set once here and so discarded, foot,
+    // and body. A `tabular` names none of the boundaries and stays in Head,
+    // which leaves its entries in the order they were written.
+    const HEAD: usize = 0;
+    const REPEAT: usize = 1;
+    const FOOT: usize = 2;
+    const BODY: usize = 3;
+    let mut sections: [Vec<Entry>; 4] = Default::default();
+    let mut section = HEAD;
+    let mut row: Vec<String> = Vec::new();
+    let mut cell = String::new();
+    // A cell is measured and wrapped as one line, so the line ends the source
+    // wrote inside it are spaces like any other.
+    let finish = |cell: &mut String| -> String {
+        let taken = std::mem::take(cell);
+        taken.split_whitespace().collect::<Vec<&str>>().join(" ")
+    };
+    let mut chars = para.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            TABLE_MARK => {
+                let code = chars.next().unwrap_or(RULE_MID);
+                match code {
+                    // `\endfirsthead` ends the head that is set; what follows
+                    // it repeats at the top of each page, and this sets the
+                    // table once, so that copy is dropped.
+                    FIRST_HEAD_END => section = REPEAT,
+                    HEAD_END => section = FOOT,
+                    // The first boundary wins: a table writing both `\endfoot`
+                    // and `\endlastfoot` would otherwise start its body twice.
+                    FOOT_END if section != BODY => section = BODY,
+                    FOOT_END => {}
+                    rule => sections[section].push(Entry::Rule(rule)),
+                }
+            }
+            TABLE_CELL => row.push(finish(&mut cell)),
+            TABLE_ROW => {
+                row.push(finish(&mut cell));
+                if row.iter().any(|c| !c.is_empty()) {
+                    sections[section].push(Entry::Row(std::mem::take(&mut row)));
+                }
+                row.clear();
+            }
+            c => cell.push(c),
+        }
+    }
+    let [head, _repeat, foot, body] = sections;
+    head.into_iter().chain(body).chain(foot).collect()
+}
+
+/// Set a table: each row on its own line, each column as wide as its content,
+/// and each booktabs rule as a line the page draws a rule for.
+///
+/// Before this a table was one paragraph of prose -- "Name Value alpha 1 beta 2",
+/// running into the sentence after it -- because `&` was lowered to a space and
+/// `\\` to a newline. The corpus leans on tables heavily: pandoc emits a
+/// longtable for every markdown table, 132 of them in groovyrs/docs/book.tex.
+///
+/// The ambient colour and face stacks are READ and not advanced. Every line
+/// this produces balances its own markers (see `wrap_cell`), so the stacks
+/// `to_pdf` walks down the page are exactly where the table found them.
+fn table_lines(
+    para: &str,
+    layout: &Layout,
+    colours: &[Spec],
+    faces: &[Face],
+    width_of: &dyn Fn(&str, Face) -> f64,
+    out: &mut Vec<String>,
+) {
+    let entries = table_entries(para);
+    let cols = entries
+        .iter()
+        .filter_map(|e| match e {
+            Entry::Row(cells) => Some(cells.len()),
+            Entry::Rule(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+    if cols == 0 {
+        return;
+    }
+    // Padding is written in spaces, so the space is the unit every width here
+    // is counted in. booktabs leaves a `\tabcolsep` either side of a column;
+    // two spaces is that gap in this unit.
+    let space = width_of(" ", current_face(faces)).max(f64::MIN_POSITIVE);
+    let gutter = 2.0 * space;
+    // What a cell costs, in the faces its own markers select, measured on
+    // copies of the stacks so measuring never moves them.
+    let measure = |text: &str| -> f64 {
+        let (mut c, mut f) = (colours.to_vec(), faces.to_vec());
+        styled_runs(text, &mut c, &mut f)
+            .iter()
+            .map(|(plain, _, face)| width_of(plain, *face))
+            .sum()
+    };
+
+    // Each column asks for what its widest cell needs.
+    let mut natural = vec![0.0f64; cols];
+    for entry in &entries {
+        if let Entry::Row(cells) = entry {
+            for (j, cell) in cells.iter().enumerate() {
+                natural[j] = natural[j].max(measure(cell));
+            }
+        }
+    }
+    // If they do not all fit, the columns that are under their fair share keep
+    // what they asked for and the ones over it share what is left, in
+    // proportion to what they asked for. That is what makes a table of one
+    // long prose column and two short ones readable rather than three equal
+    // columns of wrapped fragments.
+    let room = (layout.measure - gutter * (cols - 1) as f64).max(space);
+    let asked: f64 = natural.iter().sum();
+    let fair = room / cols as f64;
+    let over: f64 = natural.iter().filter(|w| **w > fair).sum();
+    let under: f64 = natural.iter().filter(|w| **w <= fair).sum();
+    let widths: Vec<f64> = match asked <= room || over <= 0.0 {
+        true => natural.clone(),
+        false => natural
+            .iter()
+            .map(|w| match *w > fair {
+                // Never below four spaces: a column narrower than a short word
+                // wraps every cell to one letter a line.
+                true => ((room - under) * w / over).max(4.0 * space),
+                false => *w,
+            })
+            .collect(),
+    };
+    // Where each column starts, and how far the rules run.
+    let mut starts = vec![0.0f64; cols];
+    for j in 1..cols {
+        starts[j] = starts[j - 1] + widths[j - 1] + gutter;
+    }
+    let span = starts[cols - 1] + widths[cols - 1];
+
+    for entry in entries {
+        match entry {
+            Entry::Rule(kind) => out.push(rule_line(kind, span, space)),
+            Entry::Row(cells) => {
+                let wrapped: Vec<Vec<String>> = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(j, cell)| wrap_cell(cell, widths[j], colours, faces, width_of))
+                    .collect();
+                let height = wrapped.iter().map(Vec::len).max().unwrap_or(0);
+                for k in 0..height {
+                    let mut line = String::new();
+                    let mut at = 0.0f64;
+                    for (j, fragments) in wrapped.iter().enumerate() {
+                        let Some(fragment) = fragments.get(k).filter(|f| !f.is_empty()) else {
+                            continue;
+                        };
+                        // Pad to the column, in the unit the padding is
+                        // written in. The nearest whole space rather than the
+                        // last one that fits, so a column stands within HALF a
+                        // space of where it was measured to be and not within
+                        // a whole one; and never fewer than one space, so two
+                        // cells cannot touch even where the first overran the
+                        // width it was given.
+                        let want = ((starts[j] - at) / space).round() as i64;
+                        for _ in 0..want.max(i64::from(j > 0)) {
+                            line.push(' ');
+                            at += space;
+                        }
+                        line.push_str(fragment);
+                        at += measure(fragment);
+                    }
+                    out.push(line);
+                }
+            }
+        }
+    }
+}
+
+/// The line a rule is set from: the mark, the code saying which rule, and the
+/// spaces that MEASURE how far it runs.
+///
+/// The span has to reach `to_pdf` somehow, and a line is all that survives
+/// pagination. Spaces carry it because the page already measures text and so
+/// needs nothing new to read this. They are added by the breaker and never
+/// reach `--text`, which sees the mark and its code in the text stream and
+/// strips both.
+fn rule_line(kind: char, span: f64, space: f64) -> String {
+    let mut line = String::from(TABLE_MARK);
+    line.push(kind);
+    let mut at = 0.0;
+    while at + space <= span {
+        line.push(' ');
+        at += space;
+    }
+    line
+}
+
+/// Break one cell into fragments no wider than its column, each of which
+/// balances its own markers.
+///
+/// This is the defect a previous attempt at tables shipped. A row taller than
+/// one line is set by putting the nth fragment of every column on the nth
+/// line, while `to_pdf` walks ONE colour stack and ONE face stack down the
+/// page. A fragment that opened `\texttt` and left it open therefore handed
+/// that face to the cell BESIDE it, because the next thing drawn is the next
+/// column's fragment and not the rest of this cell. So a fragment closes what
+/// it opened, and the next one writes those markers again at its head; the
+/// markers are not measured, so re-opening them costs the column nothing.
+fn wrap_cell(
+    cell: &str,
+    width: f64,
+    colours: &[Spec],
+    faces: &[Face],
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> Vec<String> {
+    let (mut c, mut f) = (colours.to_vec(), faces.to_vec());
+    let space = width_of(" ", current_face(&f));
+    // What this cell has opened and not closed, as the text that opens it and
+    // the character that closes it.
+    let mut open: Vec<(String, char)> = Vec::new();
+    let mut fragments = Vec::new();
+    let mut line = String::new();
+    let mut at = 0.0f64;
+    for word in cell.split(' ').filter(|w| !w.is_empty()) {
+        // Measuring advances the stacks, which is what keeps the word after a
+        // `\texttt` measured in the face that `\texttt` left in force.
+        let cost: f64 = styled_runs(word, &mut c, &mut f)
+            .iter()
+            .map(|(plain, _, face)| width_of(plain, *face))
+            .sum();
+        let need = match line.is_empty() {
+            true => cost,
+            false => at + space + cost,
+        };
+        if !line.is_empty() && need > width {
+            for (_, close) in open.iter().rev() {
+                line.push(*close);
+            }
+            fragments.push(std::mem::take(&mut line));
+            for (opener, _) in &open {
+                line.push_str(opener);
+            }
+            at = cost;
+        } else {
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            at = need;
+        }
+        line.push_str(word);
+        absorb(word, &mut open);
+    }
+    if !line.is_empty() {
+        for (_, close) in open.iter().rev() {
+            line.push(*close);
+        }
+        fragments.push(line);
+    }
+    fragments
+}
+
+/// Record which markers a word leaves OPEN, as the text that opens each and the
+/// character that closes it.
+///
+/// Colour and face are separate stacks -- they nest inside each other, and a
+/// `\texttt` closing does not close the `\color` under it -- so a close pops
+/// the topmost entry of its OWN kind rather than whatever is on top.
+fn absorb(word: &str, open: &mut Vec<(String, char)>) {
+    fn close(open: &mut Vec<(String, char)>, kind: char) {
+        if let Some(at) = open.iter().rposition(|(_, c)| *c == kind) {
+            open.remove(at);
+        }
+    }
+    let mut chars = word.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\u{1}' => {
+                let mut spec = String::from('\u{1}');
+                for c in chars.by_ref() {
+                    spec.push(c);
+                    if c == '\u{2}' {
+                        break;
+                    }
+                }
+                open.push((spec, '\u{3}'));
+            }
+            '\u{3}' => close(open, '\u{3}'),
+            FACE_PUSH => {
+                let code = chars.next().unwrap_or_else(|| Face::Main.code());
+                open.push((format!("{FACE_PUSH}{code}"), FACE_POP));
+            }
+            FACE_POP => close(open, FACE_POP),
+            _ => {}
+        }
+    }
 }
 
 /// The start of a centred region, and, on a broken line, that the line is

@@ -122,6 +122,19 @@
     "\\endcenter"
     "\\centering"
     "\\centerline"
+    "\\tabular"
+    "\\endtabular"
+    "\\longtable"
+    "\\endlongtable"
+    "\\toprule"
+    "\\midrule"
+    "\\bottomrule"
+    "\\hline"
+    "\\tabularnewline"
+    "\\endhead"
+    "\\endfirsthead"
+    "\\endfoot"
+    "\\endlastfoot"
     "\\definecolor"
     "\\providecolor"
     "\\colorlet"
@@ -253,6 +266,19 @@
     (puthash "\\endcenter" "\\endcenter  —  Stop centring: what `\\end{center}` runs, and the close of the region `\\center` opened. [LaTeX]" table)
     (puthash "\\centering" "\\centering  —  Centre every line up to the end of the group or the environment that holds it. [LaTeX]" table)
     (puthash "\\centerline" "\\centerline  —  Centre exactly its argument, on a line of its own. [LaTeX]" table)
+    (puthash "\\tabular" "\\tabular  —  Open a table. [LaTeX]" table)
+    (puthash "\\endtabular" "\\endtabular  —  Close a table: what `\\end{tabular}` runs. [LaTeX]" table)
+    (puthash "\\longtable" "\\longtable  —  Open a longtable, which is set exactly as `tabular` is. [LaTeX]" table)
+    (puthash "\\endlongtable" "\\endlongtable  —  Close a longtable: what `\\end{longtable}` runs, and the same close `\\endtabular` is. [LaTeX]" table)
+    (puthash "\\toprule" "\\toprule  —  booktabs' rule above a table, drawn as a filled rectangle the width of the table at booktabs' own `\\heavyrulewidth` of 0.08em. [LaTeX]" table)
+    (puthash "\\midrule" "\\midrule  —  booktabs' rule between a table's head and its body, drawn at `\\lightrulewidth` -- 0.05em, thinner than the two outer rules, which is the whole visual difference between them. [LaTeX]" table)
+    (puthash "\\bottomrule" "\\bottomrule  —  booktabs' rule under a table, drawn at `\\heavyrulewidth` as `\\toprule` is. [LaTeX]" table)
+    (puthash "\\hline" "\\hline  —  The kernel's own horizontal rule across a table, drawn the way `\\midrule` is. [LaTeX]" table)
+    (puthash "\\tabularnewline" "\\tabularnewline  —  End a table row. [LaTeX]" table)
+    (puthash "\\endhead" "\\endhead  —  End longtable's head: everything above it repeats at the top of each page the table runs onto. [LaTeX]" table)
+    (puthash "\\endfirsthead" "\\endfirsthead  —  End longtable's FIRST head, when it differs from the one that repeats. [LaTeX]" table)
+    (puthash "\\endfoot" "\\endfoot  —  End longtable's foot: what repeats at the bottom of each page the table runs onto. [LaTeX]" table)
+    (puthash "\\endlastfoot" "\\endlastfoot  —  End longtable's LAST foot: what is set once, under the end of the table. [LaTeX]" table)
     (puthash "\\definecolor" "\\definecolor  —  Name a colour: `\\definecolor{neonCyan}{HTML}{05D9E8}`. [LaTeX]" table)
     (puthash "\\providecolor" "\\providecolor  —  Define a colour only if that name is not already defined. [LaTeX]" table)
     (puthash "\\colorlet" "\\colorlet  —  Give an existing colour another name. [LaTeX]" table)

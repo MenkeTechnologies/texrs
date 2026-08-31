@@ -1011,6 +1011,18 @@ fn value_of<'a>(body: &'a str, key: &str) -> Option<&'a str> {
 /// font object it is, so the same `/F2` is one font on one page and another on
 /// the next.
 fn faces(pdf: &[u8]) -> Vec<(String, String)> {
+    placed_faces(pdf)
+        .into_iter()
+        .map(|(_, _, face, text)| (face, text))
+        .collect()
+}
+
+/// The same, with the point each run was drawn at.
+///
+/// One reader rather than two: `placed` answers where and `faces` answers in
+/// what, and a question about a COLUMN -- which face is set at which x, on
+/// which baseline -- needs both of a single run at once.
+fn placed_faces(pdf: &[u8]) -> Vec<(f64, f64, String, String)> {
     let pdf = String::from_utf8_lossy(pdf).into_owned();
     let objects = objects(&pdf);
     let by_number = |number: &str| objects.iter().find(|(n, _)| n.to_string() == number);
@@ -1039,9 +1051,18 @@ fn faces(pdf: &[u8]) -> Vec<(String, String)> {
             // `/` before the operator, not everything after it.
             let head = line[..at].rsplit('/').next().unwrap_or("");
             let face = named(head.split_whitespace().next().unwrap_or(""));
+            // `1 0 0 1 X Y Tm` -- the two numbers before the operator.
+            let point = line.split_once(" Tm ").map(|(before, _)| before);
+            let mut back = point.unwrap_or("").split_ascii_whitespace().rev();
+            let (Some(Ok(y)), Some(Ok(x))) = (
+                back.next().map(str::parse::<f64>),
+                back.next().map(str::parse::<f64>),
+            ) else {
+                continue;
+            };
             if let Some((body, _)) = line.rsplit_once(") Tj") {
                 if let Some((_, text)) = body.rsplit_once('(') {
-                    runs.push((face, text.to_string()));
+                    runs.push((x, y, face, text.to_string()));
                 }
             }
         }
@@ -1235,4 +1256,223 @@ fn a_character_the_face_lacks_is_drawn_rather_than_written_out_as_its_utf8() {
         all.contains("rule - end"),
         "the rule was dropped instead of standing in: {runs:?}"
     );
+}
+
+// ── Tables ────────────────────────────────────────────────────────────────
+//
+// A table used to be one paragraph of prose: `&` was lowered to a space and
+// `\\` to a newline, so "Name & Value \\ alpha & 1 \\" arrived at the breaker
+// as "Name Value alpha 1" and was filled into the sentence after it. The
+// corpus depends on tables heavily -- pandoc emits a longtable for every
+// markdown table, 132 of them in groovyrs/docs/book.tex.
+
+/// A two-column table holding `body`, in the two base-fourteen faces the other
+/// tests here use, so nothing installed on the machine can change the answer.
+fn table_document(body: &str) -> String {
+    format!(
+        "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{NoSuchSerifFace}}\n\\setmonofont{{NoSuchMonoFace}}\n\
+         \\begin{{document}}\n\
+         \\begin{{tabular}}{{ll}}\n\\toprule\n{body}\\bottomrule\n\\end{{tabular}}\n\n\
+         afterwards\n\\end{{document}}\n"
+    )
+}
+
+#[test]
+fn a_table_is_set_as_rows_rather_than_filled_into_the_prose_around_it() {
+    let src = table_document("Name & Value \\\\\n\\midrule\nalpha & 1 \\\\\nbeta & 2 \\\\\n");
+    let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
+    let (_, header) = at(&runs, "Name");
+    let (_, first) = at(&runs, "alpha");
+    let (_, second) = at(&runs, "beta");
+    let (_, after) = at(&runs, "afterwards");
+    // Each row is a baseline of its own, in the order it was written, and the
+    // sentence after the table is below all of them. Before this every one of
+    // these was the same number: one line reading "Name Value alpha 1 beta 2
+    // afterwards".
+    assert!(
+        header > first && first > second && second > after,
+        "the rows are lines of their own, in order, above the prose after the \
+         table: {runs:?}"
+    );
+    // And each row holds its own cells and only its own.
+    let row = |want: &str| {
+        runs.iter()
+            .find(|(_, _, text)| text.contains(want))
+            .map(|(_, _, text)| text.clone())
+            .unwrap_or_default()
+    };
+    assert!(row("alpha").contains('1'), "got {:?}", row("alpha"));
+    assert!(!row("alpha").contains("beta"), "got {:?}", row("alpha"));
+}
+
+#[test]
+fn a_tables_columns_line_up_across_its_rows() {
+    // The second cell of every row is coloured, which splits the line into runs
+    // exactly where the column starts -- so the x a column was set at can be
+    // read back out of the file rather than taken on trust. The first cells are
+    // of very different widths on purpose: strung along one line, as they used
+    // to be, these three x values are nowhere near each other.
+    let src = table_document(
+        "one & \\textcolor[rgb]{1,0,0}{x} \\\\\n\\midrule\n\
+         a much longer first cell & \\textcolor[rgb]{1,0,0}{y} \\\\\n\
+         mid & \\textcolor[rgb]{1,0,0}{z} \\\\\n",
+    );
+    let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
+    let column = |want: &str| at(&runs, want).0;
+    let (x, y, z) = (column("x"), column("y"), column("z"));
+    let spread = x.max(y).max(z) - x.min(y).min(z);
+    // Padding is written in spaces, so a column stands within half a space of
+    // where it was measured to be; half a space is under 3pt at any size these
+    // documents are set in.
+    assert!(
+        spread < 3.0,
+        "the second column is at x={x}, {y} and {z} on the three rows: {runs:?}"
+    );
+    // And it IS a column: indented past the widest cell of the first one,
+    // rather than each row starting wherever the row before it ended.
+    assert!(
+        x > column("one") + 50.0,
+        "the second column clears the first: x={x} against {}",
+        column("one")
+    );
+}
+
+/// The filled rectangles a PDF draws, as `(x, y, width, height)`.
+///
+/// `X Y W H re f` is what `pdf::Page::rule` writes, and a rule is the only
+/// thing these documents fill -- so this is how to ask whether a booktabs rule
+/// was DRAWN, as opposed to set as characters or dropped.
+fn rules(pdf: &[u8]) -> Vec<(f64, f64, f64, f64)> {
+    let s = String::from_utf8_lossy(pdf).into_owned();
+    let mut found = Vec::new();
+    for line in s.lines() {
+        let Some(head) = line.strip_suffix(" re f") else {
+            continue;
+        };
+        let numbers: Vec<f64> = head
+            .split_ascii_whitespace()
+            .rev()
+            .take(4)
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        if let [h, w, y, x] = numbers[..] {
+            found.push((x, y, w, h));
+        }
+    }
+    found
+}
+
+#[test]
+fn the_three_booktabs_rules_are_drawn_as_rules() {
+    // `\toprule`, `\midrule` and `\bottomrule` were defined by the prelude to
+    // expand to nothing, so a table had no rules at all -- and the corpus
+    // writes `\toprule` 3,455 times.
+    let src = table_document("Name & Value \\\\\n\\midrule\nalpha & 1 \\\\\n");
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let drawn = rules(&pdf);
+    assert_eq!(drawn.len(), 3, "three rules: {drawn:?}");
+    let runs = placed(&pdf);
+    let (_, header) = at(&runs, "Name");
+    let (_, body) = at(&runs, "alpha");
+    let ys: Vec<f64> = drawn.iter().map(|(_, y, _, _)| *y).collect();
+    assert!(
+        ys[0] > header && ys[1] < header && ys[1] > body && ys[2] < body,
+        "top above the head, mid between head and body, bottom under the \
+         body: rules at {ys:?}, head at {header}, body at {body}"
+    );
+    // Each runs the width of the table: not nothing, and not off the paper.
+    for (x, _, w, h) in &drawn {
+        assert!(*w > 20.0 && x + w < 612.0, "a rule of width {w} at x={x}");
+        assert!(*h > 0.0 && *h < 2.0, "a rule is a line, not a band: {h}");
+    }
+    // booktabs sets the outer rules heavier than the inner one, which is the
+    // whole visual difference between the three.
+    assert!(
+        drawn[0].3 > drawn[1].3 && drawn[2].3 > drawn[1].3,
+        "the middle rule is the light one: {drawn:?}"
+    );
+}
+
+#[test]
+fn a_wrapped_table_row_does_not_leak_its_face_into_the_cell_beside_it() {
+    // The defect a previous attempt at tables shipped. A row taller than one
+    // line is set by putting the nth fragment of every column on the nth line,
+    // and `to_pdf` walks ONE face stack down the page -- so a first column that
+    // opened `\texttt` and left it open handed Courier to the prose in the
+    // second column on every line of the row but the first.
+    //
+    // Both cells are long enough that the row is several lines tall, which is
+    // what every wide pandoc table in the corpus looks like.
+    let mono = "\\texttt{AwkFieldGet, AwkFieldSet, AwkNf, AwkSetRecord, \
+                AwkGetFieldNum, AwkSpecialGet, AwkSpecialSet, AwkPrint}";
+    let prose = "wrapping prose that keeps going for long enough to need \
+                 several lines of its own beside the code";
+    let src = table_document(&format!("{mono} & {prose} \\\\\n"));
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let runs = placed_faces(&pdf);
+    // First, that the row IS two columns several lines tall: on more than one
+    // baseline, a Courier run at the margin and a Times-Roman run to the right
+    // of it. Filled into one paragraph, as a table used to be, that happens on
+    // exactly the one line where the code ends and the prose begins -- so this
+    // is what says the assertion below is being asked of a real table.
+    let side_by_side = runs
+        .iter()
+        .filter(|(_, _, face, _)| face == "Courier")
+        .filter(|(_, y, _, _)| {
+            runs.iter()
+                .any(|(bx, by, bf, _)| by == y && bf == "Times-Roman" && *bx > 100.0)
+        })
+        .count();
+    assert!(
+        side_by_side > 1,
+        "the row is one line, not a column of code beside a column of prose: \
+         {runs:?}"
+    );
+    // Then the defect itself: every word of the prose column is in the prose
+    // face, not just the first.
+    let flat: Vec<(String, String)> = runs
+        .iter()
+        .map(|(_, _, face, text)| (face.clone(), text.clone()))
+        .collect();
+    for word in prose.split_whitespace() {
+        assert_eq!(
+            face_of(&flat, word),
+            "Times-Roman",
+            "{word:?} came out of the second column in the first column's \
+             face: {runs:?}"
+        );
+    }
+    // And the code is still monospace, so this is not passing by never
+    // honouring the face at all.
+    assert_eq!(face_of(&flat, "AwkFieldGet"), "Courier");
+    assert_eq!(face_of(&flat, "AwkPrint"), "Courier");
+}
+
+#[test]
+fn a_longtable_sets_its_foot_after_its_body_and_not_before_it() {
+    // longtable states its head, then its foot, then its body: `\endhead`
+    // closes the head and `\endlastfoot` the foot, so `\bottomrule` is WRITTEN
+    // before the first row of data. Set in arrival order the bottom rule lands
+    // under the head instead of under the table. This is the shape of every
+    // markdown table pandoc emits, which is every table in the corpus.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{longtable}[]{@{}lr@{}}\n\
+               \\toprule\\noalign{}\n& mean \\\\\n\\midrule\\noalign{}\n\
+               \\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n\
+               awkrs & 23.7 ms \\\\\nmawk & 136.0 ms \\\\\n\
+               \\end{longtable}\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = placed(&pdf);
+    let (_, head) = at(&runs, "mean");
+    let (_, last) = at(&runs, "mawk");
+    let ys: Vec<f64> = rules(&pdf).iter().map(|(_, y, _, _)| *y).collect();
+    assert_eq!(ys.len(), 3, "three rules: {ys:?}");
+    assert!(
+        ys[2] < last,
+        "the bottom rule is under the last row of data, not under the head: \
+         rules at {ys:?}, head at {head}, last row at {last}"
+    );
+    // The rows themselves are in the order they were written.
+    assert!(head > at(&runs, "awkrs").1, "the head is above the body");
 }

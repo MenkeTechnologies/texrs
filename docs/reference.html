@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">127</div>
+            <div class="stat-val">140</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -405,6 +405,74 @@ at the margin</pre></td></tr>
 at the margin</pre></td></tr>
             <tr><td><code>\centerline</code></td><td>Centre exactly its argument, on a line of its own. The box form rather than the switch: what follows it is not centred. The prelude answered it with its argument alone, which set an imprint or a colophon flush left in the middle of the page.</td><td><pre>\centerline{TEXT}
 \centerline{a colophon}</pre></td></tr>
+            <tr><td><code>\tabular</code></td><td>Open a table. <code>\begin{tabular}</code> runs this, the way latex.ltx has it: <code>\begin{x}</code> is <code>\csname x\endcsname</code> here, so the environment IS this control sequence. The optional position and the column specification are read and dropped -- columns are as wide as their content here, not as wide as the specification asks. Inside a table <code>&amp;</code> is a cell boundary and <code>\</code> ends a row; outside one both mean what they meant before. Without it a table was filled into the prose around it as one paragraph: <code>Name Value alpha 1 beta 2</code>.</td><td><pre>\begin{tabular}{ll}
+Name &amp; Value \\
+alpha &amp; 1 \\
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\endtabular</code></td><td>Close a table: what <code>\end{tabular}</code> runs. It also ends the row in hand, so a last row written without a closing <code>\</code> is still a row.</td><td><pre>\begin{tabular}{ll}
+a &amp; b \\
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\longtable</code></td><td>Open a longtable, which is set exactly as <code>tabular</code> is. This is what pandoc emits for every markdown table, so it is the shape of nearly every table in a generated book. A longtable states its head, then its foot, then its body, and it is set head, body, foot -- see <code>\endhead</code> and <code>\endlastfoot</code>.</td><td><pre>\begin{longtable}[]{@{}lr@{}}
+\toprule
+Name &amp; Value \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+alpha &amp; 1 \\
+\end{longtable}</pre></td></tr>
+            <tr><td><code>\endlongtable</code></td><td>Close a longtable: what <code>\end{longtable}</code> runs, and the same close <code>\endtabular</code> is.</td><td><pre>\begin{longtable}[]{@{}ll@{}}
+a &amp; b \\
+\end{longtable}</pre></td></tr>
+            <tr><td><code>\toprule</code></td><td>booktabs' rule above a table, drawn as a filled rectangle the width of the table at booktabs' own <code>\heavyrulewidth</code> of 0.08em. Written 3,455 times across the corpus and drawn none of them before this, because the prelude answered it with nothing.</td><td><pre>\begin{tabular}{ll}
+\toprule
+Name &amp; Value \\
+\bottomrule
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\midrule</code></td><td>booktabs' rule between a table's head and its body, drawn at <code>\lightrulewidth</code> -- 0.05em, thinner than the two outer rules, which is the whole visual difference between them. An optional width may follow and is read and dropped.</td><td><pre>\begin{tabular}{ll}
+Name &amp; Value \\
+\midrule
+alpha &amp; 1 \\
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\bottomrule</code></td><td>booktabs' rule under a table, drawn at <code>\heavyrulewidth</code> as <code>\toprule</code> is. In a longtable it is written in the foot, before the body, and is set where a reader gets it: under the last row.</td><td><pre>\begin{tabular}{ll}
+alpha &amp; 1 \\
+\bottomrule
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\hline</code></td><td>The kernel's own horizontal rule across a table, drawn the way <code>\midrule</code> is. Outside a table it does nothing, which is what it did everywhere before tables were set.</td><td><pre>\begin{tabular}{ll}
+\hline
+a &amp; b \\
+\hline
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\tabularnewline</code></td><td>End a table row. The unambiguous spelling of <code>\\</code> inside a table, for the places where <code>\\</code> would be read as something else; both end a row here, and both take the <code>*</code> and the optional extra space LaTeX allows after them.</td><td><pre>\begin{tabular}{ll}
+a &amp; b \tabularnewline
+c &amp; d \tabularnewline
+\end{tabular}</pre></td></tr>
+            <tr><td><code>\endhead</code></td><td>End longtable's head: everything above it repeats at the top of each page the table runs onto. The table is set once here, so the head is set once -- above the body, which is where it is written.</td><td><pre>\begin{longtable}[]{@{}ll@{}}
+\toprule
+Name &amp; Value \\
+\midrule
+\endhead
+alpha &amp; 1 \\
+\end{longtable}</pre></td></tr>
+            <tr><td><code>\endfirsthead</code></td><td>End longtable's FIRST head, when it differs from the one that repeats. The first head is the one set; what stands between this and <code>\endhead</code> is the repeating copy, and a table set once has no page to repeat it on.</td><td><pre>\begin{longtable}[]{@{}ll@{}}
+Name &amp; Value \\
+\endfirsthead
+Name &amp; Value \\
+\endhead
+alpha &amp; 1 \\
+\end{longtable}</pre></td></tr>
+            <tr><td><code>\endfoot</code></td><td>End longtable's foot: what repeats at the bottom of each page the table runs onto. Written before the body and set after it, which is where a reader gets it.</td><td><pre>\begin{longtable}[]{@{}ll@{}}
+\endhead
+\bottomrule
+\endfoot
+alpha &amp; 1 \\
+\end{longtable}</pre></td></tr>
+            <tr><td><code>\endlastfoot</code></td><td>End longtable's LAST foot: what is set once, under the end of the table. This is the boundary pandoc writes, with <code>\bottomrule</code> above it, in every markdown table it emits.</td><td><pre>\begin{longtable}[]{@{}ll@{}}
+\endhead
+\bottomrule
+\endlastfoot
+alpha &amp; 1 \\
+\end{longtable}</pre></td></tr>
             <tr><td><code>\definecolor</code></td><td>Name a colour: <code>\definecolor{neonCyan}{HTML}{05D9E8}</code>. The models read are <code>HTML</code> (six hex digits), <code>rgb</code> (three components in 0..=1), <code>RGB</code> (the same in 0..=255), <code>gray</code> and <code>cmyk</code>. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later <code>\color</code> names something unknown and the page comes out black.</td><td><pre>\definecolor{NAME}{MODEL}{SPEC}
 \definecolor{neonCyan}{HTML}{05D9E8}</pre></td></tr>
             <tr><td><code>\providecolor</code></td><td>Define a colour only if that name is not already defined. Otherwise <code>\definecolor</code>.</td><td><pre>\providecolor{NAME}{MODEL}{SPEC}
