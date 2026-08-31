@@ -131,6 +131,22 @@ probe like that one and diverge in every use the primitive actually has, which
 all turn on the file end and `\everyeof`. It needs the pseudo-file machinery,
 not a shortcut.
 
+## texrs cannot rewrite tex's own DVI unchanged
+
+`cargo run --bin dvi-parity -- --roundtrip` parses a DVI real `tex` wrote and
+writes it back through `Dvi::rewrite`. Nothing to do with typesetting: it asks
+only whether what was read can be written. None of the nine documents survives,
+in two distinct ways.
+
+Six come back LONGER -- 380 bytes in, 456 out; 684 in, 872 out -- because the
+writer does not choose the compact operand widths tex chose, so a movement tex
+wrote in two bytes is written back in four.
+
+Three come back the same length with bytes changed, and those are precise: byte
+111 is the font checksum in `fnt_def`, written as zero instead of the value
+read, and postamble+21 is the maximum page width, recomputed rather than
+carried. `tests/dvi_trip_floor.txt` records where each file stands.
+
 ## DVI output is not tex's, in three specific ways
 
 `cargo run --bin dvi-parity` compares against real `tex`, and DVI is the

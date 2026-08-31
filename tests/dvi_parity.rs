@@ -106,3 +106,54 @@ fn the_current_differences_are_the_ones_recorded() {
         sd.text()
     );
 }
+
+/// The round trip: a file tex wrote must survive texrs's reader and writer at
+/// least as well as it did.
+///
+/// This asks nothing of the typesetter — only that what was read can be written
+/// back. Nothing reaches IDENTICAL yet, and the two reasons are worth naming:
+/// six of the nine documents come out LONGER, because the writer does not
+/// choose the compact operand widths tex chose, and the other three come out
+/// the same length with the font checksum zeroed and the postamble's maximum
+/// page width recomputed differently.
+#[test]
+fn no_file_survives_the_round_trip_less_well_than_it_did() {
+    let Some(oracle) = dvi_parity::oracle() else {
+        eprintln!("skipping: no `tex` on PATH");
+        return;
+    };
+    let floor: Vec<(String, texrs::dvi_parity::Trip)> =
+        std::fs::read_to_string(manifest("tests/dvi_trip_floor.txt"))
+            .expect("the round-trip floor")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+            .filter_map(|l| {
+                let (trip, name) = l.split_once(' ')?;
+                Some((
+                    name.trim().to_string(),
+                    texrs::dvi_parity::Trip::parse(trip)?,
+                ))
+            })
+            .collect();
+    assert!(!floor.is_empty(), "the floor file records nothing");
+
+    let mut dropped = Vec::new();
+    for (name, was) in floor {
+        let case = manifest("tests/pdf_cases").join(&name);
+        let Some(dvi) = dvi_parity::reference(&oracle, &case) else {
+            continue;
+        };
+        let (now, detail) = dvi_parity::trip_verdict(&dvi);
+        if now < was {
+            dropped.push(format!(
+                "{name}: was {}, now {} ({detail})",
+                was.name(),
+                now.name()
+            ));
+        }
+    }
+    assert!(
+        dropped.is_empty(),
+        "these files survive the round trip less well than they did: {dropped:#?}"
+    );
+}

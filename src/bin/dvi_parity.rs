@@ -15,6 +15,14 @@ fn main() {
     };
     println!("oracle: {} {}", oracle.program, oracle.version);
 
+    // `--roundtrip` asks a different question: not whether texrs sets a
+    // document as tex does, but whether it can carry tex's own file through its
+    // reader and writer unchanged. That needs no typesetting at all.
+    if std::env::args().any(|a| a == "--roundtrip") {
+        roundtrip_report(&root, &oracle);
+        return;
+    }
+
     let floor = read_floor(&root.join("tests/dvi_floor.txt"));
     let record = std::env::args().any(|a| a == "--record");
     let dir = root.join("tests/pdf_cases");
@@ -85,4 +93,51 @@ fn read_floor(path: &std::path::Path) -> Vec<(String, Rung)> {
             Some((name.trim().to_string(), Rung::parse(rung)?))
         })
         .collect()
+}
+
+/// Parse each case's tex-produced DVI, write it back, and say what changed.
+fn roundtrip_report(root: &std::path::Path, oracle: &dvi_parity::Oracle) {
+    let dir = root.join("tests/pdf_cases");
+    let mut cases: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|e| e == "tex"))
+                .collect()
+        })
+        .unwrap_or_default();
+    cases.sort();
+
+    let mut clean = 0;
+    let mut lines = Vec::new();
+    for case in &cases {
+        let name = case
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let Some(dvi) = dvi_parity::reference(oracle, case) else {
+            println!("{:<11} {:<26} tex wrote no DVI", "-", name);
+            continue;
+        };
+        let (trip, detail) = dvi_parity::trip_verdict(&dvi);
+        if trip == dvi_parity::Trip::Identical {
+            clean += 1;
+        }
+        println!("{:<11} {:<26} {detail}", trip.name(), name);
+        lines.push(format!("{} {}", trip.name(), name));
+    }
+
+    if std::env::args().any(|a| a == "--record") {
+        let header = concat!(
+            "# How faithfully texrs carries tex's own DVI through its reader and\n",
+            "# writer. UNPARSED < REWRITTEN < SAMELENGTH < IDENTICAL.\n",
+            "# IDENTICAL is the goal and needs no typesetting to reach: it asks\n",
+            "# only that a file tex wrote survives being read and written back.\n",
+        );
+        let body = format!("{header}{}\n", lines.join("\n"));
+        let _ = std::fs::write(root.join("tests/dvi_trip_floor.txt"), body);
+        println!("\nrecorded {} case(s)", lines.len());
+        return;
+    }
+    println!("\n{clean} of {} carried through unchanged", cases.len());
 }

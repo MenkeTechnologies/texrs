@@ -1,0 +1,13 @@
+# How faithfully texrs carries tex's own DVI through its reader and
+# writer. UNPARSED < REWRITTEN < SAMELENGTH < IDENTICAL.
+# IDENTICAL is the goal and needs no typesetting to reach: it asks
+# only that a file tex wrote survives being read and written back.
+REWRITTEN a_paragraph.tex
+REWRITTEN digits_and_case.tex
+REWRITTEN groups_and_registers.tex
+REWRITTEN long_paragraph.tex
+SAMELENGTH macro_expansion.tex
+SAMELENGTH nested_macros.tex
+REWRITTEN punctuation.tex
+REWRITTEN two_paragraphs.tex
+SAMELENGTH two_words.tex

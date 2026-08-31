@@ -14,6 +14,17 @@ use crate::dvi::{Difference, Dvi};
 use std::path::Path;
 use std::process::Command;
 
+/// A number no other call in this process will use.
+///
+/// The scratch directory used to be named by process id and case name alone,
+/// so two tests running the same document in parallel threads shared one
+/// directory and removed it under each other. That failed only when the tests
+/// ran together, which is the worst way for a harness to fail.
+fn unique_suffix() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The engine texrs is measured against here: real `tex`, not luatex, because
 /// DVI is what tex writes natively.
 pub struct Oracle {
@@ -88,8 +99,9 @@ impl Rung {
 /// What `tex` writes for `case`.
 pub fn reference(oracle: &Oracle, case: &Path) -> Option<Vec<u8>> {
     let dir = std::env::temp_dir().join(format!(
-        "texrs-dviparity-{}-{}",
+        "texrs-dviparity-{}-{}-{}",
         std::process::id(),
+        unique_suffix(),
         case.file_stem()?.to_string_lossy()
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -170,4 +182,83 @@ pub fn verdict(reference: Option<&Vec<u8>>, subject: Option<&Vec<u8>>) -> (Rung,
 /// A few characters either side of `at`, for a message that fits on a line.
 fn snippet(text: &str, at: usize) -> String {
     text.chars().skip(at.saturating_sub(8)).take(24).collect()
+}
+
+/// How faithfully texrs's reader and writer carry a file they did not write.
+///
+/// A third axis, and the one that needs no typesetting: parse a DVI real `tex`
+/// produced, write it back, and compare. Everything else here asks whether
+/// texrs SETS a document as tex does; this asks only whether it can carry
+/// tex's own file through unchanged, which is a smaller question with a
+/// definite answer.
+pub fn roundtrip(dvi: &[u8]) -> Result<Vec<usize>, String> {
+    let parsed = Dvi::parse(dvi)?;
+    let out = parsed.rewrite();
+    if out.len() != dvi.len() {
+        return Err(format!(
+            "length changed: {} in, {} out",
+            dvi.len(),
+            out.len()
+        ));
+    }
+    Ok(dvi
+        .iter()
+        .zip(out.iter())
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i)
+        .collect())
+}
+
+/// How far a file survives that round trip.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Trip {
+    /// texrs could not parse what tex wrote.
+    Unparsed,
+    /// It parsed and came back at a DIFFERENT length: the writer does not
+    /// choose the compact operand widths tex chose.
+    Rewritten,
+    /// ... at the same length, with bytes changed.
+    SameLength,
+    /// ... unchanged. The goal, and it needs no typesetting to reach.
+    Identical,
+}
+
+impl Trip {
+    pub fn name(self) -> &'static str {
+        match self {
+            Trip::Unparsed => "UNPARSED",
+            Trip::Rewritten => "REWRITTEN",
+            Trip::SameLength => "SAMELENGTH",
+            Trip::Identical => "IDENTICAL",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Trip> {
+        Some(match s {
+            "UNPARSED" => Trip::Unparsed,
+            "REWRITTEN" => Trip::Rewritten,
+            "SAMELENGTH" => Trip::SameLength,
+            "IDENTICAL" => Trip::Identical,
+            _ => return None,
+        })
+    }
+}
+
+/// How far `dvi` survives the round trip, and a line saying what changed.
+pub fn trip_verdict(dvi: &[u8]) -> (Trip, String) {
+    match roundtrip(dvi) {
+        Ok(d) if d.is_empty() => (Trip::Identical, String::new()),
+        Ok(d) => (
+            Trip::SameLength,
+            format!(
+                "{} of {} bytes differ, first at {}",
+                d.len(),
+                dvi.len(),
+                d.first().copied().unwrap_or(0)
+            ),
+        ),
+        Err(e) if e.starts_with("length changed") => (Trip::Rewritten, e),
+        Err(e) => (Trip::Unparsed, e),
+    }
 }

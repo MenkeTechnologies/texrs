@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- A round-trip axis: `cargo run --bin dvi-parity -- --roundtrip` reads a DVI
+  real `tex` wrote, writes it back through texrs's own writer, and compares.
+  It asks nothing of the typesetter, so IDENTICAL is reachable today — and
+  nothing reaches it: six of nine documents come back LONGER because the writer
+  does not choose the operand widths tex chose, and three come back the same
+  length with the font checksum zeroed and the postamble's maximum page width
+  recomputed.
 - A second parity axis: `cargo run --bin dvi-parity` compares texrs's DVI with
   real `tex`'s. DVI carries no fonts and no compression, so byte-identical
   output is a reachable goal — 224 bytes against 260 for `Hello world.`, where

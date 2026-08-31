@@ -17,6 +17,17 @@
 use std::path::Path;
 use std::process::Command;
 
+/// A number no other call in this process will use.
+///
+/// The scratch directory used to be named by process id and case name alone,
+/// so two tests running the same document in parallel threads shared one
+/// directory and removed it under each other. That failed only when the tests
+/// ran together, which is the worst way for a harness to fail.
+fn unique_suffix() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The engine texrs is measured against.
 pub struct Oracle {
     pub program: String,
@@ -109,8 +120,9 @@ impl Rung {
 /// input: run in one place and the second would read the first's file.
 fn build(case: &Path, engine: &str, program: &str) -> Option<Vec<u8>> {
     let dir = std::env::temp_dir().join(format!(
-        "texrs-pdfparity-{}-{}-{}",
+        "texrs-pdfparity-{}-{}-{}-{}",
         std::process::id(),
+        unique_suffix(),
         engine,
         case.file_stem()?.to_string_lossy()
     ));
@@ -247,8 +259,9 @@ pub fn fonts(pdf: &[u8]) -> Option<Vec<String>> {
 /// cannot judge rather than as agreement.
 fn run_tool(tool: &str, pdf: &[u8]) -> Option<String> {
     let path = std::env::temp_dir().join(format!(
-        "texrs-pdfparity-{}-{}.pdf",
+        "texrs-pdfparity-{}-{}-{}.pdf",
         std::process::id(),
+        unique_suffix(),
         tool
     ));
     std::fs::write(&path, pdf).ok()?;
