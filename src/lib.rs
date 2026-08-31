@@ -130,6 +130,9 @@ fn without_marks(text: &str) -> String {
             // what says the same thing in text.
             crate::typeset::CENTRE | crate::typeset::CENTRE_END => {}
             crate::typeset::VERTICAL_SPACE => {}
+            // That a line was set to the measure is a fact about the page, not
+            // about the words, and the words are all a reader asked for.
+            crate::typeset::JUSTIFY => {}
             // A page break is a boundary in the text too, so it comes back as
             // one rather than as a form feed nobody asked to read.
             crate::typeset::PAGE_BREAK => out.push('\n'),

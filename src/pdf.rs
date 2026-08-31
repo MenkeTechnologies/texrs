@@ -306,6 +306,20 @@ impl Font {
     }
 }
 
+/// What a run of text is set at: what its glyphs come to, and what it is to
+/// occupy.
+///
+/// One argument rather than two because it is one decision, and because two
+/// bare widths side by side at a call site are two things to get the wrong way
+/// round. `natural` is what the caller measured this same text at, in the same
+/// font at the same size; the difference between the two is what is shared out
+/// over the spaces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Set {
+    pub natural: f64,
+    pub width: f64,
+}
+
 /// One page: how big it is, and what is drawn on it.
 #[derive(Debug, Clone)]
 pub struct Page {
@@ -346,6 +360,32 @@ impl Page {
     /// whatever the font's own encoding says, and 11 is an `ff` ligature and
     /// not a vertical tab.
     pub fn text_in(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str) {
+        self.draw(font, size, x, y, text, 0.0);
+    }
+
+    /// The same, set to occupy exactly the width asked for rather than whatever
+    /// the glyphs happen to come to.
+    ///
+    /// Without this the renderer could only draw a run at its natural width,
+    /// and a line breaker that prices a line over glue -- every one of them
+    /// does -- had nothing to hand its answer to: a line it chose to shrink was
+    /// still drawn at its natural width, out past the measure into the margin.
+    ///
+    /// PDF spells it `Tw` (S9.3.3): a number of unscaled text-space units added
+    /// to the advance of every code 32 in a simple font, which all three of the
+    /// fonts here are. Text with no space in it cannot be set to a width at
+    /// all, and is drawn where it stands rather than drawn wrong.
+    pub fn text_set(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str, set: Set) {
+        let spaces = text.chars().filter(|c| *c == ' ').count();
+        let word_space = match spaces {
+            0 => 0.0,
+            n => (set.width - set.natural) / n as f64,
+        };
+        self.draw(font, size, x, y, text, word_space);
+    }
+
+    /// One `BT ... ET`, with `word_space` added to every space in it.
+    fn draw(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str, word_space: f64) {
         let name = format!("F{}", self.fonts.len() + 1);
         let name = match self.fonts.iter().find(|(_, used)| used == &font) {
             Some((existing, _)) => existing.clone(),
@@ -370,9 +410,23 @@ impl Page {
                 other => vec![other],
             })
             .collect();
+        // Word spacing is TEXT STATE and outlives the `BT ... ET` it was set in
+        // (S9.3.1), so a line set to the measure would go on stretching every
+        // line drawn after it. It is set inside the block and put back before
+        // the block closes, which leaves a run drawn at its natural width byte
+        // for byte the operators it was before.
+        //
+        // It goes AFTER the `Tm` and not before it, which is the same to a
+        // reader and not the same to everything that reads this stream back:
+        // `Tm`'s six operands are found by counting from the `Tf`, so a `Tw`
+        // between the two moves the position a line was drawn at by two words.
+        let (open, close) = match word_space == 0.0 {
+            true => (String::new(), String::new()),
+            false => (format!("{word_space} Tw "), " 0 Tw".to_string()),
+        };
         let _ = writeln!(
             self.content,
-            "BT /{name} {size} Tf 1 0 0 1 {x} {y} Tm ({escaped}) Tj ET"
+            "BT /{name} {size} Tf 1 0 0 1 {x} {y} Tm {open}({escaped}) Tj{close} ET"
         );
     }
 

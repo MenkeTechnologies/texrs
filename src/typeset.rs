@@ -802,7 +802,7 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
         // page, not glyphs: a centred line carries one at its head, and
         // measuring it would push the line off centre by whatever the font
         // happens to have in that slot.
-        CENTRE | CENTRE_END | VERTICAL_SPACE => false,
+        CENTRE | CENTRE_END | VERTICAL_SPACE | JUSTIFY => false,
         FACE_PUSH => {
             face_code = true;
             false
@@ -1484,7 +1484,7 @@ pub fn to_pdf(
     page_colour: Option<crate::colour::Rgb>,
     near: Option<&std::path::Path>,
 ) -> Vec<u8> {
-    use crate::pdf::{document, Font, Page};
+    use crate::pdf::{document, Font, Page, Set};
 
     // The font the document asked for, EMBEDDED if it can be found: that is
     // the difference between a page set in Arimo's metrics and one set in
@@ -1672,6 +1672,14 @@ pub fn to_pdf(
                 Some(rest) => (true, rest),
                 None => (false, line),
             };
+            // A full line is set TO the measure; a ragged one is set at
+            // whatever it comes to. The breaker decides which -- only a line
+            // the next word would not fit on is full -- and says so with the
+            // same kind of prefix. A centred line never carries it.
+            let (justified, line) = match line.strip_prefix(JUSTIFY) {
+                Some(rest) => (true, rest),
+                None => (false, line),
+            };
             // A line is a sequence of RUNS, each with its own colour: the
             // markers turn colour on and off part way along it. Collapsing the
             // line to one colour state was the first attempt and drew none at
@@ -1698,6 +1706,31 @@ pub fn to_pdf(
                 }
                 false => 0.0,
             };
+            // What each space on a justified line is widened by: the room left
+            // over at the measure, shared out between them. Measured the same
+            // way a centred line is, on copies of the stacks, because it is the
+            // same question -- what does this line come to as it will be drawn.
+            // A line with no space in it has nothing to share the room between
+            // and is set where it stands.
+            let extra: f64 = match justified {
+                true => {
+                    let (mut c, mut f) = (colours.clone(), faces.clone());
+                    let runs = styled_runs(line, &mut c, &mut f);
+                    let natural: f64 = runs
+                        .iter()
+                        .map(|(plain, _, face)| width_of(plain, *face))
+                        .sum();
+                    let spaces: usize = runs
+                        .iter()
+                        .map(|(plain, _, _)| plain.chars().filter(|c| *c == ' ').count())
+                        .sum();
+                    match spaces {
+                        0 => 0.0,
+                        n => (layout.measure - natural) / n as f64,
+                    }
+                }
+                false => 0.0,
+            };
             let mut x = match centred {
                 true => layout.margin + (layout.measure - width).max(0.0) / 2.0,
                 false => layout.margin,
@@ -1720,8 +1753,19 @@ pub fn to_pdf(
                         true => Font::Base14(SYMBOL_FONT_NAME.to_string()),
                         false => fonts[face.index()].clone(),
                     };
-                    page.text_in(font, layout.size, x, y, &piece.codes);
-                    x += piece_width(&piece, face);
+                    // The piece takes its share of the room: what it measures,
+                    // plus the widening for each space that falls inside it.
+                    // x advances by what was actually SET and not by what the
+                    // glyphs come to, or the piece after it would be drawn back
+                    // over the space just widened.
+                    let natural = piece_width(&piece, face);
+                    let spaces = piece.codes.chars().filter(|c| *c == ' ').count() as f64;
+                    let set = Set {
+                        natural,
+                        width: natural + extra * spaces,
+                    };
+                    page.text_set(font, layout.size, x, y, &piece.codes, set);
+                    x += set.width;
                 }
             }
             y -= layout.leading;
@@ -1895,7 +1939,16 @@ fn fill(
                 false => width + space + ww,
             };
             if !line.is_empty() && need > layout.measure {
-                lines.push(std::mem::take(&mut line));
+                // A line pushed HERE is one the next word would not fit on, so
+                // it is a FULL line and is the one set to the measure. The last
+                // line of a paragraph falls out of this loop below and stays
+                // ragged, which is what TeX does with it; and a centred line is
+                // positioned by its own width, so it is left alone.
+                let full = std::mem::take(&mut line);
+                lines.push(match *centred {
+                    true => full,
+                    false => format!("{JUSTIFY}{full}"),
+                });
                 width = ww;
                 line = start(*centred);
                 line.push_str(word);
@@ -1983,6 +2036,7 @@ pub const MARKERS: &[(char, bool)] = &[
     (CENTRE, false),
     (CENTRE_END, false),
     (VERTICAL_SPACE, false),
+    (JUSTIFY, false),
     // The one that carries an argument: the character naming the face.
     (FACE_PUSH, true),
     (FACE_POP, false),
@@ -2032,6 +2086,21 @@ pub const CENTRE: char = '\u{e}';
 
 /// The end of a centred region, back to the margin.
 pub const CENTRE_END: char = '\u{f}';
+
+/// That a broken line is FULL, and so is set to the measure rather than at the
+/// width its glyphs come to.
+///
+/// Justification is a property of the line and not of the text, so it cannot be
+/// worked out again where the page is drawn: by then the paragraphs have been
+/// flattened into one list of lines and nothing says which of them the author
+/// ended and which the breaker did. The breaker knows -- it pushed the line
+/// because the next word did not fit -- and says so at the head of the line,
+/// the way a centred line is marked, which is what survives pagination without
+/// a second structure beside the lines.
+///
+/// A device control character rather than a letter, for the same reason the
+/// others are: it is not a character any document writes.
+pub const JUSTIFY: char = '\u{13}';
 
 /// A line's worth of vertical space with nothing drawn on it.
 ///
