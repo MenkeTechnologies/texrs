@@ -164,7 +164,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\par",
         "Expansion",
-        "End a paragraph. Accepted and ignored: paragraphs belong to the stomach, which texrs does not have. A blank line produces one, which is why the line scanner tracks its state.",
+        "End a paragraph. A blank line produces one, which is why the line scanner tracks its state, and in a typesetting run it reaches the page: the breaker starts a fresh paragraph, so the line before it ends where the paragraph does however short that leaves it.",
         "\\par",
     ),
     (

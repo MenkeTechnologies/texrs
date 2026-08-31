@@ -268,3 +268,47 @@ fn a_font_declaration_consumes_features_on_either_side() {
         ["WORDS"]
     );
 }
+
+/// `\textbackslash` is ONE backslash. It was `\string\\`, and `\\` is a control
+/// sequence whose name is a backslash, so \string wrote the escape character
+/// and then that name -- two of them. Every `\textbackslash` in a pandoc code
+/// listing came out doubled: 468 of them in strykelang's book gave 936
+/// backslashes in the text, and a path `C:\Users` printed as `C:\\Users`.
+#[test]
+fn textbackslash_is_a_single_backslash() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               [\\textbackslash{}] [C:\\textbackslash Users]\n\\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    assert!(
+        got.contains("[\\]") && got.contains("[C:\\Users]"),
+        "one backslash per \\textbackslash, got {got:?}"
+    );
+    assert!(!got.contains("\\\\"), "doubled: {got:?}");
+}
+
+/// The same inside a `\message`, which reaches the primitive by another path.
+#[test]
+fn textbackslash_is_a_single_backslash_in_a_message() {
+    assert_eq!(
+        out("\\documentclass{article}\n\\message{[\\textbackslash]}\n\\end\n"),
+        "[\\]"
+    );
+}
+
+/// `\^` is the circumflex accent, and pandoc also writes a bare caret as `\^{}`
+/// -- the accent over nothing. `#1` alone dropped it, so the regexes in these
+/// books lost their anchors: `/\^{}END/` printed as `/END/`, which says
+/// something else. An empty argument is the character itself; a letter still
+/// comes through as the letter, since texrs composes no glyph.
+#[test]
+fn a_circumflex_over_nothing_is_a_caret() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               /\\^{}END/ \\^e \\^{o} \\textasciicircum{}\n\\end{document}\n";
+    assert_eq!(
+        texrs::run_text(src)
+            .expect("run")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["/^END/", "e", "o", "^"]
+    );
+}

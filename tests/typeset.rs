@@ -309,7 +309,11 @@ fn colour_survives_the_pdf_path_as_pdfs_own_operator() {
     let pdf = texrs::run_pdf(src).expect("pdf");
     let s = String::from_utf8_lossy(&pdf);
     assert!(s.contains("1 0 0 rg"), "the colour is set");
-    assert!(s.contains("0 g"), "and put back after");
+    // And put back after -- as the colour underneath, said in full. It used to
+    // be the literal `0 g`, which is only right when the colour underneath
+    // happens to be black; a book that sets a body colour is then drawn in
+    // black for everything after its first `\textcolor`.
+    assert!(s.contains("0 0 0 rg"), "and put back after: {s:?}");
 }
 
 #[test]
@@ -324,6 +328,98 @@ fn a_line_is_split_into_runs_where_the_colour_changes() {
     assert!(s.contains("(before )"), "the run before the colour: {s:?}");
     assert!(s.contains("(middle)"), "the coloured run");
     assert!(s.contains("0 0 1 rg"), "with the colour set for it");
+}
+
+/// Every run of text a PDF draws, with the fill colour in force when it is
+/// drawn.
+///
+/// The content streams texrs writes are not compressed, so the operators can be
+/// read straight out of the file: `R G B rg` sets the colour, `(text) Tj` draws
+/// under it. This is what a reader does with the page, which is the only way to
+/// ask what colour a word actually came out in.
+fn drawn(pdf: &[u8]) -> Vec<(String, String)> {
+    let s = String::from_utf8_lossy(pdf).into_owned();
+    let mut runs = Vec::new();
+    let mut colour = String::from("none");
+    for (at, _) in s.match_indices(['g', 'j']) {
+        let head = &s[..at + 1];
+        if let Some(spec) = head.strip_suffix(" rg") {
+            // The three components before the operator, taken from the back:
+            // the one before them is a newline, or `stream`, or whatever the
+            // object header ended with.
+            let mut back = spec.split_ascii_whitespace().rev();
+            if let (Some(b), Some(g), Some(r)) = (back.next(), back.next(), back.next()) {
+                if [r, g, b].iter().all(|n| n.parse::<f64>().is_ok()) {
+                    colour = format!("{r} {g} {b}");
+                }
+            }
+            continue;
+        }
+        if !head.ends_with(") Tj") {
+            continue;
+        }
+        // Back over the string to its opening bracket. The documents below draw
+        // no brackets of their own, so the nearest one is where the run starts.
+        let body = &head[..head.len() - 4];
+        if let Some(open) = body.rfind('(') {
+            runs.push((colour.clone(), body[open + 1..].to_string()));
+        }
+    }
+    runs
+}
+
+#[test]
+fn a_colour_switch_survives_the_textcolor_nested_inside_it() {
+    // `\color` is in force until its group closes, so the `\textcolor` inside
+    // it is a colour ON TOP of it, not instead of it: what follows goes back to
+    // the switch, not to black. Popping to black is what drew every book in the
+    // corpus black on its own #05050A page -- they all say `\color{textPrim}`
+    // once and then use `\textcolor` for code, 683,577 times.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\color[rgb]{0.87,0.94,1}before \
+               \\textcolor[rgb]{0,0,1}{middle} after\n\\end{document}\n";
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = drawn(&pdf);
+    let colour_of = |want: &str| {
+        runs.iter()
+            .find(|(_, text)| text.contains(want))
+            .map(|(colour, _)| colour.clone())
+            .unwrap_or_else(|| panic!("nothing drawn containing {want:?}: {runs:?}"))
+    };
+    assert_eq!(colour_of("before"), "0.87 0.94 1", "the switch is in force");
+    assert_eq!(
+        colour_of("middle"),
+        "0 0 1",
+        "the nested colour on top of it"
+    );
+    assert_eq!(
+        colour_of("after"),
+        "0.87 0.94 1",
+        "and the switch is back after it: {runs:?}"
+    );
+}
+
+#[test]
+fn a_colour_switch_holds_for_every_line_under_it() {
+    // The switch is set once, above a whole document, and the text under it is
+    // broken into lines afterwards. A colour that only lasted the line its
+    // marker landed on coloured the first line of a book and left the other
+    // 339 pages black.
+    let body = "sentence ".repeat(120);
+    let src = format!(
+        "\\documentclass{{article}}\n\\begin{{document}}\n\
+         \\color[rgb]{{0.87,0.94,1}}{body}\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let runs = drawn(&pdf);
+    let drawn_lines = runs.iter().filter(|(_, t)| t.contains("sentence")).count();
+    assert!(drawn_lines > 3, "the text wrapped: {drawn_lines} lines");
+    for (colour, text) in &runs {
+        assert_eq!(
+            colour, "0.87 0.94 1",
+            "line drawn in the wrong colour: {text:?}"
+        );
+    }
 }
 
 /// A family that exists on the machine running the tests, or `None`.
@@ -489,4 +585,45 @@ fn count_pages(pdf: &[u8]) -> usize {
             String::from_utf8_lossy(pdf).matches("/Type /Page").count()
                 - String::from_utf8_lossy(pdf).matches("/Type /Pages").count(),
         )
+}
+/// The same words, once plain and once with every one of them coloured.
+fn coloured_and_plain(preamble: &str, repeats: usize) -> (usize, usize) {
+    let doc = |body: String| {
+        format!("\\documentclass{{article}}\n{preamble}\\begin{{document}}\n{body}\n\\end{{document}}\n")
+    };
+    let plain = texrs::run_pdf(&doc("alpha ".repeat(repeats))).expect("pdf");
+    let marked = doc("\\textcolor[rgb]{0.25,0.44,0.63}{alpha} ".repeat(repeats));
+    let marked = texrs::run_pdf(&marked).expect("pdf");
+    (count_pages(&plain), count_pages(&marked))
+}
+
+#[test]
+fn colouring_a_word_does_not_change_where_the_pdf_breaks_the_line() {
+    // The marker's SPEC -- `0.25,0.44,0.63` between U+0001 and U+0002 -- is
+    // digits and commas, and the widths tables the PDF path measures with have
+    // real widths for those, so a five-letter word inside one \textcolor was
+    // charged for twenty-two characters. Measured: a line held four coloured
+    // words where the same line uncoloured holds seventeen, and
+    // rubyrs/docs/book.tex set in 340 pages where it sets in 186 with the
+    // markers skipped. The DVI path has skipped them since it was written;
+    // this is the same skip, reached through the same helper.
+    let (plain, coloured) = coloured_and_plain("", 600);
+    assert_eq!(
+        coloured, plain,
+        "colour is not text and must not push words onto later pages"
+    );
+}
+
+#[test]
+fn a_coloured_word_costs_nothing_in_an_embedded_fonts_own_widths() {
+    // The branch above measures in cmr10's metrics; a document that ships or
+    // names a real font is measured in that font's `/Widths`, which is the
+    // branch every book in the corpus takes. Both had to be given the skip.
+    let Some(family) = some_installed_family() else {
+        eprintln!("skipping: no known font installed");
+        return;
+    };
+    let preamble = format!("\\usepackage{{fontspec}}\n\\setmainfont{{{family}}}\n");
+    let (plain, coloured) = coloured_and_plain(&preamble, 600);
+    assert_eq!(coloured, plain, "the spec digits were charged as glyphs");
 }

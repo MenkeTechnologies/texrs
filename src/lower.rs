@@ -197,6 +197,24 @@ impl Lowerer {
         out
     }
 
+    /// Append one character to the text run in progress.
+    ///
+    /// Looks PAST any line directives: they generate no code, but one is
+    /// emitted per line, so treating them as breaks makes every line its own
+    /// constant. A 4 MB book then exhausts fusevm's 65,536-entry constant pool
+    /// — which a u16 operand cannot address past — and the compile panics.
+    /// Coalescing keeps one constant per stretch of text between real commands.
+    fn push_text_char(out: &mut Vec<Cmd>, c: char) {
+        let mut at = out.len();
+        while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
+            at -= 1;
+        }
+        match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+            Some(Cmd::Text(t)) => t.push(c),
+            _ => out.push(Cmd::Text(c.to_string())),
+        }
+    }
+
     fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
         self.depth += 1;
         if self.depth > MAX_LOWER_DEPTH {
@@ -278,25 +296,21 @@ impl Lowerer {
                         self.close_colour(&mut out, &mut colour_open);
                         return Ok(Self::drop_empty_line_directives(out));
                     }
+                    // An alignment tab is a cell BOUNDARY, not a character the
+                    // document wrote. The catch-all below takes characters of
+                    // every catcode, so each one reached the page as a literal
+                    // ampersand: 8,941 of them in zmax-reference.pdf, where
+                    // lualatex sets the same source with 23 -- the 24 escaped
+                    // `\&' it actually writes. Nothing here builds cells yet,
+                    // so the boundary is emitted as what separates two cells
+                    // when they are set side by side -- a space.
+                    Token::Char(_, Cat::AlignTab) if self.text_output => {
+                        Self::push_text_char(&mut out, ' ');
+                    }
                     // The document's own words. Dropping these is why a book
                     // used to compile to a program that printed nothing.
                     Token::Char(c, _) if self.text_output => {
-                        // Append to the run in progress, looking PAST any line
-                        // directives: they generate no code, but one is emitted
-                        // per line, so treating them as breaks makes every line
-                        // its own constant. A 4 MB book then exhausts fusevm's
-                        // 65,536-entry constant pool -- which a u16 operand
-                        // cannot address past -- and the compile panics.
-                        // Coalescing keeps one constant per stretch of text
-                        // between real commands.
-                        let mut at = out.len();
-                        while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
-                            at -= 1;
-                        }
-                        match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
-                            Some(Cmd::Text(t)) => t.push(*c),
-                            _ => out.push(Cmd::Text(c.to_string())),
-                        }
+                        Self::push_text_char(&mut out, *c);
                     }
                     _ => {}
                 }
@@ -629,7 +643,20 @@ impl Lowerer {
                 "protected" => self.eng.set_protected_prefix(true),
                 // `\unless\ifnum ...` runs the ELSE arm when the test holds.
                 "unless" => self.unless = true,
-                "relax" | "par" => {}
+                "relax" => {}
+                // A blank line IS a `\par` -- the mouth synthesises one per
+                // blank line, §304 -- and dropping it is why a whole book came
+                // out as a single paragraph. The line breaker starts a fresh
+                // paragraph at "\n\n"; scifi2/docs/book.tex holds 3,163 blank
+                // lines and reached the breaker with 58 separators, so every
+                // paragraph lost the ragged last line it is entitled to, and
+                // the words on either side of a suppressed break welded
+                // together: `// A NOVEL OF DEEP TIME //TWO SHIPS IN THE DARK.`
+                "par" => {
+                    if self.text_output {
+                        self.push_text(&mut out, "\n\n");
+                    }
+                }
                 other => {
                     // TeX's loop idiom -- a macro whose last act is to call
                     // itself under a test -- becomes a real loop rather than an

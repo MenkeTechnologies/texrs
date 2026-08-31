@@ -364,6 +364,33 @@ const APPROXIMATIONS: &[(char, &str)] = &[
     ('’', "'"),
 ];
 
+/// The characters of `text` that will actually be SET, with the colour markers
+/// dropped.
+///
+/// A marker's SPEC -- the `r,g,b` between U+0001 and U+0002 -- has to be
+/// skipped whole. Charging the three control characters nothing is not enough:
+/// the digits and commas between them are ordinary characters the font does
+/// have, so a coloured word measured that way comes out wider than it sets and
+/// every line after it breaks short. The DVI side learned that first and the
+/// PDF side kept charging for them, breaking its lines at a quarter of the
+/// measure -- so the skip lives here, where both measuring paths reach it,
+/// rather than being written out twice and drifting apart again.
+pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
+    let mut in_spec = false;
+    text.chars().filter(move |&ch| match ch {
+        '\u{1}' => {
+            in_spec = true;
+            false
+        }
+        '\u{2}' => {
+            in_spec = false;
+            false
+        }
+        '\u{3}' => false,
+        _ => !in_spec,
+    })
+}
+
 impl FontChain {
     /// Load `primary` and each fallback by name, skipping any that is missing.
     ///
@@ -438,23 +465,10 @@ impl FontChain {
 
     /// The width of a whole string, resolving each character through the chain.
     ///
-    /// A colour marker's SPEC -- the `r,g,b` between U+0001 and U+0002 -- is
-    /// skipped whole. Measuring the three control characters as zero is not
-    /// enough: the digits and commas between them are ordinary characters that
-    /// the font does have, so a coloured word measured this way came out wider
-    /// than it sets and every line after it broke short.
+    /// The colour markers and their spec are not measured -- see
+    /// `printing_chars`, which the PDF path measures through as well.
     pub fn width_of(&self, text: &str, size: f64) -> f64 {
-        let mut total = 0.0;
-        let mut in_spec = false;
-        for ch in text.chars() {
-            match ch {
-                '\u{1}' => in_spec = true,
-                '\u{2}' => in_spec = false,
-                _ if in_spec => {}
-                c => total += self.width(c, size),
-            }
-        }
-        total
+        printing_chars(text).map(|c| self.width(c, size)).sum()
     }
 }
 
@@ -668,11 +682,16 @@ pub fn to_pdf(
         _ => None,
     };
     let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
+    // Every branch measures through `printing_chars`. A marker's spec is digits
+    // and commas, which every one of these tables has a real width for, so a
+    // word inside one \textcolor was charged for its five letters plus fourteen
+    // spec characters plus three markers -- and a line of them broke after four
+    // words where the same line uncoloured holds seventeen. It cost whole
+    // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
     let width_of = |word: &str| -> f64 {
         if let Some(w) = &embedded_widths {
             // PDF widths are 1/1000 em, and codes below 32 are not in the table.
-            return word
-                .chars()
+            return printing_chars(word)
                 .map(|c| {
                     let code = c as usize;
                     let at = code.saturating_sub(32);
@@ -682,13 +701,30 @@ pub fn to_pdf(
                 .sum();
         }
         match &metrics {
-            Some(f) => f.width_of(word) * layout.size,
-            None => word.chars().count() as f64 * layout.size * 0.5,
+            // The .tfm reader kerns and ligatures across neighbouring
+            // characters, so it needs the string whole rather than an iterator.
+            Some(f) => f.width_of(&printing_chars(word).collect::<String>()) * layout.size,
+            None => printing_chars(word).count() as f64 * layout.size * 0.5,
         }
     };
 
     let lines = break_lines_measured(text, layout, &width_of);
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
+
+    // The colour stack, seeded with what the document is set in where it has
+    // not said otherwise. Seeding it means a run with nothing pushed still
+    // carries a colour, so every run is emitted with an explicit `rg` and none
+    // inherits whatever the run before it left behind.
+    //
+    // It lives out here, across lines and across pages, because a `\color` is
+    // in force until its group closes and a book says `\color{textPrim}` ONCE,
+    // above everything. Restarting it per line put that colour back to black
+    // on the second line of the document.
+    let mut colours: Vec<Spec> = vec![(
+        DEFAULT_COLOUR.0.to_string(),
+        DEFAULT_COLOUR.1.to_string(),
+        DEFAULT_COLOUR.2.to_string(),
+    )];
 
     let mut pages = Vec::new();
     for chunk in paginate(&lines, per_page) {
@@ -710,17 +746,15 @@ pub fn to_pdf(
             // all, because the closing marker put the state back before
             // anything was emitted.
             let mut x = layout.margin;
-            for (plain, colour) in colour_runs(line) {
+            for (plain, (r, g, b)) in colour_runs(line, &mut colours) {
                 if plain.is_empty() {
                     continue;
                 }
-                if let Some((r, g, b)) = &colour {
-                    page.content.push_str(&format!("{r} {g} {b} rg\n"));
-                }
+                // Every run says its colour, so the run after a `\textcolor`
+                // gets the colour it was NESTED IN back. Resetting to `0 g`
+                // instead is what drew the rest of a dark-paged book black.
+                page.content.push_str(&format!("{r} {g} {b} rg\n"));
                 page.text_in(main.clone(), layout.size, x, y, &plain);
-                if colour.is_some() {
-                    page.content.push_str("0 g\n");
-                }
                 x += width_of(&plain);
             }
             y -= layout.leading;
@@ -814,27 +848,56 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
 /// words are, since Rust counts it as whitespace and would otherwise drop it.
 pub const PAGE_BREAK: char = '\u{c}';
 
-/// A stretch of a line and the colour it is drawn in, if it is not the default.
+/// The r, g and b a marker carried, kept verbatim as written rather than
+/// parsed, because they are handed straight back to PDF's `rg` operator.
+type Spec = (String, String, String);
+
+/// A stretch of a line and the colour it is drawn in.
 ///
-/// The three strings are the r, g and b the document asked for, kept verbatim
-/// as written rather than parsed, because they are handed straight back to
-/// PDF's `rg` operator.
-type ColourRun = (String, Option<(String, String, String)>);
+/// Always a colour, never "none": the stack it comes off is seeded with the
+/// document's default, so every run says what it is drawn in.
+type ColourRun = (String, Spec);
+
+/// The colour every LaTeX document starts in, as PDF wants it written.
+///
+/// A document that wants another says `\color`, which arrives here as a marker
+/// and pushes on top of this one.
+const DEFAULT_COLOUR: (&str, &str, &str) = ("0", "0", "0");
 
 /// The markers the runtime writes turn colour on and off part way along a line,
 /// so a line is not one string in one colour: `let x` may be black and `= 1`
 /// blue. Each run is emitted with its own colour and its own position, which is
 /// why the caller advances x by the width of what it just drew.
-fn colour_runs(line: &str) -> Vec<ColourRun> {
+///
+/// Colour is a STACK, not one current colour, because the markers nest:
+/// `\color{textPrim}` at the top of a book is still in force inside the
+/// `\texttt` that pushes neonCyan for one word and pops again. Popping to "no
+/// colour" -- what this did -- meant that after the first closing marker
+/// everything was drawn in black, on a page `\pagecolor` had painted #05050A:
+/// 573,723 of the 715,546 drawn characters of `rubyrs/docs/book.tex`, a whole
+/// book black on black. The DVI path has had this right all along, as `color
+/// push rgb` / `color pop` at typeset.rs:117-137; this is the same thing.
+///
+/// The stack belongs to the CALLER and carries from line to line, because a
+/// `\color` set once above the whole document is in force on every line under
+/// it, not just the one the marker landed on. Its bottom entry is the
+/// document's default and is never popped, so an unbalanced closing marker
+/// leaves that in force rather than nothing at all.
+fn colour_runs(line: &str, stack: &mut Vec<Spec>) -> Vec<ColourRun> {
     let mut runs = Vec::new();
-    let mut current: Option<(String, String, String)> = None;
     let mut text = String::new();
     let mut chars = line.chars().peekable();
+    let default: Spec = (
+        DEFAULT_COLOUR.0.to_string(),
+        DEFAULT_COLOUR.1.to_string(),
+        DEFAULT_COLOUR.2.to_string(),
+    );
+    let top = |stack: &[Spec]| stack.last().cloned().unwrap_or_else(|| default.clone());
     while let Some(ch) = chars.next() {
         match ch {
             '\u{1}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), current.clone()));
+                    runs.push((std::mem::take(&mut text), top(stack)));
                 }
                 let mut spec = String::new();
                 for c in chars.by_ref() {
@@ -844,22 +907,29 @@ fn colour_runs(line: &str) -> Vec<ColourRun> {
                     spec.push(c);
                 }
                 let p: Vec<&str> = spec.split(',').collect();
-                current = match p.len() == 3 {
-                    true => Some((p[0].to_string(), p[1].to_string(), p[2].to_string())),
-                    false => None,
+                // A spec that is not three components still pushes -- the
+                // colour it inherits -- because the `\u{3}` that closes it is
+                // coming either way and has to pop what this pushed, not the
+                // entry underneath.
+                let pushed = match p.len() == 3 {
+                    true => (p[0].to_string(), p[1].to_string(), p[2].to_string()),
+                    false => top(stack),
                 };
+                stack.push(pushed);
             }
             '\u{3}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), current.clone()));
+                    runs.push((std::mem::take(&mut text), top(stack)));
                 }
-                current = None;
+                if stack.len() > 1 {
+                    stack.pop();
+                }
             }
             c => text.push(c),
         }
     }
     if !text.is_empty() {
-        runs.push((text, current));
+        runs.push((text, top(stack)));
     }
     runs
 }

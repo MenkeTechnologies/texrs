@@ -144,3 +144,79 @@ fn a_character_above_latin1_ends_a_control_word() {
     assert!(got.contains('>'), "the macro resolved: {got:?}");
     assert!(got.contains('→'), "and the arrow is text: {got:?}");
 }
+
+#[test]
+fn a_blank_line_ends_the_paragraph() {
+    // The mouth already synthesises a `\par` per blank line (§304) and the
+    // lowerer dropped it on the floor, so a book arrived at the line breaker as
+    // ONE paragraph: scifi2/docs/book.tex holds 3,163 blank lines and produced
+    // 58 separators, 3,229 once it is kept. Two consequences in the PDF -- no
+    // paragraph got the ragged last line it is entitled to, and the words on
+    // either side of the suppressed break welded together, which is how a title
+    // page came out `// A NOVEL OF DEEP TIME //TWO SHIPS IN THE DARK.`
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               first block\n\nsecond block\n\\end{document}\n";
+    let got = text(src);
+    let paras: Vec<&str> = got
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    assert_eq!(
+        paras,
+        vec!["first block", "second block"],
+        "a blank line is a paragraph boundary, not a space: {got:?}"
+    );
+}
+
+#[test]
+fn an_explicit_par_ends_the_paragraph_too() {
+    // Same break, written out. Pandoc's output uses `\par` directly in places
+    // where a blank line would be swallowed by an environment, so the two
+    // spellings have to mean the same thing.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               first block\\par second block\n\\end{document}\n";
+    let got = text(src);
+    assert!(
+        got.contains("first block\n\nsecond block"),
+        "an explicit \\par breaks the paragraph: {got:?}"
+    );
+}
+
+#[test]
+fn an_alignment_tab_separates_cells_and_is_not_an_ampersand() {
+    // plain.tex:14 makes `&` catcode 4; nothing here did, so every cell
+    // separator stayed an ordinary character and printed itself. A book of
+    // keybinding tables came out of --pdf with 8,941 stray ampersands where
+    // the same source set by lualatex has 23 — every one of those the escaped
+    // `\&`. There are no cells to set into yet, so a boundary is the space
+    // that would stand between two cells.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\begin{tabular}{ll}\nleft & right \\\\\n\\end{tabular}\n\
+               \\end{document}\n";
+    let got = text(src);
+    assert!(!got.contains('&'), "a tab is not a character: {got:?}");
+    assert!(got.contains("left"), "the first cell's text: {got:?}");
+    assert!(got.contains("right"), "and the second's: {got:?}");
+}
+
+#[test]
+fn an_escaped_ampersand_is_still_an_ampersand() {
+    // The other half of giving `&` catcode 4: `\&` is defined one line before
+    // the `\catcode` in the prelude, while `&` is still ordinary, so its body
+    // holds the character and not an alignment tab. Defined after, `AT\&T`
+    // would have printed as `AT T`.
+    let src = "\\documentclass{article}\n\\begin{document}\nAT\\&T\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("AT&T"), "got {got:?}");
+}
+
+#[test]
+fn csstring_reaches_running_text_as_string_does() {
+    // `\csstring` was answered only inside a `\message`, so in the body of a
+    // document it was an undefined control sequence -- and it is the only way
+    // to write ONE backslash, since `\string\\` writes the escape character and
+    // then the name `\`. That is what the prelude's `\textbackslash` needs.
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\def\\f{F}[\\csstring\\f][\\string\\f]\n\\end\n";
+    assert_eq!(text(src).trim(), "[f][\\f]");
+}

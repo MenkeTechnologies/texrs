@@ -457,9 +457,17 @@ impl Engine {
             // inside of a `\message`. tex.web 262 has the expander produce the
             // characters of the next token wherever it appears; handling it only
             // in message context left it undefined in the body of a document.
-            "string" => {
+            // `\csstring` is the same primitive without the escape character,
+            // and lower.rs already answered it inside a `\message`. In running
+            // text it was undefined, which is why the prelude had to spell a
+            // lone backslash as `\string\\` -- escape plus the name `\`, i.e.
+            // TWO backslashes, so every `\textbackslash` in a code listing came
+            // out doubled. `\csstring\\` is the one character.
+            "string" | "csstring" => {
+                let bare = name.name() == "csstring";
                 if let Some(t) = self.take(lx, pending_only) {
                     let text = match &t {
+                        Token::Cs(n) if bare => n.name().to_string(),
                         Token::Cs(n) => format!("{}{}", self.escape, n.name()),
                         other => other.to_text(self.escape),
                     };

@@ -92,6 +92,13 @@
 \def\%{%}
 \catcode`\%=14
 \def\&{&}
+% plain.tex:14 -- "ampersand is alignment tab". INITEX leaves it Other, and
+% nothing here set it, so every cell separator in every table lexed as an
+% ordinary character and printed itself: 8,941 ampersands in the zmax reference
+% whose source writes 24 (all of them \&). The order matters -- \& is defined
+% one line up, while & is still Other, so the macro body keeps the ordinary
+% character the way \% keeps its per cent sign above.
+\catcode`\&=4
 \def\_{_}
 \def\#{#}
 \def\${$}
@@ -115,7 +122,12 @@
 % The accents, as control symbols. texrs cannot compose a glyph, so each yields
 % the letter it was placed over -- which is what a reader of the TEXT wants and
 % is not what a typesetter would do.
-\def\^#1{#1}
+% `\^' has a second reading its neighbours do not: pandoc writes a bare caret as
+% `\^{}', an accent over nothing, and `#1' alone made the character disappear --
+% `/\^{}END/' printed as `/END/', which says something else. An empty argument
+% is the character itself, the same one \textasciicircum yields; a non-empty one
+% is still the letter that was accented.
+\def\^#1{\ifx\relax#1\relax^\else#1\fi}
 \def\"#1{#1}
 \def\'#1{#1}
 \def\`#1{#1}
@@ -133,7 +145,10 @@
 % ---- characters that are spelled as control sequences --------------------
 \newcommand{\textgreater}{>}
 \newcommand{\textless}{<}
-\newcommand{\textbackslash}{\string\\}
+% One backslash, and `\string\\' is not it: `\\' is a control sequence whose name
+% is a single backslash, so \string writes the escape character AND that name --
+% two characters. \csstring writes the name alone.
+\newcommand{\textbackslash}{\csstring\\}
 \newcommand{\textbar}{|}
 \newcommand{\textasciitilde}{~}
 \newcommand{\textasciicircum}{^}
