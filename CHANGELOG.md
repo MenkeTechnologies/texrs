@@ -232,6 +232,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- Two sections of the reference no longer share a heading. The corpus chapter
+  "Category codes" and the appendix table of INITEX's category codes were both
+  called that, so the reference PDF's table of contents listed the title twice,
+  pointing at two different pages with no way to tell them apart. The table is
+  "INITEX category codes" now, and a gate in `tests/docs_reference_sections.rs`
+  fails on any repeated heading.
 - `\edef` freezes a macro. It expanded `\the\count` into a scratch register and
   left every macro in the body as itself, which made it a synonym for `\def`
   wherever macros were concerned: `\def\q{Q}\edef\e{\q}\def\q{Z}` then `\e`

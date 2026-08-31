@@ -212,3 +212,38 @@ fn every_documented_tiers_line_is_one_the_report_prints() {
         );
     }
 }
+
+/// Two sections may not share a heading.
+///
+/// The page is read as a book as well as a web page, and a book's table of
+/// contents lists headings and nothing else — so two sections called the same
+/// thing become two identical entries pointing at different pages, with no way
+/// to tell which is which. That shipped: the corpus chapter "Category codes"
+/// and the appendix table of INITEX's category codes both carried that title,
+/// and the reference PDF's contents listed it twice.
+#[test]
+fn no_two_sections_share_a_heading() {
+    let html = fs::read_to_string(manifest("docs/reference.html")).expect("the reference page");
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut repeated: Vec<String> = Vec::new();
+    for chunk in html.split("<h2").skip(1) {
+        let Some(open) = chunk.find('>') else {
+            continue;
+        };
+        let Some(close) = chunk.find("</h2>") else {
+            continue;
+        };
+        if close < open {
+            continue;
+        }
+        let title = chunk[open + 1..close].trim().to_string();
+        if !seen.insert(title.clone()) {
+            repeated.push(title);
+        }
+    }
+    assert!(
+        repeated.is_empty(),
+        "these headings appear more than once, so a table of contents cannot \
+         tell them apart: {repeated:?}"
+    );
+}

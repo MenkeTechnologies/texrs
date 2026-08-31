@@ -419,7 +419,7 @@ pub fn emacs_stdlib_el() -> String {
 fn category_codes() -> String {
     let table = CatTable::new();
     let mut out = String::from(
-        "      <section class=\"tutorial-section\" id=\"tbl-catcodes\">\n        <h2>Category codes</h2>\n        <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>\n          <tbody>\n",
+        "      <section class=\"tutorial-section\" id=\"tbl-catcodes\">\n        <h2>INITEX category codes</h2>\n        <p>The table INITEX starts from, which is what texrs starts from: no format is loaded. <code>{</code>, <code>}</code>, <code>$</code>, <code>&amp;</code>, <code>#</code>, <code>^</code>, <code>_</code> and <code>~</code> get their familiar meanings from plain.tex, not from the engine.</p>\n        <table class=\"file-table\">\n          <thead><tr><th>Code</th><th>Category</th><th>Characters INITEX puts here</th></tr></thead>\n          <tbody>\n",
     );
     for cat in Cat::ALL {
         let chars = initex_members(&table, cat);
