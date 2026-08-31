@@ -13,11 +13,22 @@ keywords = ["tex", "typesetting", "macro", "expander", "fusevm"]
 categories = ["command-line-utilities", "text-processing"]
 # Dev-only trees kept out of the published crate: consumers get src and the
 # `texrs` binary, not the differential corpus, the fuzz harness, the parity
-# scripts or CI config. Nothing here is referenced at compile time (no
-# include_str! into any of it), so the packaged crate still builds.
+# scripts or CI config.
+#
+# `/tests/` is NOT excluded wholesale, and the reason is load-bearing:
+# `src/docs.rs` does `include_str!("../tests/known_gaps.txt")`, so that one
+# file is compiled INTO the crate. Excluding it made `cargo publish` fail at
+# the verify step -- "couldn't read src/../tests/known_gaps.txt" -- which is
+# a packaging break nothing in a normal build or test run can see, because
+# every one of those reads the file from the repo where it is still there.
+# The parts of `/tests/` that are genuinely dev-only are named instead.
 exclude = [
     "/.github/",
-    "/tests/",
+    "/tests/cases/",
+    "/tests/common/",
+    "/tests/data/",
+    "/tests/*.rs",
+    "/tests/*.sh",
     "/fuzz/",
     "/scripts/",
     "/docs/",
