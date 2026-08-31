@@ -80,6 +80,8 @@
     "\\skipdef"
     "\\toks"
     "\\toksdef"
+    "\\numexpr"
+    "\\dimexpr"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -181,6 +183,8 @@
     (puthash "\\skipdef" "\\skipdef  —  Give a glue register a name, as `\\countdef` and `\\dimendef` do for theirs. [Registers]" table)
     (puthash "\\toks" "\\toks  —  A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why `\\toks0={\\x}` reads back as `\\x` whatever `\\x` means. [Registers]" table)
     (puthash "\\toksdef" "\\toksdef  —  Give a token register a name, as `\\countdef` does for a count. [Registers]" table)
+    (puthash "\\numexpr" "\\numexpr  —  An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. [Registers]" table)
+    (puthash "\\dimexpr" "\\dimexpr  —  The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

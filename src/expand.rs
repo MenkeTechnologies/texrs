@@ -51,6 +51,18 @@ pub enum Meaning {
     CountDef(i64),
 }
 
+/// eTeX's division: round half AWAY from zero, which is not what `\divide`
+/// does (`tex.web` §1236 truncates). Measured -- 7/2 is 4, 5/2 is 3, -7/2 is
+/// -4, and 6/4 is 2.
+fn round_div(a: i64, b: i64) -> i64 {
+    let sign = match (a < 0) == (b < 0) {
+        true => 1,
+        false => -1,
+    };
+    let (a, b) = (a.abs(), b.abs());
+    sign * ((a + b / 2) / b)
+}
+
 /// What a control sequence contributes when a number is being scanned.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NumericCs {
@@ -709,6 +721,15 @@ impl Engine {
     /// A dimension: the number, then a unit (`tex.web` §448-453). The result is
     /// scaled points, which is the only form a dimension ever has.
     pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        // `\dimexpr ...\relax` stands where a dimension does.
+        if let Some(t) = self.take(lx, pending_only) {
+            let is_expr = matches!(&t, Token::Cs(n) if n.name() == "dimexpr");
+            lx.push_back(std::slice::from_ref(&t));
+            if is_expr {
+                let _ = self.take(lx, pending_only);
+                return self.scan_expr(lx, pending_only, true);
+            }
+        }
         let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
         let mut unit = String::new();
         while unit.len() < 2 {
@@ -804,6 +825,103 @@ impl Engine {
         match self.meanings.get(&name) {
             Some(Meaning::ToksDef(r)) => Some(*r),
             _ => None,
+        }
+    }
+
+    /// eTeX's `\numexpr` and `\dimexpr`, evaluated on the spot.
+    ///
+    /// Ordinary precedence, parentheses, and left to right within a level. The
+    /// one rule worth stating is division: it ROUNDS, half away from zero, so
+    /// `7/2` is 4 and `-7/2` is -4 -- which is not what `\divide` does, and is
+    /// why the two cannot share an implementation. Measured against
+    /// LuaTeX 1.24.0.
+    pub fn scan_expr(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
+        let v = self.expr_sum(lx, pending_only, dimen)?;
+        // An expression is closed by an optional `\relax`, which is absorbed.
+        if let Some(t) = self.take(lx, pending_only) {
+            match &t {
+                Token::Cs(n) if n.name() == "relax" => {}
+                other => lx.push_back(std::slice::from_ref(other)),
+            }
+        }
+        Ok(v)
+    }
+
+    fn expr_sum(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
+        let mut acc = self.expr_term(lx, pending_only, dimen)?;
+        loop {
+            match self.expr_operator(lx, pending_only, &['+', '-']) {
+                Some('+') => acc += self.expr_term(lx, pending_only, dimen)?,
+                Some('-') => acc -= self.expr_term(lx, pending_only, dimen)?,
+                _ => return Ok(acc),
+            }
+        }
+    }
+
+    fn expr_term(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
+        let mut acc = self.expr_factor(lx, pending_only, dimen)?;
+        loop {
+            match self.expr_operator(lx, pending_only, &['*', '/']) {
+                // A multiplier and a divisor are integers even in a dimension
+                // expression: `1pt*3` is three points, not a square.
+                Some('*') => acc *= self.expr_factor(lx, pending_only, false)?,
+                Some('/') => {
+                    let by = self.expr_factor(lx, pending_only, false)?;
+                    if by == 0 {
+                        return Err(TexError("Arithmetic overflow".into()));
+                    }
+                    acc = round_div(acc, by);
+                }
+                _ => return Ok(acc),
+            }
+        }
+    }
+
+    fn expr_factor(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
+        // Skip spaces to see whether a group is opening.
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing number, treated as zero".into()));
+            };
+            match &t {
+                t if t.is_space() => continue,
+                Token::Char('(', _) => {
+                    let v = self.expr_sum(lx, pending_only, dimen)?;
+                    match self.take(lx, pending_only) {
+                        Some(Token::Char(')', _)) => return Ok(v),
+                        _ => return Err(TexError("Missing ) inserted".into())),
+                    }
+                }
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    return match dimen {
+                        true => self.scan_dimen(lx, pending_only),
+                        false => self.scan_number(lx, pending_only),
+                    };
+                }
+            }
+        }
+    }
+
+    /// The next operator, if the next non-space token is one of `wanted`.
+    fn expr_operator(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+        wanted: &[char],
+    ) -> Option<char> {
+        loop {
+            let t = self.take(lx, pending_only)?;
+            if t.is_space() {
+                continue;
+            }
+            if let Token::Char(c, _) = &t {
+                if wanted.contains(c) {
+                    return Some(*c);
+                }
+            }
+            lx.push_back(std::slice::from_ref(&t));
+            return None;
         }
     }
 
@@ -1722,6 +1840,10 @@ impl Engine {
         }
         if let Token::Cs(name) = &cur {
             let name = *name;
+            // `\numexpr ...\relax` in numeric position.
+            if name.name() == "numexpr" {
+                return Ok(sign * self.scan_expr(lx, pending_only, false)?);
+            }
             if name.name() == "count" {
                 let reg = self.scan_number(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));

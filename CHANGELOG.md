@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\numexpr` and `\dimexpr`, the eTeX expression primitives LuaTeX carries:
+  `+`, `-`, `*`, `/` with ordinary precedence and parentheses, closed by an
+  optional `\relax`. Division ROUNDS, half away from zero — `\numexpr 7/2` is 4
+  where `\divide` gives 3 — so the two are separate operations here. Not in
+  `tex` 3.141592653, so the oracle is LuaTeX 1.24.0 and the comparison lives in
+  `tests/etex.rs` rather than in the parity corpus.
 - Token registers: `\toks`, `\toksdef`, register-to-register copying, and
   `\the`. A token list is stored VERBATIM — nothing in the braces expands,
   which is the difference between it and a macro — and is scoped by a group as

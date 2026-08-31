@@ -452,6 +452,19 @@ pub const CORPUS: &[Entry] = &[
         "Give a token register a name, as `\\countdef` does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.",
         "\\toksdef\\toks@=0\n\\toks@={...}",
     ),
+    // ══ eTeX extensions — expand::scan_expr ═══════════════════════════════
+    (
+        "\\numexpr",
+        "Registers",
+        "An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so `\\numexpr 7/2` is 4 where `\\divide` gives 3 -- the two are different operations and texrs keeps them apart. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; `tests/etex.rs` holds the comparison.",
+        "\\count0=\\numexpr (2+3)*4\\relax   % => 20",
+    ),
+    (
+        "\\dimexpr",
+        "Registers",
+        "The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. The arithmetic happens in scaled points, which is the only form a dimension has.",
+        "\\dimen0=\\dimexpr 1pt+2pt\\relax   % => 3.0pt",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",
