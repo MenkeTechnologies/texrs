@@ -1,0 +1,18 @@
+% \edef expands its body at definition time, so redefining a macro afterwards
+% cannot change what the \edef'd one produces. This is the difference between
+% \edef and \def, and texrs did not have it: it expanded \the\count into a
+% scratch register and left every macro in the body as itself.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\q{Q}
+\edef\e{\q}
+\def\q{Z}
+\message{[\e][\q]}
+\def\f#1{<#1>}
+\edef\g{\f{a}}
+\def\f#1{[#1]}
+\message{[\g]}
+\count1=5
+\edef\r{\the\count1}
+\count1=9
+\message{[\r][\the\count1]}
+\end

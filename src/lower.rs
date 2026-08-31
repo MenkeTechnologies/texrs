@@ -697,6 +697,10 @@ impl Lowerer {
             params.push(t);
         }
         let body = self.eng.read_balanced_pub(lx)?;
+        // `\edef` expands its body NOW, which is the whole difference from
+        // `\def`. Only the macro calls: `\the\count<n>` has to reach the walk
+        // below as tokens so it can be snapshotted into a scratch register.
+        let body = self.eng.expand_macros_only(&body)?;
         // Find `\the\count<n>` in the body; anything else stays literal.
         let mut work = Lexer::new("");
         work.push_back(&body);

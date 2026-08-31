@@ -1982,6 +1982,45 @@ impl Engine {
     }
 
     /// Fully expand a token list to the tokens it produces.
+    /// Expand the MACRO calls in `toks` and nothing else.
+    ///
+    /// `\edef` expands its body at definition time, but texrs cannot simply
+    /// expand everything: `\the\count<n>` has to survive as tokens so the
+    /// caller can snapshot the register into a scratch one, because a count
+    /// lives in a VM slot at run time while this table only knows what was
+    /// assigned while lowering. So macros expand here and `\the`, the
+    /// conditionals and the primitives are left exactly as they were.
+    ///
+    /// A `\protected` macro is left alone too -- that is what the prefix is
+    /// for, and it is the only thing that makes it observable.
+    pub fn expand_macros_only(&mut self, toks: &[Token]) -> R<Vec<Token>> {
+        let mut work = Lexer::new("");
+        work.push_back(toks);
+        let mut out = Vec::new();
+        let mut steps = 0usize;
+        while let Some(t) = work.pending.pop() {
+            steps += 1;
+            if steps > 200_000 {
+                return Err(TexError("TeX capacity exceeded".into()));
+            }
+            match &t {
+                Token::Cs(name) => {
+                    let name = *name;
+                    let expandable = matches!(
+                        self.meanings.get(&name),
+                        Some(Meaning::Macro(m)) if !m.protected
+                    );
+                    match expandable {
+                        true => self.expand_macro(&mut work, name, true)?,
+                        false => out.push(t),
+                    }
+                }
+                _ => out.push(t),
+            }
+        }
+        Ok(out)
+    }
+
     fn expand_to_tokens(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<Vec<Token>> {
         let saved: Vec<Token> = std::mem::take(&mut lx.pending);
         lx.push_back(toks);

@@ -222,6 +222,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\edef` freezes a macro. It expanded `\the\count` into a scratch register and
+  left every macro in the body as itself, which made it a synonym for `\def`
+  wherever macros were concerned: `\def\q{Q}\edef\e{\q}\def\q{Z}` then `\e`
+  gave `Z` where tex gives `Q`. The body's macro calls are expanded at
+  definition time now — only the macro calls, because `\the\count` has to
+  survive as tokens for the register snapshot. A `\protected` macro is left
+  alone, which is what makes that prefix observable.
 - The lowering depth bound is re-measured, and the runaway it guards is bounded
   again rather than crashing. The bound exists to stop a runaway before the
   STACK does, so it is a measurement, and a measurement moves when a frame on

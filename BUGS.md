@@ -116,27 +116,6 @@ A file that cannot be found stops the run naming it, where tex prompts for a
 replacement. That is the error model recorded under "Not implemented" rather
 than anything specific to files.
 
-## `\edef` does not freeze a macro
-
-`\edef` expands its body at definition time; texrs expands only the parts it
-snapshots. `\the\count<n>` is frozen correctly -- into a scratch register, as
-recorded below -- but a MACRO in the body is left as itself, so:
-
-    \def\q{Q}\edef\e{\q}\def\q{Z}\message{[\e]}
-    tex   [Q]        texrs [Z]
-
-which makes `\edef` a synonym for `\def` wherever macros are concerned.
-Measured against tex 3.141592653. The conditional case recorded under
-"Divergences" is one face of this; the macro case is the general one.
-
-The fix is not simply to expand the body: the register snapshot exists because
-a count lives in a VM slot at run time while the frontend's table only knows
-what was assigned while lowering, so an expansion pass would have to expand
-macros and leave `\the` alone. `tests/etex.rs` pins the `\protected` behaviour
-that depends on this, and it passes for the opposite reason from tex's -- both
-engines call the current macro, tex because the prefix says so and texrs
-because it never froze anything.
-
 ## Definition prefixes
 
 `\long` and `\outer` are recorded on the macro and are part of its meaning, so
