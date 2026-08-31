@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">99</div>
+            <div class="stat-val">105</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -363,6 +363,21 @@
 \PassOptionsToPackage{dvipsnames}{xcolor}</pre></td></tr>
             <tr><td><code>\PassOptionsToClass</code></td><td>Consumed with both of its arguments, producing nothing. The class counterpart of <code>\PassOptionsToPackage</code>.</td><td><pre>\PassOptionsToClass{OPTIONS}{CLASS}
 \PassOptionsToClass{a4paper}{article}</pre></td></tr>
+            <tr><td><code>\begin</code></td><td>Open an environment. Most environments are the prelude's business, but a VERBATIM one is the lowerer's: it is caught here, before <code>\begin</code> expands, because expanding is exactly what must not happen to the body. A code listing is full of backslashes that are not control sequences, and reading them as control sequences is why a book of code samples could not be read at all. The body is taken as raw characters up to the matching <code>\end</code>.</td><td><pre>\begin{ENVIRONMENT}
+\begin{verbatim}
+\this is text, not a command
+\end{verbatim}</pre></td></tr>
+            <tr><td><code>\newpage</code></td><td>Start a new page. The prelude defined this to expand to nothing, so a book's title page, copyright page and first chapter ran together as one stream of prose and the page count came out at roughly half what the document asks for. Carried through the text as a form feed, which is what the character means, and split out before words are because Rust counts it as whitespace.</td><td><pre>\newpage
+first page
+\newpage
+second page</pre></td></tr>
+            <tr><td><code>\clearpage</code></td><td>Start a new page, after placing any pending floats. There are no floats here, so it is <code>\newpage</code>. Two breaks in a row are one break: <code>\clearpage</code> straight after <code>\newpage</code> does not leave a blank sheet between them.</td><td><pre>\clearpage</pre></td></tr>
+            <tr><td><code>\cleardoublepage</code></td><td>Start a new page, and in a two-sided document a new RIGHT-hand one. The blank verso a two-sided run would insert is not written, so this is <code>\clearpage</code> here.</td><td><pre>\cleardoublepage</pre></td></tr>
+            <tr><td><code>\pagebreak</code></td><td>Break the page. <code>\pagebreak[0-4]</code> takes an optional strength, which is advice about how badly the break is wanted rather than a break itself; the break is taken either way, because the document asked for one.</td><td><pre>\pagebreak
+\pagebreak[4]</pre></td></tr>
+            <tr><td><code>\chapter</code></td><td>Begin a chapter, on a new page. The prelude defined this as its own argument -- the heading text and nothing else -- so no chapter began a page. <code>\chapter*{...}</code> is the unnumbered form and <code>\chapter[short]{long}</code> carries a running-head title; both start a page and both set the long title. The heading is not yet set in a larger face, and the number is not printed.</td><td><pre>\chapter{TITLE}
+\chapter*{Preface}
+\chapter[Short]{A Longer Title}</pre></td></tr>
             <tr><td><code>\definecolor</code></td><td>Name a colour: <code>\definecolor{neonCyan}{HTML}{05D9E8}</code>. The models read are <code>HTML</code> (six hex digits), <code>rgb</code> (three components in 0..=1), <code>RGB</code> (the same in 0..=255), <code>gray</code> and <code>cmyk</code>. A model that is not one of those defines nothing rather than guessing, because a colour read in the wrong model is wrong on every page it reaches. Documents define their palette once in the preamble and refer to it by name afterwards, so without this every later <code>\color</code> names something unknown and the page comes out black.</td><td><pre>\definecolor{NAME}{MODEL}{SPEC}
 \definecolor{neonCyan}{HTML}{05D9E8}</pre></td></tr>
             <tr><td><code>\providecolor</code></td><td>Define a colour only if that name is not already defined. Otherwise <code>\definecolor</code>.</td><td><pre>\providecolor{NAME}{MODEL}{SPEC}

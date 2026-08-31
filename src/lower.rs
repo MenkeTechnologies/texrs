@@ -85,11 +85,22 @@ pub struct Lowerer {
 /// conditionals a few dozen deep at the very most -- and below what the stack
 /// can take. The ceiling is MEASURED, not guessed, and measured on a SPAWNED
 /// thread rather than main: a spawned stack is a fraction of main's, and both
-/// the test harness and any future worker pool run there. In a debug build on
-/// such a thread 128 levels still lower and 192 abort, so the bound is set
-/// under the smaller of those with room to spare. Matches the spirit of the
-/// expander's 200_000-step ceiling: bound the runaway, name it as TeX names it.
-const MAX_LOWER_DEPTH: usize = 100;
+/// the test harness and any future worker pool run there. Matches the spirit
+/// of the expander's 200_000-step ceiling: bound the runaway, name it as TeX
+/// names it.
+///
+/// The measurement is of the STACK, so it moves when a frame on the recursive
+/// path grows, and it has: it was 128-lowers/192-aborts when the bound was set
+/// to 100, and adding a primitive to the number scanner made every level
+/// fatter. Re-measured in a debug build on a spawned thread, 98 levels lower
+/// and 100 abort -- the old bound was sitting exactly on the cliff, and
+/// `mutual_recursion_is_still_bounded_rather_than_aborting` stopped reporting
+/// "capacity exceeded" and started dying with a stack overflow instead, which
+/// is the crash the bound exists to prevent. 64 leaves the margin back.
+///
+/// If this abbreviates a document that legitimately nests deeper, the fix is a
+/// bigger stack for the lowering thread, not a bigger number here.
+const MAX_LOWER_DEPTH: usize = 64;
 
 impl Lowerer {
     pub fn new() -> Self {
@@ -327,6 +338,10 @@ impl Lowerer {
             // nothing, which is why a book full of `\color{neonCyan}` came out
             // entirely black.
             if self.text_output && self.lower_colour(lx, name, &mut out, &mut colour_open)? {
+                continue;
+            }
+            // Page structure, for the same reason and in the same place.
+            if self.text_output && self.lower_page_break(lx, name, &mut out)? {
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -717,6 +732,47 @@ impl Lowerer {
     /// `rgb` model is understood, which is what a Pandoc document writes;
     /// anything else falls through to the ordinary macro path rather than being
     /// coloured wrongly.
+    /// The commands that move to a new page, before the prelude's stubs can
+    /// swallow them.
+    ///
+    /// The prelude defined `\newpage`, `\clearpage` and `\pagebreak` to expand
+    /// to nothing, so a book's title page, copyright page and first chapter ran
+    /// together as one stream of prose. `\chapter` was `#1` -- the heading text
+    /// and nothing else -- so no chapter began a page either, and a 270-page
+    /// book came out at 144.
+    fn lower_page_break(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
+        match name.name() {
+            // `\pagebreak[0-4]` takes an optional strength, which is advice
+            // about how badly the break is wanted rather than a break itself;
+            // taken as a break, since the document asked.
+            "newpage" | "clearpage" | "cleardoublepage" | "pagebreak" => {
+                let _ = self.eng.read_optional_bracket(lx)?;
+                self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
+                Ok(true)
+            }
+            // A chapter starts a page. `\chapter*{...}` is the unnumbered form
+            // and `\chapter[short]{long}` carries a running-head title; both
+            // begin a page, and the long title is what gets set.
+            "chapter" => {
+                self.eng.skip_optional_star(lx);
+                let _ = self.eng.read_optional_bracket(lx)?;
+                self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
+                let raw = self.eng.read_balanced_group(lx)?;
+                self.lower_into(&raw, out)?;
+                // The heading owns its line rather than running into the
+                // paragraph after it.
+                self.push_text(out, "\n\n");
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// The colour commands, before the prelude's stubs can swallow them.
     ///
     /// Returns whether the command was one of these and has been dealt with.

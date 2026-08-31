@@ -577,6 +577,43 @@ pub const CORPUS: &[Entry] = &[
         "Consumed with both of its arguments, producing nothing. The class counterpart of `\\PassOptionsToPackage`.",
         "\\PassOptionsToClass{OPTIONS}{CLASS}\n\\PassOptionsToClass{a4paper}{article}",
     ),
+    (
+        "\\begin",
+        "LaTeX",
+        "Open an environment. Most environments are the prelude's business, but a VERBATIM one is the lowerer's: it is caught here, before `\\begin` expands, because expanding is exactly what must not happen to the body. A code listing is full of backslashes that are not control sequences, and reading them as control sequences is why a book of code samples could not be read at all. The body is taken as raw characters up to the matching `\\end`.",
+        "\\begin{ENVIRONMENT}\n\\begin{verbatim}\n\\this is text, not a command\n\\end{verbatim}",
+    ),
+    // ── Page structure — lower::lower_page_break ─────────────────────────
+    (
+        "\\newpage",
+        "LaTeX",
+        "Start a new page. The prelude defined this to expand to nothing, so a book's title page, copyright page and first chapter ran together as one stream of prose and the page count came out at roughly half what the document asks for. Carried through the text as a form feed, which is what the character means, and split out before words are because Rust counts it as whitespace.",
+        "\\newpage\nfirst page\n\\newpage\nsecond page",
+    ),
+    (
+        "\\clearpage",
+        "LaTeX",
+        "Start a new page, after placing any pending floats. There are no floats here, so it is `\\newpage`. Two breaks in a row are one break: `\\clearpage` straight after `\\newpage` does not leave a blank sheet between them.",
+        "\\clearpage",
+    ),
+    (
+        "\\cleardoublepage",
+        "LaTeX",
+        "Start a new page, and in a two-sided document a new RIGHT-hand one. The blank verso a two-sided run would insert is not written, so this is `\\clearpage` here.",
+        "\\cleardoublepage",
+    ),
+    (
+        "\\pagebreak",
+        "LaTeX",
+        "Break the page. `\\pagebreak[0-4]` takes an optional strength, which is advice about how badly the break is wanted rather than a break itself; the break is taken either way, because the document asked for one.",
+        "\\pagebreak\n\\pagebreak[4]",
+    ),
+    (
+        "\\chapter",
+        "LaTeX",
+        "Begin a chapter, on a new page. The prelude defined this as its own argument -- the heading text and nothing else -- so no chapter began a page. `\\chapter*{...}` is the unnumbered form and `\\chapter[short]{long}` carries a running-head title; both start a page and both set the long title. The heading is not yet set in a larger face, and the number is not printed.",
+        "\\chapter{TITLE}\n\\chapter*{Preface}\n\\chapter[Short]{A Longer Title}",
+    ),
     // ── Colour — lower::lower_colour, colour.rs ──────────────────────────
     (
         "\\definecolor",

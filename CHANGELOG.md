@@ -8,6 +8,23 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Page structure. `\newpage`, `\clearpage`, `\cleardoublepage` and `\pagebreak`
+  were defined by the prelude to expand to nothing, and `\chapter` was its own
+  argument -- the heading text and nothing else. So no break in a document
+  reached the page: a book's title page, copyright page and first chapter ran
+  together as one stream of prose, and page one of the scifi2 novel had the
+  title, the copyright notice and the start of the next section drawn over each
+  other, reading `feaCr oitpyright`. The novel set at 144 pages where lualatex
+  sets it at 270. A break is carried through the text as a form feed -- what
+  the character means -- and split out before words are, since Rust counts it
+  as whitespace and would drop it. Two breaks in a row are one break, so
+  `\clearpage` after `\newpage` leaves no blank sheet. `\chapter` starts a page
+  in all three of its forms, and the star of `\chapter*` no longer becomes the
+  first character of the heading. That novel is 174 pages now, its title page
+  is its own, and its copyright page is the next one. The remaining gap to 270
+  is vertical: no space around headings, no `\begin{center}`, and the document's
+  own type size and leading are not read yet.
+
 - `\numexpr` and `\dimexpr`, the eTeX expression primitives LuaTeX carries:
   `+`, `-`, `*`, `/` with ordinary precedence and parentheses, closed by an
   optional `\relax`. Division ROUNDS, half away from zero — `\numexpr 7/2` is 4

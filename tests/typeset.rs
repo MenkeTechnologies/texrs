@@ -429,3 +429,64 @@ fn the_lowerer_keeps_the_font_file_the_preamble_named() {
         Some("/somewhere/.fonts/")
     );
 }
+
+/// `\newpage` and its siblings were defined by the prelude to expand to
+/// nothing, so a book's title page, copyright page and first chapter ran
+/// together into one stream of prose: the scifi2 novel came out at 144 pages
+/// where lualatex sets it at 270, and page one held the title, the copyright
+/// notice and the opening of the next section drawn over each other.
+#[test]
+fn a_forced_break_starts_a_new_page() {
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "first page text\n\\newpage\nsecond page text\n",
+        "\\clearpage\nthird page text\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    assert_eq!(
+        count_pages(&pdf),
+        3,
+        "one page per break, not one page total"
+    );
+}
+
+#[test]
+fn consecutive_breaks_do_not_make_a_blank_page() {
+    // `\clearpage` right after `\newpage` is one break between two pages.
+    // Emitting a page per marker would leave an empty sheet between chapters.
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "one\n\\newpage\n\\clearpage\ntwo\n\\end{document}\n"
+    );
+    assert_eq!(count_pages(&texrs::run_pdf(src).expect("pdf")), 2);
+}
+
+#[test]
+fn a_chapter_begins_a_page_in_both_its_forms() {
+    // `\chapter` was `#1` in the prelude -- the heading text and nothing else
+    // -- so no chapter began a page. The starred form is one token different
+    // and, unread, that `*` becomes the first character of the heading.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "front matter\n\\chapter{First}\nbody one\n",
+        "\\chapter*{Unnumbered}\nbody two\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    assert_eq!(count_pages(&pdf), 3);
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(
+        !text.contains("*Unnumbered"),
+        "the star leaked into the heading"
+    );
+}
+
+/// Pages in a PDF, counted from the page objects themselves.
+fn count_pages(pdf: &[u8]) -> usize {
+    String::from_utf8_lossy(pdf)
+        .matches("/Type /Page\n")
+        .count()
+        .max(
+            String::from_utf8_lossy(pdf).matches("/Type /Page").count()
+                - String::from_utf8_lossy(pdf).matches("/Type /Pages").count(),
+        )
+}

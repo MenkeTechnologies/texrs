@@ -691,7 +691,7 @@ pub fn to_pdf(
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
     let mut pages = Vec::new();
-    for chunk in lines.chunks(per_page) {
+    for chunk in paginate(&lines, per_page) {
         let mut page = Page::letter();
         // The page is painted first, and only first: a fill drawn after the
         // text covers it, and a document that sets a dark page sets light
@@ -739,28 +739,36 @@ fn break_lines_measured(
     let space = width_of(" ");
     let mut lines = Vec::new();
     for para in text.split("\n\n") {
-        let mut line = String::new();
-        let mut width = 0.0f64;
-        for word in para.split_whitespace() {
-            let ww = width_of(word);
-            let need = match line.is_empty() {
-                true => ww,
-                false => width + space + ww,
-            };
-            if !line.is_empty() && need > layout.measure {
-                lines.push(std::mem::take(&mut line));
-                width = ww;
+        // A forced break is its own line, so the paginator can see one. It has
+        // to come out here because `split_whitespace` below counts a form feed
+        // as whitespace and would silently drop it.
+        for (part_number, part) in para.split(PAGE_BREAK).enumerate() {
+            if part_number > 0 {
+                lines.push(PAGE_BREAK.to_string());
+            }
+            let mut line = String::new();
+            let mut width = 0.0f64;
+            for word in part.split_whitespace() {
+                let ww = width_of(word);
+                let need = match line.is_empty() {
+                    true => ww,
+                    false => width + space + ww,
+                };
+                if !line.is_empty() && need > layout.measure {
+                    lines.push(std::mem::take(&mut line));
+                    width = ww;
+                    line.push_str(word);
+                    continue;
+                }
+                if !line.is_empty() {
+                    line.push(' ');
+                }
                 line.push_str(word);
-                continue;
+                width = need;
             }
             if !line.is_empty() {
-                line.push(' ');
+                lines.push(line);
             }
-            line.push_str(word);
-            width = need;
-        }
-        if !line.is_empty() {
-            lines.push(line);
         }
     }
     lines
@@ -768,6 +776,44 @@ fn break_lines_measured(
 
 /// Split a line into runs of text that share a colour.
 ///
+/// Split broken lines into pages, at a forced break or when the page is full.
+///
+/// `chunks(per_page)` alone cannot do this: it fills every page to the brim,
+/// so a `\newpage` has nowhere to say anything and a chapter starts wherever
+/// the previous one happened to end.
+fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
+    let mut pages: Vec<Vec<&str>> = Vec::new();
+    let mut page: Vec<&str> = Vec::new();
+    for line in lines {
+        if line.chars().all(|c| c == PAGE_BREAK) && !line.is_empty() {
+            // Consecutive breaks do not make blank pages: \clearpage after
+            // \newpage is one break, which is what both mean together.
+            if !page.is_empty() {
+                pages.push(std::mem::take(&mut page));
+            }
+            continue;
+        }
+        if page.len() >= per_page {
+            pages.push(std::mem::take(&mut page));
+        }
+        page.push(line);
+    }
+    if !page.is_empty() {
+        pages.push(page);
+    }
+    pages
+}
+
+/// A forced page break, carried through the text the way colour is.
+///
+/// `\newpage` and `\clearpage` were defined by the prelude to expand to
+/// nothing, so a book's title page, copyright page and first chapter ran
+/// together into one stream of prose and the page count came out at half what
+/// the document asks for. A form feed is what the character means, it survives
+/// the run because it is not a word, and it is split out of the text BEFORE
+/// words are, since Rust counts it as whitespace and would otherwise drop it.
+pub const PAGE_BREAK: char = '\u{c}';
+
 /// A stretch of a line and the colour it is drawn in, if it is not the default.
 ///
 /// The three strings are the r, g and b the document asked for, kept verbatim

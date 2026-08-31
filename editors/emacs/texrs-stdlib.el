@@ -100,6 +100,12 @@
     "\\RequirePackage"
     "\\PassOptionsToPackage"
     "\\PassOptionsToClass"
+    "\\begin"
+    "\\newpage"
+    "\\clearpage"
+    "\\cleardoublepage"
+    "\\pagebreak"
+    "\\chapter"
     "\\definecolor"
     "\\providecolor"
     "\\colorlet"
@@ -203,6 +209,12 @@
     (puthash "\\RequirePackage" "\\RequirePackage  —  Consumed with its optional arguments, producing nothing. [LaTeX]" table)
     (puthash "\\PassOptionsToPackage" "\\PassOptionsToPackage  —  Consumed with both of its arguments, producing nothing, because the package it would have carried options to is never loaded. [LaTeX]" table)
     (puthash "\\PassOptionsToClass" "\\PassOptionsToClass  —  Consumed with both of its arguments, producing nothing. [LaTeX]" table)
+    (puthash "\\begin" "\\begin  —  Open an environment. [LaTeX]" table)
+    (puthash "\\newpage" "\\newpage  —  Start a new page. [LaTeX]" table)
+    (puthash "\\clearpage" "\\clearpage  —  Start a new page, after placing any pending floats. [LaTeX]" table)
+    (puthash "\\cleardoublepage" "\\cleardoublepage  —  Start a new page, and in a two-sided document a new RIGHT-hand one. [LaTeX]" table)
+    (puthash "\\pagebreak" "\\pagebreak  —  Break the page. [LaTeX]" table)
+    (puthash "\\chapter" "\\chapter  —  Begin a chapter, on a new page. [LaTeX]" table)
     (puthash "\\definecolor" "\\definecolor  —  Name a colour: `\\definecolor{neonCyan}{HTML}{05D9E8}`. [LaTeX]" table)
     (puthash "\\providecolor" "\\providecolor  —  Define a colour only if that name is not already defined. [LaTeX]" table)
     (puthash "\\colorlet" "\\colorlet  —  Give an existing colour another name. [LaTeX]" table)

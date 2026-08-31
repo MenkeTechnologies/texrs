@@ -2201,6 +2201,32 @@ impl Engine {
         self.scan_optional_bracket(lx)
     }
 
+    /// Consume a `*` if the next thing is one, for the starred form of a
+    /// sectioning command.
+    ///
+    /// `\chapter*{Preface}` is the unnumbered chapter, and it is one token
+    /// different from `\chapter{Preface}`. Left unread, the `*` becomes the
+    /// first character of the heading.
+    pub fn skip_optional_star(&mut self, lx: &mut Lexer) -> bool {
+        let mut skipped = Vec::new();
+        loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                lx.push_back(&skipped);
+                return false;
+            };
+            if t.is_space() {
+                skipped.push(t);
+                continue;
+            }
+            if matches!(&t, Token::Char('*', _)) {
+                return true;
+            }
+            lx.push_back(&[t]);
+            lx.push_back(&skipped);
+            return false;
+        }
+    }
+
     /// A `{...}` group's text, for a caller outside the expander.
     pub fn read_group_text_pub(&mut self, lx: &mut Lexer) -> R<String> {
         let toks = self.read_group_tokens(lx)?;
