@@ -1082,8 +1082,8 @@ impl Engine {
         let mut acc = self.glue_expr_term(lx)?;
         loop {
             match self.expr_operator(lx, false, &['+', '-']) {
-                Some('+') => acc = acc.add(self.glue_expr_term(lx)?),
-                Some('-') => acc = acc.sub(self.glue_expr_term(lx)?),
+                Some('+') => acc = acc + self.glue_expr_term(lx)?,
+                Some('-') => acc = acc - self.glue_expr_term(lx)?,
                 _ => return Ok(acc),
             }
         }

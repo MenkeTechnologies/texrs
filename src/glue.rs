@@ -95,33 +95,6 @@ impl Glue {
         }
     }
 
-    pub fn add(self, other: Glue) -> Glue {
-        let (stretch, stretch_order) = combine(
-            (self.stretch, self.stretch_order),
-            (other.stretch, other.stretch_order),
-        );
-        let (shrink, shrink_order) = combine(
-            (self.shrink, self.shrink_order),
-            (other.shrink, other.shrink_order),
-        );
-        Glue {
-            natural: self.natural + other.natural,
-            stretch,
-            stretch_order,
-            shrink,
-            shrink_order,
-        }
-    }
-
-    pub fn sub(self, other: Glue) -> Glue {
-        self.add(Glue {
-            natural: -other.natural,
-            stretch: -other.stretch,
-            shrink: -other.shrink,
-            ..other
-        })
-    }
-
     /// Multiply every component, which is what a glue expression's `*` does.
     pub fn scale(self, by: i64) -> Glue {
         Glue {
@@ -140,6 +113,50 @@ impl Glue {
             stretch: round(self.stretch, by),
             shrink: round(self.shrink, by),
             ..self
+        }
+    }
+}
+
+/// Adding glue adds the natural widths and combines each of the two
+/// infinity-orders separately, which is what `\advance` on a skip does.
+///
+/// Written as the std trait rather than as an inherent `add`, because an
+/// inherent method by that name is the one thing a reader may take for the
+/// operator and it is not -- clippy rejects the pair outright. Every existing
+/// `a + b` call still resolves, to this.
+impl std::ops::Add for Glue {
+    type Output = Glue;
+
+    fn add(self, other: Glue) -> Glue {
+        let (stretch, stretch_order) = combine(
+            (self.stretch, self.stretch_order),
+            (other.stretch, other.stretch_order),
+        );
+        let (shrink, shrink_order) = combine(
+            (self.shrink, self.shrink_order),
+            (other.shrink, other.shrink_order),
+        );
+        Glue {
+            natural: self.natural + other.natural,
+            stretch,
+            stretch_order,
+            shrink,
+            shrink_order,
+        }
+    }
+}
+
+/// Subtracting negates the components and adds, so the order arithmetic stays
+/// in one place.
+impl std::ops::Sub for Glue {
+    type Output = Glue;
+
+    fn sub(self, other: Glue) -> Glue {
+        self + Glue {
+            natural: -other.natural,
+            stretch: -other.stretch,
+            shrink: -other.shrink,
+            ..other
         }
     }
 }
@@ -167,7 +184,7 @@ mod tests {
             stretch_order: 1,
             ..Glue::default()
         };
-        let sum = a.add(b);
+        let sum = a + b;
         assert_eq!(
             print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
             "4.0pt plus 4.0fil"
@@ -179,7 +196,7 @@ mod tests {
             stretch_order: 2,
             ..Glue::default()
         };
-        let sum = a.add(b);
+        let sum = a + b;
         assert_eq!(
             print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
             "4.0pt plus 2.0fill"
@@ -191,7 +208,7 @@ mod tests {
             stretch_order: 1,
             ..Glue::default()
         };
-        let sum = a.add(b);
+        let sum = a + b;
         assert_eq!(
             print_glue(sum.natural, sum.stretch, sum.stretch_order, 0, 0),
             "4.0pt plus 6.0fil"
