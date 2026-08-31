@@ -8,6 +8,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The PDF parity harness grew a corpus and two rungs. Ten documents now rather
+  than three, and the ladder gained LINES (the same words falling on the same
+  lines, which is where line breaking shows) and FONTS (the same typefaces,
+  embedded the same way) between TEXT and BYTES.
 - A PDF parity harness: `cargo run --bin pdf-parity` puts a document through
   LuaTeX and through texrs and reports how far the two files agree, on a ladder
   — PRODUCED, PAGES, PAGESIZE, TEXT, BYTES. Byte-identical output is the goal

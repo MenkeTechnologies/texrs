@@ -138,10 +138,17 @@ luatex writes 11,729 bytes and texrs writes 615. `cargo run --bin pdf-parity`
 measures it on a ladder rather than as a yes/no, because a harness that only
 answered "identical?" would say no every day and say nothing else.
 
-Where the three corpus documents stand: PAGESIZE — same page count, same page
-size, and the words differ by exactly one, the folio. luatex ships a page
-number and texrs does not. Above that lie TEXT and then BYTES, which needs the
-font embedding, the object layout and the compression to agree as well.
+Where the ten corpus documents stand: nine at PAGESIZE — same page count, same
+page size, and the words differ by exactly one, the folio. luatex ships a page
+number and texrs does not. The tenth is an empty document, where the engines
+disagree about whether to write a file at all: luatex writes none ("no pages of
+output") and texrs writes a 233-byte PDF.
+
+Two more things have to agree before BYTES, and each is a rung. The words must
+fall on the same LINES, which is where line breaking and glue setting show
+themselves. And the FONTS must match: luatex embeds a subsetted `CMR10`, texrs
+names a base-14 `Helvetica` it does not embed, so the two set in different
+typefaces today.
 
 Byte equality is only defined with `SOURCE_DATE_EPOCH` pinned: measured, luatex
 reproduces itself exactly when it is set and differs run to run when it is not,

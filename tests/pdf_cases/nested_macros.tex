@@ -1,0 +1,5 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\inner#1{[#1]}
+\def\outerm#1{\inner{#1}\inner{#1}}
+\outerm{x}
+\end

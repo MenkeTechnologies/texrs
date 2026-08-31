@@ -74,3 +74,56 @@ fn every_recorded_document_is_in_the_corpus() {
         );
     }
 }
+
+/// The rungs above the ones any document currently reaches still have to work.
+///
+/// Nothing gets past PAGESIZE today, so `lines` and `fonts` would sit unread
+/// until the folio is fixed — and an unexercised comparison is how this harness
+/// reported a match that was not there once already. These call the readers on
+/// the two engines' real output and pin what they say.
+#[test]
+fn the_upper_rungs_read_what_is_actually_in_the_files() {
+    let Some(oracle) = pdf_parity::oracle() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let case = manifest("tests/pdf_cases").join("two_words.tex");
+    let Some(reference) = pdf_parity::reference(&oracle, &case) else {
+        eprintln!("skipping: luatex wrote no PDF");
+        return;
+    };
+    let subject = pdf_parity::subject(&case).expect("texrs writes a PDF for two words");
+
+    // Fonts: the engines set in different typefaces, and that is the finding.
+    // luatex embeds a subsetted Computer Modern; texrs names a base-14
+    // Helvetica it does not embed. Byte equality is unreachable until this
+    // agrees, which is why it is a rung of its own.
+    let (Some(rf), Some(sf)) = (pdf_parity::fonts(&reference), pdf_parity::fonts(&subject)) else {
+        eprintln!("skipping: pdffonts is not installed");
+        return;
+    };
+    assert!(
+        rf.iter().any(|f| f.contains("CMR10")),
+        "luatex sets in Computer Modern, got {rf:?}"
+    );
+    assert!(
+        sf.iter().any(|f| f.contains("Helvetica")),
+        "texrs sets in Helvetica, got {sf:?}"
+    );
+    assert_ne!(rf, sf, "the two engines' fonts differ, which is the point");
+
+    // Lines: both put these two words on one line, so the reader agrees here
+    // even though the documents differ elsewhere.
+    let (Some(rl), Some(sl)) = (pdf_parity::lines(&reference), pdf_parity::lines(&subject)) else {
+        eprintln!("skipping: pdftotext is not installed");
+        return;
+    };
+    assert!(
+        rl.first().is_some_and(|l| l.contains("Hello world.")),
+        "luatex sets the words on a line, got {rl:?}"
+    );
+    assert!(
+        sl.first().is_some_and(|l| l.contains("Hello world.")),
+        "texrs sets the words on a line, got {sl:?}"
+    );
+}

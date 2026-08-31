@@ -65,6 +65,11 @@ pub enum Rung {
     PageSize,
     /// ... carrying the same words, in the same order.
     Text,
+    /// ... with those words falling on the same lines, which is where line
+    /// breaking and glue setting show themselves.
+    Lines,
+    /// ... set in the same fonts, embedded the same way.
+    Fonts,
     /// ... byte for byte. The goal.
     Bytes,
 }
@@ -77,6 +82,8 @@ impl Rung {
             Rung::Pages => "PAGES",
             Rung::PageSize => "PAGESIZE",
             Rung::Text => "TEXT",
+            Rung::Lines => "LINES",
+            Rung::Fonts => "FONTS",
             Rung::Bytes => "BYTES",
         }
     }
@@ -88,6 +95,8 @@ impl Rung {
             "PAGES" => Rung::Pages,
             "PAGESIZE" => Rung::PageSize,
             "TEXT" => Rung::Text,
+            "LINES" => Rung::Lines,
+            "FONTS" => Rung::Fonts,
             "BYTES" => Rung::Bytes,
             _ => return None,
         })
@@ -185,6 +194,47 @@ pub fn words(pdf: &[u8]) -> Option<Vec<String>> {
     )
 }
 
+/// The lines a PDF's pages carry, with the words on each.
+///
+/// `-layout` keeps the physical arrangement, so two files agree here only if
+/// their line breaking put the same words on the same lines. Leading and
+/// trailing space is dropped and runs of spaces collapse: the rung is about
+/// which words share a line, not about the column they start in, which the
+/// next rung up covers.
+pub fn lines(pdf: &[u8]) -> Option<Vec<String>> {
+    let out = run_tool("pdftotext-layout", pdf)?;
+    Some(
+        out.lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|l| !l.is_empty())
+            .collect(),
+    )
+}
+
+/// The fonts a PDF names, as `name type embedded`.
+///
+/// This is where the two engines part company most visibly: luatex embeds a
+/// subsetted `CMR10`, texrs names a non-embedded `Helvetica`. Byte equality is
+/// unreachable while the typeface differs, so it is worth its own rung.
+pub fn fonts(pdf: &[u8]) -> Option<Vec<String>> {
+    let out = run_tool("pdffonts", pdf)?;
+    Some(
+        out.lines()
+            .skip(2)
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let f: Vec<&str> = l.split_whitespace().collect();
+                // The subset prefix is arbitrary per run, so compare the face
+                // rather than the tag: KJJYRX+CMR10 and ABCDEF+CMR10 are the
+                // same font embedded twice.
+                let name = f.first().copied().unwrap_or("");
+                let face = name.split_once('+').map(|(_, r)| r).unwrap_or(name);
+                format!("{face} {}", f.get(1).copied().unwrap_or(""))
+            })
+            .collect(),
+    )
+}
+
 /// Run a poppler tool over `pdf` and return its stdout.
 ///
 /// The arguments are spelled out per tool rather than templated: a template
@@ -208,6 +258,11 @@ fn run_tool(tool: &str, pdf: &[u8]) -> Option<String> {
         "pdftotext" => {
             cmd.arg("-q").arg(&path).arg("-");
         }
+        // The same, keeping the physical layout so lines are comparable.
+        "pdftotext-layout" => {
+            cmd = Command::new("pdftotext");
+            cmd.arg("-q").arg("-layout").arg(&path).arg("-");
+        }
         _ => {
             cmd.arg(&path);
         }
@@ -222,8 +277,25 @@ fn run_tool(tool: &str, pdf: &[u8]) -> Option<String> {
 
 /// How far the two PDFs agree, and a line saying where they stop.
 pub fn verdict(reference: Option<&Vec<u8>>, subject: Option<&Vec<u8>>) -> (Rung, String) {
-    let (Some(r), Some(s)) = (reference, subject) else {
-        return (Rung::None, "texrs wrote no PDF".to_string());
+    // Which engine wrote nothing is the whole diagnosis, and reporting one
+    // message for all three cases got it backwards: for an empty document it
+    // is LUATEX that writes no PDF ("no pages of output") while texrs writes an
+    // empty one, and the harness blamed texrs for it.
+    let (r, s) = match (reference, subject) {
+        (None, None) => {
+            return (
+                Rung::Bytes,
+                "neither engine wrote a PDF: no pages of output".to_string(),
+            )
+        }
+        (Some(_), None) => return (Rung::None, "texrs wrote no PDF, luatex did".to_string()),
+        (None, Some(s)) => {
+            return (
+                Rung::None,
+                format!("texrs wrote a {}-byte PDF, luatex wrote none", s.len()),
+            )
+        }
+        (Some(r), Some(s)) => (r, s),
     };
     if r == s {
         return (Rung::Bytes, String::new());
@@ -257,8 +329,34 @@ pub fn verdict(reference: Option<&Vec<u8>>, subject: Option<&Vec<u8>>) -> (Rung,
             ),
         );
     }
+    let (Some(rl), Some(sl)) = (lines(r), lines(s)) else {
+        return (Rung::Text, "pdftotext -layout unavailable".to_string());
+    };
+    if rl != sl {
+        let at = rl
+            .iter()
+            .zip(sl.iter())
+            .position(|(a, b)| a != b)
+            .unwrap_or(rl.len().min(sl.len()));
+        return (
+            Rung::Text,
+            format!(
+                "lines: {} vs {}, first difference at {at} ({:?} vs {:?})",
+                rl.len(),
+                sl.len(),
+                rl.get(at),
+                sl.get(at)
+            ),
+        );
+    }
+    let (Some(rf), Some(sf)) = (fonts(r), fonts(s)) else {
+        return (Rung::Lines, "pdffonts unavailable".to_string());
+    };
+    if rf != sf {
+        return (Rung::Lines, format!("fonts: luatex {rf:?}, texrs {sf:?}"));
+    }
     (
-        Rung::Text,
+        Rung::Fonts,
         format!("bytes: luatex {}, texrs {}", r.len(), s.len()),
     )
 }

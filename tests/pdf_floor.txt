@@ -3,5 +3,12 @@
 # BYTES is the goal. Re-record with `cargo run --bin pdf-parity -- --record`
 # after a change that climbs; a case that DROPS is a regression.
 PAGESIZE a_paragraph.tex
+PAGESIZE digits_and_case.tex
+NONE empty_document.tex
+PAGESIZE groups_and_registers.tex
+PAGESIZE long_paragraph.tex
 PAGESIZE macro_expansion.tex
+PAGESIZE nested_macros.tex
+PAGESIZE punctuation.tex
+PAGESIZE two_paragraphs.tex
 PAGESIZE two_words.tex
