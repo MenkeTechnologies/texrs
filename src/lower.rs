@@ -965,7 +965,7 @@ impl Lowerer {
                 self.eng.skip_optional_star(lx);
                 let _ = self.eng.read_optional_bracket(lx)?;
                 self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
-                self.push_heading(out, 3, 2, lx)?;
+                self.push_heading(out, 6, 4, lx)?;
                 Ok(true)
             }
             // The section headings. Same treatment and for the same reason as
@@ -974,18 +974,19 @@ impl Lowerer {
             "section" | "subsection" | "subsubsection" => {
                 self.eng.skip_optional_star(lx);
                 let _ = self.eng.read_optional_bracket(lx)?;
-                self.push_heading(out, 1, 1, lx)?;
+                self.push_heading(out, 2, 2, lx)?;
                 Ok(true)
             }
             _ => Ok(false),
         }
     }
 
-    /// A heading's text, with `above` and `below` lines of vertical space
+    /// A heading's text, with `above` and `below` units of vertical space
     /// around it.
     ///
-    /// The space is counted in LINES because a line is the unit this page
-    /// breaker has: it stacks lines a leading apart and knows no other length.
+    /// The unit is `typeset::PARAGRAPH_SPACE` -- half a leading, the space
+    /// LaTeX leaves between two paragraphs -- because that is the smallest
+    /// length the page breaker spends and so the one the rest are counted in.
     /// LaTeX spends 50pt above a chapter title and 40pt below it, and roughly
     /// a line and a half either side of a section; a heading set with none of
     /// that is indistinguishable from the paragraph it introduces, and the

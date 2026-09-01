@@ -2003,7 +2003,6 @@ pub fn to_pdf(
     };
 
     let lines = break_lines_measured(text, layout, &width_of);
-    let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
     // The colour stack, seeded with what the document is set in where it has
     // not said otherwise. Seeding it means a run with nothing pushed still
@@ -2024,7 +2023,7 @@ pub fn to_pdf(
     let mut faces: Vec<Face> = vec![Face::Main];
 
     let mut pages = Vec::new();
-    for chunk in paginate(&lines, per_page) {
+    for chunk in paginate(&lines, layout) {
         let mut page = Page::letter();
         // The page is painted first, and only first: a fill drawn after the
         // text covers it, and a document that sets a dark page sets light
@@ -2040,11 +2039,12 @@ pub fn to_pdf(
             // Which part of a table a line is was a question for `paginate`,
             // which has answered it: the page draws the line.
             let line = without_longtable(line);
-            // A line of vertical space is space: the baseline moves down and
-            // nothing is drawn on it. Falling through to the run loop below
-            // would draw the marker itself as a character.
-            if !line.is_empty() && line.chars().all(|c| c == VERTICAL_SPACE) {
-                y -= layout.leading;
+            // A line of vertical space is space: the baseline moves down by
+            // what that space measures -- see `line_height` -- and nothing is
+            // drawn on it. Falling through to the run loop below would draw the
+            // marker itself as a character.
+            if is_space_line(line) {
+                y -= line_height(line, layout);
                 continue;
             }
             // A booktabs rule is DRAWN, not set: the breaker's line carries the
@@ -2333,6 +2333,17 @@ fn break_lines_measured(
     // 0 is "not in a list".
     let mut depth = 0usize;
     for para in text.split("\n\n") {
+        // `\parskip`: the space LaTeX leaves BETWEEN two paragraphs, which
+        // texrs left out entirely -- and which is the largest reason it set a
+        // book short. See `PARAGRAPH_SPACE`. It goes in only between two
+        // paragraphs that both set text, so a heading's own space is not added
+        // to, and nothing is left at the head of the document.
+        let after_text = lines
+            .last()
+            .is_some_and(|line: &String| !is_space_line(line) && !is_break_line(line));
+        if after_text && sets_text(para) {
+            lines.push(VERTICAL_SPACE.to_string());
+        }
         // A code listing is already broken, by the author -- see
         // `listing_lines`, which the DVI breaker reads the same way.
         if let Some(code) = listing_lines(para) {
@@ -2606,12 +2617,58 @@ fn strip_indent(line: &str) -> (usize, &str) {
     (depth, chars.as_str())
 }
 
+/// `\parskip`, as a fraction of the leading.
+///
+/// Every book in the corpus loads pandoc's preamble, which loads `parskip.sty`
+/// and so sets `\parskip` to half a line. Measured, in the lualatex-built
+/// scifi2/docs/book.pdf: consecutive baselines inside a paragraph are 13.549bp
+/// apart and consecutive baselines ACROSS a paragraph boundary are 20.324bp
+/// apart, and 20.324 - 13.549 = 6.775 = 13.549/2, on all 2,613 of that book's
+/// paragraph boundaries.
+const PARAGRAPH_SPACE: f64 = 0.5;
+
+/// Whether a broken line is vertical space rather than text.
+fn is_space_line(line: &str) -> bool {
+    !line.is_empty() && line.chars().all(|c| c == VERTICAL_SPACE)
+}
+
+/// Whether a broken line is a forced page break rather than text.
+fn is_break_line(line: &str) -> bool {
+    !line.is_empty() && line.chars().all(|c| c == PAGE_BREAK)
+}
+
+/// What one broken line takes down the page.
+///
+/// A line of text takes a leading. A line of vertical space takes ONE unit of
+/// `\parskip`, which is half of one: that is the smallest space the page
+/// spends, so it is the unit the rest are counted in -- a heading asks for its
+/// space as that many of them (`lower::push_heading`).
+fn line_height(line: &str, layout: &Layout) -> f64 {
+    match is_space_line(line) {
+        true => layout.leading * PARAGRAPH_SPACE,
+        false => layout.leading,
+    }
+}
+
+/// Whether a paragraph of the text stream will set any text at all.
+///
+/// A heading is written as its own paragraphs with paragraphs of vertical
+/// space either side of it, and the space between two paragraphs goes in only
+/// where there are two paragraphs of TEXT: adding it around a heading would
+/// pay for the heading's own space twice. Every marker and every kind of
+/// whitespace -- the vertical tab a listing breaks its lines on, the form feed
+/// a forced break travels as -- answers false here.
+fn sets_text(para: &str) -> bool {
+    printing_chars(para).any(|c| !c.is_whitespace())
+}
+
 /// Split broken lines into pages, at a forced break or when the page is full,
 /// carrying a longtable's head and foot onto every page it runs onto.
 ///
-/// `chunks(per_page)` alone cannot do this: it fills every page to the brim,
-/// so a `\newpage` has nowhere to say anything and a chapter starts wherever
-/// the previous one happened to end.
+/// `chunks` alone cannot do this: it fills every page to the brim, so a
+/// `\newpage` has nowhere to say anything and a chapter starts wherever the
+/// previous one happened to end. Nor can it now be a count of lines at all,
+/// since a line of vertical space is half the height of a line of text.
 ///
 /// Nor can a table be filled that way. A table is not a run of lines a break
 /// may fall anywhere in:
@@ -2631,7 +2688,16 @@ fn strip_indent(line: &str) -> (usize, &str) {
 /// the page and opens the next one with the head. The head and foot are lines
 /// of `lines` like any other, so repeating one costs nothing -- the page holds
 /// the same `&str` again.
-fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
+fn paginate<'a>(lines: &'a [String], layout: &Layout) -> Vec<Vec<&'a str>> {
+    // The page is filled to its HEIGHT and not to a count of lines, because
+    // the lines are no longer all one height: a line of vertical space is half
+    // of one. A page held 48 lines whether or not seven of them were space.
+    let capacity = layout.height;
+    // Float slack, so a page that comes to exactly its height is not one line
+    // short of it.
+    const SLACK: f64 = 1e-6;
+    let height = |lines: &[&str]| -> f64 { lines.iter().map(|l| line_height(l, layout)).sum() };
+    let mut used = 0.0;
     let mut pages: Vec<Vec<&str>> = Vec::new();
     let mut page: Vec<&str> = Vec::new();
     // The table being set, if one is: the head that goes above each of its
@@ -2643,7 +2709,7 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
     while i < lines.len() {
         let line = lines[i].as_str();
         i += 1;
-        if line.chars().all(|c| c == PAGE_BREAK) && !line.is_empty() {
+        if is_break_line(line) {
             // A forced break cannot fall inside a table: a table is one
             // paragraph and is recognised as one before the break character is
             // split out of it, so the break stays inside a cell. It can stand
@@ -2656,6 +2722,7 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
             // \newpage is one break, which is what both mean together.
             if !page.is_empty() {
                 pages.push(std::mem::take(&mut page));
+                used = 0.0;
             }
             continue;
         }
@@ -2665,10 +2732,13 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
             in_table = false;
             head.clear();
             foot.clear();
-            if page.len() >= per_page {
+            let tall = line_height(line, layout);
+            if !page.is_empty() && used + tall > capacity + SLACK {
                 pages.push(std::mem::take(&mut page));
+                used = 0.0;
             }
             page.push(line);
+            used += tall;
             continue;
         };
         if !in_table {
@@ -2705,20 +2775,29 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
         // A group taller than the page it would be repeated on cannot be kept
         // whole; it is set where it falls rather than pushing every page after
         // it out of shape.
-        let step = group.min(per_page.saturating_sub(head.len()).max(1));
+        // A table's lines are all lines of text, so the room a page under the
+        // head has for them is what is left of it divided by the leading.
+        let room = ((capacity - height(&head)) / layout.leading)
+            .floor()
+            .max(1.0) as usize;
+        let step = group.min(room);
+        let tall = step as f64 * layout.leading;
         // Room for the group AND for the foot under it: longtable keeps the
         // foot's height back on every page for the same reason.
-        if !page.is_empty() && page.len() + step + foot.len() > per_page {
+        if !page.is_empty() && used + tall + height(&foot) > capacity + SLACK {
             // The table runs past this page, so the foot goes under it and the
             // head over the next -- unless the head is what is about to be set
             // anyway, which is where the table starts on the new page.
             page.extend(foot.iter().copied());
             pages.push(std::mem::take(&mut page));
+            used = 0.0;
             if code != LT_HEAD {
                 page.extend(head.iter().copied());
+                used += height(&head);
             }
         }
         page.extend(lines[i - 1..i - 1 + step].iter().map(String::as_str));
+        used += tall;
         i += step - 1;
     }
     if !page.is_empty() {

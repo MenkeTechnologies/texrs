@@ -1942,3 +1942,82 @@ fn a_page_break_does_not_fall_inside_a_row_of_a_longtable() {
         );
     }
 }
+
+/// The filler a paragraph is made long enough to wrap with.
+const FILLER: &str = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do \
+                      eiusmod tempor incididunt ut labore et dolore magna aliqua";
+
+#[test]
+fn a_paragraph_boundary_leaves_half_a_line_and_a_wrapped_line_does_not() {
+    // texrs stacked every line one leading below the last, whatever stood
+    // between them, so a paragraph boundary cost the page nothing. LaTeX
+    // spends `\parskip` there, and every book in the corpus loads pandoc's
+    // preamble, which loads parskip.sty and sets it to half a line.
+    //
+    // Measured, in the lualatex-built scifi2/docs/book.pdf: baselines inside a
+    // paragraph are 13.549bp apart, baselines across a boundary are 20.324bp
+    // apart, and the difference is 6.775 = 13.549/2 on all 2,613 of that
+    // book's boundaries. texrs set that book in 233 pages where lualatex sets
+    // it in 272, and put 40.98 lines on a page where lualatex puts 36.24.
+    //
+    // Both halves are asserted here, because "everything moved down" would
+    // pass the first on its own: a line the paragraph WRAPPED onto is still
+    // exactly one leading below the line before it.
+    let src = format!(
+        "\\documentclass{{article}}\n\\begin{{document}}\n\
+         alphaone {FILLER} {FILLER} {FILLER} alphalast\n\n\
+         betaone {FILLER}\n\\end{{document}}\n"
+    );
+    let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
+    let leading = Layout::default().leading;
+    let mut ys: Vec<f64> = runs.iter().map(|(_, y, _)| *y).collect();
+    ys.sort_by(|a, b| b.partial_cmp(a).expect("a baseline is a number"));
+    ys.dedup();
+    assert!(
+        ys.len() >= 4,
+        "the first paragraph has to wrap or this asserts nothing: {ys:?}"
+    );
+    assert!(
+        (ys[0] - ys[1] - leading).abs() < 1e-9,
+        "a line the paragraph wrapped onto is one leading below the last: \
+         {} against {leading}",
+        ys[0] - ys[1]
+    );
+    let (_, beta) = at(&runs, "betaone");
+    // `ys` runs down the page, so the LAST baseline still above the second
+    // paragraph is the line immediately over it.
+    let above = ys
+        .iter()
+        .copied()
+        .rfind(|y| *y > beta)
+        .expect("the first paragraph is above the second");
+    assert!(
+        (above - beta - leading * 1.5).abs() < 1e-9,
+        "a paragraph boundary leaves half a line: {} against {}",
+        above - beta,
+        leading * 1.5
+    );
+}
+
+#[test]
+fn the_space_between_paragraphs_fills_the_page_sooner() {
+    // The page is filled to its HEIGHT, not to a count of lines, or the space
+    // between paragraphs would be free: 40 lines is under the 53 that 643.2pt
+    // of \textheight holds at a 12pt leading, and all 40 went on one page
+    // however much white stood between them.
+    //
+    // 12pt for the first line and 18pt for each after it comes to 36 lines on
+    // the page and 4 on the next.
+    let body: String = (1..=40).map(|n| format!("paragraph{n}\n\n")).collect();
+    let src = format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\\end{{document}}\n");
+    let pages = by_page(&texrs::run_pdf(&src).expect("pdf"));
+    let set: usize = pages.iter().map(Vec::len).sum();
+    assert_eq!(set, 40, "every paragraph is set: {pages:?}");
+    assert_eq!(
+        pages.len(),
+        2,
+        "40 paragraphs a line each no longer fit on one page: {:?}",
+        pages.iter().map(Vec::len).collect::<Vec<_>>()
+    );
+    assert_eq!(pages[0].len(), 36, "the first page holds 36 of them");
+}
