@@ -1266,7 +1266,12 @@ fn placed_faces(pdf: &[u8]) -> Vec<(f64, f64, String, String)> {
             .to_string()
     };
     let mut runs = Vec::new();
-    for (_, page) in objects.iter().filter(|(_, b)| b.contains("/Type /Page>>")) {
+    // A page, and not the page TREE. Asked without depending on how the writer
+    // spaces a dictionary: this read `/Type /Page>>` and stopped finding any
+    // page at all the day the writer put a space before the closing bracket,
+    // which made seventeen tests report that nothing had been drawn.
+    let is_page = |b: &str| b.contains("/Type /Page") && !b.contains("/Type /Pages");
+    for (_, page) in objects.iter().filter(|(_, b)| is_page(b)) {
         let Some((_, stream)) = value_of(page, "/Contents ").and_then(by_number) else {
             continue;
         };

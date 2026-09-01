@@ -145,19 +145,19 @@ impl Object {
 }
 
 fn write_dict(pairs: &BTreeMap<String, Object>, out: &mut Vec<u8>) {
+    // `<< /Key value >>`, spaced the way LuaTeX spaces it. The spec allows any
+    // whitespace at all between the brackets and the first key, so this is a
+    // writer's habit rather than a rule -- and two writers with different
+    // habits produce different bytes for identical content, which is the
+    // difference the parity ladder's BYTES rung would otherwise report forever.
     out.extend(b"<<");
     for (key, value) in pairs {
+        out.push(b' ');
         Object::Name(key.clone()).write(out);
         out.push(b' ');
         value.write(out);
-        out.push(b' ');
     }
-    // A dictionary with nothing in it still needs its brackets apart.
-    if pairs.is_empty() {
-        out.push(b' ');
-    }
-    out.pop();
-    out.extend(b">>");
+    out.extend(b" >>");
 }
 
 /// A PDF being written.
@@ -216,8 +216,15 @@ impl Pdf {
         let mut out = Vec::new();
         // §7.5.2: the header, and a comment of high bytes that tells anything
         // moving the file about that it is binary and must not be translated.
+        // The spec asks only for four bytes over 127; WHICH four is the
+        // writer's own. These are LuaTeX's, so that a document both engines set
+        // the same way is the same file here too rather than differing in its
+        // second line -- the parity ladder's BYTES rung compares what was drawn,
+        // and a header comment is not a difference in drawing.
         out.extend(b"%PDF-1.7\n");
-        out.extend([b'%', 0xe2, 0xe3, 0xcf, 0xd3, b'\n']);
+        out.extend([
+            b'%', 0xcc, 0xd5, 0xc1, 0xd4, 0xc5, 0xd8, 0xd0, 0xc4, 0xc6, b'\n',
+        ]);
 
         let mut offsets = Vec::with_capacity(self.objects.len());
         for (i, object) in self.objects.iter().enumerate() {
@@ -886,9 +893,13 @@ mod tests {
                 ("Type", Object::name("Page")),
                 ("Count", Object::Integer(2))
             ])),
-            "<</Count 2 /Type /Page>>"
+            "<< /Count 2 /Type /Page >>"
         );
-        assert_eq!(written(Object::Dict(BTreeMap::new())), "<<>>");
+        // Spaced the way LuaTeX spaces a dictionary. The spec allows any
+        // whitespace here, so this pins a writer's habit -- and pinning it is
+        // the point: two writers with different habits give different bytes for
+        // identical content, which the parity ladder would report forever.
+        assert_eq!(written(Object::Dict(BTreeMap::new())), "<< >>");
     }
 
     /// A stream's `Length` is what was written, not what was claimed.
@@ -898,7 +909,7 @@ mod tests {
             dict: BTreeMap::from([("Length".to_string(), Object::Integer(9999))]),
             data: b"12345".to_vec(),
         });
-        assert!(text.starts_with("<</Length 5>>"), "{text}");
+        assert!(text.starts_with("<< /Length 5 >>"), "{text}");
         assert!(text.contains("\nstream\n12345\nendstream"), "{text}");
     }
 
