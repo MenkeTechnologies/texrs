@@ -6,11 +6,13 @@
 //! This is the join: measure each character in a real font, break the text into
 //! lines at a measure, stack the lines down a page, and ship the result.
 //!
-//! What this is NOT is `tex.web`'s stomach. TeX breaks a paragraph by looking at
-//! every feasible sequence of breakpoints and minimising total badness
-//! (§813-§890); this takes the first break that fits, which is what every
-//! word processor before TeX did and what TeX was written to improve on. There
-//! is no hyphenation, no glue stretching or shrinking, no page-breaking by
+//! The PDF path breaks a paragraph the way TeX does: `linebreak::break_paragraph`
+//! minimises total badness over every feasible sequence of breakpoints
+//! (§813-§890) and hyphenates with Knuth's own patterns. The DVI path still
+//! takes the first break that fits, because its driver cannot set a line to a
+//! width and a breaker that prices glue has nothing to hand its answer to.
+//!
+//! What is still NOT `tex.web`'s stomach, on either path: no page-breaking by
 //! penalties, no maths, no boxes a document can nest. A paragraph set here and
 //! the same paragraph set by tex will not agree line for line.
 //!
@@ -292,12 +294,16 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
     }
 }
 
-/// Break `text` into lines that fit the measure.
+/// Break `text` into lines that fit the measure, for the DVI path.
 ///
 /// First fit, not best fit: a word is added while it still fits and starts a new
 /// line when it does not. `tex.web` §813 does far better -- it considers every
-/// feasible set of breakpoints for the whole paragraph at once -- and the
-/// difference is visible as a raggeder right edge here.
+/// feasible set of breakpoints for the whole paragraph at once -- and the PDF
+/// path takes that route through `linebreak::break_paragraph`. This one cannot:
+/// a breaker that prices lines over glue asks for some of them to be SHRUNK,
+/// and the DVI writer here has no way to set a run to a width, so its answer
+/// would be drawn past the measure. The difference is visible as a raggeder
+/// right edge in a `.dvi` than in a `.pdf` of the same document.
 pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
     let chain = FontChain {
         fonts: vec![Loaded {
@@ -1998,14 +2004,13 @@ fn fill(
     width_of: &dyn Fn(&str, Face) -> f64,
     lines: &mut Vec<String>,
 ) {
+    use crate::linebreak::After;
     let mut rest = text;
     loop {
         let (stretch, marker) = match rest.find([CENTRE, CENTRE_END, LIST_INDENT]) {
             Some(at) => (&rest[..at], rest[at..].chars().next()),
             None => (rest, None),
         };
-        let mut line = String::new();
-        let mut width = 0.0f64;
         // A list narrows the measure by exactly what it moves the text in, so
         // a long item wraps INSIDE the list rather than running back out to
         // the right margin. A centred line is not moved in -- see `start` --
@@ -2034,43 +2039,51 @@ fn fill(
             (_, 0) => String::new(),
             (_, deep) => indent_mark(deep),
         };
+        // Every word is measured ONCE, here, and the sequence is handed to the
+        // total-fit breaker. Measuring here rather than inside the breaker is
+        // what keeps the colour and face stacks walked exactly once and in
+        // document order, which is the only order they mean anything in.
+        let mut pieces: Vec<crate::linebreak::Piece> = Vec::new();
         for word in stretch.split_whitespace() {
             // The space between two words is set in the face in force where it
             // falls, which is the one the word BEFORE it left; and the word
             // itself costs what it costs in the faces its own markers select.
             // Measuring a monospace word in the prose font is how a line of
             // code came out narrower than it sets.
-            let space = width_of(" ", current_face(faces));
-            let ww = word_width(word, colours, faces, width_of);
-            let need = match line.is_empty() {
-                true => ww,
-                false => width + space + ww,
-            };
-            if !line.is_empty() && need > measure {
-                // A line pushed HERE is one the next word would not fit on, so
-                // it is a FULL line and is the one set to the measure. The last
-                // line of a paragraph falls out of this loop below and stays
-                // ragged, which is what TeX does with it; and a centred line is
-                // positioned by its own width, so it is left alone.
-                let full = std::mem::take(&mut line);
-                lines.push(match *centred {
-                    true => full,
-                    false => format!("{JUSTIFY}{full}"),
-                });
-                width = ww;
-                line = start(*centred, *depth);
-                line.push_str(word);
-                continue;
+            if let Some(previous) = pieces.last_mut() {
+                previous.after = crate::linebreak::After::Glue(width_of(" ", current_face(faces)));
             }
-            match line.is_empty() {
-                true => line = start(*centred, *depth),
-                false => line.push(' '),
-            }
-            line.push_str(word);
-            width = need;
+            measure_word(word, colours, faces, width_of, &mut pieces);
         }
-        if !line.is_empty() {
-            lines.push(line);
+        // tex.web §813: the set of breakpoints that costs the WHOLE paragraph
+        // least, rather than the ones a left-to-right fill happens to reach.
+        let breaks = crate::linebreak::break_paragraph(&pieces, measure);
+        let mut from = 0usize;
+        for (number, end) in breaks.iter().enumerate() {
+            let mut line = start(*centred, *depth);
+            for (offset, piece) in pieces[from..*end].iter().enumerate() {
+                // The pieces of one word run together; two words are joined by
+                // the space that stood between them.
+                if offset > 0 && matches!(pieces[from + offset - 1].after, After::Glue(_)) {
+                    line.push(' ');
+                }
+                line.push_str(&piece.text);
+            }
+            // A line ending inside a word carries the hyphen the word did not
+            // write. One ending after a hyphen the AUTHOR wrote already has it.
+            if matches!(pieces[*end - 1].after, After::Discretionary(_)) {
+                line.push('-');
+            }
+            from = *end;
+            // Every line but the paragraph's last is a FULL line and is the one
+            // set to the measure. The last stays ragged, which is what TeX's
+            // `\parfillskip` makes of it, and a centred line is positioned by
+            // its own width so it is left alone.
+            let last = number + 1 == breaks.len();
+            lines.push(match *centred || last {
+                true => line,
+                false => format!("{JUSTIFY}{line}"),
+            });
         }
         match marker {
             // The depth marker carries the new depth as one digit, so a nested
@@ -2088,6 +2101,81 @@ fn fill(
             }
             None => return,
         }
+    }
+}
+
+/// Measure one word into the pieces a line may end between.
+///
+/// A word carrying a marker is ONE piece: `word_width` walks the colour and
+/// face stacks to measure it, and a fragment of it would be measured in a face
+/// its own markers had not selected yet. Only a plain word is offered to the
+/// hyphenator, which is also the only kind Liang's patterns were stated for.
+fn measure_word(
+    word: &str,
+    colours: &mut Vec<Spec>,
+    faces: &mut Vec<Face>,
+    width_of: &dyn Fn(&str, Face) -> f64,
+    out: &mut Vec<crate::linebreak::Piece>,
+) {
+    use crate::linebreak::{After, Piece};
+    let face = current_face(faces);
+    let whole = |text: &str, width: f64| Piece {
+        text: text.to_string(),
+        width,
+        after: After::Nothing,
+    };
+    if word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP]) {
+        let width = word_width(word, colours, faces, width_of);
+        out.push(whole(word, width));
+        return;
+    }
+    // A hyphen the author wrote is a breakpoint of its own (tex.web §869), and
+    // TeX does not go looking for more inside a word that already has one.
+    if word.contains('-') {
+        let parts: Vec<&str> = word.split_inclusive('-').collect();
+        for (number, part) in parts.iter().enumerate() {
+            out.push(Piece {
+                text: part.to_string(),
+                width: width_of(part, face),
+                after: match number + 1 < parts.len() {
+                    true => After::Explicit,
+                    false => After::Nothing,
+                },
+            });
+        }
+        return;
+    }
+    // A word is regularly wrapped in punctuation -- an opening quote, a full
+    // stop -- and the patterns are stated for LETTERS. The letters in the
+    // middle are what is offered; the punctuation stays welded to the fragment
+    // it sits against.
+    let letter = |c: char| c.is_ascii_alphabetic();
+    let head = word.len() - word.trim_start_matches(|c| !letter(c)).len();
+    let tail = word.len() - word.trim_end_matches(|c| !letter(c)).len();
+    let points: Vec<usize> = match head + tail <= word.len() {
+        true => crate::linebreak::hyphenator()
+            .points(&word[head..word.len() - tail])
+            .iter()
+            .map(|at| at + head)
+            .collect(),
+        false => Vec::new(),
+    };
+    if points.is_empty() {
+        out.push(whole(word, width_of(word, face)));
+        return;
+    }
+    let dash = width_of("-", face);
+    let mut from = 0usize;
+    for at in points.iter().copied().chain(std::iter::once(word.len())) {
+        out.push(Piece {
+            text: word[from..at].to_string(),
+            width: width_of(&word[from..at], face),
+            after: match at == word.len() {
+                true => After::Nothing,
+                false => After::Discretionary(dash),
+            },
+        });
+        from = at;
     }
 }
 

@@ -44,6 +44,7 @@ pub mod ir;
 pub mod itar;
 pub mod latex;
 pub mod lexer;
+pub mod linebreak;
 pub mod lower;
 pub mod lsp;
 pub mod parallel;

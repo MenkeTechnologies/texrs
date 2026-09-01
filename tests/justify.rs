@@ -85,48 +85,56 @@ fn pdf(src: &str) -> Vec<u8> {
 /// A full line is drawn at exactly the measure.
 ///
 /// The natural width of the words is read out of the file rather than measured
-/// here: the same four words are set a second time with a `\textbf` welded to
-/// the end of them, which splits that line into two runs, and the second run's
-/// own x says where the first one ended. So the width being checked is the one
-/// the FILE says, and the check is `natural + spaces * Tw == measure` -- which
-/// is the whole claim.
+/// here: whatever words the breaker put on the first line are set a SECOND
+/// time, alone, with a `\textbf` welded to the end of them, which splits that
+/// line into two runs, and the second run's own x says where the first one
+/// ended. So the width being checked is the one the FILE says, and the check is
+/// `natural + spaces * Tw == measure` -- which is the whole claim.
+///
+/// The document used to be four words and one 200-character word, on the
+/// reasoning that the long word could not fit and so the four before it were a
+/// full line. That reasoning was first fit's. `pdflatex` sets those same words
+/// as ONE line and reports `Overfull \hbox (830.83832pt too wide)`, which is
+/// what texrs now does too, so the document no longer holds a full line at all.
+/// Every assertion below is the one that was there; only the paragraph the
+/// claim is made about is a real one.
 #[test]
 fn a_full_line_is_drawn_at_the_measure() {
-    // The long word cannot fit on any line, so the four words before it are a
-    // line the next word did not fit on: a full line, and the one to justify.
-    // The second paragraph sets the same four words as a paragraph's last line,
-    // which is ragged, and welds a bold letter to them so the line is two runs.
-    let long = "x".repeat(200);
-    let src = format!(
-        "\\documentclass{{article}}\n\\begin{{document}}\n\
-         alpha beta gamma delta {long}\n\n\
-         alpha beta gamma delta\\textbf{{Z}}\n\
-         \\end{{document}}\n"
-    );
-    let runs = runs(&pdf(&src));
+    let prose = "The typesetting of a paragraph is a global optimisation problem, \
+                 not a local one. A greedy algorithm that fills each line until the \
+                 following word will no longer fit is straightforward to implement \
+                 and fast to run, but it commits to every decision it makes without \
+                 ever considering the consequences for the lines that follow.";
+    let src =
+        format!("\\documentclass{{article}}\n\\begin{{document}}\n{prose}\n\\end{{document}}\n");
+    let drawn_runs = runs(&pdf(&src));
     let measure = texrs::typeset::Layout::default().measure;
 
-    let full: Vec<&Drawn> = runs
-        .iter()
-        .filter(|r| r.text == "alpha beta gamma delta" && r.word_space != 0.0)
-        .collect();
-    assert_eq!(
-        full.len(),
-        1,
-        "one full line, set to the measure: {:#?}",
-        runs
+    // The first line drawn is a full one: the paragraph runs to several lines,
+    // and only its last is ragged.
+    let full = drawn_runs.first().expect("the paragraph is set").clone();
+    assert!(
+        full.word_space != 0.0,
+        "the first line of a multi-line paragraph is set to the measure: {full:?}"
     );
-    let full = full[0];
     assert!(full.reset, "the word spacing has to be put back: {full:?}");
+    assert!(
+        !full.text.contains('\\'),
+        "the line is plain text, so it can be set again as-is: {full:?}"
+    );
 
-    // Where the bold letter starts is where the four words ended, so this is
+    // Where the bold letter starts is where those same words ended, so this is
     // the natural width of exactly the text the full line holds.
     let natural = {
-        let pair = runs
-            .iter()
-            .position(|r| r.text == "alpha beta gamma delta" && r.word_space == 0.0)
-            .expect("the same words set ragged");
-        let (before, after) = (&runs[pair], &runs[pair + 1]);
+        let again = format!(
+            "\\documentclass{{article}}\n\\begin{{document}}\n{}\\textbf{{Z}}\n\
+             \\end{{document}}\n",
+            full.text
+        );
+        let alone = runs(&pdf(&again));
+        let (before, after) = (&alone[0], &alone[1]);
+        assert_eq!(before.text, full.text, "the same words, alone: {before:?}");
+        assert_eq!(before.word_space, 0.0, "and ragged, so not adjusted");
         assert_eq!(after.text, "Z", "the bold letter follows them: {after:?}");
         assert_eq!(after.y, before.y, "on the same line");
         after.x - before.x

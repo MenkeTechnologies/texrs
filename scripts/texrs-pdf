@@ -13,17 +13,19 @@
 # the build at this instead of the second pandoc call and it does one
 # markdown->LaTeX pass rather than two.
 #
-# WHAT YOU GIVE UP by building a publication this way. Lines break first-fit
-# where tex minimises badness across a whole paragraph, and there is no
-# hyphenation, so the right-hand edge is looser than a tex page. There is no
-# per-glyph font fallback, so a character the chosen face lacks does not get
+# WHAT YOU GIVE UP by building a publication this way. Pages break by height
+# and not by penalties, so a paragraph does not sit where tex puts it. There is
+# no per-glyph font fallback, so a character the chosen face lacks does not get
 # fetched from another one. A draft reads correctly; a book being SOLD on its
 # typography should still be built by an engine with a stomach.
 #
 # What you do NOT give up any more: the face the document asked for is embedded
 # rather than substituted, including a font shipped beside the document with
 # fontspec Path=/UprightFont=, and \definecolor/\color/\pagecolor reach the
-# page. This is an order of magnitude faster, which is what it is for.
+# page; and lines break the way tex.web S813 breaks them, by minimising total
+# badness over every feasible sequence of breakpoints, with words hyphenated on
+# Knuth's own patterns wherever the machine has a TeX installation to read them
+# from. This is an order of magnitude faster, which is what it is for.
 set -euo pipefail
 
 tex_in=""
