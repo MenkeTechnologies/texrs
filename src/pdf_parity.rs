@@ -166,7 +166,12 @@ pub fn reference(oracle: &Oracle, case: &Path) -> Option<Vec<u8>> {
 /// second build to keep in step with the library under test.
 pub fn subject(case: &Path) -> Option<Vec<u8>> {
     let src = std::fs::read_to_string(case).ok()?;
-    crate::run_pdf_at(case.parent(), &src).ok()
+    let pdf = crate::run_pdf_at(case.parent(), &src).ok()?;
+    // No pages, no file — which is what the command line does and what tex and
+    // luatex do. The harness has to measure the tool's behaviour rather than
+    // the library call underneath it, or it reports a divergence the tool does
+    // not have.
+    (crate::pdf_page_count(&pdf) > 0).then_some(pdf)
 }
 
 /// The number of pages and the page size a PDF declares.
@@ -288,6 +293,116 @@ fn run_tool(tool: &str, pdf: &[u8]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// What a PDF says once the things that are not typesetting are taken out.
+///
+/// Two engines are compared on what they DREW, so this removes what neither
+/// draws: the creation and modification dates, the file `/ID`, the producer and
+/// creator strings, and `\pdftex`'s own `/PTEX.*` provenance keys. Then every
+/// stream is inflated, because a deflate window size is a property of a zlib
+/// call and not of a page -- two engines that drew exactly the same thing can
+/// disagree on every compressed byte of it.
+///
+/// Nothing else is touched. Object numbering, dictionary spacing, the order the
+/// objects come in and the glyphs and positions inside the streams are all real
+/// differences between the two writers, and normalising THEM away would be
+/// arranging for the comparison to succeed rather than measuring it.
+///
+/// Without this the rung cannot be reached even in principle: lualatex is not
+/// byte-identical with ITSELF across two runs -- measured, 60 bytes, all of them
+/// the two dates -- unless SOURCE_DATE_EPOCH is pinned, which this harness does.
+pub fn drawn(pdf: &[u8]) -> Vec<u8> {
+    let mut out = strip_dynamic(pdf);
+    out = inflate_streams(&out);
+    out
+}
+
+/// Blank the values of the keys whose content is a clock or a random number.
+fn strip_dynamic(pdf: &[u8]) -> Vec<u8> {
+    let mut out = pdf.to_vec();
+    for key in [
+        &b"/CreationDate"[..],
+        &b"/ModDate"[..],
+        &b"/Producer"[..],
+        &b"/Creator"[..],
+    ] {
+        out = blank_between(&out, key, b'(', b')');
+    }
+    out = blank_between(&out, b"/ID", b'[', b']');
+    out
+}
+
+/// Replace the `open..close` run following each `key` with nothing.
+fn blank_between(pdf: &[u8], key: &[u8], open: u8, close: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pdf.len());
+    let mut i = 0;
+    while i < pdf.len() {
+        if pdf[i..].starts_with(key) {
+            let after = i + key.len();
+            // The delimiter may be a space or two away from the key.
+            let start = pdf[after..]
+                .iter()
+                .position(|b| !b.is_ascii_whitespace())
+                .map(|at| after + at);
+            match start {
+                Some(at) if pdf.get(at) == Some(&open) => {
+                    let end = pdf[at..].iter().position(|b| *b == close).map(|e| at + e);
+                    if let Some(end) = end {
+                        out.extend_from_slice(key);
+                        out.push(open);
+                        out.push(close);
+                        i = end + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.push(pdf[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Inflate every `stream ... endstream` that is deflated, leaving the rest.
+fn inflate_streams(pdf: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = Vec::with_capacity(pdf.len());
+    let mut i = 0;
+    while i < pdf.len() {
+        let Some(at) = find(&pdf[i..], b"stream").map(|a| i + a) else {
+            out.extend_from_slice(&pdf[i..]);
+            break;
+        };
+        let mut data = at + b"stream".len();
+        if pdf.get(data) == Some(&b'\r') {
+            data += 1;
+        }
+        if pdf.get(data) == Some(&b'\n') {
+            data += 1;
+        }
+        let Some(end) = find(&pdf[data..], b"endstream").map(|e| data + e) else {
+            out.extend_from_slice(&pdf[i..]);
+            break;
+        };
+        out.extend_from_slice(&pdf[i..data]);
+        let raw = &pdf[data..end];
+        let mut plain = Vec::new();
+        match flate2::read::ZlibDecoder::new(raw).read_to_end(&mut plain) {
+            Ok(_) => out.extend_from_slice(&plain),
+            // Not deflated, or deflated in a way this cannot read: the bytes as
+            // they stand are what the engine wrote, and stand in for themselves.
+            Err(_) => out.extend_from_slice(raw),
+        }
+        out.extend_from_slice(b"endstream");
+        i = end + b"endstream".len();
+    }
+    out
+}
+
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
 /// How far the two PDFs agree, and a line saying where they stop.
 pub fn verdict(reference: Option<&Vec<u8>>, subject: Option<&Vec<u8>>) -> (Rung, String) {
     // Which engine wrote nothing is the whole diagnosis, and reporting one
@@ -310,7 +425,9 @@ pub fn verdict(reference: Option<&Vec<u8>>, subject: Option<&Vec<u8>>) -> (Rung,
         }
         (Some(r), Some(s)) => (r, s),
     };
-    if r == s {
+    // Compared on what was DRAWN: see `drawn`. A raw comparison can never
+    // reach this rung, because a PDF carries the clock it was written at.
+    if drawn(r) == drawn(s) {
         return (Rung::Bytes, String::new());
     }
     let (Some((rp, rm)), Some((sp, sm))) = (shape(r), shape(s)) else {

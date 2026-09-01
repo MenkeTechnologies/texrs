@@ -127,3 +127,73 @@ fn the_upper_rungs_read_what_is_actually_in_the_files() {
         "texrs sets the words on a line, got {sl:?}"
     );
 }
+
+/// The dynamic half of a PDF is not typesetting, and is not compared.
+///
+/// Two engines must be comparable on what they DREW. A PDF carries the clock it
+/// was written at, so a raw byte comparison can never succeed even between an
+/// engine and ITSELF: lualatex run twice over one file differs in 60 bytes, all
+/// of them `/CreationDate` and `/ModDate`.
+#[test]
+fn the_clock_and_the_file_id_are_not_part_of_the_comparison() {
+    let with = |date: &str, id: &str| {
+        format!(
+            "%PDF-1.7\n1 0 obj\n<< /CreationDate ({date}) /ModDate ({date}) \
+             /Producer (something) /ID [<{id}> <{id}>] >>\nendobj\n"
+        )
+        .into_bytes()
+    };
+    let monday = texrs::pdf_parity::drawn(&with("D:20260101000000Z", "AB"));
+    let friday = texrs::pdf_parity::drawn(&with("D:20261231235959Z", "CD"));
+    assert_eq!(
+        monday, friday,
+        "two runs an hour apart must compare equal on what they drew"
+    );
+    let text = String::from_utf8_lossy(&monday).to_string();
+    assert!(!text.contains("2026"), "a date survived: {text}");
+    assert!(!text.contains("AB"), "an id survived: {text}");
+}
+
+/// A stream is compared inflated, because a deflate setting is not a page.
+#[test]
+fn a_compressed_stream_is_compared_by_what_is_in_it() {
+    use std::io::Write;
+    let plain = b"BT /F1 10 Tf (hello) Tj ET";
+    let squeeze = |level| {
+        let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(level));
+        e.write_all(plain).unwrap();
+        let body = e.finish().unwrap();
+        let mut pdf = b"%PDF-1.7\n1 0 obj\n<< /Length 9 >>\nstream\n".to_vec();
+        pdf.extend_from_slice(&body);
+        pdf.extend_from_slice(b"endstream\nendobj\n");
+        pdf
+    };
+    // The same bytes deflated two ways: different files, one page.
+    let fast = squeeze(1);
+    let small = squeeze(9);
+    assert_ne!(fast, small, "the two compressions must differ as raw bytes");
+    assert_eq!(
+        texrs::pdf_parity::drawn(&fast),
+        texrs::pdf_parity::drawn(&small),
+        "the same drawing compressed two ways is the same drawing"
+    );
+    assert!(
+        String::from_utf8_lossy(&texrs::pdf_parity::drawn(&fast)).contains("(hello) Tj"),
+        "the stream was not inflated"
+    );
+}
+
+/// What is NOT normalised away, because it is a real difference.
+#[test]
+fn the_structure_two_writers_chose_is_still_compared() {
+    // Object numbering, dictionary spacing and the order objects come in are
+    // differences between the writers, and normalising them away would be
+    // arranging for the comparison to pass rather than measuring it.
+    let one = b"%PDF-1.7\n1 0 obj\n<< /Type /Pages >>\nendobj\n";
+    let two = b"%PDF-1.7\n3 0 obj\n<</Type /Pages>>\nendobj\n";
+    assert_ne!(
+        texrs::pdf_parity::drawn(one),
+        texrs::pdf_parity::drawn(two),
+        "different object numbers and spacing are a real difference"
+    );
+}
