@@ -847,8 +847,10 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
         }
         FACE_POP => false,
         // Its code character goes the same way the face's does, and so does
-        // the code saying which part of a longtable a line is.
-        TABLE_MARK | LONGTABLE => {
+        // the code saying which part of a longtable a line is -- and the code
+        // on a contents mark, which says whether the mark is a request, a
+        // heading the contents lists, or where the page numbering starts.
+        TABLE_MARK | LONGTABLE | TOC => {
             face_code = true;
             false
         }
@@ -2002,7 +2004,12 @@ pub fn to_pdf(
             .sum()
     };
 
-    let lines = break_lines_measured(text, layout, &width_of);
+    // The contents, if the document asked for one: set here rather than where
+    // `\tableofcontents` stood, because an entry names the page its chapter
+    // starts on and no such page exists until the whole document has been
+    // broken and paginated. See `TOC`.
+    let text = contents_set(text, layout, &width_of);
+    let lines = break_lines_measured(&text, layout, &width_of);
 
     // The colour stack, seeded with what the document is set in where it has
     // not said otherwise. Seeding it means a run with nothing pushed still
@@ -2806,6 +2813,339 @@ fn paginate<'a>(lines: &'a [String], layout: &Layout) -> Vec<Vec<&'a str>> {
     pages
 }
 
+/// A table of contents: where one belongs, which headings feed it, and where
+/// the document's own page numbering starts.
+///
+/// `\tableofcontents` is 123 occurrences across the corpus -- every book opens
+/// with a contents page -- and the prelude answered it with nothing, so none
+/// of them was set: a missing feature, and pages the reference has that this
+/// does not.
+///
+/// A contents cannot be built in one pass. An entry says which page its
+/// chapter starts on, that page is not known until the document has been
+/// broken and paginated, and the contents itself then moves every page after
+/// it -- it is pages of its own. TeX answers this with the `.aux` file and a
+/// second run. There is no `.aux` here and no multi-pass driver, so the two
+/// passes are run INSIDE the typesetter, in `contents_set`: the text is broken
+/// and paginated with the contents in place, the page each heading landed on
+/// is read back off the pages, and the contents is rebuilt with those numbers
+/// until the numbers stop moving. That is the fixed point `latexmk` reaches by
+/// running latex twice, and it is reached in two passes here for the same
+/// reason -- an entry is one line whatever its page number reads, so only the
+/// digits change the second time.
+///
+/// Recording the page as the page is BUILT was the alternative, and it cannot
+/// answer this: the contents is set before the chapters it lists, so at the
+/// moment its own page is built not one of the numbers on it exists yet.
+///
+/// The one character after the marker says what it is:
+///
+///   * a DIGIT -- the contents belongs here, listing headings down to that
+///     level. It is `tocdepth`, which every book in the corpus sets to 0:
+///     chapters only;
+///   * `TOC_CHAPTER`, `TOC_SECTION`, `TOC_SUBSECTION` -- the heading this
+///     marks is an entry of that level;
+///   * `TOC_PAGE_ONE` -- the page after the one this falls on is page 1.
+///
+/// U+0015 is the next free control character after U+0014 (LIST_INDENT); the
+/// `MARKERS` registry says what the rest are spent on.
+pub const TOC: char = '\u{15}';
+
+/// A `\chapter` heading, which is level 0 -- `tocdepth` 0 lists these alone.
+pub const TOC_CHAPTER: char = 'c';
+
+/// A `\section` heading: level 1.
+pub const TOC_SECTION: char = 's';
+
+/// A `\subsection` heading: level 2.
+pub const TOC_SUBSECTION: char = 'u';
+
+/// The page after the one this marker is set on is page 1.
+///
+/// The `titlepage` environment closes with `\newpage` and then, unless the
+/// class is two-sided, `\setcounter{page}\@ne` -- extreport.cls:514-518, which
+/// is the class every book in the corpus loads and no document in it says
+/// `twoside`. So the cover sheet is not one of the document's numbered pages,
+/// and every folio a contents entry prints is one less than the sheet it
+/// stands on: lualatex's own contents for `rubyrs/docs/book.tex` reads 1 for a
+/// chapter on sheet 2 and 6 for one on sheet 7, and this reads the same.
+pub const TOC_PAGE_ONE: char = 'p';
+
+/// What a contents page is headed: `\contentsname` in book.cls and report.cls.
+const CONTENTS_NAME: &str = "Contents";
+
+/// How many times the contents is rebuilt before its numbers are taken as
+/// settled. Two passes is what a document needs; the second is the one that
+/// finds them unchanged, and the rest are only ever reached by a document
+/// whose entries wrap differently each time.
+const CONTENTS_PASSES: usize = 4;
+
+/// The heading level a TOC code names, or `None` when the code is not an entry.
+fn toc_level(code: char) -> Option<usize> {
+    match code {
+        TOC_CHAPTER => Some(0),
+        TOC_SECTION => Some(1),
+        TOC_SUBSECTION => Some(2),
+        _ => None,
+    }
+}
+
+/// The mark naming a heading of this level, for the lowerer to write.
+///
+/// Empty past a subsection: `\subsubsection` is a heading the contents does
+/// not list here, and there is no code for it to carry.
+pub fn toc_entry_mark(level: usize) -> String {
+    match level {
+        0 => format!("{TOC}{TOC_CHAPTER}"),
+        1 => format!("{TOC}{TOC_SECTION}"),
+        2 => format!("{TOC}{TOC_SUBSECTION}"),
+        _ => String::new(),
+    }
+}
+
+/// The mark asking for a contents listing headings down to `depth`.
+pub fn toc_request_mark(depth: usize) -> String {
+    let digit = char::from_digit(depth.min(9) as u32, 10).unwrap_or('0');
+    format!("{TOC}{digit}")
+}
+
+/// The mark saying the page after this one is the document's page 1.
+pub fn toc_page_one_mark() -> String {
+    format!("{TOC}{TOC_PAGE_ONE}")
+}
+
+/// How deep a contents this text asks for, or `None` when it asks for none.
+///
+/// The digit is what tells a request from an entry: an entry's code is a
+/// letter, so the scan walks past every heading in the document without
+/// mistaking one for the `\tableofcontents` that lists it.
+fn contents_depth(text: &str) -> Option<usize> {
+    let mut rest = text;
+    while let Some(at) = rest.find(TOC) {
+        let after = &rest[at + TOC.len_utf8()..];
+        let code = after.chars().next()?;
+        if let Some(depth) = code.to_digit(10) {
+            return Some(depth as usize);
+        }
+        rest = &after[code.len_utf8()..];
+    }
+    None
+}
+
+/// Every heading the contents lists, in the order the document sets them.
+///
+/// The title is taken through `printing_chars`, so a heading's own colour and
+/// face markers do not travel into the contents line: they are balanced where
+/// the heading stands, but the colour and face stacks carry from line to line
+/// across the whole document, and a marker copied into a second place is a
+/// marker pushed twice.
+fn contents_entries(text: &str, depth: usize) -> Vec<(usize, String)> {
+    let mut entries = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(TOC) {
+        let after = &rest[at + TOC.len_utf8()..];
+        let Some(code) = after.chars().next() else {
+            break;
+        };
+        rest = &after[code.len_utf8()..];
+        let Some(level) = toc_level(code) else {
+            continue;
+        };
+        if level > depth {
+            continue;
+        }
+        // The heading owns its paragraph: the lowerer writes the mark, the
+        // title, and the paragraph break that ends it. A title broken across
+        // source lines is one line here, so the words are rejoined.
+        let title = rest.split("\n\n").next().unwrap_or("");
+        let plain: String = printing_chars(title).collect();
+        entries.push((
+            level,
+            plain.split_whitespace().collect::<Vec<_>>().join(" "),
+        ));
+    }
+    entries
+}
+
+/// Which page of the document each heading landed on, in the document's own
+/// page numbering.
+///
+/// Read off the PAGES rather than off the lines, because that is the question
+/// an entry asks -- and only the paginator knows where a page ends.
+fn heading_pages(lines: &[String], layout: &Layout, depth: usize) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut folio = 1usize;
+    for page in paginate(lines, layout) {
+        let mut restart = false;
+        for line in page {
+            let mut chars = line.chars();
+            while let Some(ch) = chars.next() {
+                if ch != TOC {
+                    continue;
+                }
+                let Some(code) = chars.next() else {
+                    break;
+                };
+                match toc_level(code) {
+                    Some(level) if level <= depth => found.push(folio),
+                    _ => restart |= code == TOC_PAGE_ONE,
+                }
+            }
+        }
+        folio = match restart {
+            true => 1,
+            false => folio + 1,
+        };
+    }
+    found
+}
+
+/// One entry of the contents: its title, the leaders, and the page it starts
+/// on set against the right margin.
+///
+/// A title too long for one line is filled to what the number and a space
+/// either side of the leaders leave of the measure, and the number goes on the
+/// last of its lines -- which is where LaTeX's own `\@dottedtocline` puts it.
+fn entry_lines(
+    level: usize,
+    title: &str,
+    page: usize,
+    layout: &Layout,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> Vec<String> {
+    let face = Face::Main;
+    let number = page.to_string();
+    let indent = list_indent(level, layout);
+    let space = width_of(" ", face);
+    // A face whose full stop measures nothing would divide by zero; one dot is
+    // then the whole leader, which is honest about knowing no better.
+    let dot = width_of(".", face).max(f64::EPSILON);
+    let room = layout.measure - indent - width_of(&number, face) - 2.0 * space;
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in title.split_whitespace() {
+        let wider = match current.is_empty() {
+            true => word.to_string(),
+            false => format!("{current} {word}"),
+        };
+        match !current.is_empty() && width_of(&wider, face) > room {
+            true => lines.push(std::mem::replace(&mut current, word.to_string())),
+            false => current = wider,
+        }
+    }
+    let dots = ((room - width_of(&current, face)) / dot).floor().max(0.0) as usize;
+    lines.push(format!("{current} {} {number}", ".".repeat(dots)));
+    // Level 0 sets at the margin and carries no mark at all; a deeper entry
+    // carries the indent marker a list item does, so the page positions it the
+    // one way it knows.
+    let mark = match level {
+        0 => String::new(),
+        deep => indent_mark(deep),
+    };
+    lines.into_iter().map(|l| format!("{mark}{l}")).collect()
+}
+
+/// The contents itself: the heading, and the entries under it.
+///
+/// The entry lines are handed to the breaker the way a code listing's are --
+/// each already broken, terminated by `LISTING_BREAK` -- because a contents
+/// line is set as it is written. Filled into a paragraph instead, the leaders
+/// of one entry would run the next entry onto the end of it.
+fn contents_block(
+    entries: &[(usize, String)],
+    pages: &[usize],
+    layout: &Layout,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> String {
+    let mut listing = String::new();
+    for (at, (level, title)) in entries.iter().enumerate() {
+        // A heading whose page has not been read yet -- the first pass, before
+        // anything has been paginated -- still takes the one line it will take
+        // when it has one, so the pass measures the contents at its real
+        // height.
+        let page = pages.get(at).copied().unwrap_or(0);
+        // A chapter entry is set clear of the one above it: report.cls spends
+        // `\vskip 1.0em` above every `\l@chapter` and nothing above an
+        // `\l@section`. A line is the unit this page has, and the difference
+        // it makes is whole pages -- lualatex sets rubyrs's ninety-six chapter
+        // entries in four pages where this set them in two.
+        if *level == 0 {
+            listing.push(VERTICAL_SPACE);
+            listing.push(LISTING_BREAK);
+        }
+        for line in entry_lines(*level, title, page, layout, width_of) {
+            listing.push_str(&line);
+            listing.push(LISTING_BREAK);
+        }
+    }
+    // A contents starts a page, as `\chapter*{\contentsname}` does in
+    // report.cls, and the chapter after it starts one of its own.
+    format!(
+        "\n\n{PAGE_BREAK}\n\n{VERTICAL_SPACE}\n\n{CONTENTS_NAME}\n\n{VERTICAL_SPACE}\n\n{listing}\n\n"
+    )
+}
+
+/// The text with every contents request replaced by the contents itself.
+fn with_contents(
+    text: &str,
+    entries: &[(usize, String)],
+    pages: &[usize],
+    layout: &Layout,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> String {
+    let block = contents_block(entries, pages, layout, width_of);
+    let mut out = String::with_capacity(text.len() + block.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(TOC) {
+        let after = &rest[at + TOC.len_utf8()..];
+        let Some(code) = after.chars().next() else {
+            break;
+        };
+        out.push_str(&rest[..at]);
+        match code.is_ascii_digit() {
+            true => out.push_str(&block),
+            // An entry mark stays where it is: the pass that follows reads the
+            // page it lands on back out of it.
+            false => {
+                out.push(TOC);
+                out.push(code);
+            }
+        }
+        rest = &after[code.len_utf8()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The document's text with its contents set into it, page numbers and all.
+///
+/// Returns the text untouched -- and does no extra work at all -- for a
+/// document that asked for no contents, which is every document that is not
+/// one of the books.
+fn contents_set<'a>(
+    text: &'a str,
+    layout: &Layout,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> std::borrow::Cow<'a, str> {
+    let Some(depth) = contents_depth(text) else {
+        return std::borrow::Cow::Borrowed(text);
+    };
+    let entries = contents_entries(text, depth);
+    let mut pages: Vec<usize> = vec![0; entries.len()];
+    for _ in 0..CONTENTS_PASSES {
+        let staged = with_contents(text, &entries, &pages, layout, width_of);
+        let lines = break_lines_measured(&staged, layout, width_of);
+        let found = heading_pages(&lines, layout, depth);
+        // The numbers stopped moving, and the text they were read out of is
+        // the text that carries them: that is what a second run leaves behind.
+        if found == pages {
+            return std::borrow::Cow::Owned(staged);
+        }
+        pages = found;
+    }
+    std::borrow::Cow::Owned(with_contents(text, &entries, &pages, layout, width_of))
+}
+
 /// The left edge of a list item's lines, carried through the text the way
 /// centring is, with the nesting depth as the one character after it.
 ///
@@ -2870,6 +3210,9 @@ pub const MARKERS: &[(char, bool)] = &[
     // And the one saying which part of a longtable a line is, whose argument
     // is the code naming that part.
     (LONGTABLE, true),
+    // The contents marker, whose argument says which of the three things it
+    // is: a request, a heading it lists, or where page 1 begins.
+    (TOC, true),
 ];
 
 /// The end of a line INSIDE a code listing, carried through the text the way a

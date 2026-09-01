@@ -2021,3 +2021,194 @@ fn the_space_between_paragraphs_fills_the_page_sooner() {
     );
     assert_eq!(pages[0].len(), 36, "the first page holds 36 of them");
 }
+
+/// The text each page of a PDF draws, in page order.
+///
+/// The content streams texrs writes are uncompressed and are written one to a
+/// page, in page order, ahead of anything else that page needs
+/// (`pdf::document`) -- and a document set in one of the fourteen base fonts
+/// carries no other stream at all. So the streams ARE the pages, which is the
+/// only way to ask which page a word came out on.
+fn page_texts(pdf: &[u8]) -> Vec<String> {
+    let s = String::from_utf8_lossy(pdf).into_owned();
+    let mut pages = Vec::new();
+    let mut rest = s.as_str();
+    while let Some(at) = rest.find("stream\n") {
+        let body = &rest[at + "stream\n".len()..];
+        let Some(end) = body.find("endstream") else {
+            break;
+        };
+        let mut text = String::new();
+        let mut chunk = &body[..end];
+        // `(text) Tj` is how a run is drawn; the documents below draw no
+        // brackets of their own, so every bracketed stretch is a run.
+        while let Some(open) = chunk.find('(') {
+            let after = &chunk[open + 1..];
+            let Some(close) = after.find(')') else {
+                break;
+            };
+            text.push_str(&after[..close]);
+            text.push(' ');
+            chunk = &after[close + 1..];
+        }
+        pages.push(text);
+        rest = &body[end + "endstream".len()..];
+    }
+    pages
+}
+
+/// The page number a contents entry prints against `title`.
+///
+/// The number is read off the END of the entry rather than the whole line
+/// being compared, because how many leader dots stand between the two is a
+/// question for the font: a machine with no TeX installation measures in an
+/// estimate and fits a different number of them.
+fn entry_number(contents: &str, title: &str) -> usize {
+    let at = contents
+        .find(title)
+        .unwrap_or_else(|| panic!("no contents entry for {title:?} in {contents:?}"));
+    contents[at + title.len()..]
+        .split_whitespace()
+        .find_map(|word| word.parse::<usize>().ok())
+        .unwrap_or_else(|| panic!("entry for {title:?} prints no page: {contents:?}"))
+}
+
+/// Which page of the document a word is set on, counting from one, ignoring
+/// the contents page itself -- where every one of these titles also stands.
+fn set_on(pages: &[String], contents: usize, word: &str) -> usize {
+    pages
+        .iter()
+        .enumerate()
+        .skip(contents + 1)
+        .find(|(_, page)| page.contains(word))
+        .map(|(at, _)| at + 1)
+        .unwrap_or_else(|| panic!("{word:?} is set on no page after the contents"))
+}
+
+#[test]
+fn a_contents_is_set_where_the_document_asked_for_one() {
+    // `\tableofcontents` expanded to nothing, so every book in the corpus --
+    // all 123 of them ask for one -- opened straight on its first chapter.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "front matter\n\\tableofcontents\n",
+        "\\chapter{Alpha}\nbody alpha\n\\end{document}\n"
+    );
+    let pages = page_texts(&texrs::run_pdf(src).expect("pdf"));
+    let contents: Vec<&String> = pages.iter().filter(|p| p.contains("Contents")).collect();
+    assert_eq!(
+        contents.len(),
+        1,
+        "one contents page, headed as report.cls heads it: {pages:?}"
+    );
+    assert!(
+        contents[0].contains("Alpha"),
+        "the chapter is listed on it: {:?}",
+        contents[0]
+    );
+}
+
+#[test]
+fn the_contents_names_the_page_each_chapter_starts_on() {
+    // The number an entry prints is not decoration: it is the page the chapter
+    // is set on, which is only known after the document has been broken and
+    // paginated WITH the contents in place -- and the contents moves those
+    // pages itself. See `typeset::contents_set`.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "front matter\n\\tableofcontents\n",
+        "\\chapter{Alpha}\nbody alpha\n",
+        "\\chapter{Beta}\nbody beta\n",
+        "\\chapter{Gamma}\nbody gamma\n\\end{document}\n"
+    );
+    let pages = page_texts(&texrs::run_pdf(src).expect("pdf"));
+    let contents = pages
+        .iter()
+        .position(|p| p.contains("Contents"))
+        .unwrap_or_else(|| panic!("no contents page: {pages:?}"));
+    for title in ["Alpha", "Beta", "Gamma"] {
+        assert_eq!(
+            entry_number(&pages[contents], title),
+            set_on(&pages, contents, title),
+            "the contents prints one page for {title} and the chapter is on another: {pages:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cover_sheet_is_not_counted_in_the_numbers_the_contents_prints() {
+    // `\end{titlepage}` is `\newpage` and then `\setcounter{page}\@ne` unless
+    // the class is two-sided (extreport.cls:514-518), and no document in the
+    // corpus says twoside. So the chapter on the third sheet of this is the
+    // document's page 2, and lualatex's own contents for these books prints
+    // exactly that: 1 for a chapter on sheet 2.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "\\begin{titlepage}\ncover\n\\end{titlepage}\n",
+        "\\tableofcontents\n",
+        "\\chapter{Alpha}\nbody alpha\n\\end{document}\n"
+    );
+    let pages = page_texts(&texrs::run_pdf(src).expect("pdf"));
+    let contents = pages
+        .iter()
+        .position(|p| p.contains("Contents"))
+        .unwrap_or_else(|| panic!("no contents page: {pages:?}"));
+    let sheet = set_on(&pages, contents, "Alpha");
+    assert_eq!(sheet, 3, "cover, contents, chapter: {pages:?}");
+    assert_eq!(
+        entry_number(&pages[contents], "Alpha"),
+        sheet - 1,
+        "the cover sheet is not one of the document's numbered pages: {pages:?}"
+    );
+}
+
+#[test]
+fn tocdepth_says_how_deep_the_contents_goes() {
+    // `\setcounter{tocdepth}{0}` is what every book in the corpus writes
+    // immediately above its `\tableofcontents`: a contents of chapters. Listing
+    // the sections too would put four hundred entries where lualatex puts
+    // forty, and the pages that costs are pages the reference has not got.
+    let doc = |depth: usize| {
+        format!(
+            "\\documentclass{{report}}\n\\begin{{document}}\n\
+             \\setcounter{{tocdepth}}{{{depth}}}\n\\tableofcontents\n\
+             \\chapter{{Alpha}}\nbody alpha\n\\section{{Inner}}\nmore body\n\
+             \\end{{document}}\n"
+        )
+    };
+    let contents_of = |depth: usize| {
+        let pages = page_texts(&texrs::run_pdf(&doc(depth)).expect("pdf"));
+        pages
+            .into_iter()
+            .find(|p| p.contains("Contents"))
+            .unwrap_or_else(|| panic!("no contents page at tocdepth {depth}"))
+    };
+    let flat = contents_of(0);
+    assert!(flat.contains("Alpha"), "the chapter is listed: {flat:?}");
+    assert!(
+        !flat.contains("Inner"),
+        "tocdepth 0 is chapters alone: {flat:?}"
+    );
+    let deep = contents_of(1);
+    assert!(
+        deep.contains("Inner"),
+        "tocdepth 1 lists the sections too: {deep:?}"
+    );
+}
+
+#[test]
+fn a_document_that_asks_for_no_contents_is_set_exactly_as_it_was() {
+    // The contents costs two extra passes over the whole document, and a
+    // document that never wrote `\tableofcontents` must not pay for them --
+    // nor gain a page it did not ask for.
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "front matter\n\\chapter{Alpha}\nbody alpha\n\\end{document}\n"
+    );
+    let pages = page_texts(&texrs::run_pdf(src).expect("pdf"));
+    assert_eq!(pages.len(), 2, "front matter, then the chapter: {pages:?}");
+    assert!(
+        !pages.iter().any(|p| p.contains("Contents")),
+        "nothing asked for one: {pages:?}"
+    );
+}

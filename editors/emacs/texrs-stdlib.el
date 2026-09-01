@@ -118,6 +118,9 @@
     "\\section"
     "\\subsection"
     "\\subsubsection"
+    "\\tableofcontents"
+    "\\setcounter"
+    "\\endtitlepage"
     "\\center"
     "\\endcenter"
     "\\centering"
@@ -270,6 +273,9 @@
     (puthash "\\section" "\\section  —  Begin a section: the heading text, with a line of vertical space above it and a line below. [LaTeX]" table)
     (puthash "\\subsection" "\\subsection  —  Begin a subsection. [LaTeX]" table)
     (puthash "\\subsubsection" "\\subsubsection  —  Begin a subsubsection, set as `\\section` and `\\subsection` are: its own lines, with a line of vertical space above and below. [LaTeX]" table)
+    (puthash "\\tableofcontents" "\\tableofcontents  —  Set a table of contents: one line per heading, with leader dots and the page it starts on. [LaTeX]" table)
+    (puthash "\\setcounter" "\\setcounter  —  Set a counter. [LaTeX]" table)
+    (puthash "\\endtitlepage" "\\endtitlepage  —  End a title page, which `\\end{titlepage}` runs. [LaTeX]" table)
     (puthash "\\center" "\\center  —  Start centring the lines that follow. [LaTeX]" table)
     (puthash "\\endcenter" "\\endcenter  —  Stop centring: what `\\end{center}` runs, and the close of the region `\\center` opened. [LaTeX]" table)
     (puthash "\\centering" "\\centering  —  Centre every line up to the end of the group or the environment that holds it. [LaTeX]" table)

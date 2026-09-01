@@ -156,6 +156,12 @@ fn without_marks(text: &str) -> String {
             // the lowerer wrote and stays; the depth digit after the marker
             // goes the way a face code does.
             crate::typeset::LIST_INDENT => face_code = true,
+            // Where a contents belongs, which heading feeds it, and where the
+            // page numbering starts are all facts about the pages rather than
+            // words the document wrote. The contents itself is built by the
+            // typesetter out of pages, which a reader asking for the text has
+            // not got; its code character goes the way a face code does.
+            crate::typeset::TOC => face_code = true,
             _ if face_code => face_code = false,
             c if in_spec => {
                 let _ = c;

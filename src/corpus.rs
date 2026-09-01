@@ -686,6 +686,25 @@ pub const CORPUS: &[Entry] = &[
         "Begin a subsubsection, set as `\\section` and `\\subsection` are: its own lines, with a line of vertical space above and below.",
         "\\subsubsection{TITLE}\n\\subsubsection*{Unnumbered}",
     ),
+    // ── Contents — lower::lower_page_break, typeset::contents_set ────────
+    (
+        "\\tableofcontents",
+        "LaTeX",
+        "Set a table of contents: one line per heading, with leader dots and the page it starts on. The prelude expanded this to nothing, so every book in the corpus opened straight on its first chapter and was short by the pages a contents takes. The page numbers cannot be known when this is read -- the contents is set before the chapters it lists, and it moves them itself -- so what goes into the text here is a REQUEST, and the typesetter breaks and paginates the document repeatedly until the numbers stop moving, which is what running latex twice does with the `.aux` file.",
+        "\\setcounter{tocdepth}{0}\n\\tableofcontents\n\\chapter{First}",
+    ),
+    (
+        "\\setcounter",
+        "LaTeX",
+        "Set a counter. Both arguments are read and nothing is set, as the prelude's stub did, with one exception: `tocdepth` says how deep `\\tableofcontents` lists, 0 for chapters alone and one more for each step down, and it is read here because a contents two levels deeper lists some hundreds of headings a document never asked for. The class default is 2.",
+        "\\setcounter{tocdepth}{0}\n\\setcounter{secnumdepth}{-1}",
+    ),
+    (
+        "\\endtitlepage",
+        "LaTeX",
+        "End a title page, which `\\end{titlepage}` runs. It is `\\newpage`, and then `\\setcounter{page}{1}` unless the class is two-sided (extreport.cls, which every book in the corpus loads): the cover sheet is not one of the document's numbered pages, so every number the contents prints is one less than the sheet it stands on. The command is handed on rather than consumed, because an `\\end...` is also what closes a `\\centering` region and a title page is built out of centred pieces.",
+        "\\begin{titlepage}\ncover\n\\end{titlepage}",
+    ),
     // ── Centring — lower::lower_centre ───────────────────────────────────
     (
         "\\center",

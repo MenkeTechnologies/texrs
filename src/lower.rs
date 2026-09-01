@@ -78,6 +78,13 @@ pub struct Lowerer {
     /// How many `\input` files are open above this one, so a file that inputs
     /// itself stops with a diagnostic instead of exhausting the host stack.
     input_depth: usize,
+    /// How deep a contents lists, which is LaTeX's `tocdepth`.
+    ///
+    /// 2 is the class default -- chapter, section, subsection. Every book in
+    /// the corpus sets 0 immediately above its `\tableofcontents`, which is a
+    /// contents of chapters, and setting one two levels deeper would list some
+    /// four hundred headings where lualatex lists forty.
+    pub toc_depth: usize,
     /// How deep `block` is currently nested.
     ///
     /// Lowering inlines a macro into the stream and lowers through its body, and
@@ -165,7 +172,25 @@ impl Lowerer {
             depth: 0,
             lists: Vec::new(),
             table_depth: 0,
+            toc_depth: 2,
         }
+    }
+
+    /// One macro argument as the characters in it.
+    ///
+    /// `read_balanced_group` scans an argument the way TeX does -- a brace
+    /// group, or one token standing in for one -- so a `\setcounter` read here
+    /// consumes exactly what the prelude's two-argument stub consumed. Control
+    /// sequences inside it are dropped: a counter is named in letters.
+    fn group_chars(&mut self, lx: &mut Lexer) -> R<String> {
+        let toks = self.eng.read_balanced_group(lx)?;
+        Ok(toks
+            .iter()
+            .filter_map(|t| match t {
+                crate::token::Token::Char(c, _) => Some(*c),
+                crate::token::Token::Cs(_) => None,
+            })
+            .collect())
     }
 
     /// Where the hidden scratch registers have got to.
@@ -965,7 +990,7 @@ impl Lowerer {
                 self.eng.skip_optional_star(lx);
                 let _ = self.eng.read_optional_bracket(lx)?;
                 self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
-                self.push_heading(out, 6, 4, lx)?;
+                self.push_heading(out, 6, 4, lx, 0)?;
                 Ok(true)
             }
             // The section headings. Same treatment and for the same reason as
@@ -974,8 +999,60 @@ impl Lowerer {
             "section" | "subsection" | "subsubsection" => {
                 self.eng.skip_optional_star(lx);
                 let _ = self.eng.read_optional_bracket(lx)?;
-                self.push_heading(out, 2, 2, lx)?;
+                // The depth the contents knows it by: `tocdepth` counts a
+                // chapter 0 and each step down one more.
+                let level = match name.name() {
+                    "section" => 1,
+                    "subsection" => 2,
+                    _ => 3,
+                };
+                self.push_heading(out, 2, 2, lx, level)?;
                 Ok(true)
+            }
+            // The contents, which the prelude answered with nothing: every
+            // book in the corpus opens with one and none of them was set. What
+            // goes here is the REQUEST -- the contents cannot be built until
+            // the pages its entries name exist, so the typesetter builds it
+            // (`typeset::contents_set`).
+            "tableofcontents" => {
+                // The mark alone, with no paragraph break around it: the
+                // contents the typesetter puts in its place opens and closes
+                // with the breaks it needs, and a document read as TEXT --
+                // which has no pages and so no contents -- is then exactly
+                // the text it was before.
+                self.push_text(out, &crate::typeset::toc_request_mark(self.toc_depth));
+                Ok(true)
+            }
+            // `\setcounter{tocdepth}{n}` says how deep the contents goes, and
+            // it is the one counter read here: the prelude swallows
+            // `\setcounter` whole, and every book sets this one to 0 -- a
+            // contents of chapters -- immediately above its
+            // `\tableofcontents`. Both arguments are consumed either way, as
+            // the prelude's two-argument stub consumed them, so a counter this
+            // does not know is set exactly as it was before.
+            "setcounter" => {
+                let counter = self.group_chars(lx)?;
+                let value = self.group_chars(lx)?;
+                if counter.trim() == "tocdepth" {
+                    if let Ok(depth) = value.trim().parse::<usize>() {
+                        self.toc_depth = depth;
+                    }
+                }
+                Ok(true)
+            }
+            // `\end{titlepage}` is `\newpage` and then, unless the class is
+            // two-sided, `\setcounter{page}\@ne` (extreport.cls:514-518). So
+            // the cover sheet is not one of the document's numbered pages and
+            // the contents entries are a page lower than the sheets they stand
+            // on. The mark goes BEFORE the break, so that it lands on the
+            // cover sheet itself -- which is what it is about; the command is
+            // handed back rather than consumed, because an `\end...` is also
+            // what closes a `\centering` region and a title page is built out
+            // of centred pieces.
+            "endtitlepage" => {
+                let mark = crate::typeset::toc_page_one_mark();
+                self.push_text(out, &format!("{mark}{}", crate::typeset::PAGE_BREAK));
+                Ok(false)
             }
             _ => Ok(false),
         }
@@ -991,12 +1068,18 @@ impl Lowerer {
     /// a line and a half either side of a section; a heading set with none of
     /// that is indistinguishable from the paragraph it introduces, and the
     /// page holds lines that lualatex spends on white space.
+    ///
+    /// `level` is what the contents knows the heading by -- 0 for a chapter,
+    /// one more for each step down. The mark naming it goes at the head of the
+    /// heading's own paragraph, so the title is everything from the mark to
+    /// the paragraph break: that is what `typeset::contents_entries` reads.
     fn push_heading(
         &mut self,
         out: &mut Vec<Cmd>,
         above: usize,
         below: usize,
         lx: &mut Lexer,
+        level: usize,
     ) -> R<()> {
         let space = crate::typeset::VERTICAL_SPACE.to_string();
         // The heading owns its own lines rather than running into the
@@ -1005,6 +1088,7 @@ impl Lowerer {
         self.push_text(out, "\n\n");
         self.push_text(out, &space.repeat(above));
         self.push_text(out, "\n\n");
+        self.push_text(out, &crate::typeset::toc_entry_mark(level));
         let raw = self.eng.read_balanced_group(lx)?;
         self.lower_into(&raw, out)?;
         self.push_text(out, "\n\n");

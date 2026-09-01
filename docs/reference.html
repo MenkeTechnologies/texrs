@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">148</div>
+            <div class="stat-val">151</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -394,6 +394,14 @@ second page</pre></td></tr>
 \subsection*{Unnumbered}</pre></td></tr>
             <tr><td><code>\subsubsection</code></td><td>Begin a subsubsection, set as <code>\section</code> and <code>\subsection</code> are: its own lines, with a line of vertical space above and below.</td><td><pre>\subsubsection{TITLE}
 \subsubsection*{Unnumbered}</pre></td></tr>
+            <tr><td><code>\tableofcontents</code></td><td>Set a table of contents: one line per heading, with leader dots and the page it starts on. The prelude expanded this to nothing, so every book in the corpus opened straight on its first chapter and was short by the pages a contents takes. The page numbers cannot be known when this is read -- the contents is set before the chapters it lists, and it moves them itself -- so what goes into the text here is a REQUEST, and the typesetter breaks and paginates the document repeatedly until the numbers stop moving, which is what running latex twice does with the <code>.aux</code> file.</td><td><pre>\setcounter{tocdepth}{0}
+\tableofcontents
+\chapter{First}</pre></td></tr>
+            <tr><td><code>\setcounter</code></td><td>Set a counter. Both arguments are read and nothing is set, as the prelude's stub did, with one exception: <code>tocdepth</code> says how deep <code>\tableofcontents</code> lists, 0 for chapters alone and one more for each step down, and it is read here because a contents two levels deeper lists some hundreds of headings a document never asked for. The class default is 2.</td><td><pre>\setcounter{tocdepth}{0}
+\setcounter{secnumdepth}{-1}</pre></td></tr>
+            <tr><td><code>\endtitlepage</code></td><td>End a title page, which <code>\end{titlepage}</code> runs. It is <code>\newpage</code>, and then <code>\setcounter{page}{1}</code> unless the class is two-sided (extreport.cls, which every book in the corpus loads): the cover sheet is not one of the document's numbered pages, so every number the contents prints is one less than the sheet it stands on. The command is handed on rather than consumed, because an <code>\end...</code> is also what closes a <code>\centering</code> region and a title page is built out of centred pieces.</td><td><pre>\begin{titlepage}
+cover
+\end{titlepage}</pre></td></tr>
             <tr><td><code>\center</code></td><td>Start centring the lines that follow. This is what <code>\begin{center}</code> runs, the way latex.ltx has it: <code>\begin{x}</code> is <code>\csname x\endcsname</code> here, so the environment IS this control sequence. Each line inside is positioned by the width it measures rather than at the left margin. Without it a centred line and the line after it were filled into one flowing line, which is most of why a title page collapsed into the prose under it.</td><td><pre>\begin{center}
 centred
 \end{center}</pre></td></tr>
