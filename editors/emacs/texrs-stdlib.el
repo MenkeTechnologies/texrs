@@ -152,6 +152,7 @@
     "\\setromanfont"
     "\\setsansfont"
     "\\setmonofont"
+    "\\directlua"
     "\\ttfamily"
     "\\bfseries"
     "\\itshape"
@@ -303,6 +304,7 @@
     (puthash "\\setromanfont" "\\setromanfont  —  The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps. [LaTeX]" table)
     (puthash "\\setsansfont" "\\setsansfont  —  Record the document's sans-serif family. [LaTeX]" table)
     (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`, and the face `\\ttfamily` selects. [LaTeX]" table)
+    (puthash "\\directlua" "\\directlua  —  Hand a chunk to LuaTeX's embedded Lua interpreter. [LaTeX]" table)
     (puthash "\\ttfamily" "\\ttfamily  —  Set in the monospace face, until the group holding the declaration closes. [LaTeX]" table)
     (puthash "\\bfseries" "\\bfseries  —  Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. [LaTeX]" table)
     (puthash "\\itshape" "\\itshape  —  Set in the italic face, until the group holding the declaration closes; `\\textit{...}` and `\\emph{...}` are both `{\\itshape ...}`. [LaTeX]" table)

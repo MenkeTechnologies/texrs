@@ -463,6 +463,21 @@ impl Lowerer {
             if self.text_output && self.lower_list(lx, name, &mut out)? {
                 continue;
             }
+            // `\directlua` has no Lua behind it here and the prelude answers it
+            // with nothing, so its chunk was read and thrown away. One thing a
+            // corpus book puts inside it is the only statement anywhere of
+            // WHICH faces a glyph its own face lacks comes from -- the box
+            // drawing, the arrows and the Greek that made these books need
+            // LuaTeX. The chunk is still not run; it is read for that list and
+            // then dropped, which is what it was before.
+            if name.name() == "directlua" {
+                let chunk = self.eng.read_group_text_pub(lx)?;
+                let chain = crate::typeset::fallback_chain(&chunk);
+                if !chain.is_empty() {
+                    self.fonts.fallbacks = chain;
+                }
+                continue;
+            }
             // A control sequence MEANS what it was last defined as. The
             // dispatch below is by NAME, so a document that redefines a
             // primitive was still getting the primitive. LaTeX redefines `\end`

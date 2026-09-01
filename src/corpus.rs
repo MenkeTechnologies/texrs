@@ -895,6 +895,12 @@ pub const CORPUS: &[Entry] = &[
         "\\setmonofont[OPTIONS]{FAMILY}[OPTIONS]\n\\setmonofont{Cousine}\n\\setmonofont{ShareTechMono}[Path=./.fonts/,Extension=.ttf,UprightFont=ShareTechMono-Regular]",
     ),
     (
+        "\\directlua",
+        "LaTeX",
+        "Hand a chunk to LuaTeX's embedded Lua interpreter. texrs has none, so the chunk is read and not run — and one thing in it IS read: `luaotfload.add_fallback` names the faces a glyph the document's own face lacks is fetched from, and that list is the only statement of it a document makes. The PDF backend loads those families in order, asks each one's `cmap` for the character, and draws the first face that has it, carrying only the glyphs the document borrowed. What a chunk computes is still not available, so a document whose OUTPUT depended on the Lua is wrong here rather than refused.",
+        "\\directlua{CHUNK}\n\\directlua{luaotfload.add_fallback(\"symfb\", {\"Arial Unicode MS:mode=base;\", \"Arial:mode=base;\"})}",
+    ),
+    (
         "\\ttfamily",
         "LaTeX",
         "Set in the monospace face, until the group holding the declaration closes. This is what `\\texttt{...}` is made of — `{\\ttfamily ...}` — and it is honoured here rather than in the text command, because a document that redefines `\\texttt` to colour its inline code writes the declaration in the replacement. The face is the file or family `\\setmonofont` named, embedded when it can be found, Courier when it cannot, and the main face when the document named no monospace family at all.",

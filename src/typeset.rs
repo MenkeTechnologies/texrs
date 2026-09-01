@@ -1183,6 +1183,9 @@ pub enum Glyph {
     Own(u8),
     /// A code in the Symbol font, which has it where the face does not.
     Fallback(u8),
+    /// A glyph in one of the faces the DOCUMENT named as its fallback chain:
+    /// which face of the chain, and which glyph of that face.
+    Outside(usize, u16),
     /// ASCII the face draws itself, standing in for a shape nothing has.
     StandIn(&'static str),
 }
@@ -1192,7 +1195,17 @@ pub enum Glyph {
 /// `covers` answers from the font file's own `cmap`, which `embed_file` already
 /// reads: whether a face HAS a codepoint is a question the file answers, and
 /// asking it is the difference between a glyph and a blank.
-pub fn glyph_for(ch: char, covers: &dyn Fn(char) -> bool) -> Option<Glyph> {
+///
+/// `outside` is the document's own fallback chain, asked after the Symbol font
+/// and before the stand-ins. After Symbol, because Symbol is one of the
+/// fourteen and costs the file nothing where it has the character; before the
+/// stand-ins, because `─` set as `-` is a picture redrawn and `─` set from a
+/// face that has it is the picture.
+pub fn glyph_for(
+    ch: char,
+    covers: &dyn Fn(char) -> bool,
+    outside: &dyn Fn(char) -> Option<(usize, u16)>,
+) -> Option<Glyph> {
     if let Some(code) = winansi_code(ch) {
         if ch.is_ascii() || covers(ch) {
             return Some(Glyph::Own(code));
@@ -1201,7 +1214,247 @@ pub fn glyph_for(ch: char, covers: &dyn Fn(char) -> bool) -> Option<Glyph> {
     if let Some((_, code, _)) = SYMBOL_FONT.iter().find(|(c, _, _)| *c == ch) {
         return Some(Glyph::Fallback(*code));
     }
+    if let Some((face, glyph)) = outside(ch) {
+        return Some(Glyph::Outside(face, glyph));
+    }
     FontChain::approximate(ch).map(Glyph::StandIn)
+}
+
+/// The faces a document named to fetch a missing glyph from, loaded.
+///
+/// This is `luaotfload.add_fallback` itself rather than the fixed stand-in for
+/// it: the chain is the document's, the answer per character comes out of each
+/// face's own `cmap`, and what is drawn is that face's glyph. A face that
+/// cannot be found, or that carries PostScript outlines a `/FontFile2` may not
+/// hold, is skipped -- the chain then degrades to the next one, and to the
+/// stand-ins after that, exactly as it did before there was a chain at all.
+#[derive(Default)]
+pub struct Fallbacks {
+    faces: Vec<Outside>,
+    /// Each face as the file will carry it, built once `reserve` has been told
+    /// every character the document draws. Building it per piece instead would
+    /// subset a 23 MB face thirty thousand times over.
+    carried: Vec<Option<crate::pdf::Font>>,
+}
+
+/// One face of the chain: enough of its file to answer for a character, and the
+/// glyphs the document has asked it for so far.
+struct Outside {
+    name: String,
+    bytes: Vec<u8>,
+    cmap: std::collections::BTreeMap<u32, u16>,
+    advances: Vec<u16>,
+    upem: f64,
+    bbox: [i64; 4],
+    ascent: i64,
+    descent: i64,
+    /// Glyph id to the character it was fetched for. A `BTreeMap` so the `/W`
+    /// array and the `/ToUnicode` map come out in the same order every run,
+    /// which is what makes two runs of the same book the same file.
+    used: std::collections::BTreeMap<u16, char>,
+}
+
+impl Fallbacks {
+    /// Load each family of the chain, skipping any that cannot be embedded.
+    pub fn load(families: &[String]) -> Fallbacks {
+        let mut faces = Vec::new();
+        for family in families {
+            let Some(path) = find_fallback_family(family) else {
+                continue;
+            };
+            let Some(face) = Outside::open(&path) else {
+                continue;
+            };
+            faces.push(face);
+        }
+        Fallbacks {
+            faces,
+            carried: Vec::new(),
+        }
+    }
+
+    /// Which face of the chain has `ch`, and which of its glyphs it is.
+    ///
+    /// Glyph 0 is `.notdef` -- the empty box -- so a `cmap` that answers with
+    /// it has not answered, and the search goes on to the next face.
+    pub fn glyph(&self, ch: char) -> Option<(usize, u16)> {
+        self.faces.iter().enumerate().find_map(|(at, face)| {
+            match face.cmap.get(&(ch as u32)).copied() {
+                Some(gid) if gid != 0 => Some((at, gid)),
+                _ => None,
+            }
+        })
+    }
+
+    /// Note that the document draws `ch`, so the file carries a width and a
+    /// meaning for the glyph it comes out as.
+    pub fn reserve(&mut self, ch: char) {
+        if let Some((at, gid)) = self.glyph(ch) {
+            self.faces[at].used.insert(gid, ch);
+        }
+    }
+
+    /// What one glyph of one face advances, in points at `size`.
+    pub fn width(&self, face: usize, glyph: u16, size: f64) -> f64 {
+        self.faces
+            .get(face)
+            .map(|f| f.width(glyph) as f64 / 1000.0 * size)
+            .unwrap_or(0.0)
+    }
+
+    /// Build each face into the font the file will carry, now that every
+    /// character the document draws has been reserved.
+    pub fn settle(&mut self) {
+        self.carried = self.faces.iter().map(Outside::font).collect();
+    }
+
+    /// One face of the chain as a font the file can carry.
+    pub fn font(&self, face: usize) -> Option<&crate::pdf::Font> {
+        self.carried.get(face)?.as_ref()
+    }
+
+    /// Whether the chain resolved to anything at all.
+    pub fn is_empty(&self) -> bool {
+        self.faces.is_empty()
+    }
+}
+
+impl Outside {
+    fn open(path: &std::path::Path) -> Option<Outside> {
+        let bytes = std::fs::read(path).ok()?;
+        let sfnt = crate::sfnt::Sfnt::parse(bytes.clone()).ok()?;
+        // A CFF-flavoured OpenType carries PostScript outlines, which a
+        // `/FontFile2` must not: that entry means a TrueType font program.
+        if sfnt.is_cff() {
+            return None;
+        }
+        let head = sfnt.head().ok()?;
+        let hhea = sfnt.hhea().ok()?;
+        let upem = f64::from(head.units_per_em.max(1));
+        let scale = |v: f64| (v * 1000.0 / upem).round() as i64;
+        Some(Outside {
+            name: path.file_stem()?.to_string_lossy().replace(' ', ""),
+            cmap: sfnt.cmap().ok()?,
+            advances: sfnt.advance_widths().ok()?,
+            upem,
+            bbox: [
+                scale(f64::from(head.x_min)),
+                scale(f64::from(head.y_min)),
+                scale(f64::from(head.x_max)),
+                scale(f64::from(head.y_max)),
+            ],
+            ascent: scale(f64::from(hhea.ascender)),
+            descent: scale(f64::from(hhea.descender)),
+            bytes,
+            used: std::collections::BTreeMap::new(),
+        })
+    }
+
+    /// A glyph's advance in 1/1000 em, which is what a PDF width is.
+    ///
+    /// `hmtx` runs short of `maxp` by design: every glyph past the last entry
+    /// advances what that entry does, which is how a monospace face stores one
+    /// width for thousands of glyphs.
+    fn width(&self, glyph: u16) -> i64 {
+        let adv = self
+            .advances
+            .get(glyph as usize)
+            .or_else(|| self.advances.last())
+            .copied()
+            .unwrap_or(0);
+        (f64::from(adv) * 1000.0 / self.upem).round() as i64
+    }
+
+    /// The face as the file will carry it: the glyphs this document borrowed,
+    /// and nothing else of a face that may hold fifty thousand.
+    ///
+    /// `None` when nothing was borrowed from it, and when the subset cannot be
+    /// built -- a face whose `glyf` or `loca` cannot be read is one nothing
+    /// here can embed, and the chain has already fallen through to it.
+    fn font(&self) -> Option<crate::pdf::Font> {
+        if self.used.is_empty() {
+            return None;
+        }
+        let sfnt = crate::sfnt::Sfnt::parse(self.bytes.clone()).ok()?;
+        let bytes = sfnt.subset(&self.used.keys().copied().collect()).ok()?;
+        Some(crate::pdf::Font::Glyphs {
+            name: self.name.clone(),
+            bytes,
+            glyphs: self
+                .used
+                .iter()
+                .map(|(gid, ch)| (*gid, *ch, self.width(*gid)))
+                .collect(),
+            bbox: self.bbox,
+            ascent: self.ascent,
+            descent: self.descent,
+        })
+    }
+}
+
+/// The file for a family named in a fallback chain.
+///
+/// Looser than `find_family` in one way, and deliberately: a chain names
+/// families as a person writes them -- `Arial Unicode MS` -- and the file is
+/// `Arial Unicode.ttf`, so a rule that only accepts a stem STARTING with the
+/// name asked for rejects the very font the chain was written for. Here either
+/// may be the longer, which resolves that pair and still refuses `Arial` for
+/// `Helvetica`. The strict rule is left alone where `\setmainfont` uses it: a
+/// body face resolved loosely would set a whole book in the wrong one, while a
+/// fallback resolved loosely draws one glyph from a near neighbour.
+pub fn find_fallback_family(family: &str) -> Option<std::path::PathBuf> {
+    let wanted = normalise(family);
+    // Too short a name matches half the system: `MS` would take `MSGothic`.
+    if wanted.len() < 4 {
+        return None;
+    }
+    let close = |path: &std::path::Path| {
+        let stem = path
+            .file_stem()
+            .map(|s| normalise(&s.to_string_lossy()))
+            .unwrap_or_default();
+        stem.len() >= 4 && (stem.starts_with(&wanted) || wanted.starts_with(&stem))
+    };
+    if let Ok(out) = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", family])
+        .output()
+    {
+        if out.status.success() {
+            let answer = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let path = std::path::Path::new(&answer);
+            // fc-match ALWAYS answers, with a default when it has no match, so
+            // the answer is only useful if it looks like the family asked for.
+            if path.exists() && close(path) {
+                return Some(path.to_path_buf());
+            }
+        }
+    }
+    for dir in [
+        "/System/Library/Fonts",
+        "/System/Library/Fonts/Supplemental",
+        "/Library/Fonts",
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+    ] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if ext != "ttf" && ext != "otf" {
+                continue;
+            }
+            if close(&path) {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 /// What a code in the fallback font MEANS, as against which glyph it draws.
@@ -1382,6 +1635,54 @@ pub struct Families {
     /// beside itself, so the family name alone resolves to nothing and
     /// `\texttt` would be set in the body font after all.
     pub mono_file: FontFile,
+    /// The families a character none of the above can draw is fetched from,
+    /// in the order the document listed them.
+    ///
+    /// A book SHIPS its faces -- `\setmainfont{Arimo}` with `Path=` and
+    /// `UprightFont=`, embedded whole -- and a character Arimo has no glyph for
+    /// has nowhere to go: the Symbol font covers the arrows and the Greek and
+    /// nothing else, so U+2500 fell to an ASCII stand-in and the box drawing
+    /// came out as hyphens. This is the chain the document itself names, and
+    /// naming it is the reason its build required LuaTeX.
+    pub fallbacks: Vec<String>,
+}
+
+/// The families named by `luaotfload.add_fallback`, in the order given.
+///
+/// Every book in the corpus opens with one statement of where a missing glyph
+/// comes from:
+///
+/// ```text
+/// \directlua{luaotfload.add_fallback("symfb", {"Arial Unicode MS:mode=base;",
+///   "Arial:mode=base;", "STIX Two Math:mode=base;", "Noto Emoji:mode=base;"})}
+/// ```
+///
+/// texrs has no Lua, so the chunk is read rather than run: what is wanted from
+/// it is the list of family names, and a name is everything before the `:` that
+/// introduces luaotfload's own options. Anything else inside `\directlua`
+/// yields nothing, which leaves the document with no chain and the stand-ins it
+/// had before.
+pub fn fallback_chain(chunk: &str) -> Vec<String> {
+    let Some(rest) = chunk.split_once("add_fallback").map(|(_, r)| r) else {
+        return Vec::new();
+    };
+    // The braced table is the second argument; the first is the chain's own
+    // name, which nothing here refers to.
+    let Some(table) = rest.split_once('{').and_then(|(_, r)| r.split_once('}')) else {
+        return Vec::new();
+    };
+    table
+        .0
+        .split(',')
+        .filter_map(|item| {
+            let quoted = item.trim().trim_matches('"');
+            let name = quoted.split(':').next().unwrap_or("").trim();
+            match name.is_empty() {
+                true => None,
+                false => Some(name.to_string()),
+            }
+        })
+        .collect()
 }
 
 /// The face a stretch of text is set in.
@@ -1405,6 +1706,12 @@ pub enum Face {
 }
 
 impl Face {
+    /// Every face a page can be set in, which is what a question asked of all
+    /// of them iterates: whether a character needs fetching from outside is one
+    /// such question, and it is asked once for the document rather than once a
+    /// line.
+    pub const ALL: [Face; 4] = [Face::Main, Face::Mono, Face::Bold, Face::Italic];
+
     /// The one character that names this face inside a marker.
     pub fn code(self) -> char {
         match self {
@@ -1607,6 +1914,29 @@ pub fn to_pdf(
         Some(has) => has.contains(&(ch as u32)),
         None => true,
     };
+    // The faces the DOCUMENT named to fetch a missing glyph from, and the
+    // glyphs it is about to ask them for. Reserving them first is what keeps
+    // the file's `/W` array to the nine glyphs a book borrowed rather than to
+    // all fifty thousand a broad face carries; the scan is over the DISTINCT
+    // characters, so it costs one pass whatever the book's length.
+    let mut fallbacks = Fallbacks::load(&families.fallbacks);
+    if !fallbacks.is_empty() {
+        let distinct: std::collections::BTreeSet<char> =
+            printing_chars(text).filter(|c| !c.is_ascii()).collect();
+        for ch in distinct {
+            // Only what a face cannot draw and the Symbol font has not got:
+            // asking for the rest would carry glyphs nothing ever draws.
+            let drawn_already = SYMBOL_FONT.iter().any(|(c, _, _)| *c == ch)
+                || Face::ALL
+                    .iter()
+                    .all(|face| winansi_code(ch).is_some() && covers(ch, *face));
+            if !drawn_already {
+                fallbacks.reserve(ch);
+            }
+        }
+        fallbacks.settle();
+    }
+    let outside = |ch: char| fallbacks.glyph(ch);
     let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
     // What a stretch the face draws ITSELF costs. The codes are what the file
     // will hold and the characters are what the document wrote; the two differ
@@ -1632,17 +1962,23 @@ pub fn to_pdf(
         }
     };
     let piece_width = |piece: &Piece, face: Face| -> f64 {
-        match piece.fallback {
+        match piece.from {
             // The fallback font's metrics are its own, and they are nothing
             // like the face's: `arrowright` is 987/1000 em where a letter is
             // about 500. Charging the face's widths for it would push every
             // line holding an arrow off the measure.
-            true => piece
+            Source::Symbol => piece
                 .codes
                 .chars()
                 .map(|c| symbol_width(c as u8) as f64 / 1000.0 * layout.size)
                 .sum(),
-            false => own_width(&piece.codes, &piece.source, face),
+            // A borrowed face's metrics are its own for the same reason, and
+            // they are read from its `hmtx` by the glyph the piece names --
+            // two bytes to the glyph, so the codes are taken in pairs.
+            Source::Outside(at) => glyph_ids(&piece.codes)
+                .map(|glyph| fallbacks.width(at, glyph, layout.size))
+                .sum(),
+            Source::Face => own_width(&piece.codes, &piece.source, face),
         }
     };
     // Every branch measures through `printing_chars`. A marker's spec is digits
@@ -1660,7 +1996,7 @@ pub fn to_pdf(
             let plain: String = printing_chars(word).collect();
             return own_width(&plain, &plain, face);
         }
-        drawn(word, &|c| covers(c, face))
+        drawn(word, &|c| covers(c, face), &outside)
             .iter()
             .map(|piece| piece_width(piece, face))
             .sum()
@@ -1832,10 +2168,16 @@ pub fn to_pdf(
                 // different font resource and so a `Tf` of its own. The pieces
                 // are positioned exactly as the runs are, each one advancing x
                 // by what it just drew.
-                for piece in drawn(&plain, &|c| covers(c, face)) {
-                    let font = match piece.fallback {
-                        true => Font::Base14(SYMBOL_FONT_NAME.to_string()),
-                        false => fonts[face.index()].clone(),
+                for piece in drawn(&plain, &|c| covers(c, face), &outside) {
+                    let font = match piece.from {
+                        Source::Symbol => Font::Base14(SYMBOL_FONT_NAME.to_string()),
+                        // The face the chain answered with, carried in the file
+                        // as the glyphs this document borrowed from it.
+                        Source::Outside(at) => match fallbacks.font(at) {
+                            Some(font) => font.clone(),
+                            None => continue,
+                        },
+                        Source::Face => fonts[face.index()].clone(),
                     };
                     // The piece takes its share of the room: what it measures,
                     // plus the widening for each space that falls inside it.
@@ -1843,7 +2185,13 @@ pub fn to_pdf(
                     // glyphs come to, or the piece after it would be drawn back
                     // over the space just widened.
                     let natural = piece_width(&piece, face);
-                    let spaces = piece.codes.chars().filter(|c| *c == ' ').count() as f64;
+                    // A borrowed face's codes are glyph ids, and a byte 0x20
+                    // inside one is half an id rather than a space: there is
+                    // nothing on such a piece for the room to be shared over.
+                    let spaces = match piece.from {
+                        Source::Outside(_) => 0.0,
+                        _ => piece.codes.chars().filter(|c| *c == ' ').count() as f64,
+                    };
                     let set = Set {
                         natural,
                         width: natural + extra * spaces,
@@ -1867,8 +2215,34 @@ struct Piece {
     /// The document's own characters, for a face whose widths are not in the
     /// file and are measured out of `cmr10` instead.
     source: String,
-    /// Whether the codes are the fallback font's rather than the face's.
-    fallback: bool,
+    /// Which font of the chain draws this stretch.
+    from: Source,
+}
+
+/// The glyph ids a borrowed face's piece names, out of its two-byte codes.
+///
+/// The codes are held as `char`s under 256 and not as bytes, because that is
+/// what the content stream escapes one at a time; reading them back as UTF-8
+/// bytes would split every code above 127 into two.
+fn glyph_ids(codes: &str) -> impl Iterator<Item = u16> + '_ {
+    let mut chars = codes.chars();
+    std::iter::from_fn(move || {
+        let hi = chars.next()?;
+        let lo = chars.next()?;
+        Some((hi as u16) << 8 | lo as u16)
+    })
+}
+
+/// Which font of the chain a piece is drawn from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    /// The face in force, in its own WinAnsi codes.
+    Face,
+    /// The Symbol font, in its own codes.
+    Symbol,
+    /// One face of the document's own fallback chain, in glyph ids: two bytes
+    /// a glyph, because that is what `/Identity-H` addresses.
+    Outside(usize),
 }
 
 /// Resolve a run through the chain, into the stretches each font draws.
@@ -1877,28 +2251,42 @@ struct Piece {
 /// of prose is still one `Tj` and only the arrow in the middle of it is its
 /// own. A character that no face, no fallback and no stand-in has is left out,
 /// which is what the DVI path does with the same character.
-fn drawn(text: &str, covers: &dyn Fn(char) -> bool) -> Vec<Piece> {
+fn drawn(
+    text: &str,
+    covers: &dyn Fn(char) -> bool,
+    outside: &dyn Fn(char) -> Option<(usize, u16)>,
+) -> Vec<Piece> {
     let mut pieces: Vec<Piece> = Vec::new();
     for ch in printing_chars(text) {
-        let Some(glyph) = glyph_for(ch, covers) else {
+        let Some(glyph) = glyph_for(ch, covers, outside) else {
             continue;
         };
-        let (fallback, codes, source) = match glyph {
-            Glyph::Own(code) => (false, (code as char).to_string(), ch.to_string()),
-            Glyph::Fallback(code) => (true, (code as char).to_string(), ch.to_string()),
+        let (from, codes, source) = match glyph {
+            Glyph::Own(code) => (Source::Face, (code as char).to_string(), ch.to_string()),
+            Glyph::Fallback(code) => (Source::Symbol, (code as char).to_string(), ch.to_string()),
+            // A glyph id is a two-byte code, written high byte first the way
+            // `/Identity-H` reads it, and held as two `char`s under 256 so the
+            // content stream escapes each of them as the one byte it is.
+            Glyph::Outside(face, glyph) => (
+                Source::Outside(face),
+                [(glyph >> 8) as u8 as char, (glyph & 0xFF) as u8 as char]
+                    .iter()
+                    .collect(),
+                ch.to_string(),
+            ),
             // A stand-in is measured as what it SETS and not as what it stands
             // for: `Cmd` takes three letters' room wherever it lands.
-            Glyph::StandIn(text) => (false, text.to_string(), text.to_string()),
+            Glyph::StandIn(text) => (Source::Face, text.to_string(), text.to_string()),
         };
         match pieces.last_mut() {
-            Some(last) if last.fallback == fallback => {
+            Some(last) if last.from == from => {
                 last.codes.push_str(&codes);
                 last.source.push_str(&source);
             }
             _ => pieces.push(Piece {
                 codes,
                 source,
-                fallback,
+                from,
             }),
         }
     }

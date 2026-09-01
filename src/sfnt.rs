@@ -95,6 +95,16 @@ fn u32_at(bytes: &[u8], at: usize) -> Result<u32, String> {
     Ok(number(bytes, at, 4)? as u32)
 }
 
+/// A table's checksum: its bytes read as big-endian longs and added up, the
+/// tail padded with zeros. What the directory carries beside every table.
+fn checksum(body: &[u8]) -> u32 {
+    body.chunks(4).fold(0u32, |sum, word| {
+        let mut four = [0u8; 4];
+        four[..word.len()].copy_from_slice(word);
+        sum.wrapping_add(u32::from_be_bytes(four))
+    })
+}
+
 fn tag_at(bytes: &[u8], at: usize) -> Result<String, String> {
     Ok(bytes
         .get(at..at + 4)
@@ -245,6 +255,183 @@ impl Sfnt {
                 last = u16_at(hmtx, glyph * 4)?;
             }
             out.push(last);
+        }
+        Ok(out)
+    }
+
+    /// The font, carrying only the outlines of the glyphs named -- and every
+    /// glyph id it had, so a glyph is still found where it was.
+    ///
+    /// A document that borrows box drawing from a broad face borrows nine
+    /// glyphs from fifty thousand, and embedding the file whole puts 23 MB into
+    /// a book to draw them: measured on Arial Unicode, which is what the corpus
+    /// books' own fallback chain names first. This is why every driver
+    /// subsets. The ids are NOT renumbered, because a `/CIDToGIDMap /Identity`
+    /// font addresses a glyph by the id the face gave it, and renumbering would
+    /// mean rewriting `cmap` to agree; instead `loca` keeps its full length and
+    /// every glyph not asked for becomes a zero-length entry, which is how a
+    /// TrueType font spells "this glyph is blank".
+    ///
+    /// Composite glyphs name their parts by glyph id, so a part is kept
+    /// whenever the glyph built out of it is (`glyf`, the component flags loop).
+    /// Dropping one would leave an accent without its letter.
+    pub fn subset(&self, keep: &std::collections::BTreeSet<u16>) -> Result<Vec<u8>, String> {
+        let glyphs = self.num_glyphs()? as usize;
+        let long = self.head()?.long_loca;
+        let loca = self.table("loca").ok_or("the font has no loca table")?;
+        let glyf = self.table("glyf").ok_or("the font has no glyf table")?;
+        let at = |glyph: usize| -> Result<usize, String> {
+            match long {
+                true => Ok(u32_at(loca, glyph * 4)? as usize),
+                false => Ok(u16_at(loca, glyph * 2)? as usize * 2),
+            }
+        };
+        let record = |glyph: usize| -> Option<&[u8]> {
+            let (from, to) = (at(glyph).ok()?, at(glyph + 1).ok()?);
+            match to > from {
+                true => glyf.get(from..to.min(glyf.len())),
+                false => None,
+            }
+        };
+
+        // The parts a composite is built out of, and the parts of those.
+        let mut wanted: std::collections::BTreeSet<u16> = keep.clone();
+        let mut pending: Vec<u16> = wanted.iter().copied().collect();
+        while let Some(glyph) = pending.pop() {
+            let Some(body) = record(glyph as usize) else {
+                continue;
+            };
+            // A negative contour count is what marks a composite (`glyf`).
+            if i16_at(body, 0).unwrap_or(0) >= 0 {
+                continue;
+            }
+            let mut cursor = 10usize;
+            while let (Ok(flags), Ok(part)) = (u16_at(body, cursor), u16_at(body, cursor + 2)) {
+                if wanted.insert(part) {
+                    pending.push(part);
+                }
+                // ARG_1_AND_2_ARE_WORDS doubles the two arguments; the three
+                // transform flags each carry their own number of F2Dot14s.
+                cursor += 4 + if flags & 0x0001 != 0 { 4 } else { 2 };
+                cursor += match flags {
+                    f if f & 0x0008 != 0 => 2,
+                    f if f & 0x0040 != 0 => 4,
+                    f if f & 0x0080 != 0 => 8,
+                    _ => 0,
+                };
+                // MORE_COMPONENTS.
+                if flags & 0x0020 == 0 {
+                    break;
+                }
+            }
+        }
+
+        // `glyf`, and the offsets into it. Every record is padded to four
+        // bytes, so an offset is always even and either `loca` form can state
+        // it; the short form halves a table that is one entry per glyph of a
+        // face that may hold fifty thousand, and reaches to 128 KB of outlines,
+        // which is far more than a document borrows.
+        let mut new_glyf: Vec<u8> = Vec::new();
+        let mut offsets: Vec<usize> = Vec::with_capacity(glyphs + 1);
+        for glyph in 0..glyphs {
+            offsets.push(new_glyf.len());
+            if wanted.contains(&(glyph as u16)) {
+                if let Some(body) = record(glyph) {
+                    new_glyf.extend_from_slice(body);
+                    while !new_glyf.len().is_multiple_of(4) {
+                        new_glyf.push(0);
+                    }
+                }
+            }
+        }
+        offsets.push(new_glyf.len());
+        let short = new_glyf.len() <= 0x1_FFFE;
+        let new_loca: Vec<u8> = match short {
+            true => offsets
+                .iter()
+                .flat_map(|at| ((at / 2) as u16).to_be_bytes())
+                .collect(),
+            false => offsets
+                .iter()
+                .flat_map(|at| (*at as u32).to_be_bytes())
+                .collect(),
+        };
+
+        // `head` says which form `loca` is in, and its checksum covers a file
+        // that no longer exists; both are corrected here.
+        let mut head = self
+            .table("head")
+            .ok_or("the font has no head table")?
+            .to_vec();
+        if head.len() < 54 {
+            return Err("the head table is too short to be one".into());
+        }
+        head[8..12].copy_from_slice(&0u32.to_be_bytes());
+        head[50..52].copy_from_slice(&u16::from(!short).to_be_bytes());
+
+        // `hmtx` is four bytes a glyph up to `hhea`'s count and one width for
+        // every glyph after it, so cutting the count at the last glyph borrowed
+        // drops the rest: 200 KB of widths for glyphs the file never draws. The
+        // ones past the cut then read as the last width, which is what that
+        // rule means and is a width nothing asks for.
+        let mut hhea = self
+            .table("hhea")
+            .ok_or("the font has no hhea table")?
+            .to_vec();
+        let mut hmtx = self.table("hmtx").map(<[u8]>::to_vec).unwrap_or_default();
+        let metrics = self.hhea()?.number_of_h_metrics as usize;
+        let last = wanted
+            .iter()
+            .next_back()
+            .map(|g| *g as usize + 1)
+            .unwrap_or(1);
+        if hhea.len() >= 36 && last < metrics && hmtx.len() >= last * 4 {
+            hmtx.truncate(last * 4);
+            hhea[34..36].copy_from_slice(&(last as u16).to_be_bytes());
+        }
+
+        // What a glyph-addressed font needs and nothing else: no `cmap`, since
+        // a code here is a glyph id; no `name`, `post` or layout tables, since
+        // nothing looks a glyph up by name. `cvt `, `fpgm` and `prep` are the
+        // hinting programs, kept because a glyph's instructions call them.
+        let mut tables: Vec<(String, Vec<u8>)> = vec![
+            ("head".to_string(), head),
+            ("hhea".to_string(), hhea),
+            ("hmtx".to_string(), hmtx),
+            ("glyf".to_string(), new_glyf),
+            ("loca".to_string(), new_loca),
+        ];
+        for tag in ["maxp", "cvt ", "fpgm", "prep"] {
+            if let Some(body) = self.table(tag) {
+                tables.push((tag.to_string(), body.to_vec()));
+            }
+        }
+        tables.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // The directory: a header, then one entry a table, then the tables
+        // themselves, each starting on a four-byte boundary.
+        let count = tables.len();
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        out.extend_from_slice(&(count as u16).to_be_bytes());
+        let entry_selector = (usize::BITS - 1 - count.leading_zeros().min(usize::BITS - 1)) as u16;
+        let search_range = 16u16 << entry_selector;
+        out.extend_from_slice(&search_range.to_be_bytes());
+        out.extend_from_slice(&entry_selector.to_be_bytes());
+        out.extend_from_slice(&(count as u16 * 16 - search_range).to_be_bytes());
+        let mut offset = 12 + count * 16;
+        for (tag, body) in &tables {
+            out.extend_from_slice(tag.as_bytes());
+            out.extend_from_slice(&checksum(body).to_be_bytes());
+            out.extend_from_slice(&(offset as u32).to_be_bytes());
+            out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            offset += body.len().next_multiple_of(4);
+        }
+        for (_, body) in &tables {
+            out.extend_from_slice(body);
+            while !out.len().is_multiple_of(4) {
+                out.push(0);
+            }
         }
         Ok(out)
     }

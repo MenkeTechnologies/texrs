@@ -201,6 +201,40 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("ffl", "\u{fb04}"),
 ];
 
+/// A `/ToUnicode` CMap for a font addressed by GLYPH rather than by code.
+///
+/// A face fetched for a glyph the document's own face lacks is written with
+/// `/Encoding /Identity-H`, where a code is two bytes and IS a glyph id, so the
+/// codespace and every entry are twice as wide as the simple font's below.
+/// Without it the box drawing a book fetches from such a face would be ON the
+/// page and nowhere in its text: a glyph id means nothing to a reader by
+/// itself, and `pdftotext` reads an unmapped one back as nothing at all.
+pub fn to_unicode_wide(name: &str, codes: &[(u16, String)]) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "/CIDInit /ProcSet findresource begin\n\
+         12 dict begin\n\
+         begincmap\n\
+         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n",
+    );
+    out.push_str(&format!("/CMapName /{name} def\n/CMapType 2 def\n"));
+    out.push_str("1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+    // The same hundred-to-a-block rule S9.10.3 states for the simple map.
+    for block in codes.chunks(100) {
+        out.push_str(&format!("{} beginbfchar\n", block.len()));
+        for (code, text) in block {
+            let utf16: String = text
+                .encode_utf16()
+                .map(|unit| format!("{unit:04X}"))
+                .collect();
+            out.push_str(&format!("<{code:04X}> <{utf16}>\n"));
+        }
+        out.push_str("endbfchar\n");
+    }
+    out.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+    out
+}
+
 /// A `/ToUnicode` CMap for a simple font: what each byte means.
 ///
 /// Ported from the CMap `pdf_font_load_type1` writes. The format is

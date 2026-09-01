@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">147</div>
+            <div class="stat-val">148</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -526,6 +526,8 @@ back at the margin</pre></td></tr>
             <tr><td><code>\setmonofont</code></td><td>Record the document's monospace family, the counterpart of <code>\setsansfont</code>, and the face <code>\ttfamily</code> selects. Its options are read the way <code>\setmainfont</code>'s are, so a <code>Path=</code>/<code>UprightFont=</code> naming a file the document ships is what the PDF backend embeds — which is the usual case, since a book carries its monospace face beside itself rather than installing it. The DVI backend names <code>.tfm</code> fonts and still sets in Computer Modern throughout.</td><td><pre>\setmonofont[OPTIONS]{FAMILY}[OPTIONS]
 \setmonofont{Cousine}
 \setmonofont{ShareTechMono}[Path=./.fonts/,Extension=.ttf,UprightFont=ShareTechMono-Regular]</pre></td></tr>
+            <tr><td><code>\directlua</code></td><td>Hand a chunk to LuaTeX's embedded Lua interpreter. texrs has none, so the chunk is read and not run — and one thing in it IS read: <code>luaotfload.add_fallback</code> names the faces a glyph the document's own face lacks is fetched from, and that list is the only statement of it a document makes. The PDF backend loads those families in order, asks each one's <code>cmap</code> for the character, and draws the first face that has it, carrying only the glyphs the document borrowed. What a chunk computes is still not available, so a document whose OUTPUT depended on the Lua is wrong here rather than refused.</td><td><pre>\directlua{CHUNK}
+\directlua{luaotfload.add_fallback("symfb", {"Arial Unicode MS:mode=base;", "Arial:mode=base;"})}</pre></td></tr>
             <tr><td><code>\ttfamily</code></td><td>Set in the monospace face, until the group holding the declaration closes. This is what <code>\texttt{...}</code> is made of — <code>{\ttfamily ...}</code> — and it is honoured here rather than in the text command, because a document that redefines <code>\texttt</code> to colour its inline code writes the declaration in the replacement. The face is the file or family <code>\setmonofont</code> named, embedded when it can be found, Courier when it cannot, and the main face when the document named no monospace family at all.</td><td><pre>{\ttfamily fixed pitch}
 \texttt{fixed pitch}</pre></td></tr>
             <tr><td><code>\bfseries</code></td><td>Set in the bold face, until the group holding the declaration closes; <code>\textbf{...}</code> is <code>{\bfseries ...}</code>. The face is the file <code>BoldFont=</code> named in the main family's options, or the bold member of the fourteen — <code>Helvetica-Bold</code>, <code>Times-Bold</code> — and the main face where the document supplies neither. A variable font whose bold is the upright file at another weight is the SAME file, so it comes out as the main face: instantiating a weight axis is not something this does.</td><td><pre>{\bfseries heavy}

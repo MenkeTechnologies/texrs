@@ -300,6 +300,34 @@ pub enum Font {
         /// From `hhea`. Negative, the way the table stores it.
         descent: i64,
     },
+    /// A face carried in the file and addressed by GLYPH rather than by code.
+    ///
+    /// This is what a per-glyph fallback needs and a simple font cannot give:
+    /// `\setmainfont{Arimo}` embeds Arimo whole, WinAnsi addresses 224 of its
+    /// glyphs, and no code in that encoding means U+2500. A face that HAS the
+    /// box drawing is written here instead as a composite font -- `/Type0` with
+    /// `/Identity-H`, where a code is two bytes and is the glyph id itself --
+    /// so any glyph in the file can be drawn, whatever Unicode calls it.
+    Glyphs {
+        /// The name the file calls it by.
+        name: String,
+        /// The font program, embedded as `FontFile2` -- subsetted to the glyphs
+        /// below, since a broad face is tens of megabytes and a document
+        /// borrows a handful of glyphs from it.
+        bytes: Vec<u8>,
+        /// The glyphs the document actually asks this face for: the glyph id,
+        /// the character it stands for, and its advance in 1/1000 em. Only
+        /// these, because a broad face has fifty thousand glyphs and a `/W`
+        /// array of all of them is a quarter of a megabyte of widths for a
+        /// document that drew nine of them.
+        glyphs: Vec<(u16, char, i64)>,
+        /// `[xMin, yMin, xMax, yMax]`, in the same units.
+        bbox: [i64; 4],
+        /// From `hhea`, for the descriptor a reader needs.
+        ascent: i64,
+        /// From `hhea`. Negative, the way the table stores it.
+        descent: i64,
+    },
 }
 
 impl Font {
@@ -308,8 +336,18 @@ impl Font {
         match self {
             Font::Base14(name) => name.clone(),
             Font::Embedded(font) => font.font_name.clone(),
-            Font::TrueType { name, .. } => name.clone(),
+            Font::TrueType { name, .. } | Font::Glyphs { name, .. } => name.clone(),
         }
+    }
+
+    /// Whether a code in this font is two bytes rather than one.
+    ///
+    /// PDF's word spacing (S9.3.3) applies to the single-byte code 32 and to
+    /// nothing else, so a `Tw` written for a composite font is ignored by the
+    /// reader while the driver goes on advancing by it. Nothing here sets a
+    /// two-byte run to a width, and this is what says so.
+    pub fn is_composite(&self) -> bool {
+        matches!(self, Font::Glyphs { .. })
     }
 }
 
@@ -383,7 +421,13 @@ impl Page {
     /// fonts here are. Text with no space in it cannot be set to a width at
     /// all, and is drawn where it stands rather than drawn wrong.
     pub fn text_set(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str, set: Set) {
-        let spaces = text.chars().filter(|c| *c == ' ').count();
+        // A composite font's codes are two bytes and none of them is the
+        // single-byte 32 that `Tw` widens, so there is no space here to share
+        // the room between: 0x20 inside a glyph id is half a glyph id.
+        let spaces = match font.is_composite() {
+            true => 0,
+            false => text.chars().filter(|c| *c == ' ').count(),
+        };
         let word_space = match spaces {
             0 => 0.0,
             n => (set.width - set.natural) / n as f64,
@@ -656,6 +700,85 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
 /// decrypt, and `Length1`, `Length2` and `Length3` say where its three parts
 /// end.
 fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
+    if let Font::Glyphs {
+        name,
+        bytes,
+        glyphs,
+        bbox,
+        ascent,
+        descent,
+    } = font
+    {
+        let file = pdf.add(Object::Stream {
+            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
+            data: bytes.clone(),
+        });
+        let descriptor = pdf.add(Object::dict([
+            ("Type", Object::name("FontDescriptor")),
+            ("FontName", Object::name(name)),
+            // 4 is the symbolic flag: a code here is a glyph id and not a
+            // character in any standard encoding, which is what symbolic means.
+            ("Flags", Object::Integer(4)),
+            (
+                "FontBBox",
+                Object::Array(bbox.iter().map(|v| Object::Integer(*v)).collect()),
+            ),
+            ("ItalicAngle", Object::Integer(0)),
+            ("Ascent", Object::Integer(*ascent)),
+            ("Descent", Object::Integer(*descent)),
+            ("CapHeight", Object::Integer(*ascent)),
+            ("StemV", Object::Integer(80)),
+            ("FontFile2", file),
+        ]));
+        // `/W` (S9.7.4.3): a CID, then the widths of the CIDs running from it.
+        // Written one CID to an entry rather than in runs, because the glyphs a
+        // document borrows from a fallback are scattered across the face and a
+        // run of consecutive ids is the exception.
+        let widths: Vec<Object> = glyphs
+            .iter()
+            .flat_map(|(gid, _, w)| {
+                [
+                    Object::Integer(i64::from(*gid)),
+                    Object::Array(vec![Object::Integer(*w)]),
+                ]
+            })
+            .collect();
+        let descendant = pdf.add(Object::dict([
+            ("Type", Object::name("Font")),
+            ("Subtype", Object::name("CIDFontType2")),
+            ("BaseFont", Object::name(name)),
+            (
+                "CIDSystemInfo",
+                Object::dict([
+                    ("Registry", Object::string("Adobe")),
+                    ("Ordering", Object::string("Identity")),
+                    ("Supplement", Object::Integer(0)),
+                ]),
+            ),
+            ("FontDescriptor", descriptor),
+            ("DW", Object::Integer(1000)),
+            ("W", Object::Array(widths)),
+            // Identity: the CID a code names IS the glyph to draw, which is
+            // what makes the two-byte code above a glyph id.
+            ("CIDToGIDMap", Object::name("Identity")),
+        ]));
+        let meanings: Vec<(u16, String)> = glyphs
+            .iter()
+            .map(|(gid, ch, _)| (*gid, ch.to_string()))
+            .collect();
+        let to_unicode = pdf.add(Object::Stream {
+            dict: BTreeMap::new(),
+            data: crate::agl::to_unicode_wide(name, &meanings).into_bytes(),
+        });
+        return pdf.add(Object::dict([
+            ("Type", Object::name("Font")),
+            ("Subtype", Object::name("Type0")),
+            ("BaseFont", Object::name(name)),
+            ("Encoding", Object::name("Identity-H")),
+            ("DescendantFonts", Object::Array(vec![descendant])),
+            ("ToUnicode", to_unicode),
+        ]));
+    }
     if let Font::TrueType {
         name,
         bytes,

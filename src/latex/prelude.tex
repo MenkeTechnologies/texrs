@@ -512,6 +512,12 @@
 % rest of the document be read; running it is a Lua interpreter, which is a
 % different project. A document whose OUTPUT depends on what the Lua computed
 % will be wrong here rather than refused, and that is worth knowing.
+%
+% One thing in a chunk is read rather than run, and it is read in lower.rs
+% before this definition is reached: `luaotfload.add_fallback` names the faces a
+% glyph the document's own face lacks comes from. This definition is what
+% answers `\directlua` everywhere else -- and what answers the three below,
+% which no backend reads anything out of.
 \newcommand{\directlua}[1]{}
 \newcommand{\luadirect}[1]{}
 \newcommand{\latelua}[1]{}
