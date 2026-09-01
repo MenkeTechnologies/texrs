@@ -1,11 +1,16 @@
 //! What this writes, against the programs that read PDF.
 //!
-//! A PDF is a graph with a table of byte offsets, and the file is refused
-//! whole if one offset is wrong -- so "does it parse" is the test, and the only
-//! honest way to ask is to hand the file to readers that had no part in
-//! writing it. Three of them, that fail differently: `pdfinfo` reads the
-//! trailer and the page tree, `pdftotext` reads the content streams and the
+//! A PDF is a graph with a table saying where each object is, and the file is
+//! refused whole if one entry is wrong -- so "does it parse" is the test, and
+//! the only honest way to ask is to hand the file to readers that had no part
+//! in writing it. Three of them, that fail differently: `pdfinfo` reads the
+//! table and the page tree, `pdftotext` reads the content streams and the
 //! font encodings, and Ghostscript interprets the whole thing.
+//!
+//! What the table IS is PDF 1.5's `/XRef` stream, and most objects are inside
+//! an `/ObjStm` rather than in the file's own bytes -- so the tests here that
+//! look at a dictionary inflate first, and the one that breaks the table on
+//! purpose has to re-encode it.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -159,33 +164,65 @@ fn a_reader_refuses_a_file_whose_table_is_wrong() {
     };
     assert!(report.contains("Pages:          1"));
 
-    // Move every offset in the table along by one byte. The table is found by
-    // `\nxref\n` rather than `xref`, because `startxref` ends in one too --
-    // and on the bytes rather than on a string, because the header's binary
-    // comment is not UTF-8 and every offset would shift.
+    // Move every offset in the table along by one byte. The table is an
+    // `/XRef` stream (§7.5.8), so this is not a text edit: `startxref` names
+    // the object holding it, its entries are inflated, the rows that ARE byte
+    // offsets -- type 1 -- are bumped, and the stream is deflated and written
+    // back with the length it now has.
     let at = good
-        .windows(6)
-        .rposition(|window| window == b"\nxref\n")
-        .expect("a table");
-    let mut broken = good.clone();
-    let mut cursor = at + 6;
-    // Past the `0 6` line that says which objects follow.
-    cursor += broken[cursor..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .expect("a subsection header")
-        + 1;
-    while let Some(line) = broken[cursor..].iter().position(|&b| b == b'\n') {
-        let entry = &broken[cursor..cursor + line];
-        if entry.len() != 19 {
-            break;
+        .windows(9)
+        .rposition(|window| window == b"startxref")
+        .expect("startxref");
+    let table: usize = String::from_utf8_lossy(&good[at + 9..])
+        .split_whitespace()
+        .next()
+        .expect("an offset")
+        .parse()
+        .expect("a number");
+    let widths = xref_widths(&good, table);
+    let mut data = stream_data(&good, table);
+    for entry in data.chunks_mut(1 + widths[1] + widths[2]) {
+        if entry[0] != 1 {
+            continue;
         }
-        if let Ok(offset) = String::from_utf8_lossy(&entry[..10]).parse::<usize>() {
-            let moved = format!("{:010}", offset + 1);
-            broken[cursor..cursor + 10].copy_from_slice(moved.as_bytes());
+        let field = &mut entry[1..1 + widths[1]];
+        let mut offset = 0usize;
+        for byte in field.iter() {
+            offset = offset << 8 | *byte as usize;
         }
-        cursor += line + 1;
+        offset += 1;
+        let width = field.len();
+        for (i, byte) in field.iter_mut().enumerate() {
+            *byte = (offset >> ((width - 1 - i) * 8)) as u8;
+        }
     }
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut encoder, &data).expect("deflate");
+    let deflated = encoder.finish().expect("deflate");
+
+    // The object is the last one in the file, so only its own dictionary and
+    // the bytes after it are rebuilt -- and its `/Length`, which the new
+    // deflate is unlikely to have left alone.
+    let tail = String::from_utf8_lossy(&good[table..]).into_owned();
+    let close = tail.find(">>").expect("the dictionary ends");
+    let dict = &tail[..close + 2];
+    let length: String = dict
+        .split("/Length ")
+        .nth(1)
+        .expect("a length")
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let dict = dict.replace(
+        &format!("/Length {length}"),
+        &format!("/Length {}", deflated.len()),
+    );
+    let mut broken = good[..table].to_vec();
+    broken.extend(dict.as_bytes());
+    broken.extend(b"\nstream\n");
+    broken.extend(&deflated);
+    broken.extend(b"\nendstream\nendobj\n");
+    broken.extend(format!("startxref\n{table}\n%%EOF\n").as_bytes());
     assert_ne!(broken, good, "the table was not changed");
 
     let path = dir.join("broken.pdf");
@@ -355,7 +392,9 @@ fn the_widths_and_the_encoding_are_the_fonts_own() {
     let mut page = Page::letter();
     page.text_in(Font::Embedded(Box::new(cmr10)), 12.0, 72.0, 700.0, "A");
     let bytes = document(&[page]);
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+    // Inflated, because the font dictionary and its descriptor are packed into
+    // an object stream now and are not in the file's own bytes.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&bytes)).into_owned();
 
     // An A is 750 thousandths of an em, which is what the .tfm says too.
     assert!(text.contains("/FirstChar"), "{}", &text[..400]);
@@ -687,4 +726,187 @@ fn a_transparent_picture_keeps_its_transparency() {
     }
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The file is PDF 1.5's serialisation, which is the one LuaTeX writes.
+///
+/// Two things at once, because they are one decision (§7.5.7 and §7.5.8): the
+/// objects that MAY be packed go into an `/ObjStm` and stop appearing in the
+/// file's own bytes, and the classic table and trailer are replaced by an
+/// `/XRef` stream. Measured on `Hello world.`, LuaTeX's first object is
+/// `3 0 obj` -- a content stream -- and its page, resources, font, descriptor,
+/// widths, page tree and catalogue are seven objects inside one `/ObjStm`,
+/// with a `/Type /XRef` object last and no `trailer` keyword anywhere.
+///
+/// This walks the table rather than grepping for its keys: every entry has to
+/// LAND somewhere, which is the part a reader refuses the file over.
+#[test]
+fn the_objects_are_packed_and_the_table_is_a_stream() {
+    let mut page = Page::letter();
+    page.text("Helvetica", 12.0, 72.0, 700.0, "Hello world.");
+    let bytes = document(&[page]);
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
+
+    // The classic form is gone: no `xref` table, no `trailer` dictionary.
+    assert!(
+        !raw.contains("\nxref\n"),
+        "a classic cross-reference table is still written"
+    );
+    assert!(
+        !raw.contains("trailer"),
+        "a classic trailer is still written"
+    );
+
+    // The page dictionary is not in the file's bytes any more -- it is inside
+    // the object stream, which is why `pdf_parity::shape` has to ask pdfinfo
+    // rather than scan for `/Type /Page`.
+    assert!(
+        !raw.contains("/Type /Page"),
+        "the page dictionary was not packed"
+    );
+    // The table. `startxref` names the object that holds it, and that object
+    // is an `/XRef` stream with the three field widths of §7.5.8.
+    let at = raw.rfind("startxref").expect("startxref");
+    let start: usize = raw[at + "startxref".len()..]
+        .split_whitespace()
+        .next()
+        .expect("an offset")
+        .parse()
+        .expect("a number");
+    let head = String::from_utf8_lossy(&bytes[start..(start + 200).min(bytes.len())]).into_owned();
+    assert!(head.contains(" 0 obj"), "startxref points at {head:?}");
+    assert!(head.contains("/Type /XRef"), "startxref points at {head:?}");
+    assert!(head.contains("/W [1 "), "no field widths: {head:?}");
+
+    // And every entry lands where it says. A type 1 entry is a byte offset and
+    // an object begins there; a type 2 entry names an object stream and an
+    // index into it, and that stream's own header has to agree.
+    let table = xref_entries(&bytes, start);
+    assert!(
+        table.len() > 5,
+        "a one-page document has more objects than {}",
+        table.len()
+    );
+    assert_eq!(table[0], (0, 0, 255), "object zero heads the free list");
+    let mut packed = 0;
+    let mut streams: Vec<usize> = Vec::new();
+    for (number, entry) in table.iter().enumerate().skip(1) {
+        let (kind, field2, field3) = *entry;
+        match kind {
+            1 => {
+                let here = String::from_utf8_lossy(&bytes[field2..(field2 + 24).min(bytes.len())])
+                    .into_owned();
+                assert!(
+                    here.starts_with(&format!("{number} 0 obj")),
+                    "entry {number} points at {here:?}"
+                );
+            }
+            2 => {
+                packed += 1;
+                let (kind, offset, _) = table[field2];
+                assert_eq!(kind, 1, "object {number}'s object stream is itself packed");
+                if !streams.contains(&offset) {
+                    streams.push(offset);
+                }
+                let head = objstm_header(&bytes, offset);
+                assert_eq!(
+                    head.get(field3).map(|(n, _)| *n),
+                    Some(number as u32),
+                    "object {number} is not at index {field3} of its stream: {head:?}"
+                );
+            }
+            other => panic!("object {number} has entry type {other}"),
+        }
+    }
+    assert!(packed >= 3, "only {packed} objects were packed");
+
+    // And what was packed is the document's structure: the page, the tree it
+    // hangs off and the catalogue a reader starts at.
+    let inside: String = streams
+        .iter()
+        .map(|offset| String::from_utf8_lossy(&stream_data(&bytes, *offset)).into_owned())
+        .collect();
+    for key in ["/Type /Page", "/Type /Pages", "/Type /Catalog"] {
+        assert!(inside.contains(key), "{key} is in no object stream");
+    }
+}
+
+/// The entries of the `/XRef` stream that begins at `start`, as
+/// `(type, field 2, field 3)`.
+fn xref_entries(pdf: &[u8], start: usize) -> Vec<(usize, usize, usize)> {
+    let widths = xref_widths(pdf, start);
+    let data = stream_data(pdf, start);
+    let row: usize = widths.iter().sum();
+    assert_eq!(
+        data.len() % row,
+        0,
+        "the table is not a whole number of rows"
+    );
+    data.chunks(row)
+        .map(|entry| {
+            let mut fields = [0usize; 3];
+            let mut at = 0;
+            for (i, width) in widths.iter().enumerate() {
+                for byte in &entry[at..at + width] {
+                    fields[i] = fields[i] << 8 | *byte as usize;
+                }
+                at += width;
+            }
+            (fields[0], fields[1], fields[2])
+        })
+        .collect()
+}
+
+/// The three field widths the `/XRef` stream at `start` declares.
+fn xref_widths(pdf: &[u8], start: usize) -> Vec<usize> {
+    let dict = String::from_utf8_lossy(&pdf[start..(start + 400).min(pdf.len())]).into_owned();
+    let at = dict.find("/W [").expect("field widths");
+    let widths: Vec<usize> = dict[at + 4..]
+        .split(']')
+        .next()
+        .expect("a closed array")
+        .split_whitespace()
+        .map(|w| w.parse().expect("a width"))
+        .collect();
+    assert_eq!(widths.len(), 3, "{dict:?}");
+    widths
+}
+
+/// The `(object number, offset)` pairs the `/ObjStm` at `start` begins with.
+fn objstm_header(pdf: &[u8], start: usize) -> Vec<(u32, usize)> {
+    let data = stream_data(pdf, start);
+    let text = String::from_utf8_lossy(&data).into_owned();
+    let head = text.split('\n').next().expect("a header line").to_string();
+    head.split_whitespace()
+        .collect::<Vec<&str>>()
+        .chunks(2)
+        .filter(|pair| pair.len() == 2)
+        .map(|pair| {
+            (
+                pair[0].parse().expect("an object number"),
+                pair[1].parse().expect("an offset"),
+            )
+        })
+        .collect()
+}
+
+/// The inflated data of the stream object beginning at `start`.
+fn stream_data(pdf: &[u8], start: usize) -> Vec<u8> {
+    let at = pdf[start..]
+        .windows(6)
+        .position(|window| window == b"stream")
+        .expect("a stream")
+        + start
+        + 6;
+    let at = at + usize::from(pdf[at] == b'\r');
+    let at = at + usize::from(pdf[at] == b'\n');
+    let end = pdf[at..]
+        .windows(9)
+        .position(|window| window == b"endstream")
+        .expect("an endstream")
+        + at;
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&pdf[at..end]), &mut out)
+        .expect("the stream inflates");
+    out
 }

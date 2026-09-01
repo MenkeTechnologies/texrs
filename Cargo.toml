@@ -147,6 +147,10 @@ harness = false
 tempfile = "3"
 # The benchmarks; `cargo bench` only.
 criterion = "0.5"
+# The PDF tests inflate one stream at a known offset -- an /ObjStm's packed
+# objects, an /XRef stream's table -- to check the file says what it means.
+# Already a dependency; this is what lets an integration test link it.
+flate2 = "1"
 
 # texrs is a standalone crate, not a workspace member. An explicit empty
 # `[workspace]` stops cargo walking up to the MenkeTechnologiesMeta parent, and

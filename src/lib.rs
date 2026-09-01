@@ -316,7 +316,11 @@ pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
 /// luatex do -- a harness that measured the library call underneath would
 /// report a divergence the tool does not have.
 pub fn pdf_page_count(pdf: &[u8]) -> usize {
-    let text = String::from_utf8_lossy(pdf);
+    // Inflated first: the page dictionaries are inside a PDF 1.5 object stream
+    // and do not appear in the file's own bytes at all -- which is the same
+    // reason `pdf_parity::shape` asks pdfinfo rather than scanning for them.
+    let plain = crate::pdf::inflate_streams(pdf);
+    let text = String::from_utf8_lossy(&plain);
     text.matches("/Type /Page").count() - text.matches("/Type /Pages").count()
 }
 

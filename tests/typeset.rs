@@ -15,6 +15,18 @@ use texrs::typeset::{
     break_lines, find_font, to_dvi, to_dvi_chain, FontChain, Layout, LISTING_BREAK,
 };
 
+/// A PDF as text, with what the writer packed put back where it reads.
+///
+/// The file texrs writes is PDF 1.5: everything that is not a stream lives in
+/// a compressed `/ObjStm`, so a page dictionary, a font and a resource
+/// dictionary are in none of the file's own bytes. Every reader below -- the
+/// ones that grep for a key, and the ones that walk `N 0 obj` and follow the
+/// references between them -- goes through here so it sees the document rather
+/// than its compression.
+fn read_back(pdf: &[u8]) -> String {
+    String::from_utf8_lossy(&texrs::pdf::unpacked(pdf)).into_owned()
+}
+
 /// The text font these tests measure in, or `None` where TeX is not installed.
 ///
 /// The metrics belong to an INSTALLATION, not to this crate: `find_font` asks
@@ -290,7 +302,7 @@ fn setmainfont_reaches_the_pdf() {
     // widths when it does not. Which route a given family takes depends on
     // what is installed, so the test asserts the outcome rather than the route.
     let mono = texrs::run_pdf(&src("ShareTechMono")).expect("pdf");
-    let mono = String::from_utf8_lossy(&mono);
+    let mono = read_back(&mono);
     assert!(
         mono.contains("/Courier") || mono.contains("/FontFile2"),
         "a monospace request reaches the file as Courier or as itself"
@@ -299,7 +311,7 @@ fn setmainfont_reaches_the_pdf() {
     // a document that named one at all was asking not to be set in Computer
     // Modern.
     let unknown = texrs::run_pdf(&src("NoSuchFontExistsAnywhere")).expect("pdf");
-    let unknown = String::from_utf8_lossy(&unknown);
+    let unknown = read_back(&unknown);
     assert!(unknown.contains("/Helvetica"), "got {unknown:?}");
     assert!(!unknown.contains("/FontFile2"), "nothing to embed");
 }
@@ -309,7 +321,7 @@ fn colour_survives_the_pdf_path_as_pdfs_own_operator() {
     let src = "\\documentclass{article}\n\\begin{document}\n\
                plain \\textcolor[rgb]{1.00,0.00,0.00}{RED} plain\n\\end{document}\n";
     let pdf = texrs::run_pdf(src).expect("pdf");
-    let s = String::from_utf8_lossy(&pdf);
+    let s = read_back(&pdf);
     assert!(s.contains("1 0 0 rg"), "the colour is set");
     // And put back after -- as the colour underneath, said in full. It used to
     // be the literal `0 g`, which is only right when the colour underneath
@@ -326,7 +338,7 @@ fn a_line_is_split_into_runs_where_the_colour_changes() {
     let src = "\\documentclass{article}\n\\begin{document}\n\
                before \\textcolor[rgb]{0,0,1}{middle} after\n\\end{document}\n";
     let pdf = texrs::run_pdf(src).expect("pdf");
-    let s = String::from_utf8_lossy(&pdf);
+    let s = read_back(&pdf);
     assert!(s.contains("(before )"), "the run before the colour: {s:?}");
     assert!(s.contains("(middle)"), "the coloured run");
     assert!(s.contains("0 0 1 rg"), "with the colour set for it");
@@ -340,7 +352,7 @@ fn a_line_is_split_into_runs_where_the_colour_changes() {
 /// under it. This is what a reader does with the page, which is the only way to
 /// ask what colour a word actually came out in.
 fn drawn(pdf: &[u8]) -> Vec<(String, String)> {
-    let s = String::from_utf8_lossy(pdf).into_owned();
+    let s = read_back(pdf);
     let mut runs = Vec::new();
     let mut colour = String::from("none");
     for (at, _) in s.match_indices(['g', 'j']) {
@@ -454,7 +466,7 @@ fn the_font_file_the_document_named_is_carried_in_the_pdf() {
          \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n"
     );
     let pdf = texrs::run_pdf(&src).expect("pdf");
-    let s = String::from_utf8_lossy(&pdf);
+    let s = read_back(&pdf);
     assert!(
         s.contains("/FontFile2"),
         "the font program must be in the file"
@@ -474,7 +486,7 @@ fn a_family_nothing_matches_still_typesets() {
                \\setmainfont{NoSuchFontExistsAnywhere}\n\
                \\begin{document}\nwords\n\\end{document}\n";
     let pdf = texrs::run_pdf(src).expect("pdf");
-    let s = String::from_utf8_lossy(&pdf);
+    let s = read_back(&pdf);
     assert!(s.contains("/BaseFont"), "something was named");
     assert!(!s.contains("/FontFile2"), "but nothing was embedded");
 }
@@ -571,7 +583,7 @@ fn a_chapter_begins_a_page_in_both_its_forms() {
     );
     let pdf = texrs::run_pdf(src).expect("pdf");
     assert_eq!(count_pages(&pdf), 3);
-    let text = String::from_utf8_lossy(&pdf);
+    let text = read_back(&pdf);
     assert!(
         !text.contains("*Unnumbered"),
         "the star leaked into the heading"
@@ -580,13 +592,10 @@ fn a_chapter_begins_a_page_in_both_its_forms() {
 
 /// Pages in a PDF, counted from the page objects themselves.
 fn count_pages(pdf: &[u8]) -> usize {
-    String::from_utf8_lossy(pdf)
-        .matches("/Type /Page\n")
+    let text = read_back(pdf);
+    text.matches("/Type /Page\n")
         .count()
-        .max(
-            String::from_utf8_lossy(pdf).matches("/Type /Page").count()
-                - String::from_utf8_lossy(pdf).matches("/Type /Pages").count(),
-        )
+        .max(text.matches("/Type /Page").count() - text.matches("/Type /Pages").count())
 }
 /// The same words, once plain and once with every one of them coloured.
 fn coloured_and_plain(preamble: &str, repeats: usize) -> (usize, usize) {
@@ -637,7 +646,7 @@ fn a_coloured_word_costs_nothing_in_an_embedded_fonts_own_widths() {
 /// read straight out of the bytes; that is how the page it actually set is
 /// checked rather than how many pages came out.
 fn set_text(pdf: &[u8]) -> Vec<(f64, f64, f64)> {
-    let text = String::from_utf8_lossy(pdf).into_owned();
+    let text = read_back(pdf);
     let mut out = Vec::new();
     for run in text.split("BT /").skip(1) {
         let mut words = run.split_whitespace();
@@ -1212,9 +1221,10 @@ fn vertical_space_is_space_and_not_a_character() {
 
 /// Every `N 0 obj ... endobj` of a PDF, by its number.
 ///
-/// The files texrs writes are uncompressed, so the objects can be read straight
-/// out of them -- which is what the reader below needs and what a PDF reader
-/// itself does.
+/// The bytes handed here have been through `read_back`, so every object has a
+/// header again -- including the ones the writer packed into an `/ObjStm`,
+/// which have none in the file itself. That is what lets this read the graph
+/// the way a PDF reader reads it.
 fn objects(pdf: &str) -> Vec<(u32, &str)> {
     let mut out = Vec::new();
     for chunk in pdf.split("endobj") {
@@ -1256,7 +1266,7 @@ fn faces(pdf: &[u8]) -> Vec<(String, String)> {
 /// what, and a question about a COLUMN -- which face is set at which x, on
 /// which baseline -- needs both of a single run at once.
 fn placed_faces(pdf: &[u8]) -> Vec<(f64, f64, String, String)> {
-    let pdf = String::from_utf8_lossy(pdf).into_owned();
+    let pdf = read_back(pdf);
     let objects = objects(&pdf);
     let by_number = |number: &str| objects.iter().find(|(n, _)| n.to_string() == number);
     let base = |number: &str| {
@@ -1339,7 +1349,7 @@ fn texttt_textbf_and_emph_are_set_in_the_faces_they_name() {
     assert_eq!(face_of(&runs, "italic"), "Times-Italic");
     // Times' bold is not `Times-Roman-Bold`: the fourteen are named as they are
     // named, and a name no reader has is substituted without saying so.
-    let s = String::from_utf8_lossy(&pdf);
+    let s = read_back(&pdf);
     assert!(s.contains("/BaseFont /Times-Bold"), "{s}");
 }
 
@@ -1582,7 +1592,7 @@ fn a_tables_columns_line_up_across_its_rows() {
 /// thing these documents fill -- so this is how to ask whether a booktabs rule
 /// was DRAWN, as opposed to set as characters or dropped.
 fn rules(pdf: &[u8]) -> Vec<(f64, f64, f64, f64)> {
-    let s = String::from_utf8_lossy(pdf).into_owned();
+    let s = read_back(pdf);
     let mut found = Vec::new();
     for line in s.lines() {
         let Some(head) = line.strip_suffix(" re f") else {
@@ -1724,7 +1734,7 @@ fn a_longtable_sets_its_foot_after_its_body_and_not_before_it() {
 /// object as it finishes the page, so ascending object number is the order
 /// they are bound in.
 fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
-    let pdf = String::from_utf8_lossy(pdf).into_owned();
+    let pdf = read_back(pdf);
     let objects = objects(&pdf);
     let mut pages = Vec::new();
     // A page, not the page TREE, asked without depending on how the writer
@@ -2040,6 +2050,15 @@ fn page_texts(pdf: &[u8]) -> Vec<String> {
         };
         let mut text = String::new();
         let mut chunk = &body[..end];
+        // A CONTENT stream, and not any other kind. This once assumed every
+        // stream in the file was a page, which stopped being true when the
+        // writer began packing objects into a compressed `/ObjStm`: its bytes
+        // are binary, and read as a page they came back as one of these with
+        // mojibake in it. A content stream opens its runs with `BT`.
+        if !chunk.contains("BT ") {
+            rest = &body[end..];
+            continue;
+        }
         // `(text) Tj` is how a run is drawn; the documents below draw no
         // brackets of their own, so every bracketed stretch is a run.
         while let Some(open) = chunk.find('(') {

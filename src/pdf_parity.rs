@@ -364,43 +364,12 @@ fn blank_between(pdf: &[u8], key: &[u8], open: u8, close: u8) -> Vec<u8> {
 }
 
 /// Inflate every `stream ... endstream` that is deflated, leaving the rest.
+///
+/// The writer needs the same thing -- texrs's own structure is inside object
+/// streams now -- so this lives in `pdf` and is called from both sides rather
+/// than existing twice with two chances to drift.
 fn inflate_streams(pdf: &[u8]) -> Vec<u8> {
-    use std::io::Read;
-    let mut out = Vec::with_capacity(pdf.len());
-    let mut i = 0;
-    while i < pdf.len() {
-        let Some(at) = find(&pdf[i..], b"stream").map(|a| i + a) else {
-            out.extend_from_slice(&pdf[i..]);
-            break;
-        };
-        let mut data = at + b"stream".len();
-        if pdf.get(data) == Some(&b'\r') {
-            data += 1;
-        }
-        if pdf.get(data) == Some(&b'\n') {
-            data += 1;
-        }
-        let Some(end) = find(&pdf[data..], b"endstream").map(|e| data + e) else {
-            out.extend_from_slice(&pdf[i..]);
-            break;
-        };
-        out.extend_from_slice(&pdf[i..data]);
-        let raw = &pdf[data..end];
-        let mut plain = Vec::new();
-        match flate2::read::ZlibDecoder::new(raw).read_to_end(&mut plain) {
-            Ok(_) => out.extend_from_slice(&plain),
-            // Not deflated, or deflated in a way this cannot read: the bytes as
-            // they stand are what the engine wrote, and stand in for themselves.
-            Err(_) => out.extend_from_slice(raw),
-        }
-        out.extend_from_slice(b"endstream");
-        i = end + b"endstream".len();
-    }
-    out
-}
-
-fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).position(|w| w == needle)
+    crate::pdf::inflate_streams(pdf)
 }
 
 /// How far the two PDFs agree, and a line saying where they stop.

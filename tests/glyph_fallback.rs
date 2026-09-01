@@ -117,7 +117,10 @@ fn a_character_the_face_lacks_is_drawn_from_the_face_the_document_named() {
         return;
     };
     let pdf = texrs::run_pdf(&book(Some(family), "tree ─── branch")).expect("pdf");
-    let text = String::from_utf8_lossy(&pdf);
+    // Inflated: the font dictionaries are packed into an object stream and
+    // are not in the file's own bytes at all. A raw scan would find neither
+    // what is asserted here nor what is asserted absent.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).into_owned();
 
     // A composite font, because a simple one's encoding has 256 slots and none
     // of them means U+2500.
@@ -161,7 +164,10 @@ fn the_symbol_font_is_still_asked_before_the_document_s_own_chain() {
     // A face carrying U+2500 carries U+2192 as well, so this says which of the
     // two the arrow came from rather than whether it arrived at all.
     let pdf = texrs::run_pdf(&book(Some(family), "a → b")).expect("pdf");
-    let text = String::from_utf8_lossy(&pdf);
+    // Inflated: the font dictionaries are packed into an object stream and
+    // are not in the file's own bytes at all. A raw scan would find neither
+    // what is asserted here nor what is asserted absent.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).into_owned();
     assert!(
         text.contains("/BaseFont /Symbol"),
         "the arrow comes from Symbol, which costs the file nothing"
@@ -183,7 +189,10 @@ fn the_symbol_font_is_still_asked_before_the_document_s_own_chain() {
 #[test]
 fn without_a_chain_a_missing_glyph_still_falls_to_its_stand_in() {
     let pdf = texrs::run_pdf(&book(None, "tree ─── branch")).expect("pdf");
-    let text = String::from_utf8_lossy(&pdf);
+    // Inflated: the font dictionaries are packed into an object stream and
+    // are not in the file's own bytes at all. A raw scan would find neither
+    // what is asserted here nor what is asserted absent.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).into_owned();
     assert!(
         !text.contains("/Identity-H"),
         "nothing was named, so nothing may be borrowed"
