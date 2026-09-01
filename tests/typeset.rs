@@ -1714,3 +1714,231 @@ fn a_longtable_sets_its_foot_after_its_body_and_not_before_it() {
     // The rows themselves are in the order they were written.
     assert!(head > at(&runs, "awkrs").1, "the head is above the body");
 }
+
+/// Every run a PDF draws, page by page, in the order the pages are bound.
+///
+/// `placed` flattens the file: it says what was drawn and where on the paper,
+/// which cannot tell a head set once from a head set on all three pages --
+/// both are runs at the same y. A longtable's whole question is WHICH PAGE a
+/// line is on, so this keeps the pages apart. The PDF writer adds each page
+/// object as it finishes the page, so ascending object number is the order
+/// they are bound in.
+fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
+    let pdf = String::from_utf8_lossy(pdf).into_owned();
+    let objects = objects(&pdf);
+    let mut pages = Vec::new();
+    // A page, not the page TREE, asked without depending on how the writer
+    // spaces a dictionary -- `/Type /Page>>` stops matching the day a space is
+    // put before the closing bracket, and every test then reports zero pages.
+    let is_page = |b: &str| b.contains("/Type /Page") && !b.contains("/Type /Pages");
+    for (_, page) in objects.iter().filter(|(_, b)| is_page(b)) {
+        let Some((_, stream)) = value_of(page, "/Contents ").and_then(|want| {
+            objects
+                .iter()
+                .find(|(number, _)| number.to_string() == want)
+        }) else {
+            continue;
+        };
+        let mut runs = Vec::new();
+        for line in stream.lines() {
+            if let Some((body, _)) = line.rsplit_once(") Tj") {
+                if let Some((_, text)) = body.rsplit_once('(') {
+                    runs.push(text.to_string());
+                }
+            }
+        }
+        pages.push(runs);
+    }
+    pages
+}
+
+/// Which page a run answering `holds` was drawn on, or `None`.
+fn page_of(pages: &[Vec<String>], holds: impl Fn(&str) -> bool) -> Option<usize> {
+    pages
+        .iter()
+        .position(|page| page.iter().any(|run| holds(run)))
+}
+
+/// A longtable of `rows` rows in pandoc's shape -- `\endhead` and
+/// `\endlastfoot` -- which is what every markdown table in the corpus is.
+fn long_table(rows: usize) -> String {
+    let body: String = (1..=rows)
+        .map(|n| format!("row{n} & value {n} \\\\\n"))
+        .collect();
+    format!(
+        "\\documentclass{{article}}\n\\begin{{document}}\n\
+         \\begin{{longtable}}[]{{@{{}}lr@{{}}}}\n\
+         \\toprule\\noalign{{}}\nName & Measured \\\\\n\\midrule\\noalign{{}}\n\
+         \\endhead\n\\bottomrule\\noalign{{}}\n\\endlastfoot\n{body}\
+         \\end{{longtable}}\n\\end{{document}}\n"
+    )
+}
+
+#[test]
+fn a_longtable_repeats_its_head_on_every_page_it_runs_onto() {
+    // What a longtable IS. A table that crosses a page boundary repeats its
+    // head at the top of the next one, or the reader gets a page of unlabelled
+    // numbers. `\endhead` says which rows are that head, and the corpus writes
+    // 3,477 of them because pandoc emits a longtable for every markdown table.
+    // The head was set once, above the first page, and the rows ran on under
+    // nothing.
+    let pdf = texrs::run_pdf(&long_table(120)).expect("pdf");
+    let pages = by_page(&pdf);
+    assert!(
+        pages.len() >= 3,
+        "120 rows is more than one page: got {} pages",
+        pages.len()
+    );
+    for (number, page) in pages.iter().enumerate() {
+        let head = page.iter().filter(|run| run.contains("Measured")).count();
+        assert_eq!(
+            head,
+            1,
+            "page {} of {} carries the head exactly once: {page:?}",
+            number + 1,
+            pages.len()
+        );
+        // And carries it FIRST: a head under the rows it labels is not a head.
+        assert!(
+            page[0].contains("Measured"),
+            "page {} opens with the head: {:?}",
+            number + 1,
+            &page[..3.min(page.len())]
+        );
+    }
+    // Repeating the head must not repeat or drop a ROW: each is set once, and
+    // the last of them is on the last page.
+    let set: Vec<&String> = pages.iter().flatten().collect();
+    for n in 1..=120 {
+        let want = format!("row{n} ");
+        let times = set.iter().filter(|run| run.starts_with(&want)).count();
+        assert_eq!(times, 1, "row {n} is set once, not {times} times");
+    }
+    assert!(
+        pages
+            .last()
+            .expect("pages")
+            .iter()
+            .any(|run| run.starts_with("row120 ")),
+        "the table ends where it ends"
+    );
+    // Two rules on every page -- the `\toprule` and `\midrule` that are part
+    // of the head, repeated with it -- and the one `\bottomrule` under the end
+    // of the table.
+    assert_eq!(
+        rules(&pdf).len(),
+        pages.len() * 2 + 1,
+        "the head's rules repeat with the head and the bottom rule does not"
+    );
+}
+
+#[test]
+fn a_longtable_sets_its_first_head_once_and_its_foot_on_every_page_but_the_last() {
+    // The other three boundaries. `\endfirsthead` is a head for the first page
+    // that differs from the one repeated after it; `\endfoot` is a foot for
+    // every page the table runs PAST and `\endlastfoot` the one under the end
+    // of the table. Both feet were lowered to one code, so a table writing both
+    // set its last foot in the middle of its body.
+    let body: String = (1..=120)
+        .map(|n| format!("row{n} & value {n} \\\\\n"))
+        .collect();
+    let src = format!(
+        "\\documentclass{{article}}\n\\begin{{document}}\n\
+         \\begin{{longtable}}[]{{@{{}}lr@{{}}}}\n\
+         \\toprule\nOpening & OnlyPageOne \\\\\n\\midrule\n\\endfirsthead\n\
+         \\toprule\nContinued & Measured \\\\\n\\midrule\n\\endhead\n\
+         \\midrule\ncarried & forward \\\\\n\\endfoot\n\
+         \\bottomrule\ntheend & total \\\\\n\\endlastfoot\n{body}\
+         \\end{{longtable}}\n\\end{{document}}\n"
+    );
+    let pages = by_page(&texrs::run_pdf(&src).expect("pdf"));
+    assert!(pages.len() >= 3, "got {} pages", pages.len());
+    let holding = |want: &str| -> Vec<usize> {
+        pages
+            .iter()
+            .enumerate()
+            .filter(|(_, page)| page.iter().any(|run| run.contains(want)))
+            .map(|(number, _)| number)
+            .collect()
+    };
+    let after: Vec<usize> = (1..pages.len()).collect();
+    let past: Vec<usize> = (0..pages.len() - 1).collect();
+    assert_eq!(
+        holding("OnlyPageOne"),
+        vec![0],
+        "the first head is the first page's alone"
+    );
+    assert_eq!(
+        holding("Continued"),
+        after,
+        "and every page after it opens with the head that repeats"
+    );
+    assert_eq!(
+        holding("carried"),
+        past,
+        "the foot stands under every page the table runs past"
+    );
+    assert_eq!(
+        holding("theend"),
+        vec![pages.len() - 1],
+        "and the last foot once, under the end of the table"
+    );
+    for (number, page) in pages.iter().enumerate() {
+        let want = match number + 1 == pages.len() {
+            true => "theend",
+            false => "carried",
+        };
+        assert!(
+            page.last().expect("a page sets something").contains(want),
+            "page {} ends with its foot: {:?}",
+            number + 1,
+            page.last()
+        );
+    }
+}
+
+#[test]
+fn a_page_break_does_not_fall_inside_a_row_of_a_longtable() {
+    // A row is not a line. A cell that wrapped makes a row several lines tall,
+    // and a break between those lines leaves half a row at the foot of one
+    // page and half at the head of the next -- under the repeated head, which
+    // reads as a row of its own.
+    //
+    // Each row opens with its own name and closes with its own token, so where
+    // a row STARTS and where it ENDS can both be read out of the file.
+    let filler = "a wrapped cell of prose long enough that the column it is set in \
+                  cannot hold it on one line and has to take several of them for it";
+    let body: String = (1..=80)
+        .map(|n| format!("row{n} & {filler} endofrow{n}. \\\\\n"))
+        .collect();
+    let src = format!(
+        "\\documentclass{{article}}\n\\begin{{document}}\n\
+         \\begin{{longtable}}[]{{@{{}}lr@{{}}}}\n\
+         \\toprule\\noalign{{}}\nName & Measured \\\\\n\\midrule\\noalign{{}}\n\
+         \\endhead\n\\bottomrule\\noalign{{}}\n\\endlastfoot\n{body}\
+         \\end{{longtable}}\n\\end{{document}}\n"
+    );
+    let pages = by_page(&texrs::run_pdf(&src).expect("pdf"));
+    assert!(pages.len() >= 3, "got {} pages", pages.len());
+    // The rows are taller than one line, or this asks nothing.
+    let lines: usize = pages.iter().map(Vec::len).sum();
+    assert!(
+        lines > 80 * 2,
+        "the cells wrap, so a row is several lines: {lines} lines for 80 rows"
+    );
+    for n in 1..=80 {
+        let opens = format!("row{n} ");
+        let closes = format!("endofrow{n}.");
+        let first = page_of(&pages, |run| run.starts_with(&opens))
+            .unwrap_or_else(|| panic!("row {n} is set at all"));
+        let last = page_of(&pages, |run| run.contains(&closes))
+            .unwrap_or_else(|| panic!("row {n} is set whole"));
+        assert_eq!(
+            first + 1,
+            last + 1,
+            "row {n} starts on page {} and ends on page {}: the break fell inside it",
+            first + 1,
+            last + 1
+        );
+    }
+}

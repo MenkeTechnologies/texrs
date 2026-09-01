@@ -147,6 +147,10 @@ fn without_marks(text: &str) -> String {
             crate::typeset::TABLE_CELL => out.push(' '),
             crate::typeset::TABLE_ROW => out.push('\n'),
             crate::typeset::TABLE_MARK => face_code = true,
+            // Which part of a longtable a line is -- its head, its foot, a row
+            // -- is a fact about the page it is set on, not about the words.
+            // Its code character goes the way a rule's does.
+            crate::typeset::LONGTABLE => face_code = true,
             // Where a list item's line starts is a fact about the page. The
             // item's own mark -- the bullet, the number, the term -- is text
             // the lowerer wrote and stays; the depth digit after the marker

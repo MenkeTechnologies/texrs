@@ -769,25 +769,25 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\endhead",
         "LaTeX",
-        "End longtable's head: everything above it repeats at the top of each page the table runs onto. The table is set once here, so the head is set once -- above the body, which is where it is written.",
+        "End longtable's head: everything above it is set at the top of EVERY page the table runs onto, not only the first. Written above the body, which is where it is set on the first page.",
         "\\begin{longtable}[]{@{}ll@{}}\n\\toprule\nName & Value \\\\\n\\midrule\n\\endhead\nalpha & 1 \\\\\n\\end{longtable}",
     ),
     (
         "\\endfirsthead",
         "LaTeX",
-        "End longtable's FIRST head, when it differs from the one that repeats. The first head is the one set; what stands between this and `\\endhead` is the repeating copy, and a table set once has no page to repeat it on.",
+        "End longtable's FIRST head, when it differs from the one that repeats. What stands above this is set at the top of the first page, and what stands between it and `\\endhead` at the top of every page after that.",
         "\\begin{longtable}[]{@{}ll@{}}\nName & Value \\\\\n\\endfirsthead\nName & Value \\\\\n\\endhead\nalpha & 1 \\\\\n\\end{longtable}",
     ),
     (
         "\\endfoot",
         "LaTeX",
-        "End longtable's foot: what repeats at the bottom of each page the table runs onto. Written before the body and set after it, which is where a reader gets it.",
+        "End longtable's foot: what stands at the bottom of every page the table runs PAST -- so on no page at all when it fits on one, and never on the last, where `\\endlastfoot` stands instead. Written before the body and set under it.",
         "\\begin{longtable}[]{@{}ll@{}}\n\\endhead\n\\bottomrule\n\\endfoot\nalpha & 1 \\\\\n\\end{longtable}",
     ),
     (
         "\\endlastfoot",
         "LaTeX",
-        "End longtable's LAST foot: what is set once, under the end of the table. This is the boundary pandoc writes, with `\\bottomrule` above it, in every markdown table it emits.",
+        "End longtable's LAST foot: what is set once, under the end of the table, where `\\endfoot` stands under every page before it. This is the boundary pandoc writes, with `\\bottomrule` above it, in every markdown table it emits.",
         "\\begin{longtable}[]{@{}ll@{}}\n\\endhead\n\\bottomrule\n\\endlastfoot\nalpha & 1 \\\\\n\\end{longtable}",
     ),
     // ── Lists — lower::lower_list, typeset::fill ─────────────────────────

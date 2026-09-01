@@ -1085,8 +1085,8 @@ impl Lowerer {
         out: &mut Vec<Cmd>,
     ) -> R<bool> {
         use crate::typeset::{
-            FIRST_HEAD_END, FOOT_END, HEAD_END, RULE_BOTTOM, RULE_MID, RULE_TOP, TABLE_MARK,
-            TABLE_ROW,
+            FIRST_HEAD_END, FOOT_END, HEAD_END, LAST_FOOT_END, RULE_BOTTOM, RULE_MID, RULE_TOP,
+            TABLE_MARK, TABLE_ROW,
         };
         // Every arm below that means something only inside a table asks this
         // in its BODY rather than in a match guard, and hands the command back
@@ -1142,7 +1142,11 @@ impl Lowerer {
                 let code = match name.name() {
                     "endhead" => HEAD_END,
                     "endfirsthead" => FIRST_HEAD_END,
-                    _ => FOOT_END,
+                    "endfoot" => FOOT_END,
+                    // The last foot is not the repeating one: it is set once,
+                    // under the end of the table, where the repeating foot is
+                    // set at the bottom of every page the table runs past.
+                    _ => LAST_FOOT_END,
                 };
                 self.push_text(out, &format!("{TABLE_MARK}{code}"));
                 Ok(true)

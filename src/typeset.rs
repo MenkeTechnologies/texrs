@@ -846,8 +846,9 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
             false
         }
         FACE_POP => false,
-        // Its code character goes the same way the face's does.
-        TABLE_MARK => {
+        // Its code character goes the same way the face's does, and so does
+        // the code saying which part of a longtable a line is.
+        TABLE_MARK | LONGTABLE => {
             face_code = true;
             false
         }
@@ -1700,6 +1701,9 @@ pub fn to_pdf(
         }
         let mut y = layout.height + layout.margin - layout.leading;
         for line in chunk {
+            // Which part of a table a line is was a question for `paginate`,
+            // which has answered it: the page draws the line.
+            let line = without_longtable(line);
             // A line of vertical space is space: the baseline moves down and
             // nothing is drawn on it. Falling through to the run loop below
             // would draw the marker itself as a character.
@@ -2214,16 +2218,52 @@ fn strip_indent(line: &str) -> (usize, &str) {
     (depth, chars.as_str())
 }
 
-/// Split broken lines into pages, at a forced break or when the page is full.
+/// Split broken lines into pages, at a forced break or when the page is full,
+/// carrying a longtable's head and foot onto every page it runs onto.
 ///
 /// `chunks(per_page)` alone cannot do this: it fills every page to the brim,
 /// so a `\newpage` has nowhere to say anything and a chapter starts wherever
 /// the previous one happened to end.
+///
+/// Nor can a table be filled that way. A table is not a run of lines a break
+/// may fall anywhere in:
+///
+///   * a row whose cell wrapped is several lines and one thing, and a break
+///     between them tears the row in half;
+///   * the head belongs above the rows, on EVERY page they run onto, and a
+///     continuation page whose first row has no head over it is a page of
+///     unlabelled numbers;
+///   * the foot belongs under the rows on every page the table runs PAST, and
+///     under the end of the table on the last -- so room for it has to be kept
+///     back before the page is full, not found after it is.
+///
+/// So the lines say what they are (`LONGTABLE`), and this reads them: the
+/// repeating head and foot are lines of the stream that are held back rather
+/// than set where they stand, and a break inside a table sets the foot, ends
+/// the page and opens the next one with the head. The head and foot are lines
+/// of `lines` like any other, so repeating one costs nothing -- the page holds
+/// the same `&str` again.
 fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
     let mut pages: Vec<Vec<&str>> = Vec::new();
     let mut page: Vec<&str> = Vec::new();
-    for line in lines {
+    // The table being set, if one is: the head that goes above each of its
+    // continuation pages, and the foot that goes below each page it runs past.
+    let mut head: Vec<&str> = Vec::new();
+    let mut foot: Vec<&str> = Vec::new();
+    let mut in_table = false;
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].as_str();
+        i += 1;
         if line.chars().all(|c| c == PAGE_BREAK) && !line.is_empty() {
+            // A forced break cannot fall inside a table: a table is one
+            // paragraph and is recognised as one before the break character is
+            // split out of it, so the break stays inside a cell. It can stand
+            // BETWEEN two of them, and the second must not inherit the first
+            // one's head.
+            in_table = false;
+            head.clear();
+            foot.clear();
             // Consecutive breaks do not make blank pages: \clearpage after
             // \newpage is one break, which is what both mean together.
             if !page.is_empty() {
@@ -2231,10 +2271,67 @@ fn paginate(lines: &[String], per_page: usize) -> Vec<Vec<&str>> {
             }
             continue;
         }
-        if page.len() >= per_page {
-            pages.push(std::mem::take(&mut page));
+        let Some(code) = longtable_code(line) else {
+            // Out of the table again: the next one brings its own head, and
+            // this one's must not be carried into the prose after it.
+            in_table = false;
+            head.clear();
+            foot.clear();
+            if page.len() >= per_page {
+                pages.push(std::mem::take(&mut page));
+            }
+            page.push(line);
+            continue;
+        };
+        if !in_table {
+            in_table = true;
+            head.clear();
+            foot.clear();
         }
-        page.push(line);
+        // What is only repeated is not set here.
+        if code == LT_REPEAT {
+            head.push(line);
+            continue;
+        }
+        if code == LT_FOOT {
+            foot.push(line);
+            continue;
+        }
+        // What must not be broken into: the rest of this head, or the lines
+        // this row wrapped onto.
+        let mut group = 1;
+        let continues = match code {
+            LT_HEAD => LT_HEAD,
+            _ => LT_CONT,
+        };
+        while lines
+            .get(i + group - 1)
+            .is_some_and(|next| longtable_code(next) == Some(continues))
+        {
+            group += 1;
+        }
+        if code == LT_HEAD {
+            head.clear();
+            head.extend(lines[i - 1..i - 1 + group].iter().map(String::as_str));
+        }
+        // A group taller than the page it would be repeated on cannot be kept
+        // whole; it is set where it falls rather than pushing every page after
+        // it out of shape.
+        let step = group.min(per_page.saturating_sub(head.len()).max(1));
+        // Room for the group AND for the foot under it: longtable keeps the
+        // foot's height back on every page for the same reason.
+        if !page.is_empty() && page.len() + step + foot.len() > per_page {
+            // The table runs past this page, so the foot goes under it and the
+            // head over the next -- unless the head is what is about to be set
+            // anyway, which is where the table starts on the new page.
+            page.extend(foot.iter().copied());
+            pages.push(std::mem::take(&mut page));
+            if code != LT_HEAD {
+                page.extend(head.iter().copied());
+            }
+        }
+        page.extend(lines[i - 1..i - 1 + step].iter().map(String::as_str));
+        i += step - 1;
     }
     if !page.is_empty() {
         pages.push(page);
@@ -2303,6 +2400,9 @@ pub const MARKERS: &[(char, bool)] = &[
     // The other one that carries an argument: the character saying which rule,
     // or which of longtable's section boundaries, this mark is.
     (TABLE_MARK, true),
+    // And the one saying which part of a longtable a line is, whose argument
+    // is the code naming that part.
+    (LONGTABLE, true),
 ];
 
 /// The end of a line INSIDE a code listing, carried through the text the way a
@@ -2351,6 +2451,52 @@ pub const TABLE_ROW: char = '\u{1e}';
 /// one of longtable's sections. The character AFTER it says which.
 pub const TABLE_MARK: char = '\u{1d}';
 
+/// The part of a table a line belongs to: the character AFTER it is one of the
+/// `LT_` codes below.
+///
+/// A longtable repeats its head at the top of every page it runs onto and sets
+/// its foot at the bottom of every page it runs past. The only thing that
+/// knows where a page ends is `paginate`, and all it sees is lines -- so the
+/// line has to say what part of which table it is. That is what this carries.
+///
+/// It also says where a row STARTS, because a row is not a line: a cell that
+/// wrapped makes a row several lines tall, and a page break inside those lines
+/// tears the row in half.
+///
+/// U+0016 is the next free control character after U+0015; the `MARKERS`
+/// registry above says what the rest are spent on.
+pub const LONGTABLE: char = '\u{16}';
+
+/// The codes `LONGTABLE` carries.
+///
+/// `LT_HEAD` is a head that is set where it stands AND repeated above every
+/// continuation page. `LT_REPEAT` is the repeating head of a table that gave a
+/// DIFFERENT first head, so it is set only above the pages after the first.
+/// `LT_FOOT` is never set where it stands: it belongs at the bottom of a page
+/// the table runs past, and `paginate` puts it there. `LT_ROW` opens a line
+/// that is set where it stands, and `LT_CONT` continues it -- the two together
+/// are what says a row and the lines its cells wrapped onto are one thing.
+const LT_HEAD: char = 'h';
+const LT_REPEAT: char = 'H';
+const LT_FOOT: char = 'f';
+const LT_ROW: char = 'r';
+const LT_CONT: char = 'c';
+
+/// Which part of a table this line is, or `None` when it is not a table line.
+fn longtable_code(line: &str) -> Option<char> {
+    line.strip_prefix(LONGTABLE)?.chars().next()
+}
+
+/// The line without the part it says it is: what the page draws.
+fn without_longtable(line: &str) -> &str {
+    let Some(rest) = line.strip_prefix(LONGTABLE) else {
+        return line;
+    };
+    let mut chars = rest.chars();
+    chars.next();
+    chars.as_str()
+}
+
 /// The codes `TABLE_MARK` carries. The three rules, then the boundaries that
 /// say where longtable's head and foot end.
 ///
@@ -2362,34 +2508,89 @@ pub const RULE_BOTTOM: char = 'b';
 pub const HEAD_END: char = 'h';
 pub const FIRST_HEAD_END: char = 'H';
 pub const FOOT_END: char = 'f';
+/// `\endlastfoot`, which is not `\endfoot`: one is set at the bottom of every
+/// page the table runs past and the other once, under the end of the table.
+/// They shared `FOOT_END` and a table writing both put its last foot into its
+/// body.
+pub const LAST_FOOT_END: char = 'F';
 
 /// One entry of a table: a rule across it, or a row of cells.
+///
+/// Cloneable because a section can be set twice: a table that gave no
+/// `\endlastfoot` sets its repeating foot under the end of the table as well
+/// as at the bottom of every page before it.
+#[derive(Clone)]
 enum Entry {
     Rule(char),
     Row(Vec<String>),
 }
 
-/// Split a table paragraph into its rules and rows, in the order they are SET.
+/// A longtable's sections: what each of its four boundaries closes, and the
+/// body that follows the last of them.
 ///
-/// That is not the order longtable WRITES them. A longtable states its head,
-/// then its foot, then its body -- `\endhead` closes the head and `\endlastfoot`
-/// the foot -- so the bottom rule is written before the first row of data, and
-/// setting the stream in arrival order would draw it there. Every markdown
-/// table pandoc emits has this shape.
+/// longtable states its head and its foot BEFORE its body -- `\endhead` closes
+/// the head, `\endlastfoot` the foot -- so nothing can be set in the order a
+/// reader gets it until the sections are told apart. Keeping them apart is
+/// also what lets the head be set AGAIN at the top of the next page, which is
+/// the whole of what a longtable is for.
+#[derive(Default)]
+struct Sections {
+    /// What `\endfirsthead` closes: set at the top of the FIRST page only.
+    first_head: Vec<Entry>,
+    /// What `\endhead` closes: set again at the top of every page the table
+    /// runs onto.
+    head: Vec<Entry>,
+    /// What `\endfoot` closes: set at the bottom of every page the table runs
+    /// PAST, and so on no page at all when it fits on one.
+    foot: Vec<Entry>,
+    /// What `\endlastfoot` closes: set once, under the end of the table.
+    last_foot: Vec<Entry>,
+    /// Everything after the last boundary: the rows. A `tabular` names no
+    /// boundary and is all body, which leaves its entries in the order it
+    /// wrote them.
+    body: Vec<Entry>,
+}
+
+impl Sections {
+    /// The head the FIRST page gets: the first head where one is given, and
+    /// the repeating head otherwise -- longtable.sty defaults `\endfirsthead`
+    /// to `\endhead`.
+    fn opening_head(&self) -> &[Entry] {
+        match self.first_head.is_empty() {
+            true => &self.head,
+            false => &self.first_head,
+        }
+    }
+
+    /// The foot under the END of the table: the last foot where one is given,
+    /// and the repeating foot otherwise -- `\endlastfoot` defaults to
+    /// `\endfoot` the same way.
+    fn closing_foot(&self) -> &[Entry] {
+        match self.last_foot.is_empty() {
+            true => &self.foot,
+            false => &self.last_foot,
+        }
+    }
+}
+
+/// Split a table paragraph into its sections, each holding its rules and rows
+/// in the order they were written.
+///
+/// A boundary closes the material written since the last one: whatever stands
+/// before `\endhead` IS the head. Reading it that way, rather than switching a
+/// destination on each boundary, is what tells `\endfoot` from `\endlastfoot`;
+/// before this the two shared one code and a table writing both put its last
+/// foot into its body.
 ///
 /// A row whose cells are all blank is dropped: the newline between the last
 /// `\\` and `\end{longtable}` is one, and a blank line in the middle of a
 /// table is not something the document asked for.
-fn table_entries(para: &str) -> Vec<Entry> {
-    // Head, the repeating head that is set once here and so discarded, foot,
-    // and body. A `tabular` names none of the boundaries and stays in Head,
-    // which leaves its entries in the order they were written.
-    const HEAD: usize = 0;
-    const REPEAT: usize = 1;
-    const FOOT: usize = 2;
-    const BODY: usize = 3;
-    let mut sections: [Vec<Entry>; 4] = Default::default();
-    let mut section = HEAD;
+fn table_sections(para: &str) -> Sections {
+    let mut sections = Sections::default();
+    // The entries written since the last boundary. Which section they belong
+    // to is decided by the boundary that closes them, which has not been read
+    // yet -- so they wait here until one is.
+    let mut pending: Vec<Entry> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut cell = String::new();
     // A cell is measured and wrapped as one line, so the line ends the source
@@ -2403,32 +2604,53 @@ fn table_entries(para: &str) -> Vec<Entry> {
         match ch {
             TABLE_MARK => {
                 let code = chars.next().unwrap_or(RULE_MID);
-                match code {
-                    // `\endfirsthead` ends the head that is set; what follows
-                    // it repeats at the top of each page, and this sets the
-                    // table once, so that copy is dropped.
-                    FIRST_HEAD_END => section = REPEAT,
-                    HEAD_END => section = FOOT,
-                    // The first boundary wins: a table writing both `\endfoot`
-                    // and `\endlastfoot` would otherwise start its body twice.
-                    FOOT_END if section != BODY => section = BODY,
-                    FOOT_END => {}
-                    rule => sections[section].push(Entry::Rule(rule)),
+                let section = match code {
+                    FIRST_HEAD_END => &mut sections.first_head,
+                    HEAD_END => &mut sections.head,
+                    FOOT_END => &mut sections.foot,
+                    LAST_FOOT_END => &mut sections.last_foot,
+                    rule => {
+                        pending.push(Entry::Rule(rule));
+                        continue;
+                    }
+                };
+                // A boundary written twice keeps what the first one closed:
+                // taking `pending` again would empty the section rather than
+                // add to it.
+                if section.is_empty() {
+                    *section = std::mem::take(&mut pending);
                 }
             }
             TABLE_CELL => row.push(finish(&mut cell)),
             TABLE_ROW => {
                 row.push(finish(&mut cell));
                 if row.iter().any(|c| !c.is_empty()) {
-                    sections[section].push(Entry::Row(std::mem::take(&mut row)));
+                    pending.push(Entry::Row(std::mem::take(&mut row)));
                 }
                 row.clear();
             }
             c => cell.push(c),
         }
     }
-    let [head, _repeat, foot, body] = sections;
-    head.into_iter().chain(body).chain(foot).collect()
+    sections.body = pending;
+    sections
+}
+
+/// The entries of a table in the order they are SET, for a path with no page
+/// to repeat anything on.
+///
+/// That is not the order longtable WRITES them: the bottom rule is written
+/// before the first row of data, and setting the stream in arrival order would
+/// draw it under the head. Every markdown table pandoc emits has this shape.
+fn table_entries(para: &str) -> Vec<Entry> {
+    let sections = table_sections(para);
+    sections
+        .opening_head()
+        .iter()
+        .chain(&sections.body)
+        .chain(sections.closing_foot())
+        .cloned()
+        .collect()
 }
 
 /// Set a table: each row on its own line, each column as wide as its content,
@@ -2450,7 +2672,18 @@ fn table_lines(
     width_of: &dyn Fn(&str, Face) -> f64,
     out: &mut Vec<String>,
 ) {
-    let entries = table_entries(para);
+    let sections = table_sections(para);
+    // Every section is measured against every other: the head repeated at the
+    // top of page four stands over the rows set under it, so how wide its
+    // cells are is part of how wide the columns are.
+    let entries: Vec<&Entry> = sections
+        .first_head
+        .iter()
+        .chain(&sections.head)
+        .chain(&sections.foot)
+        .chain(&sections.last_foot)
+        .chain(&sections.body)
+        .collect();
     let cols = entries
         .iter()
         .filter_map(|e| match e {
@@ -2480,7 +2713,7 @@ fn table_lines(
     // Each column asks for what its widest cell needs.
     let mut natural = vec![0.0f64; cols];
     for entry in &entries {
-        if let Entry::Row(cells) = entry {
+        if let Entry::Row(cells) = *entry {
             for (j, cell) in cells.iter().enumerate() {
                 natural[j] = natural[j].max(measure(cell));
             }
@@ -2515,43 +2748,88 @@ fn table_lines(
     }
     let span = starts[cols - 1] + widths[cols - 1];
 
-    for entry in entries {
-        match entry {
-            Entry::Rule(kind) => out.push(rule_line(kind, span, space)),
-            Entry::Row(cells) => {
-                let wrapped: Vec<Vec<String>> = cells
-                    .iter()
-                    .enumerate()
-                    .map(|(j, cell)| wrap_cell(cell, widths[j], colours, faces, width_of))
-                    .collect();
-                let height = wrapped.iter().map(Vec::len).max().unwrap_or(0);
-                for k in 0..height {
-                    let mut line = String::new();
-                    let mut at = 0.0f64;
-                    for (j, fragments) in wrapped.iter().enumerate() {
-                        let Some(fragment) = fragments.get(k).filter(|f| !f.is_empty()) else {
-                            continue;
-                        };
-                        // Pad to the column, in the unit the padding is
-                        // written in. The nearest whole space rather than the
-                        // last one that fits, so a column stands within HALF a
-                        // space of where it was measured to be and not within
-                        // a whole one; and never fewer than one space, so two
-                        // cells cannot touch even where the first overran the
-                        // width it was given.
-                        let want = ((starts[j] - at) / space).round() as i64;
-                        for _ in 0..want.max(i64::from(j > 0)) {
-                            line.push(' ');
-                            at += space;
-                        }
-                        line.push_str(fragment);
-                        at += measure(fragment);
-                    }
-                    out.push(line);
+    // One entry, set: a rule is the line the page draws a rule from, a row is
+    // its cells wrapped to their columns -- which is one line, or several when
+    // a cell wrapped.
+    let set = |entry: &Entry| -> Vec<String> {
+        let cells = match entry {
+            Entry::Rule(kind) => return vec![rule_line(*kind, span, space)],
+            Entry::Row(cells) => cells,
+        };
+        let wrapped: Vec<Vec<String>> = cells
+            .iter()
+            .enumerate()
+            .map(|(j, cell)| wrap_cell(cell, widths[j], colours, faces, width_of))
+            .collect();
+        let height = wrapped.iter().map(Vec::len).max().unwrap_or(0);
+        let mut lines = Vec::with_capacity(height);
+        for k in 0..height {
+            let mut line = String::new();
+            let mut at = 0.0f64;
+            for (j, fragments) in wrapped.iter().enumerate() {
+                let Some(fragment) = fragments.get(k).filter(|f| !f.is_empty()) else {
+                    continue;
+                };
+                // Pad to the column, in the unit the padding is written in.
+                // The nearest whole space rather than the last one that fits,
+                // so a column stands within HALF a space of where it was
+                // measured to be and not within a whole one; and never fewer
+                // than one space, so two cells cannot touch even where the
+                // first overran the width it was given.
+                let want = ((starts[j] - at) / space).round() as i64;
+                for _ in 0..want.max(i64::from(j > 0)) {
+                    line.push(' ');
+                    at += space;
                 }
+                line.push_str(fragment);
+                at += measure(fragment);
+            }
+            lines.push(line);
+        }
+        lines
+    };
+
+    // A section, with every line saying which part of the table it is. That is
+    // what `paginate` reads to repeat the head and to hold the foot back.
+    //
+    // `rows` says whether the section's entries are separate things: a body
+    // row is one, so the lines a cell wrapped onto are marked as continuing it
+    // and no page break can fall between them. A head or a foot is set whole
+    // or not at all, so every one of its lines carries the section's own code
+    // and the whole block is one thing.
+    let mut emit = |entries: &[Entry], code: char, rows: bool| {
+        for entry in entries {
+            for (n, line) in set(entry).into_iter().enumerate() {
+                let mut marked = String::from(LONGTABLE);
+                marked.push(match rows && n > 0 {
+                    true => LT_CONT,
+                    false => code,
+                });
+                marked.push_str(&line);
+                out.push(marked);
             }
         }
+    };
+    // The repeating head of a table that gave a different first head, and the
+    // repeating foot: neither is set where it stands. They are written into
+    // the stream all the same, because the lines `paginate` repeats have to be
+    // lines it can point at.
+    if !sections.first_head.is_empty() {
+        emit(&sections.head, LT_REPEAT, false);
     }
+    emit(&sections.foot, LT_FOOT, false);
+    // The head of the first page, which is also the head that repeats unless a
+    // first head was given -- and says which of the two it is.
+    let opening = match sections.first_head.is_empty() {
+        true => LT_HEAD,
+        false => LT_ROW,
+    };
+    emit(sections.opening_head(), opening, opening == LT_ROW);
+    emit(&sections.body, LT_ROW, true);
+    // And the foot under the end of the table. A table that gave no
+    // `\endlastfoot` sets its repeating foot here as well, which is what
+    // longtable does with it.
+    emit(sections.closing_foot(), LT_ROW, true);
 }
 
 /// The line a rule is set from: the mark, the code saying which rule, and the
