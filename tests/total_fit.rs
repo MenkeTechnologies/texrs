@@ -3,6 +3,18 @@
 //! Placed against UNMODIFIED code this fails at the first assertion: a first-fit
 //! breaker reaches a different set of breakpoints for the same words.
 
+/// Whether there is a TeX installation to measure in.
+///
+/// Every line pinned below is pinned to the exact width of the words in
+/// cmr10, so the breaks are the breaks THAT FONT gives. Where there is no
+/// installation -- CI -- `find_font` answers nothing and the widths fall back
+/// to an estimate, which breaks the same prose somewhere else and makes an
+/// exact line a false statement about the algorithm rather than a true one.
+/// tests/typeset.rs guards its metric tests the same way.
+fn metrics_available() -> bool {
+    texrs::typeset::find_font("cmr10").is_some()
+}
+
 /// The text drawn on each baseline, topmost first.
 fn lines(pdf: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(pdf);
@@ -50,6 +62,10 @@ fn set(body: &str) -> Vec<String> {
 /// which is a thing `Page::text_set` can now draw and could not before.
 #[test]
 fn a_paragraph_breaks_by_total_badness_and_not_by_first_fit() {
+    if !metrics_available() {
+        eprintln!("skipping: no TeX installation, so cmr10's widths are not there to break on");
+        return;
+    }
     let prose = "The typesetting of a paragraph is a global optimisation problem, not a \
                  local one. A greedy algorithm that fills each line until the following \
                  word will no longer fit is straightforward to implement and fast to run, \
