@@ -295,6 +295,20 @@ pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
     ))
 }
 
+/// How many pages a PDF declares.
+///
+/// Counted off the page objects themselves: `/Type /Pages` is the page TREE and
+/// there is one of those, so it is subtracted rather than matched around.
+///
+/// `pdf_parity` asks this to decide whether a document produced a page at all,
+/// because "no pages, no file" is what the command line does and what tex and
+/// luatex do -- a harness that measured the library call underneath would
+/// report a divergence the tool does not have.
+pub fn pdf_page_count(pdf: &[u8]) -> usize {
+    let text = String::from_utf8_lossy(pdf);
+    text.matches("/Type /Page").count() - text.matches("/Type /Pages").count()
+}
+
 pub fn run_dvi_fallback(
     path: Option<&std::path::Path>,
     src: &str,
