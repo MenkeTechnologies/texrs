@@ -55,5 +55,11 @@ pub extern "C" fn texrs_aot_main() -> i64 {
     };
     let name = AOT_SOURCE.with(|s| s.borrow().clone());
     println!("(./{name}{body} )");
+    // …including the line the ordinary run prints for the PDF. A lowered chunk
+    // is register writes, branches and `\message`: nothing in it ships a page,
+    // so the empty document is what it produced, and `pdf_output_line` says of
+    // it exactly what the interpreter says of a document that ships nothing.
+    let out = std::path::Path::new(&name).with_extension("pdf");
+    println!("{}", crate::pdf_output_line(&out, &[]));
     code
 }

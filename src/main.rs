@@ -388,24 +388,13 @@ fn run_many(paths: &[String], jobs: Option<usize>) -> ExitCode {
 /// would have become the everyday behaviour the moment the ordinary invocation
 /// started writing.
 fn write_pdf(path: &str, pdf: &[u8]) -> Result<String, String> {
-    let pages = texrs::pdf_page_count(pdf);
     let out = Path::new(path).with_extension("pdf");
-    if pages > 0 {
+    if texrs::pdf_page_count(pdf) > 0 {
         std::fs::write(&out, pdf).map_err(|e| format!("{}: {e}", out.display()))?;
     }
-    Ok(match pages {
-        0 => "No pages of output.".to_string(),
-        1 => format!(
-            "Output written on {} (1 page, {} bytes).",
-            out.display(),
-            pdf.len()
-        ),
-        n => format!(
-            "Output written on {} ({n} pages, {} bytes).",
-            out.display(),
-            pdf.len()
-        ),
-    })
+    // The wording lives in the library so the `--aot` binary, which has no main
+    // of its own to keep in step, reports the same line.
+    Ok(texrs::pdf_output_line(&out, pdf))
 }
 
 /// One document, as the single-file path runs it, returning the line to print.

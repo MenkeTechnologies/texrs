@@ -338,6 +338,29 @@ pub fn pdf_page_count(pdf: &[u8]) -> usize {
     text.matches("/Type /Page").count() - text.matches("/Type /Pages").count()
 }
 
+/// What a run says about the PDF it produced, the way lualatex says it.
+///
+/// A document that ships no page gets no file and says so; tex and lualatex
+/// both behave that way. Both entry points report through here — the ordinary
+/// command line after it has written the file, and a `--aot` binary, which
+/// carries a chunk of register writes, branches and `\message` and no stomach
+/// at all, so the page count it reports is zero by construction.
+pub fn pdf_output_line(out: &std::path::Path, pdf: &[u8]) -> String {
+    match pdf_page_count(pdf) {
+        0 => "No pages of output.".to_string(),
+        1 => format!(
+            "Output written on {} (1 page, {} bytes).",
+            out.display(),
+            pdf.len()
+        ),
+        n => format!(
+            "Output written on {} ({n} pages, {} bytes).",
+            out.display(),
+            pdf.len()
+        ),
+    }
+}
+
 pub fn run_dvi_fallback(
     path: Option<&std::path::Path>,
     src: &str,
