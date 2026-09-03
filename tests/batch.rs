@@ -111,8 +111,11 @@ fn output_follows_argument_order_not_completion_order() {
     let b = Batch::new("order", &bodies);
     let (out, _, ok) = b.run(&["--no-cache"]);
     assert!(ok);
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 4, "one line per document, got {out:?}");
+    // Each document prints its file line and then what became of its PDF, as
+    // lualatex does. The order under test is the documents' order, so this
+    // reads the file lines and ignores the rest.
+    let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("(./")).collect();
+    assert_eq!(lines.len(), 4, "one file line per document, got {out:?}");
     assert!(lines[0].starts_with("(./slow.tex"), "got {:?}", lines[0]);
     assert!(lines[1].starts_with("(./q1.tex"), "got {:?}", lines[1]);
     assert!(lines[2].starts_with("(./q2.tex"), "got {:?}", lines[2]);
@@ -177,9 +180,12 @@ fn a_single_document_still_takes_the_ordinary_path() {
         .output()
         .expect("run");
     assert!(out.status.success());
+    // The file line is what the batch path shares; the line after it says what
+    // became of the PDF, and this document ships no page, so it is the same
+    // "No pages of output." tex writes.
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
-        "(./only.tex solo )"
+        "(./only.tex solo )\nNo pages of output."
     );
 }
 

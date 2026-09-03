@@ -110,7 +110,7 @@ fn main() -> ExitCode {
     // straight fan-out. `tex` cannot do this at all: one process compiles one
     // file, and a user wanting more reaches for `make -j`.
     if paths.len() > 1 && !dump_tokens && !cli.dump_ast && !disasm && !tiers {
-        return run_many(&paths, no_cache, jobs);
+        return run_many(&paths, jobs);
     }
     let path = paths.remove(0);
     // The document is opened through the provider stack rather than read
@@ -289,14 +289,24 @@ fn main() -> ExitCode {
             Err(e) => fail(&e.0),
         };
     }
-    let run = match no_cache {
-        true => texrs::run_messages(&src),
-        false => texrs::run_messages_cached(std::path::Path::new(&path), &src),
-    };
-    match run {
-        Ok(msgs) => {
+    // The ordinary invocation writes a PDF, because that is the job: texrs
+    // stands in for lualatex in a pipeline, and `lualatex FILE` leaves a
+    // FILE.pdf behind. It prints what tex prints as well — the file line with
+    // the document's messages in it — so a script reading either engine's
+    // terminal output sees the same thing, and then the line lualatex writes to
+    // announce the file.
+    match texrs::run_pdf_with_messages(Some(std::path::Path::new(&path)), &src) {
+        Ok((pdf, msgs)) => {
+            let tail = match write_pdf(&path, &pdf) {
+                Ok(t) => t,
+                Err(e) => return fail(&e),
+            };
             if cli.interaction.prints() {
-                println!("{}", file_line(&path, &msgs, texrs::source_ends_run(&src)));
+                println!(
+                    "{}",
+                    file_line(&path, &msgs.join(" "), texrs::source_ends_run(&src))
+                );
+                println!("{tail}");
             }
             ExitCode::SUCCESS
         }
@@ -315,7 +325,7 @@ fn main() -> ExitCode {
 /// Output is printed in ARGUMENT order however the threads finish, because a
 /// build log that reorders itself between runs is not a log anyone can diff.
 /// The exit code is the worst of the runs: one bad document fails the batch.
-fn run_many(paths: &[String], no_cache: bool, jobs: Option<usize>) -> ExitCode {
+fn run_many(paths: &[String], jobs: Option<usize>) -> ExitCode {
     let workers = jobs
         .unwrap_or_else(|| {
             std::thread::available_parallelism()
@@ -342,8 +352,7 @@ fn run_many(paths: &[String], no_cache: bool, jobs: Option<usize>) -> ExitCode {
                     if i >= paths.len() {
                         break;
                     }
-                    *results[i].lock().expect("result slot") =
-                        Some(one_document(&paths[i], no_cache));
+                    *results[i].lock().expect("result slot") = Some(one_document(&paths[i]));
                 }
             });
         }
@@ -370,19 +379,49 @@ fn run_many(paths: &[String], no_cache: bool, jobs: Option<usize>) -> ExitCode {
     code
 }
 
+/// Write the PDF a run produced and say what became of it, the way lualatex
+/// does: the file line first, then `Output written on …`.
+///
+/// A document that ships no page gets no file and says so. tex and lualatex
+/// both behave that way, and writing an empty PDF for a document with nothing
+/// on it is the divergence `pdf-parity` reports for `empty_document.tex` — it
+/// would have become the everyday behaviour the moment the ordinary invocation
+/// started writing.
+fn write_pdf(path: &str, pdf: &[u8]) -> Result<String, String> {
+    let pages = texrs::pdf_page_count(pdf);
+    let out = Path::new(path).with_extension("pdf");
+    if pages > 0 {
+        std::fs::write(&out, pdf).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    Ok(match pages {
+        0 => "No pages of output.".to_string(),
+        1 => format!(
+            "Output written on {} (1 page, {} bytes).",
+            out.display(),
+            pdf.len()
+        ),
+        n => format!(
+            "Output written on {} ({n} pages, {} bytes).",
+            out.display(),
+            pdf.len()
+        ),
+    })
+}
+
 /// One document, as the single-file path runs it, returning the line to print.
-fn one_document(path: &str, no_cache: bool) -> Result<String, String> {
+/// A typesetting run does not consult the bytecode shard: the cache holds
+/// compiled chunks, and the fonts, page colour and layout a page needs are read
+/// while lowering and are not in it. `--no-cache` has nothing to turn off here.
+fn one_document(path: &str) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    let run = match no_cache {
-        true => texrs::run_messages(&src),
-        false => texrs::run_messages_cached(Path::new(path), &src),
-    };
-    let msgs = run.map_err(|e| e.0)?;
-    let body = match msgs.is_empty() {
+    let (pdf, msgs) = texrs::run_pdf_with_messages(Some(Path::new(path)), &src).map_err(|e| e.0)?;
+    let joined = msgs.join(" ");
+    let body = match joined.is_empty() {
         true => String::new(),
-        false => format!(" {msgs}"),
+        false => format!(" {joined}"),
     };
-    Ok(format!("(./{path}{body} )"))
+    let tail = write_pdf(path, &pdf)?;
+    Ok(format!("(./{path}{body} )\n{tail}"))
 }
 
 /// `texrs -X …`: the document commands, ported in shape from tectonic's V2

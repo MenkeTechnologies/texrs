@@ -280,6 +280,18 @@ pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
 /// nothing at all -- silently, since a font that cannot be found is a font
 /// that gets substituted.
 pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, TexError> {
+    run_pdf_with_messages(path, src).map(|(pdf, _)| pdf)
+}
+
+/// The same, keeping the `\message` stream the run produced.
+///
+/// The ordinary invocation writes a PDF and prints the line tex writes, and
+/// both come out of one run — so this hands back both rather than making the
+/// caller typeset the document twice to learn what it said.
+pub fn run_pdf_with_messages(
+    path: Option<&std::path::Path>,
+    src: &str,
+) -> Result<(Vec<u8>, Vec<String>), TexError> {
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src_d) {
@@ -296,15 +308,16 @@ pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
     // 10pt-on-12pt, 1in-margin page whatever it asked for.
     let layout = lowerer.layout.clone();
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
-    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    let messages = crate::runtime::run(chunk).map_err(TexError)?;
     let text = crate::runtime::take_text();
-    Ok(crate::typeset::to_pdf(
+    let pdf = crate::typeset::to_pdf(
         &text,
         &families,
         &layout,
         page_colour,
         path.and_then(|p| p.parent()),
-    ))
+    );
+    Ok((pdf, messages))
 }
 
 /// How many pages a PDF declares.
