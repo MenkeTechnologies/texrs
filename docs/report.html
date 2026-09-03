@@ -90,7 +90,7 @@
       <section class="tutorial-section">
         <h2>Summary</h2>
         <p>Every mainstream TeX engine — pdfTeX, XeTeX, LuaTeX — descends from Knuth's <code>tex.web</code> through web2c, and every one of them <em>interprets</em> the expander. texrs compiles it. Source is tokenised under a mutable category-code table, macros are expanded while lowering, and what is left becomes <code>fusevm</code> bytecode that the shared VM executes and the Cranelift JIT can compile.</p>
-        <p>The scope is deliberate and stated plainly: this is the mouth, the expander, and the smallest stomach that produces a page. <code>--dvi</code> measures the text in a real <code>.tfm</code>, breaks it first-fit into lines and ships DVI; there is no hyphenation, no glue stretching or shrinking, no page breaking by penalties, no maths and no boxes a document can nest, so a paragraph set here and the same paragraph set by <code>tex</code> will not agree line for line. The mouth and the expander are the half of TeX a macro-heavy document spends its time in, and the half where compilation has something to prove.</p>
+        <p>The scope is deliberate and stated plainly: this is the mouth, the expander, and the smallest stomach that produces a page. <code>--pdf</code> breaks a paragraph by minimising its total demerits over every feasible set of breakpoints and hyphenates with Liang patterns; <code>--dvi</code> takes the first break that fits, because a DVI driver cannot set a run to a width. Neither has page breaking by penalties, maths or boxes a document can nest, so a paragraph set here and the same paragraph set by <code>tex</code> will not agree line for line. The mouth and the expander are the half of TeX a macro-heavy document spends its time in, and the half where compilation has something to prove.</p>
       </section>
 
       <hr class="section-rule">
@@ -158,7 +158,7 @@
 
       <section class="tutorial-section">
         <h2>Gaps, stated plainly</h2>
-        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: only the smallest stomach — <code>--dvi</code> ships a first-fit page where tex minimises badness across the whole paragraph, so byte-identical DVI parity is not approached; no registers other than <code>\count</code>; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence prints its name instead of raising; <code>\edef</code> does not decide a conditional at definition time; <code>#{</code> parameter text is refused; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
+        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: a stomach that stops short of tex's — <code>--pdf</code> breaks by total demerits and hyphenates, <code>--dvi</code> is still first-fit, and neither breaks pages by penalties, so byte-identical DVI parity is not approached; no registers other than <code>\count</code>; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence prints its name instead of raising; <code>\edef</code> does not decide a conditional at definition time; <code>#{</code> parameter text is refused; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
       </section>
 
       <hr class="section-rule">

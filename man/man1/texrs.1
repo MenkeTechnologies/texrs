@@ -80,10 +80,16 @@ breaks it into lines with the first break that fits, and ships a page a driver
 will open.  It is
 .B not
 .IR tex.web 's
-stomach \(em no hyphenation, no glue stretching or shrinking, no page breaking
-by penalties, no maths, no boxes a document can nest, and lines chosen first\-fit
-where TeX minimises badness across a whole paragraph.  Without
+stomach \(em no page breaking by penalties, no maths, no boxes a document can
+nest.  How the lines are broken depends on the output:
+.B \-\-pdf
+minimises the total demerits of a whole paragraph over every feasible set of
+breakpoints and hyphenates with Liang patterns
+.RI ( tex.web
+\(sc813\(en\(sc891), while
 .B \-\-dvi
+takes the first break that fits and does not hyphenate, because a DVI driver
+cannot set a run to a width.  Without either flag
 .B \eend
 stops the run rather than shipping a page.
 .PP
@@ -857,12 +863,14 @@ and broken into lines that fit plain TeX's measure, then stacked down plain
 TeX's page. What comes out is a real DVI file: \fBdvitype\fR reads it and
 \fBdvipdfmx\fR turns it into a PDF.
 .IP
-It is not \fBtex\fR's typesetting. Lines are broken first-fit -- the first
-break that fits -- where \fBtex\fR considers every feasible set of breakpoints
-for a whole paragraph at once and minimises the total badness
-(\fItex.web\fR \(sc813). There is no hyphenation, no glue stretching or
-shrinking, no page breaking by penalties, one font and no maths. A paragraph set
-here and the same paragraph set by \fBtex\fR will not agree line for line.
+It is not \fBtex\fR's typesetting. On THIS path lines are broken first-fit --
+the first break that fits -- and are not hyphenated, because a DVI driver cannot
+set a run to a width, so a breaker that prices glue has nothing to hand its
+answer to. \fB--pdf\fR does consider every feasible set of breakpoints for a
+whole paragraph and minimises the total demerits (\fItex.web\fR \(sc813), and
+hyphenates. Neither path has page breaking by penalties or maths, and this one
+sets one font. A paragraph set here and the same paragraph set by \fBtex\fR
+will not agree line for line.
 .TP
 .B \-\-text
 Print what the document SAYS -- its own words, after every macro has been

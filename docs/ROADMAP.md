@@ -38,16 +38,24 @@ side: `.tfm`, `.vf`, `.pk`, `.otf`, `.pfb`, `.map` and `.enc` all have readers,
 per-glyph fallback picks a font that has the character, and `src/pdf.rs` carries
 the PDF object model and writer.
 
-What is NOT done is everything that makes the parity bar meaningful. The line
-breaker takes the first break that fits; TeX minimises total badness over every
-feasible sequence of breakpoints (§813-§890). There is no hyphenation, no glue
-stretching or shrinking, no page breaking by penalties, no maths, no boxes a
-document can nest, and no font embedding in the PDF writer. So the parity bar
-for this milestone — byte-identical DVI against `tex` — is not approached, and
-saying otherwise from the existence of a `.dvi` file would be the wrong reading.
-The next piece that would move it is the badness-minimising breaker, because
-every layout difference downstream of it is a consequence of the first-fit
-choice.
+The breaker that was named here as the next piece has been written.
+`src/linebreak.rs` minimises the total demerits of a whole paragraph over every
+feasible set of breakpoints (§813-§890) and hyphenates with Liang patterns
+(§891), and `--pdf` uses it: a full line is set to the measure with PDF's `Tw`,
+which is what makes pricing glue usable at all. `--dvi` does not, and the reason
+is worth recording rather than fixing twice — a DVI driver cannot set a run to a
+width, so a breaker that decides some lines should be SHRUNK has nowhere to put
+that answer. An earlier attempt was reverted for exactly this: every shrunk line
+drew out past the measure.
+
+What is still NOT done, and what keeps the parity bar out of reach: no page
+breaking by penalties, no maths, no boxes a document can nest. `\tolerance`,
+`\pretolerance` and the demerit weights are constants rather than registers a
+document sets, and the interword glue stretches by cmr10's fractions rather than
+by each font's own. So byte-identical DVI against `tex` is not approached, and
+reading the existence of a `.dvi` or a `.pdf` as progress toward it would be
+wrong. Font embedding, listed here as missing, is done: `/FontFile2`, whole
+rather than subset.
 
 ## Known divergences
 

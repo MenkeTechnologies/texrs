@@ -20,14 +20,23 @@ passing, so the list is a claim the harness enforces rather than a note.
 
 ## Not implemented
 
-- **`tex.web`'s stomach.** `--dvi` measures the text in a real `.tfm`, breaks it
-  into lines with the first break that fits, stacks them at a fixed leading and
-  ships DVI (`src/typeset.rs`). That is the whole of it. TeX chooses breakpoints
-  by minimising total badness over every feasible sequence (§813-§890); there is
-  no hyphenation, no glue stretching or shrinking, no page breaking by
-  penalties, no maths, and no boxes a document can nest. So a paragraph set here
-  and the same paragraph set by `tex` do not agree line for line, and the
-  milestone's real parity bar — byte-identical DVI — is not approached.
+- **`tex.web`'s stomach.** Two outputs, and they are not equally good.
+  `--pdf` breaks a paragraph as §813-§890 does — every feasible set of
+  breakpoints priced by how far each line's glue is from its natural width, the
+  cheapest set taken, Liang hyphenation (§891) widening the places a line may
+  end — and sets each full line to the measure with PDF's `Tw`
+  (`src/linebreak.rs`, `src/typeset.rs`). `--dvi` still takes the first break
+  that fits and does not hyphenate, because a DVI driver cannot set a run to a
+  width, so a breaker that decides a line should be SHRUNK has nothing to hand
+  its answer to.
+
+  What neither has: page breaking by penalties, maths, boxes a document can
+  nest. `\tolerance`, `\pretolerance` and the demerit weights are the
+  constants in `src/linebreak.rs` rather than registers a document can set, and
+  the interword glue stretches and shrinks by cmr10's fractions rather than by
+  each font's own. So a paragraph set here and the same paragraph set by `tex`
+  do not agree line for line, and the milestone's real parity bar —
+  byte-identical DVI — is not approached.
 
   Without `--dvi`, `\end` stops the run and ships nothing. `tex` prints
   `No pages of output.` for the corpus here, which is why the parity contract

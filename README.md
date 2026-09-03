@@ -59,12 +59,14 @@ its time in, and the half where a compiled implementation has something to prove
 every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends from `tex.web` through
 web2c and *interprets* the expander.
 
-There is now a third piece, deliberately small: `--dvi` measures the text in a
-real font, breaks it into lines at a measure, stacks them down a page and ships
-DVI. It is not `tex.web`'s stomach — first-fit lines where TeX minimises badness
-across the whole paragraph, no hyphenation, no glue, no boxes a document can
-nest — and [0x06] says exactly what that costs. It is the difference between a
-document that produces nothing and one that produces something imperfect.
+There is now a third piece. `--pdf` breaks a paragraph the way `tex.web` §813
+does — minimising the total demerits of the whole paragraph over every feasible
+set of breakpoints, with Liang hyphenation to widen the places a line may end —
+and writes the PDF itself. `--dvi` still fills each line with the first break
+that fits, because a DVI driver cannot set a run to a width and a breaker that
+prices glue has nothing to hand its answer to. Neither is `tex.web`'s stomach:
+no page breaking by penalties, no maths, no boxes a document can nest, and
+[0x06] says exactly what that costs.
 
 ## [0x01] Install
 
@@ -155,6 +157,7 @@ texrs --disasm file        # the lowered fusevm bytecode
 texrs --tiers file         # run it, then say which fusevm tier took it
 texrs --text file          # print the document's text, not only its messages
 texrs --dvi file           # typeset it: FILE.dvi, first-fit lines, no hyphenation
+texrs --pdf file           # typeset it: FILE.pdf, total-fit lines, hyphenated
 texrs --build file         # compile into the bytecode cache and stop
 texrs --aot file           # compile it to a standalone native executable
 texrs --no-cache file      # compile this run instead of reading the cache
@@ -239,6 +242,10 @@ than none.
   change it is.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), first-fit lines at a
   measure, stacked at a leading, shipped as DVI that `dvitype` reads.
+- `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
+  chosen by minimising total demerits across the whole paragraph (`tex.web`
+  §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
+  which is what makes pricing glue usable at all.
 - Readers for the binary formats a TeX installation is made of, each printing
   what it read: `.tfm`, `.vf`, `.pk`, `.otf`, `.pfb`, `.map`, `.enc`, `.dvi`,
   `.bib`/`.aux`/`.bst`, and tar bundles.
@@ -290,16 +297,20 @@ diagnostic rather than a missing-function error later.
 
 ## [0x06] What does not
 
-There is a stomach now, and it is the smallest honest one. `--dvi` measures
-characters in a real `.tfm`, breaks a paragraph into lines with the first break
-that fits, stacks the lines down a page at a fixed leading, and ships DVI a
-driver will open. What it is NOT is `tex.web`'s stomach: TeX considers every
-feasible sequence of breakpoints and minimises total badness (§813-§890), and
-this takes the first fit, which is what every word processor before TeX did and
-what TeX was written to improve on. No hyphenation, no glue stretching or
-shrinking, no page breaking by penalties, no maths, no boxes a document can
-nest. A paragraph set here and the same paragraph set by `tex` will not agree
-line for line — see `docs/ROADMAP.md`.
+There is a stomach now, and how good it is depends on which output you ask for.
+`--pdf` breaks paragraphs as `tex.web` §813-§890 does: every feasible set of
+breakpoints is priced by how far each line's glue is from its natural width, the
+cheapest set wins, and Liang hyphenation widens the places a line may end when
+no set between words is good enough. `--dvi` takes the first break that fits —
+which is what every word processor before TeX did and what TeX was written to
+improve on — because its driver cannot set a run to a width, and a breaker that
+decides some lines should be SHRUNK has nowhere to put that answer.
+
+Neither is `tex.web`'s stomach. No page breaking by penalties, no maths, no
+boxes a document can nest. `\tolerance`, `\pretolerance` and the demerit
+weights are constants rather than registers the document can set. A paragraph
+set here and the same paragraph set by `tex` will not agree line for line — see
+`docs/ROADMAP.md`.
 
 **Some LaTeX, no Lua.** texrs carries the part of LaTeX that lives in the mouth
 and the expander, as TeX rather than as Rust: `src/latex/prelude.tex` is a file
@@ -372,10 +383,11 @@ and three of the things a document controls survive the trip:
   scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
   patterns and shadings are not there.
 
-Boxes a document nests, and maths, still do not exist. Lines break first-fit
-where tex minimises badness across a whole paragraph, and there is no
-hyphenation. A draft reads correctly; a book being sold on its typography
-should still be set by an engine with a real stomach, and `scripts/texrs-pdf`
+Boxes a document nests, and maths, still do not exist. Under `--dvi` lines break
+first-fit and are not hyphenated, which is the one place `--pdf` is meaningfully
+the better output rather than merely the other one. A draft reads correctly; a
+book being sold on its typography should still be set by an engine with a real
+stomach, and `scripts/texrs-pdf`
 says the same thing where a build would meet it.
 
 That script is a `.tex` to a `.pdf`, not a `pandoc --pdf-engine`: pandoc

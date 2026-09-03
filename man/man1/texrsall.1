@@ -308,11 +308,18 @@ Only the smallest stomach.
 .B \-\-dvi
 measures the text in a real
 .IR .tfm ,
-breaks it into lines with the first break that fits, and ships DVI; tex chooses
-breakpoints by minimising badness across a whole paragraph, so the two do not
-agree line for line and byte\-identical DVI parity is not approached.  No
-hyphenation, no glue stretching or shrinking, no page breaking by penalties, no
-maths, no boxes a document can nest.  No registers other than
+breaks it into lines and ships a page.
+.B \-\-pdf
+minimises the total demerits of a whole paragraph over every feasible set of
+breakpoints and hyphenates with Liang patterns
+.RI ( tex.web
+\(sc813\(en\(sc891);
+.B \-\-dvi
+takes the first break that fits and does not hyphenate, because a DVI driver
+cannot set a run to a width.  Neither has page breaking by penalties, maths, or
+boxes a document can nest, and the tolerances and demerit weights are constants
+rather than registers a document sets \(em so byte\-identical DVI parity is not
+approached.  No registers other than
 .BR \ecount .
 No format is preloaded, so every register starts at zero as INITEX leaves them,
 while the reference
