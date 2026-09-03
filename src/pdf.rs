@@ -694,6 +694,17 @@ pub struct Page {
     /// The fonts the content names, as `(name in the content, font)` --
     /// `("F1", Helvetica)`.
     pub fonts: Vec<(String, Font)>,
+    /// Which codes each of those fonts was actually asked to draw, as
+    /// `("F1", {'H', 'e', 'l', 'o'})`.
+    ///
+    /// A face has thousands of glyphs and a book draws perhaps two hundred of
+    /// them, so embedding the file whole puts a megabyte of outlines nobody
+    /// looks at into every document; this is the record of which ones were
+    /// looked at, kept as the page is drawn because that is the only moment
+    /// that knows. It is per resource NAME rather than per font because the
+    /// name is what the content stream says; `document` joins the two back
+    /// together across the pages, since a font is written once for the file.
+    pub used: BTreeMap<String, std::collections::BTreeSet<u8>>,
 }
 
 impl Page {
@@ -705,6 +716,7 @@ impl Page {
             content: String::new(),
             fonts: Vec::new(),
             images: Vec::new(),
+            used: BTreeMap::new(),
         }
     }
 
@@ -761,6 +773,15 @@ impl Page {
                 name
             }
         };
+        // What this font is asked for, so the file can carry those glyphs and
+        // leave the rest of the face behind. A code is one byte -- the same
+        // byte the escape below writes -- and a two-byte code of a composite
+        // font is recorded as its two halves, which is what a `/CIDToGIDMap
+        // /Identity` font's own glyph list already says more exactly.
+        self.used
+            .entry(name.clone())
+            .or_default()
+            .extend(text.chars().map(|c| (c as u32 & 0xFF) as u8));
         // A code above 126 is written as its octal escape, because a content
         // stream is BYTES and a `char` pushed into a Rust string is written as
         // UTF-8: the arrow at code 0xAE went into the file as three bytes, a
@@ -844,6 +865,28 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     let mut font_objects: Vec<(&Font, Object)> = Vec::new();
     let mut image_objects: Vec<(&crate::image::Image, Object)> = Vec::new();
 
+    // Which codes each font was asked for anywhere in the document. A font is
+    // written once, so what it has to carry is the union over the pages -- and
+    // it has to be known BEFORE the first page is written, since that is when
+    // the font program goes into the file.
+    let mut drawn: Vec<(&Font, std::collections::BTreeSet<u8>)> = Vec::new();
+    for page in pages {
+        for (name, font) in &page.fonts {
+            let codes = page.used.get(name).cloned().unwrap_or_default();
+            match drawn.iter_mut().find(|(seen, _)| *seen == font) {
+                Some((_, all)) => all.extend(codes),
+                None => drawn.push((font, codes)),
+            }
+        }
+    }
+    let codes_of = |font: &Font| {
+        drawn
+            .iter()
+            .find(|(seen, _)| *seen == font)
+            .map(|(_, codes)| codes.clone())
+            .unwrap_or_default()
+    };
+
     let mut kids = Vec::with_capacity(pages.len());
     for page in pages {
         let content = pdf.add(Object::Stream {
@@ -855,7 +898,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             let object = match font_objects.iter().find(|(seen, _)| *seen == font) {
                 Some((_, object)) => object.clone(),
                 None => {
-                    let object = add_font(&mut pdf, font);
+                    let object = add_font(&mut pdf, font, &codes_of(font));
                     font_objects.push((font, object.clone()));
                     object
                 }
@@ -1006,6 +1049,63 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
     })
 }
 
+/// The six letters a subsetted font's name begins with (S9.6.4).
+///
+/// "The tag shall consist of exactly six uppercase letters; the choice of
+/// letters is arbitrary, but different subsets in the same PDF file shall have
+/// different tags." So it is a hash of what the subset HOLDS: two subsets of
+/// the same face with the same glyphs are the same font and may share a tag,
+/// and two that differ in one glyph differ in their tags. FNV-1a, because a
+/// hash whose value is fixed by the standard is one that gives the same file
+/// twice for the same document.
+fn subset_tag(name: &str, glyphs: impl IntoIterator<Item = u16>) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |byte: u8| {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for byte in name.bytes() {
+        eat(byte);
+    }
+    for glyph in glyphs {
+        eat((glyph >> 8) as u8);
+        eat((glyph & 0xFF) as u8);
+    }
+    (0..6)
+        .map(|i| (b'A' + ((hash >> (i * 5)) % 26) as u8) as char)
+        .collect()
+}
+
+/// A TrueType program cut down to the codes a document drew, and the tag to
+/// name it by.
+///
+/// The codes are WinAnsi -- that is the encoding these fonts are written with
+/// -- and the face's `cmap` is indexed by Unicode, so the two are joined by
+/// what a code MEANS, exactly as `embed_file` joined them to find the widths.
+///
+/// `None` when the font cannot be cut: a face whose `glyf` or `loca` will not
+/// read is one to embed whole rather than to embed wrongly.
+fn cut_to_codes(
+    name: &str,
+    bytes: &[u8],
+    codes: &std::collections::BTreeSet<u8>,
+) -> Option<(String, Vec<u8>)> {
+    let sfnt = crate::sfnt::Sfnt::parse(bytes.to_vec()).ok()?;
+    let cmap = sfnt.cmap().ok()?;
+    let keep: std::collections::BTreeSet<u16> = codes
+        .iter()
+        .filter_map(|code| crate::typeset::winansi_unicode(*code))
+        .filter_map(|ch| cmap.get(&(ch as u32)).copied())
+        .collect();
+    // A font nothing was drawn in is one this cannot measure the use of, and
+    // carrying it whole is what it did before there was a subset at all.
+    if keep.is_empty() {
+        return None;
+    }
+    let cut = sfnt.subset_encoded(&keep).ok()?;
+    Some((subset_tag(name, keep.iter().copied()), cut))
+}
+
 /// Add a font to the file, embedding it when it is not one of the fourteen.
 ///
 /// Ported from `pdf_font_load_type1`. Embedding is four objects that have to
@@ -1015,7 +1115,10 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
 /// it was read, because a Type 1 font that was rebuilt would no longer
 /// decrypt, and `Length1`, `Length2` and `Length3` say where its three parts
 /// end.
-fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
+///
+/// `codes` is what the document actually drew in this font, which is what says
+/// how much of it has to go into the file.
+fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) -> Object {
     if let Font::Glyphs {
         name,
         bytes,
@@ -1025,6 +1128,14 @@ fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
         descent,
     } = font
     {
+        // This program was cut down to `glyphs` when it was loaded, so the
+        // name it goes into the file under is a subset's name: the tag says so,
+        // and says which subset, so a reader never takes two different cuts of
+        // one face for the same font.
+        let name = &format!(
+            "{}+{name}",
+            subset_tag(name, glyphs.iter().map(|(gid, _, _)| *gid))
+        );
         let file = pdf.add(Object::Stream {
             dict: BTreeMap::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
             data: bytes.clone(),
@@ -1104,11 +1215,22 @@ fn add_font(pdf: &mut Pdf, font: &Font) -> Object {
         descent,
     } = font
     {
-        // The font program, whole. A subsetted one would be smaller; a whole
-        // one is correct, and correctness is what was missing.
+        // The font program, cut to the glyphs the document set. A book sets
+        // perhaps two hundred of a face's several thousand, and carrying the
+        // rest is half a megabyte a face of outlines nothing ever draws: what
+        // `lualatex` writes for these same books is a third the size, and this
+        // is most of the difference. A face that will not cut goes in whole,
+        // which is what every face did before.
+        let (tag, program) = match cut_to_codes(name, bytes, codes) {
+            Some((tag, cut)) => (format!("{tag}+"), cut),
+            None => (String::new(), bytes.clone()),
+        };
+        // S9.6.4: a subsetted font is named for its subset, so a reader does
+        // not take one cut of a face for another.
+        let name = &format!("{tag}{name}");
         let file = pdf.add(Object::Stream {
-            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
-            data: bytes.clone(),
+            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(program.len() as i64))]),
+            data: program,
         });
         let descriptor = pdf.add(Object::dict([
             ("Type", Object::name("FontDescriptor")),

@@ -276,6 +276,33 @@ impl Sfnt {
     /// whenever the glyph built out of it is (`glyf`, the component flags loop).
     /// Dropping one would leave an accent without its letter.
     pub fn subset(&self, keep: &std::collections::BTreeSet<u16>) -> Result<Vec<u8>, String> {
+        self.cut(keep, &[])
+    }
+
+    /// The same, for a font a PDF addresses by CODE rather than by glyph id.
+    ///
+    /// A simple `/TrueType` font written with `/Encoding /WinAnsiEncoding` is
+    /// resolved by the reader through the face's OWN `cmap` (S9.6.6.4): the code
+    /// names a character and the character names the glyph. A subset that
+    /// dropped `cmap` would leave the reader nothing to go from a code to an
+    /// outline with, and the page would come out blank -- so the table travels
+    /// whole. It costs a few kilobytes against the hundreds the outlines cost,
+    /// the glyph ids did not change so every entry still points where it did,
+    /// and an entry naming a glyph that is now empty is one nothing asks for.
+    pub fn subset_encoded(
+        &self,
+        keep: &std::collections::BTreeSet<u16>,
+    ) -> Result<Vec<u8>, String> {
+        self.cut(keep, &["cmap"])
+    }
+
+    /// The subset itself; `also` names tables to carry beyond the ones a
+    /// glyph-addressed font needs.
+    fn cut(
+        &self,
+        keep: &std::collections::BTreeSet<u16>,
+        also: &[&str],
+    ) -> Result<Vec<u8>, String> {
         let glyphs = self.num_glyphs()? as usize;
         let long = self.head()?.long_loca;
         let loca = self.table("loca").ok_or("the font has no loca table")?;
@@ -390,10 +417,11 @@ impl Sfnt {
             hhea[34..36].copy_from_slice(&(last as u16).to_be_bytes());
         }
 
-        // What a glyph-addressed font needs and nothing else: no `cmap`, since
-        // a code here is a glyph id; no `name`, `post` or layout tables, since
-        // nothing looks a glyph up by name. `cvt `, `fpgm` and `prep` are the
-        // hinting programs, kept because a glyph's instructions call them.
+        // What a glyph-addressed font needs and nothing else: no `cmap` unless
+        // the caller asked for one, since a code there is a glyph id; no
+        // `name`, `post` or layout tables, since nothing looks a glyph up by
+        // name. `cvt `, `fpgm` and `prep` are the hinting programs, kept
+        // because a glyph's instructions call them.
         let mut tables: Vec<(String, Vec<u8>)> = vec![
             ("head".to_string(), head),
             ("hhea".to_string(), hhea),
@@ -401,7 +429,7 @@ impl Sfnt {
             ("glyf".to_string(), new_glyf),
             ("loca".to_string(), new_loca),
         ];
-        for tag in ["maxp", "cvt ", "fpgm", "prep"] {
+        for tag in ["maxp", "cvt ", "fpgm", "prep"].iter().chain(also) {
             if let Some(body) = self.table(tag) {
                 tables.push((tag.to_string(), body.to_vec()));
             }
