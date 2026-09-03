@@ -182,6 +182,24 @@ decisions rather than one:
 a rung number whose meaning nobody remembers. An empty document is the fourth
 case: tex writes no DVI, texrs writes one.
 
+## A typesetting run does not use the bytecode cache
+
+`texrs FILE` typesets, and typesetting does not consult the shard. The cache
+holds compiled chunks; the fonts a document asks for, its page colour and its
+layout are read WHILE lowering and are not in it, so a cached chunk is not
+enough to set a page from. Measured: `--disasm` and `--dvi` fill the shard, the
+ordinary invocation and `--text` do not.
+
+Storing the chunk anyway -- free, since it has just been compiled -- hangs the
+run. `--text` performs the same `store_mode` call on the same document in 0.01s,
+so the store is not at fault on its own; something about doing it on the
+typesetting path is, and it is not understood yet. It is left out rather than
+left in, because a pipeline that hangs is worse than one that recompiles.
+
+The cost is real for the job texrs is meant to do: a 25,000-line book recompiles
+its mouth and expander on every run. Closing this means teaching the shard to
+carry the fonts, colour and layout beside the bytecode.
+
 ## PDF output is not LuaTeX's
 
 The goal is byte-identical, and the distance is large: for `Hello world.`

@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `texrs FILE` writes `FILE.pdf`. texrs stands in for lualatex in a PDF
+  pipeline, and `lualatex FILE` leaves a `FILE.pdf` behind; the bare invocation
+  printed a line and wrote nothing. Standard output keeps the line tex prints
+  and gains the one lualatex writes to announce the file. A document that ships
+  no page gets no file and says `No pages of output.`, as both engines do. The
+  batch path goes through the same writer, so a batch of one matches the
+  document run alone.
 - The round-trip corpus reaches documents texrs cannot yet set. Because that
   axis only asks tex to typeset, it now also reads `tests/dvi_cases` — a second
   font, rules, two pages, a `\special` — and Knuth's own `story.tex`, found
