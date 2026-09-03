@@ -94,6 +94,13 @@ texrs output reached tracked lualatex references in
 
 ## Divergences from tex
 
+- **One type size.** The size-selecting commands are defined as empty in
+  `src/latex/prelude.tex` and `Layout::size` is a single document-wide `f64`, so
+  every heading is set at body size. A document containing `\section`,
+  `{\huge …}` and `{\Large …}` emits ONE distinct `Tf` size. The fix is not a
+  prelude change: giving `\Large` a body would change nothing while there is no
+  per-run size on the measure, break, pagination and draw paths for it to set.
+
 - **Quote ligatures.** `` `` `` and `` '' `` are set as the ASCII characters
   themselves rather than as the opening and closing quotes every TeX engine
   renders them into. `texrs --text` on ``` ``hello there'' ``` prints
@@ -101,7 +108,11 @@ texrs output reached tracked lualatex references in
   marks. Two consequences, and the second is the one that costs something
   measurable: the page is visibly wrong where a document quotes, and the literal
   marks measure wider than the quotes they should be, so every line carrying a
-  quotation is set wider than lualatex sets it.
+  quotation is set wider than lualatex sets it. `---` is likewise three literal
+  hyphens rather than an em dash, though there the widths agree to 0.01pt so it
+  is only visual. The direction is worth stating because it is easy to get
+  backwards: wider lines hold FEWER words and produce MORE lines, so this cannot
+  contribute to a document coming out short.
 
 - **Characters above U+00FF are one Letter token.** TeX82 reads BYTES, so `é` in
   a UTF-8 file is two `Other` tokens there and one `Letter` here. That changes

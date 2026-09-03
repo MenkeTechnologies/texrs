@@ -419,12 +419,31 @@ and three of the things a document controls survive the trip:
   built from `--`, an optional `cycle`, a line width and the picture's x/y
   scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
   patterns and shadings are not there.
+- **There is exactly one type size.** `\normalsize`, `\small`, `\large`,
+  `\Large`, `\LARGE`, `\huge` and `\Huge` are all defined as empty in
+  `src/latex/prelude.tex`, and `Layout::size` is a single document-wide `f64`
+  with no per-run size anywhere on the measure, break, pagination or draw path.
+  A document with a `\section`, a `{\huge …}` and a `{\Large …}` in it emits
+  one distinct `Tf` size for the whole file. Every heading, chapter title and
+  title page is set at body size.
+
+  Two consequences, both in the same direction, and they are why the deficit is
+  in structural material rather than in prose: a heading that would have wrapped
+  to two lines at 15.7pt fits on one at 10pt, and a heading that would have
+  occupied a larger box occupies one 12pt body line. So a book comes out with
+  fewer lines AND more lines per page than the same book set by lualatex.
+  Defining the size commands in the prelude would not fix it — there is no
+  per-run size underneath for them to set.
 - **Quote ligatures are not converted.** TeX's `` `` `` and `` '' `` are set
   literally: `` ``hello there'' `` reaches the page as four ASCII marks where
   every TeX engine since 1982 sets curly quotes. Visible in `--text` and in the
   PDF's own content stream, and it is not only cosmetic — the literal marks are
   wider than the quotes they stand for, so every line carrying a quotation is
-  set wider than it should be.
+  set wider than it should be. `---` is not converted either: three literal
+  hyphens where lualatex sets an em dash, which is purely visual because the
+  widths happen to agree to a hundredth of a point. Note the DIRECTION: wider
+  lines hold fewer words and so produce MORE lines, so none of this can be part
+  of why pages come out short.
 - **Images do NOT survive.** `\includegraphics` is
   `\newcommand{\includegraphics}[2][]{}` in the prelude: the file is dropped and
   contributes NO VERTICAL SPACE, while the `\caption` beside it survives. The
