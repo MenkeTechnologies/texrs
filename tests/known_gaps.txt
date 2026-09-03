@@ -3,7 +3,8 @@
 # fails on any case that diverges and is NOT listed here, and it also fails on a
 # listed case that has started PASSING -- so the list cannot quietly go stale.
 #
-# Currently EMPTY: all 27 cases match tex 3.141592653 (TeX Live 2026).
+# Every case listed below diverges from tex 3.141592653 (TeX Live 2026); every
+# case in tests/cases that is NOT listed here is required to match it.
 
 undefined_cs.tex   An undefined control sequence is not an error. tex reports
 #                  `! Undefined control sequence.' and expands it to nothing;
