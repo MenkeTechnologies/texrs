@@ -413,6 +413,23 @@ and three of the things a document controls survive the trip:
   built from `--`, an optional `cycle`, a line width and the picture's x/y
   scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
   patterns and shadings are not there.
+- **Images do NOT survive.** `\includegraphics` is
+  `\newcommand{\includegraphics}[2][]{}` in the prelude: the file is dropped and
+  contributes NO VERTICAL SPACE, while the `\caption` beside it survives. The
+  two documents below produce byte-identical PDFs, 709 bytes each — one has a
+  figure in it and one does not:
+
+  ```tex
+  \begin{figure}\includegraphics[width=\textwidth]{x.png}\caption{C}\end{figure}
+  \begin{figure}\caption{C}\end{figure}
+  ```
+
+  That is worth knowing beyond the missing picture, because it is a page-count
+  bug rather than a rendering one: a book whose figures each occupied part of a
+  page comes out SHORTER than the same book set by lualatex, and the deficit
+  scales with how many it has. 12 of the corpus's 167 documents call
+  `\includegraphics`, 136 times between them. `src/image.rs` reads image files
+  but nothing on the typesetting path calls it yet.
 
 Boxes a document nests, and maths, still do not exist. Under `--dvi` lines break
 first-fit and are not hyphenated, which is the one place `--pdf` is meaningfully
