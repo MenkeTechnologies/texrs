@@ -94,6 +94,15 @@ texrs output reached tracked lualatex references in
 
 ## Divergences from tex
 
+- **Quote ligatures.** `` `` `` and `` '' `` are set as the ASCII characters
+  themselves rather than as the opening and closing quotes every TeX engine
+  renders them into. `texrs --text` on ``` ``hello there'' ``` prints
+  ``` ``hello there'' ```, and the PDF's content stream carries the same four
+  marks. Two consequences, and the second is the one that costs something
+  measurable: the page is visibly wrong where a document quotes, and the literal
+  marks measure wider than the quotes they should be, so every line carrying a
+  quotation is set wider than lualatex sets it.
+
 - **Characters above U+00FF are one Letter token.** TeX82 reads BYTES, so `é` in
   a UTF-8 file is two `Other` tokens there and one `Letter` here. That changes
   what `\string` prints and how a delimited argument matches. Deliberate for now
