@@ -189,7 +189,7 @@
     (puthash "\\relax" "\\relax  —  Do nothing. [Expansion]" table)
     (puthash "\\par" "\\par  —  End a paragraph. [Expansion]" table)
     (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow. [Expansion]" table)
-    (puthash "\\end" "\\end  —  Stop the run. [Expansion]" table)
+    (puthash "\\end" "\\end  —  Stop the run, and ship what it built. [Expansion]" table)
     (puthash "\\ifnum" "\\ifnum  —  Compare two numbers with `<`, `=` or `>`. [Conditionals]" table)
     (puthash "\\ifodd" "\\ifodd  —  True when a number is odd. [Conditionals]" table)
     (puthash "\\ifcase" "\\ifcase  —  Switch on a number: the first case is 0, each `\\or` starts the next, and `\\else` catches everything past the last. [Conditionals]" table)

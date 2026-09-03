@@ -170,13 +170,13 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ignorespaces",
         "Expansion",
-        "Skip the spaces that follow. Accepted and ignored in this milestone, because spacing only matters once there is a stomach to typeset it.",
+        "Skip the spaces that follow. Accepted and ignored: there is a page now, but the interword spacing this would suppress is set by the line breaker from the font's own space, not from the token run, so honouring it would change nothing that reaches the page.",
         "\\ignorespaces",
     ),
     (
         "\\end",
         "Expansion",
-        "Stop the run. It does not ship a page: there is no stomach, which is why real tex reports `No pages of output.` for every case in the corpus.",
+        "Stop the run, and ship what it built. A document that set text comes out as `Output written on NAME.pdf (N pages, N bytes).`; one that only sent messages reports `No pages of output.`, which is what real tex says for every case in the parity corpus and why the contract for those is still the `\\message` stream.",
         "\\end",
     ),
     // ══ Conditionals — expand::do_conditional, lower's branch emission ═════
@@ -604,7 +604,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\documentclass",
         "LaTeX",
-        "Consumed, with its arguments, and produces nothing except the page. A class is TeX that builds boxes and there is no stomach to build them in, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one. The TYPE SIZE among its options is kept, because it needs no class to honour: `[11pt]` sets the text at 11pt on the 13.6pt leading `size11.clo` pairs with it, and `--pdf` sets the page from that.",
+        "Consumed, with its arguments, and produces nothing except the page. A class is TeX that builds boxes, and nothing here runs it — the boxes on the page come from this engine's own layout rather than from the class, so the directive is read and dropped — which is what lets the REST of the document be read instead of the run failing at line one. The TYPE SIZE among its options is kept, because it needs no class to honour: `[11pt]` sets the text at 11pt on the 13.6pt leading `size11.clo` pairs with it, and `--pdf` sets the page from that.",
         "\\documentclass[OPTIONS]{CLASS}\n\\documentclass[12pt]{article}\n\\message{the body still runs}",
     ),
     (
