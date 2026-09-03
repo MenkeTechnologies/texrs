@@ -343,7 +343,10 @@ refused, which is the one failure mode worth knowing about before trusting this.
 The number, run against the 167 `.tex` files of a real LaTeX/LuaLaTeX corpus
 (Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
 `--include-in-header` fragments): **167 of 167 run to completion**, and say
-69,751,923 bytes of text.
+71,388,811 bytes of text. The document count is a fact about the corpus; the
+byte count is a fact about this engine on this day, and it rises as more of
+what a document says reaches the output — it was 69,751,923 before pages
+carried numbers, contents and `\parskip`.
 
 That is a measurement, so it is re-measurable rather than remembered:
 
