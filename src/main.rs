@@ -179,7 +179,7 @@ fn main() -> ExitCode {
     if aot {
         // The executable sits beside the document, named after it: `doc.tex`
         // compiles to `doc`, the way a C file compiles to a program.
-        let out = std::path::Path::new(&path).with_extension("");
+        let out = output_path(&cli, &path, "");
         return match texrs::aot::compile_executable(&path, &out) {
             Ok(p) => {
                 println!("{}", p.display());
@@ -235,7 +235,7 @@ fn main() -> ExitCode {
     if cli.pdf_out {
         return match texrs::run_pdf_at(Some(std::path::Path::new(&path)), &src) {
             Ok(bytes) => {
-                let out = std::path::Path::new(&path).with_extension("pdf");
+                let out = output_path(&cli, &path, "pdf");
                 match std::fs::write(&out, &bytes) {
                     Ok(()) => {
                         println!("({path} -> {} [{} bytes])", out.display(), bytes.len());
@@ -266,7 +266,7 @@ fn main() -> ExitCode {
         let built = texrs::run_dvi_fallback(keyed, &src, &chain, &layout);
         return match built {
             Ok(bytes) => {
-                let out = std::path::Path::new(&path).with_extension("dvi");
+                let out = output_path(&cli, &path, "dvi");
                 match std::fs::write(&out, &bytes) {
                     Ok(()) => {
                         println!("({path} -> {} [{} bytes])", out.display(), bytes.len());
@@ -377,6 +377,31 @@ fn run_many(paths: &[String], jobs: Option<usize>) -> ExitCode {
         code = ExitCode::from(1);
     }
     code
+}
+
+/// Where an output file goes: beside the input, or in the directory the run
+/// asked for.
+///
+/// `-output-directory=DIR` was parsed and then read by nothing. Four mentions
+/// of it existed -- the field, its default, the parse arm and a test asserting
+/// that the parse succeeds -- and not one consumer, so every file landed next
+/// to its input whatever the flag said.
+///
+/// That is not a missing convenience. It is how a render of a corpus document
+/// overwrote the reference PDF it was being compared against: the command
+/// pointed its output somewhere else, was told nothing, and wrote over the
+/// input's neighbour. A flag that is accepted and ignored is worse than one
+/// that is refused, because the caller has no way to find out.
+fn output_path(cli: &texrs::cli::Cli, input: &str, extension: &str) -> PathBuf {
+    let named = Path::new(input).with_extension(extension);
+    match &cli.output_directory {
+        // The basename travels; the directory is the one that was asked for.
+        Some(dir) => match named.file_name() {
+            Some(base) => dir.join(base),
+            None => named,
+        },
+        None => named,
+    }
 }
 
 /// Write the PDF a run produced and say what became of it, the way lualatex

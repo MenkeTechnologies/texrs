@@ -1376,3 +1376,50 @@ fn the_special_reader_says_what_a_special_means() {
     let empty = texrs().args(["-X", "special", ""]).output().expect("run");
     assert!(!empty.status.success());
 }
+
+/// `-output-directory` puts the output THERE, and leaves the input's own
+/// directory alone.
+///
+/// It was parsed and then read by nothing: the field, its default, the parse
+/// arm and a test that the parse succeeds, and no consumer at all. So every
+/// file landed beside its input whatever the flag said, and a render of a
+/// corpus document overwrote the reference PDF it was being compared against
+/// -- the command pointed its output elsewhere, was told nothing, and wrote
+/// over the input's neighbour.
+///
+/// The second assertion is the one that matters: a flag that is accepted and
+/// ignored gives the caller no way to find out, so it is not enough to check
+/// that the file arrives in the right place. Nothing may appear beside the
+/// input.
+#[test]
+fn output_directory_writes_there_and_not_beside_the_input() {
+    let root = std::env::temp_dir().join(format!("texrs_outdir_{}", std::process::id()));
+    let input = root.join("in");
+    let elsewhere = root.join("out");
+    std::fs::create_dir_all(&input).expect("mkdir in");
+    std::fs::create_dir_all(&elsewhere).expect("mkdir out");
+    let doc = input.join("doc.tex");
+    std::fs::write(
+        &doc,
+        "\\documentclass{article}\n\\begin{document}\nhello\n\\end{document}\n",
+    )
+    .expect("write");
+
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_texrs"))
+        .arg("--pdf")
+        .arg(format!("-output-directory={}", elsewhere.display()))
+        .arg(&doc)
+        .output()
+        .expect("run texrs");
+    assert!(run.status.success(), "texrs failed: {run:?}");
+
+    assert!(
+        elsewhere.join("doc.pdf").is_file(),
+        "the PDF belongs in the directory that was asked for"
+    );
+    assert!(
+        !input.join("doc.pdf").exists(),
+        "and NOT beside the input -- that is how a reference PDF got overwritten"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
