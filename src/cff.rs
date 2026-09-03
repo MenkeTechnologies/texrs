@@ -21,7 +21,7 @@
 //! charset in all three of its forms, and the width at the front of a Type 2
 //! charstring. The outlines are not interpreted -- a driver embeds them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A CFF font.
 #[derive(Debug, Clone, Default)]
@@ -43,6 +43,8 @@ pub struct Cff {
 #[derive(Debug, Default)]
 struct Index {
     items: Vec<(usize, usize)>,
+    /// Where the INDEX began, which is what a subset copies from.
+    start: usize,
     /// Where the INDEX ends, which is where the next one begins.
     end: usize,
 }
@@ -65,6 +67,7 @@ fn index(bytes: &[u8], at: usize) -> Result<Index, String> {
         // §5: an empty INDEX is two bytes and nothing else.
         return Ok(Index {
             items: Vec::new(),
+            start: at,
             end: at + 2,
         });
     }
@@ -84,7 +87,11 @@ fn index(bytes: &[u8], at: usize) -> Result<Index, String> {
         items.push((from, to));
     }
     let end = items.last().map(|&(_, to)| to).unwrap_or(data);
-    Ok(Index { items, end })
+    Ok(Index {
+        items,
+        start: at,
+        end,
+    })
 }
 
 /// A `DICT`: operands, then the operator they belong to.
@@ -163,6 +170,11 @@ const CHARSET: u16 = 15;
 const CHAR_STRINGS: u16 = 17;
 const PRIVATE: u16 = 18;
 const ROS: u16 = 0x0c1e;
+const ENCODING: u16 = 16;
+/// The Top DICT operators whose operands are string ids rather than numbers:
+/// version, Notice, FullName, FamilyName, Weight, Copyright, PostScript,
+/// BaseFontName and FontName.
+const SID_OPERATORS: [u16; 9] = [0, 1, 2, 3, 4, 0x0c00, 0x0c15, 0x0c16, 0x0c26];
 const DEFAULT_WIDTH_X: u16 = 20;
 const NOMINAL_WIDTH_X: u16 = 21;
 const SUBRS: u16 = 19;
@@ -280,6 +292,508 @@ impl Cff {
     pub fn is_empty(&self) -> bool {
         self.glyph_names.is_empty()
     }
+}
+
+/// The Top DICT's operators and operands, for looking at what a rebuild
+/// changed.
+pub fn top_dict_of(bytes: &[u8]) -> Result<Vec<(u16, Vec<f64>)>, String> {
+    let header = *bytes.get(2).ok_or("shorter than a CFF header")? as usize;
+    let names = index(bytes, header)?;
+    let tops = index(bytes, names.end)?;
+    let &(from, to) = tops.items.first().ok_or("no Top DICT")?;
+    Ok(dict(&bytes[from..to])?.into_iter().collect())
+}
+
+/// Cut a `CFF ` down to the glyphs a document used.
+///
+/// The counterpart of [`crate::glyf::subset`] for the other kind of outline,
+/// and the one that matters for a TeX document: Latin Modern is a CFF font,
+/// and a paper uses a fraction of it.
+///
+/// A CFF cannot simply have its outlines deleted, because everything in the
+/// file is addressed by an offset from the start of it and those offsets are
+/// written in the Top DICT. So the file is rebuilt: the same header, name and
+/// strings; a CharStrings INDEX in which a glyph that was not asked for is
+/// replaced by a single `endchar`, which draws nothing; the charset and the
+/// private data copied across; and a Top DICT written with the new offsets.
+/// Glyph numbers do not change, for the reason they do not change in a
+/// TrueType subset -- the charset still names the right glyph, and so does a
+/// PDF's encoding.
+///
+/// The operands of the offsets in the Top DICT are written in the five-byte
+/// form whatever their value, so the DICT is the same length whichever
+/// offsets it ends up holding. That is what makes the layout solvable in one
+/// pass rather than by iterating until it settles.
+pub fn subset(bytes: &[u8], keep: &BTreeSet<u16>) -> Result<Vec<u8>, String> {
+    let header = *bytes.get(2).ok_or("shorter than a CFF header")? as usize;
+    let names = index(bytes, header)?;
+    let tops = index(bytes, names.end)?;
+    let strings = index(bytes, tops.end)?;
+    let gsubrs = index(bytes, strings.end)?;
+    let &(from, to) = tops.items.first().ok_or("the font has no Top DICT")?;
+    let top = dict(&bytes[from..to])?;
+
+    let charstrings_at = top
+        .get(&CHAR_STRINGS)
+        .and_then(|values| values.first())
+        .copied()
+        .ok_or("the Top DICT names no CharStrings")? as usize;
+    let charstrings = index(bytes, charstrings_at)?;
+
+    // §  : a glyph that draws nothing is one `endchar`. Keeping the numbers
+    // means keeping the entries.
+    let kept: Vec<Vec<u8>> = charstrings
+        .items
+        .iter()
+        .enumerate()
+        .map(
+            |(number, &(from, to))| match keep.contains(&(number as u16)) {
+                true => bytes[from..to].to_vec(),
+                false => vec![14],
+            },
+        )
+        .collect();
+
+    // The charset and the strings. A glyph's name is a number into the
+    // standard strings or into the font's own, and the font's own are most of
+    // what is left once the outlines are gone -- eight hundred names for a
+    // paper that used six. So the charset is written afresh: the glyphs that
+    // were kept keep their names, and the rest are `.notdef`, which lets every
+    // string nobody needs be left out.
+    let charset_at = top
+        .get(&CHARSET)
+        .and_then(|values| values.first())
+        .copied()
+        .unwrap_or(0.0) as usize;
+    let sids = charset_sids(bytes, charset_at, charstrings.items.len())?;
+
+    let mut new_strings: Vec<Vec<u8>> = Vec::new();
+    let mut new_sids: Vec<u16> = Vec::with_capacity(sids.len());
+    for (number, &sid) in sids.iter().enumerate() {
+        if !keep.contains(&(number as u16)) {
+            new_sids.push(0);
+            continue;
+        }
+        // A standard string is the same number in every font and stays as it
+        // is; one of the font's own is written again and renumbered.
+        if (sid as usize) < STANDARD_STRINGS.len() {
+            new_sids.push(sid);
+            continue;
+        }
+        let Some(&(from, to)) = strings.items.get(sid as usize - STANDARD_STRINGS.len()) else {
+            new_sids.push(0);
+            continue;
+        };
+        let text = bytes[from..to].to_vec();
+        let at = match new_strings.iter().position(|it| it == &text) {
+            Some(at) => at,
+            None => {
+                new_strings.push(text);
+                new_strings.len() - 1
+            }
+        };
+        new_sids.push((STANDARD_STRINGS.len() + at) as u16);
+    }
+
+    // The Top DICT names things too -- its version, its notice, the font's
+    // full name -- and those are string ids like a glyph's. Renumbering the
+    // strings without renumbering these leaves them pointing at whatever now
+    // has that number, or past the end, and a reader refuses the font. That is
+    // not a hypothetical: Ghostscript said "an embedded font is invalid" and
+    // drew the page in a substitute face.
+    let mut intern = |sid: f64| -> f64 {
+        let sid = sid as usize;
+        if sid < STANDARD_STRINGS.len() {
+            return sid as f64;
+        }
+        let Some(&(from, to)) = strings.items.get(sid - STANDARD_STRINGS.len()) else {
+            return 0.0;
+        };
+        let text = bytes[from..to].to_vec();
+        let at = match new_strings.iter().position(|it| it == &text) {
+            Some(at) => at,
+            None => {
+                new_strings.push(text);
+                new_strings.len() - 1
+            }
+        };
+        (STANDARD_STRINGS.len() + at) as f64
+    };
+    let top: BTreeMap<u16, Vec<f64>> = top
+        .into_iter()
+        .map(|(operator, values)| {
+            let values = match SID_OPERATORS.contains(&operator) {
+                true => values.iter().map(|value| intern(*value)).collect(),
+                false => values,
+            };
+            (operator, values)
+        })
+        .collect();
+
+    // Format 0: a name per glyph, past the first, which is always `.notdef`.
+    let mut charset = vec![0u8];
+    for sid in new_sids.iter().skip(1) {
+        charset.extend(sid.to_be_bytes());
+    }
+
+    // The private data: the DICT and, right behind it, the local subroutines
+    // it points at. The pointer inside the DICT is relative to the DICT's own
+    // start, so as long as the two stay together in the same order it is still
+    // right.
+    let (private_dict, private_size) = match private_offset_of(&top, bytes)? {
+        Some((from, local)) => {
+            let size = top
+                .get(&PRIVATE)
+                .and_then(|values| values.first())
+                .copied()
+                .unwrap_or(0.0) as usize;
+            let dict_bytes = bytes
+                .get(from..from + size)
+                .ok_or("the Private DICT is past the end of the CFF")?
+                .to_vec();
+            // Whatever sits between the DICT and its subroutines travels too.
+            let gap = bytes
+                .get(from + size..from + local)
+                .ok_or("the local subroutines are past the end of the CFF")?
+                .to_vec();
+            let mut all = dict_bytes;
+            all.extend(gap);
+            (all, size)
+        }
+        None => match top.get(&PRIVATE).map(|values| values[..].to_vec()) {
+            Some(values) if values.len() == 2 => {
+                let (size, offset) = (values[0] as usize, values[1] as usize);
+                (
+                    bytes
+                        .get(offset..offset + size)
+                        .ok_or("the Private DICT is past the end of the CFF")?
+                        .to_vec(),
+                    size,
+                )
+            }
+            _ => (Vec::new(), 0),
+        },
+    };
+
+    // The subroutines. Most of what is left once the outlines are gone is
+    // them: a font shares the parts of letters between its glyphs, and Latin
+    // Modern's global subroutines are fourteen kilobytes. The ones a kept
+    // glyph calls have to stay -- and so do the ones THOSE call -- but the
+    // rest can be emptied. They are not removed: a subroutine is called by a
+    // number biased by how many there are, so taking one away would renumber
+    // the others and every charstring that calls them. An emptied one is a
+    // single `return`, which is a byte.
+    let local = match private_offset_of(&top, bytes)? {
+        Some((from, local)) => index(bytes, from + local)?,
+        None => Index::default(),
+    };
+    let used = Used::of(bytes, &kept, &gsubrs, &local);
+    let gsubr_index = write_index(&emptied(bytes, &gsubrs, &used.global));
+    let local_index = write_index(&emptied(bytes, &local, &used.local));
+
+    // Everything before the Top DICT is unchanged, and the Top DICT is a fixed
+    // length, so the rest can be laid out by adding up.
+    let head_bytes = &bytes[..header];
+    let name_index = raw_index(bytes, &names);
+    let string_index = write_index(&new_strings);
+    // The global subroutines stay: a charstring that was kept may call any of
+    // them, and which ones it calls is not known without running it.
+
+    let top_dict = |charset_at: usize, charstrings_at: usize, private_at: usize| -> Vec<u8> {
+        let mut out = Vec::new();
+        for (operator, values) in &top {
+            match *operator {
+                CHARSET => {
+                    out.extend(offset_operand(charset_at as i64));
+                    out.extend(operator_bytes(CHARSET));
+                }
+                CHAR_STRINGS => {
+                    out.extend(offset_operand(charstrings_at as i64));
+                    out.extend(operator_bytes(CHAR_STRINGS));
+                }
+                PRIVATE => {
+                    out.extend(offset_operand(private_size as i64));
+                    out.extend(offset_operand(private_at as i64));
+                    out.extend(operator_bytes(PRIVATE));
+                }
+                // An Encoding is left out: a PDF says what each code means
+                // through its own /Differences, and the standard encoding is
+                // what a reader falls back to.
+                ENCODING => {}
+                other => {
+                    for value in values {
+                        out.extend(offset_operand(*value as i64));
+                    }
+                    out.extend(operator_bytes(other));
+                }
+            }
+        }
+        out
+    };
+
+    // The Top DICT's length does not depend on the offsets, so one pass with
+    // zeros gives the length, and a second gives the file.
+    // The Top DICT is the same length whatever offsets it holds, so the INDEX
+    // around it can be measured with the offsets still zero.
+    let top_index_length = write_index(&[top_dict(0, 0, 0)]).len();
+    let mut at =
+        header + name_index.len() + top_index_length + string_index.len() + gsubr_index.len();
+    let charset_offset = at;
+    at += charset.len();
+    let charstrings_offset = at;
+    let new_charstrings = write_index(&kept);
+    at += new_charstrings.len();
+    let private_offset = at;
+
+    let mut out = Vec::new();
+    out.extend(head_bytes);
+    out.extend(name_index);
+    out.extend(write_index(&[top_dict(
+        charset_offset,
+        charstrings_offset,
+        private_offset,
+    )]));
+    out.extend(string_index);
+    out.extend(gsubr_index);
+    out.extend(&charset);
+    out.extend(new_charstrings);
+    out.extend(private_dict);
+    out.extend(local_index);
+    Ok(out)
+}
+
+/// Where the Private DICT begins and how far past it its subroutines are.
+fn private_offset_of(
+    top: &BTreeMap<u16, Vec<f64>>,
+    bytes: &[u8],
+) -> Result<Option<(usize, usize)>, String> {
+    let Some(values) = top.get(&PRIVATE) else {
+        return Ok(None);
+    };
+    let [size, offset] = values[..] else {
+        return Ok(None);
+    };
+    let (from, to) = (offset as usize, offset as usize + size as usize);
+    let Some(region) = bytes.get(from..to) else {
+        return Err("the Private DICT is past the end of the CFF".into());
+    };
+    Ok(dict(region)?
+        .get(&SUBRS)
+        .and_then(|values| values.first())
+        .map(|local| (from, *local as usize)))
+}
+
+/// Which subroutines the kept glyphs call, and which those call.
+#[derive(Default)]
+struct Used {
+    global: BTreeSet<usize>,
+    local: BTreeSet<usize>,
+}
+
+impl Used {
+    fn of(bytes: &[u8], charstrings: &[Vec<u8>], gsubrs: &Index, local: &Index) -> Used {
+        let mut used = Used::default();
+        for charstring in charstrings {
+            used.walk(bytes, charstring, gsubrs, local, 0);
+        }
+        used
+    }
+
+    /// Walk a charstring far enough to see which subroutines it calls.
+    ///
+    /// Only the operands matter, and only the last of them at a call: this is
+    /// not an interpreter, and a subroutine whose number is computed rather
+    /// than written would be missed -- which no font does, because the number
+    /// has to be a constant for the bias to make sense.
+    fn walk(
+        &mut self,
+        bytes: &[u8],
+        charstring: &[u8],
+        gsubrs: &Index,
+        local: &Index,
+        depth: usize,
+    ) {
+        if depth > 10 {
+            return;
+        }
+        let mut stack: Vec<i64> = Vec::new();
+        let mut at = 0usize;
+        while at < charstring.len() {
+            let b0 = charstring[at];
+            at += 1;
+            match b0 {
+                32..=246 => stack.push(b0 as i64 - 139),
+                247..=250 => {
+                    let Some(&b1) = charstring.get(at) else {
+                        return;
+                    };
+                    at += 1;
+                    stack.push((b0 as i64 - 247) * 256 + b1 as i64 + 108);
+                }
+                251..=254 => {
+                    let Some(&b1) = charstring.get(at) else {
+                        return;
+                    };
+                    at += 1;
+                    stack.push(-(b0 as i64 - 251) * 256 - b1 as i64 - 108);
+                }
+                28 => {
+                    let Ok(value) = number(charstring, at, 2) else {
+                        return;
+                    };
+                    at += 2;
+                    stack.push(value as i16 as i64);
+                }
+                255 => {
+                    let Ok(value) = number(charstring, at, 4) else {
+                        return;
+                    };
+                    at += 4;
+                    stack.push(value as i32 as i64 / 65536);
+                }
+                // callsubr and callgsubr.
+                10 | 29 => {
+                    let Some(which) = stack.pop() else { return };
+                    let index = match b0 == 10 {
+                        true => local,
+                        false => gsubrs,
+                    };
+                    let at = which + bias(index.items.len());
+                    let Ok(at) = usize::try_from(at) else {
+                        continue;
+                    };
+                    let Some(&(from, to)) = index.items.get(at) else {
+                        continue;
+                    };
+                    let fresh = match b0 == 10 {
+                        true => self.local.insert(at),
+                        false => self.global.insert(at),
+                    };
+                    if fresh {
+                        self.walk(bytes, &bytes[from..to], gsubrs, local, depth + 1);
+                    }
+                }
+                // hintmask and cntrmask carry a mask whose length depends on
+                // how many stems have been declared; the operands before them
+                // are stems, so counting them is enough to step over it.
+                19 | 20 => {
+                    at += (stack.len() / 2).max(1).div_ceil(8);
+                    stack.clear();
+                }
+                12 => {
+                    at += 1;
+                    stack.clear();
+                }
+                _ => stack.clear(),
+            }
+        }
+    }
+}
+
+/// The subroutines, with the ones nobody calls replaced by a `return`.
+fn emptied(bytes: &[u8], index: &Index, used: &BTreeSet<usize>) -> Vec<Vec<u8>> {
+    index
+        .items
+        .iter()
+        .enumerate()
+        .map(|(number, &(from, to))| match used.contains(&number) {
+            true => bytes[from..to].to_vec(),
+            false => vec![11],
+        })
+        .collect()
+}
+
+/// An INDEX as it was, bytes and all.
+fn raw_index(bytes: &[u8], index: &Index) -> Vec<u8> {
+    bytes[index.start..index.end].to_vec()
+}
+
+/// Write an INDEX around `items`: a count, the width of an offset, one offset
+/// per item and one past the last, then the items.
+fn write_index(items: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend((items.len() as u16).to_be_bytes());
+    if items.is_empty() {
+        // §5: an empty INDEX is its count and nothing else, not even a width.
+        return out;
+    }
+    let total: usize = items.iter().map(Vec::len).sum();
+    let width = match total + 1 {
+        n if n <= 0xff => 1usize,
+        n if n <= 0xffff => 2,
+        n if n <= 0xff_ffff => 3,
+        _ => 4,
+    };
+    out.push(width as u8);
+    // The offsets count from one, and there is one more of them than there are
+    // items, so the last says where the data ends.
+    let mut offset = 1usize;
+    for item in items {
+        out.extend(&offset.to_be_bytes()[8 - width..]);
+        offset += item.len();
+    }
+    out.extend(&offset.to_be_bytes()[8 - width..]);
+    for item in items {
+        out.extend(item);
+    }
+    out
+}
+
+/// A five-byte integer, whatever its value, so a DICT's length does not depend
+/// on the offsets in it.
+fn offset_operand(value: i64) -> Vec<u8> {
+    let mut out = vec![29];
+    out.extend((value as i32).to_be_bytes());
+    out
+}
+
+fn operator_bytes(operator: u16) -> Vec<u8> {
+    match operator > 0xff {
+        true => vec![12, (operator & 0xff) as u8],
+        false => vec![operator as u8],
+    }
+}
+
+/// Which string names each glyph, in glyph order.
+///
+/// The three forms say the same thing in different ways: one name per glyph,
+/// or a first name and how many follow it. What comes back is the plain list,
+/// which is what a subset needs before it can write a new one.
+fn charset_sids(bytes: &[u8], at: usize, glyphs: usize) -> Result<Vec<u16>, String> {
+    // A predefined charset is the standard strings in order.
+    if at <= 2 {
+        return Ok((0..glyphs as u16).collect());
+    }
+    let format = *bytes.get(at).ok_or("a charset past the end of the CFF")?;
+    let mut out = vec![0u16];
+    let mut cursor = at + 1;
+    match format {
+        0 => {
+            while out.len() < glyphs {
+                out.push(number(bytes, cursor, 2)? as u16);
+                cursor += 2;
+            }
+        }
+        1 | 2 => {
+            let extra = match format == 1 {
+                true => 1,
+                false => 2,
+            };
+            while out.len() < glyphs {
+                let first = number(bytes, cursor, 2)?;
+                let left = number(bytes, cursor + 2, extra)?;
+                cursor += 2 + extra;
+                for i in 0..=left {
+                    if out.len() >= glyphs {
+                        break;
+                    }
+                    out.push((first + i) as u16);
+                }
+            }
+        }
+        other => return Err(format!("charset format {other} is not one this reads")),
+    }
+    Ok(out)
 }
 
 /// The charset: which name belongs to which glyph.
@@ -932,6 +1446,82 @@ mod tests {
         // A real: nybbles, ending in 15. `-2.5` is e 2 a 5 f.
         let real = dict(&[30, 0xe2, 0xa5, 0xff, 15]).expect("a DICT");
         assert_eq!(real.get(&15), Some(&vec![-2.5]));
+    }
+
+    /// A subset holds the glyphs asked for, and the rest draw nothing.
+    #[test]
+    fn a_subset_keeps_the_charstrings_asked_for() {
+        let Some(bytes) = installed("lmroman10-regular.otf") else {
+            return;
+        };
+        let font = crate::sfnt::Sfnt::parse(bytes).expect("the font reads");
+        let table = font.table("CFF").expect("a CFF").to_vec();
+        let whole = Cff::parse(&table).expect("the CFF reads");
+
+        // The glyphs of a word, by name, plus glyph zero.
+        let wanted: BTreeSet<u16> = ["H", "e", "l", "o", "space"]
+            .iter()
+            .filter_map(|name| {
+                whole
+                    .glyph_names
+                    .iter()
+                    .position(|it| it == name)
+                    .map(|at| at as u16)
+            })
+            .chain([0])
+            .collect();
+        assert!(wanted.len() >= 5, "{wanted:?}");
+
+        let cut = subset(&table, &wanted).expect("the subset");
+        assert!(
+            cut.len() * 4 < table.len(),
+            "{} of {}",
+            cut.len(),
+            table.len()
+        );
+
+        // It is a CFF, with the same glyphs numbered the same way.
+        let smaller = Cff::parse(&cut).expect("the subset is a CFF");
+        assert_eq!(smaller.len(), whole.len(), "the glyph count changed");
+        assert_eq!(smaller.name, whole.name);
+        // The glyphs that were kept keep their names; the rest are `.notdef`,
+        // which is what lets their names be left out of the file.
+        for glyph in &wanted {
+            assert_eq!(
+                smaller.glyph_names[*glyph as usize], whole.glyph_names[*glyph as usize],
+                "glyph {glyph} lost its name"
+            );
+        }
+        assert!(
+            smaller
+                .glyph_names
+                .iter()
+                .filter(|name| *name == ".notdef")
+                .count()
+                > whole.len() - 10,
+            "the names of the dropped glyphs are still in the file"
+        );
+
+        // Every glyph asked for is there, byte for byte; every other draws
+        // nothing.
+        for glyph in 0..whole.len() as u16 {
+            let was = &whole.charstrings[glyph as usize];
+            let is = &smaller.charstrings[glyph as usize];
+            match wanted.contains(&glyph) {
+                true => assert_eq!(is, was, "glyph {glyph} changed"),
+                false => assert_eq!(is, &[14], "glyph {glyph} is still drawn"),
+            }
+        }
+
+        // And the widths of the kept glyphs still read, which means the
+        // private data and its subroutines came across with their offsets
+        // intact.
+        for glyph in &wanted {
+            assert_eq!(
+                smaller.widths[*glyph as usize], whole.widths[*glyph as usize],
+                "glyph {glyph} changed width"
+            );
+        }
     }
 
     /// What is not a CFF is refused.
