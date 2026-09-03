@@ -8,7 +8,7 @@ _texrs() {
   _arguments -s \
     '-interaction=[how the engine behaves at an error]:mode:(batchmode nonstopmode scrollmode errorstopmode)' \
     '-jobname=[set the job name]:name:' \
-    '-output-directory=[write files in this directory]:directory:_files -/' \
+    '-output-directory=[accepted and IGNORED: output lands beside the input]:directory:_files -/' \
     '-progname=[set the program name]:name:' \
     '-fmt=[use a named format]:format:' \
     '-ini[be initex]' \

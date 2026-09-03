@@ -355,3 +355,56 @@ fn a_table_reads_back_as_rows_rather_than_as_one_run_of_words() {
         "control characters reached the reader: {leaked:?}"
     );
 }
+
+/// `\ref` names the sectioning unit its label stands in, and the number is
+/// counted the way the class counts one.
+///
+/// The prelude answered `\ref` with nothing, so `See chapter \ref{ch:one}.`
+/// came out as `See chapter .` -- and a book full of "see chapter" with no
+/// number reads as broken prose rather than as a missing feature. Measured on
+/// this document before: `See chapter , section , chapter , and .`
+#[test]
+fn a_ref_sets_the_number_of_the_unit_its_label_stands_in() {
+    let src = "\\documentclass{report}\n\\begin{document}\n\
+               \\chapter{First}\\label{ch:one}\nText in the first chapter.\n\
+               \\section{Alpha}\\label{sec:alpha}\nMore text.\n\
+               \\chapter{Second}\\label{ch:two}\n\
+               See chapter \\ref{ch:one}, section \\ref{sec:alpha}, \
+               chapter \\ref{ch:two}, and \\ref{nope}.\n\
+               \\end{document}\n";
+    let got = text(src);
+    let sentence = got.split_whitespace().collect::<Vec<&str>>().join(" ");
+    assert!(
+        sentence.contains("See chapter 1, section 1.1, chapter 2, and ??."),
+        "a chapter counts 1, 2 and a section inside chapter 1 is 1.1; a label \
+         the document never declared sets ?? the way LaTeX's own \\@setref \
+         does: {sentence:?}"
+    );
+}
+
+/// A label declares a name for a place and is not text.
+///
+/// It reaches the page -- that is how the page it fell on is read back for a
+/// `\pageref` -- so the one place that decides what a reader gets has to know
+/// about it. Three implementations in a row forgot that place; see
+/// `typeset::MARKERS`.
+#[test]
+fn a_label_leaves_neither_its_key_nor_its_marker_in_the_words() {
+    let src = "\\documentclass{report}\n\\begin{document}\n\
+               \\chapter{First}\\label{ch:one}\n\
+               Before \\label{mid-word-key} after.\n\
+               \\end{document}\n";
+    let got = text(src);
+    assert!(
+        !got.contains("mid-word-key") && !got.contains("ch:one"),
+        "a label key is a name for a place, not a word: {got:?}"
+    );
+    let leaked: Vec<char> = got
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n')
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "control characters reached the reader: {leaked:?}"
+    );
+}

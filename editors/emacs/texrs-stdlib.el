@@ -121,6 +121,9 @@
     "\\tableofcontents"
     "\\setcounter"
     "\\endtitlepage"
+    "\\label"
+    "\\ref"
+    "\\pageref"
     "\\center"
     "\\endcenter"
     "\\centering"
@@ -276,6 +279,9 @@
     (puthash "\\tableofcontents" "\\tableofcontents  —  Set a table of contents: one line per heading, with leader dots and the page it starts on. [LaTeX]" table)
     (puthash "\\setcounter" "\\setcounter  —  Set a counter. [LaTeX]" table)
     (puthash "\\endtitlepage" "\\endtitlepage  —  End a title page, which `\\end{titlepage}` runs. [LaTeX]" table)
+    (puthash "\\label" "\\label  —  Name the place this stands, so that `\\ref` and `\\pageref` can point at it. [LaTeX]" table)
+    (puthash "\\ref" "\\ref  —  Set the number of the sectioning unit the label stands in: 1 for the first chapter, 2.1 for the first section of the second. [LaTeX]" table)
+    (puthash "\\pageref" "\\pageref  —  Set the page the label fell on, in the document's own numbering. [LaTeX]" table)
     (puthash "\\center" "\\center  —  Start centring the lines that follow. [LaTeX]" table)
     (puthash "\\endcenter" "\\endcenter  —  Stop centring: what `\\end{center}` runs, and the close of the region `\\center` opened. [LaTeX]" table)
     (puthash "\\centering" "\\centering  —  Centre every line up to the end of the group or the environment that holds it. [LaTeX]" table)

@@ -150,6 +150,26 @@ fn the_text_survives_the_round_trip_through_dvi() {
 }
 
 #[test]
+fn a_label_key_is_not_set_on_the_dvi_page() {
+    // A label reaches the page -- that is how a `\pageref` learns which page it
+    // fell on -- and this path draws what it is handed, character by character.
+    // Left in, the key would be SET: a pandoc label is a sentence of hyphenated
+    // words, and every heading in every book carries one.
+    let f = font_or_skip!();
+    let marked = format!(
+        "before {} after",
+        texrs::typeset::ref_mark(texrs::typeset::REF_LABEL, "the-engine-underneath")
+    );
+    let dvi = to_dvi(&marked, &f, "cmr10", &Layout::default());
+    let got = texrs::dvi::Dvi::parse(&dvi).expect("parse").text();
+    assert!(
+        got.contains("before") && got.contains("after"),
+        "the words either side of it are set: {got:?}"
+    );
+    assert!(!got.contains("engine"), "and the key is not: {got:?}");
+}
+
+#[test]
 fn a_glyph_the_text_font_lacks_comes_from_a_fallback() {
     // `luaotfload.add_fallback` in a TFM world, and the reason the publication
     // scripts required LuaTeX: cmr10 has no arrow, cmsy10 does.
@@ -2382,5 +2402,93 @@ fn no_page_ends_on_a_paragraphs_first_line_or_begins_on_its_last() {
         orphans.is_empty() && widows.is_empty(),
         "orphans {orphans:?} and widows {widows:?} in {} pages",
         pages.len()
+    );
+}
+
+/// `\pageref` sets the page its label fell on, in the document's own numbering.
+///
+/// The prelude answered it with nothing, so `on page \pageref{ch:one}` set as
+/// `on page .`. The number is asked of the pages the contents is PART of --
+/// the contents is pages of its own and moves every page after it -- so this
+/// asks for both at once and holds them against each other rather than against
+/// a page count typed into the test, which would pin this to a font.
+#[test]
+fn a_pageref_sets_the_page_its_label_fell_on() {
+    let src = concat!(
+        "\\documentclass{report}\n\\begin{document}\n",
+        "\\tableofcontents\n",
+        "\\chapter{Alpha}\\label{ch:alpha}\nbody alpha\n",
+        "\\chapter{Beta}\\label{ch:beta}\nbody beta\n",
+        "\\chapter{Gamma}\nChapters: Alpha on page \\pageref{ch:alpha}, Beta on page ",
+        "\\pageref{ch:beta}; nothing declares \\pageref{ch:missing}.\n",
+        "\\end{document}\n"
+    );
+    let pages = page_texts(&texrs::run_pdf(src).expect("pdf"));
+    let contents = pages
+        .iter()
+        .position(|p| p.contains("Contents"))
+        .unwrap_or_else(|| panic!("no contents page: {pages:?}"));
+    let sentence = pages
+        .iter()
+        .find(|p| p.contains("Chapters: Alpha on page"))
+        .unwrap_or_else(|| panic!("the sentence is set nowhere: {pages:?}"))
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ");
+    // The contents entry for a chapter and a `\pageref` to a label in it are
+    // the same question asked twice, so they must answer the same number.
+    for (title, key) in [("Alpha", "ch:alpha"), ("Beta", "ch:beta")] {
+        let page = entry_number(&pages[contents], title);
+        assert!(
+            sentence.contains(&format!("{title} on page {page}")),
+            "{key} is on page {page} by the contents' own reckoning, and the \
+             reference says otherwise: {sentence:?}"
+        );
+    }
+    assert!(
+        sentence.contains("declares ??"),
+        "a label the document never declared sets ?? the way LaTeX's own \
+         \\@setref does, rather than leaving a gap: {sentence:?}"
+    );
+}
+
+/// A label is measured as nothing, wherever the document put it.
+///
+/// It has to reach the page -- that is how `\pageref` learns which page it fell
+/// on -- and pandoc writes it straight after the heading it names, so it opens
+/// the paragraph under it and stands as a word of its own once the text is
+/// split on whitespace. A word of its own pays for the space beside it: a
+/// space the document did not write, at the head of the paragraph under every
+/// heading, 88,341 times across the corpus. Set beside the same document
+/// without the labels, which is the only comparison that does not pin this to
+/// a font.
+#[test]
+fn a_label_is_set_as_nothing_and_pays_for_no_space() {
+    let body = |labels: bool| {
+        let mark = |key: &str| match labels {
+            true => format!("\\label{{{key}}}"),
+            false => String::new(),
+        };
+        format!(
+            "\\documentclass{{report}}\n\\begin{{document}}\n\
+             \\chapter{{Alpha}}{}\n\
+             The paragraph under the heading runs long enough to be broken into \
+             several lines, so that a space nobody wrote at the head of it would \
+             move the words that follow onto other lines than these. It carries \
+             a label {} in the middle of it as well, where the same space would \
+             be paid for a second time.\n\\end{{document}}\n",
+            mark("ch:alpha"),
+            mark("mid:para")
+        )
+    };
+    let lines = |labels: bool| by_page(&texrs::run_pdf(&body(labels)).expect("pdf"));
+    assert_eq!(
+        lines(true),
+        lines(false),
+        "the labelled document is set line for line as the bare one is"
+    );
+    assert!(
+        !format!("{:?}", lines(true)).contains("ch:alpha"),
+        "and the key itself is drawn nowhere"
     );
 }

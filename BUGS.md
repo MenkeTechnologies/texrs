@@ -57,6 +57,17 @@ passing, so the list is a claim the harness enforces rather than a note.
   `src/expand.rs`, documented in the corpus, and pinned by `tests/futurelet.rs`.
   So was `\input`, which is now in `src/lower.rs` and pinned differentially by
   `tests/input.rs` — see "Finding files" below for what it does differently.
+- **`-output-directory=DIR` is accepted and ignored.** `src/cli.rs` parses it
+  into `Cli::output_directory` and nothing reads that field, so every output --
+  the `.pdf`, the `.dvi`, the AOT executable -- is written beside the INPUT file
+  instead. The flag is silent about it, which is the dangerous part: a build
+  script that points texrs at a corpus expecting its output in a scratch
+  directory writes into the corpus, and a `.pdf` written next to a `.tex`
+  overwrites whatever reference PDF was already there. That has happened, to a
+  tracked lualatex reference in `MenkeTechnologiesPublications`, restored from
+  git. Until the field is honoured, treat the flag as absent and use a copy of
+  the input where you want the output.
+
 - **`#{` parameter text.** A parameter delimited by the left brace, which tex
   then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs
   refuses the definition. Until `cargo fuzz run lower` found it, the argument

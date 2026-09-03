@@ -60,7 +60,16 @@ weights are constants rather than registers a document sets, and the interword
 glue stretches by cmr10's fractions rather than by each font's own. So
 byte-identical DVI against `tex` is not approached, and reading the existence
 of a `.dvi` or a `.pdf` as progress toward it would be wrong. Font embedding,
-listed here as missing, is done: `/FontFile2`, whole rather than subset.
+listed here as missing, is done, and subset rather than whole: `/FontFile2`
+carrying only the glyphs the document set, the tables rebuilt, one six-letter
+tag per face.
+
+The subsetter's own untested edge is nesting. `tests/glyf.rs`'s
+`an_accented_letter_brings_the_letter_with_it` pins one level — asking for
+e-acute keeps the `e` and the accent it is drawn from — but it walks
+`components` one deep, and `src/sfnt.rs:324` closes over "the parts a composite
+is built out of, and the parts of those". A composite whose component is itself
+composite is the case no test asserts.
 
 ## Known divergences
 

@@ -465,6 +465,16 @@ impl Lowerer {
             if self.text_output && self.lower_page_break(lx, name, &mut out)? {
                 continue;
             }
+            // Cross-references, likewise: the prelude answers `\ref` and
+            // `\pageref` with nothing, so "See chapter \ref{ch:one} on page
+            // \pageref{ch:one}." set as "See chapter  on page .".
+            //
+            // AFTER the headings, because the number a `\ref` answers with is
+            // counted off the marks `\chapter` and `\section` write -- and a
+            // `\label` is written straight after the heading it names.
+            if self.text_output && self.lower_cross_ref(lx, name, &mut out)? {
+                continue;
+            }
             // Centring, likewise: the prelude answers `\centering` with
             // nothing, which is why a centred line and the line after it came
             // out as one.
@@ -1056,6 +1066,39 @@ impl Lowerer {
             }
             _ => Ok(false),
         }
+    }
+
+    /// `\label`, `\ref` and `\pageref`, before the prelude's stubs can swallow
+    /// them.
+    ///
+    /// The prelude reads all three and produces nothing, which is right for a
+    /// label -- it is a name for a place, not text -- and wrong for the other
+    /// two: `See chapter \ref{ch:one} on page \pageref{ch:one}.` set as `See
+    /// chapter  on page .`, which reads as broken prose. `\label` is 88,341
+    /// occurrences across the corpus.
+    ///
+    /// None of the three can be answered here. A `\ref` names a unit that may
+    /// not have been read yet and a `\pageref` a page that does not exist
+    /// until the document has been broken and paginated, so what is written is
+    /// the question -- see `typeset::REF` -- and the typesetter answers it.
+    fn lower_cross_ref(
+        &mut self,
+        lx: &mut Lexer,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
+        let code = match name.name() {
+            "label" => crate::typeset::REF_LABEL,
+            "ref" => crate::typeset::REF_NUMBER,
+            "pageref" => crate::typeset::REF_PAGE,
+            _ => return Ok(false),
+        };
+        // Read exactly what the prelude's one-argument stub read, so a
+        // reference in a document that never reaches the typesetter consumes
+        // its key as it did before.
+        let key = self.group_chars(lx)?;
+        self.push_text(out, &crate::typeset::ref_mark(code, &key));
+        Ok(true)
     }
 
     /// A heading's text, with `above` and `below` units of vertical space

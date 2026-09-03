@@ -117,8 +117,26 @@ fn without_marks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_spec = false;
     let mut face_code = false;
+    // Where a cross-reference span stands: `None` outside one, and inside one
+    // the code character saying which of the three it is -- NUL until that
+    // character has been read, which is the one straight after the marker.
+    let mut in_ref: Option<char> = None;
     for ch in text.chars() {
         match ch {
+            // A cross-reference span: the marker, that code, the label key,
+            // and the marker again. A label is a name for a place rather than
+            // text the document wrote, so it goes; a `\ref` or a `\pageref`
+            // still standing here is one nothing could answer, and LaTeX sets
+            // those as `??` rather than as a gap the author cannot see. Text
+            // output has no pages at all, so every `\pageref` reaches this.
+            crate::typeset::REF => match in_ref.take() {
+                Some(crate::typeset::REF_NUMBER | crate::typeset::REF_PAGE) => out.push_str("??"),
+                Some(_) => {}
+                None => in_ref = Some('\u{0}'),
+            },
+            _ if in_ref == Some('\u{0}') => in_ref = Some(ch),
+            // The key, which is not text either.
+            _ if in_ref.is_some() => {}
             '\u{1}' => in_spec = true,
             '\u{2}' => in_spec = false,
             '\u{3}' => {}
@@ -190,7 +208,12 @@ pub fn run_text_marked(src: &str) -> Result<String, TexError> {
 }
 
 pub fn run_text(src: &str) -> Result<String, TexError> {
-    Ok(without_marks(&run_text_marked(src)?))
+    let marked = run_text_marked(src)?;
+    // A `\ref` is answered here too. It asks for the number of the sectioning
+    // unit its label stands in, and that is a fact about the document's own
+    // structure rather than about its pages -- which text output has not got
+    // -- so "see chapter 2" is what the sentence says either way.
+    Ok(without_marks(&crate::typeset::refs_numbered(&marked)))
 }
 
 /// The bytecode [`run_text`] runs: the same pipeline, with the document's own

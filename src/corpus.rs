@@ -705,6 +705,25 @@ pub const CORPUS: &[Entry] = &[
         "End a title page, which `\\end{titlepage}` runs. It is `\\newpage`, and then `\\setcounter{page}{1}` unless the class is two-sided (extreport.cls, which every book in the corpus loads): the cover sheet is not one of the document's numbered pages, so every number the contents prints is one less than the sheet it stands on. The command is handed on rather than consumed, because an `\\end...` is also what closes a `\\centering` region and a title page is built out of centred pieces.",
         "\\begin{titlepage}\ncover\n\\end{titlepage}",
     ),
+    // ── Cross-references — lower::lower_cross_ref, typeset::refs_numbered ─
+    (
+        "\\label",
+        "LaTeX",
+        "Name the place this stands, so that `\\ref` and `\\pageref` can point at it. The prelude read the key and produced nothing, which is right -- a label is a name for a place rather than text -- but nothing recorded the place either, so neither reference could be answered. What goes into the text here is the key, marked, and the typesetter reads back which sectioning unit it stands in and which page it fell on.",
+        "\\chapter{First}\\label{ch:one}",
+    ),
+    (
+        "\\ref",
+        "LaTeX",
+        "Set the number of the sectioning unit the label stands in: 1 for the first chapter, 2.1 for the first section of the second. The prelude expanded this to nothing, so `see chapter \\ref{ch:one}` set as `see chapter`. The number cannot be known where the reference is written -- the unit may not have been read yet -- so the typesetter resolves it, counting chapters and sections the way the class does. A label the document never declared sets `??`, as LaTeX's own `\\@setref` does, because a missing reference an author can see is worth more than a silent gap.",
+        "See chapter \\ref{ch:one}.",
+    ),
+    (
+        "\\pageref",
+        "LaTeX",
+        "Set the page the label fell on, in the document's own numbering. Resolved after the contents is built, because the contents is pages of its own and moves every page after it, and resolved repeatedly until the numbers stop moving -- the digits are text on a line, so one reference can move the page the next one names. A label the document never declared sets `??`, and text output, which has no pages, sets `??` for every one of these.",
+        "See page \\pageref{ch:one}.",
+    ),
     // ── Centring — lower::lower_centre ───────────────────────────────────
     (
         "\\center",

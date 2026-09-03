@@ -129,7 +129,7 @@ tex's options:
 ```sh
 -interaction=MODE     batchmode, nonstopmode, scrollmode or errorstopmode
 -jobname=NAME         set the job name
--output-directory=DIR write files in this directory
+-output-directory=DIR accepted and IGNORED: output lands beside the input
 -progname=NAME        set the program name
 -fmt=NAME             use a named format
 -ini                  be initex
@@ -380,8 +380,16 @@ and three of the things a document controls survive the trip:
   `Arimo-VF TrueType yes` — once, and referred to from every page; lines are
   broken on that font's own advance widths, out of its `hmtx` through its
   `cmap`. A family nothing can be found for falls back to whichever of the
-  fourteen carries the same metrics, not to Computer Modern. There is no
-  subsetting: a font with a large repertoire is embedded whole.
+  fourteen carries the same metrics, not to Computer Modern. The face is
+  SUBSET: only the glyphs the document actually set are kept, with `cmap`,
+  `glyf`, `loca`, `hmtx`, `maxp` and `head` rebuilt rather than copied, and each
+  subset carries its own six-letter tag — a 5.6MB book comes out with
+  `GLGNCA+Arimo-VF`, `TQIODW+Arimo-Italic-VF`, `HHQUFN+ShareTechMono-Regular`
+  and `MAZEDP+ArialUnicode`, at 2,566,115 bytes against 3,580,772 before.
+  lualatex writes 968,737 for the same book, and that is not a megabyte of fat
+  left in the subsetter: this document ships four faces of its own and borrows a
+  fifth for glyphs none of them carry, where lualatex embeds one subsetted Latin
+  Modern. The totals compare two font SETS, not two subsetters.
 - **Colour.** `\definecolor`, `\providecolor` and `\colorlet` build the palette
   and `\color`, `\textcolor` and `\pagecolor` use it, in the `HTML`, `rgb`,
   `RGB`, `gray` and `cmyk` models. `\color` is a switch and ends with the group

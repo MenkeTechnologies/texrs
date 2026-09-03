@@ -186,7 +186,12 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
         w.define_font(i as u32, &f.name, at, f.tfm.checksum, at);
     }
 
-    let lines = break_lines_chain(text, chain, layout);
+    // A `\ref` asks for the number of the sectioning unit its label stands in,
+    // which is a fact about the document's structure and needs no page broken:
+    // this path can answer it, though it has neither a contents nor a page
+    // numbering to answer a `\pageref` with. See `REF`.
+    let text = refs_numbered(text);
+    let lines = break_lines_chain(&text, chain, layout);
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
     for (page, chunk) in lines.chunks(per_page).enumerate() {
@@ -259,6 +264,19 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         // of every list item.
         if ch == LIST_INDENT {
             let _ = chars.next();
+            continue;
+        }
+        // A cross-reference span is the marker, the code saying which of the
+        // three it is, the label key, and the marker again -- and the whole of
+        // it is skipped. The key is ordinary letters, so leaving it in would
+        // SET it: a pandoc label is a sentence of hyphenated words, and every
+        // heading in every book carries one.
+        if ch == REF {
+            for c in chars.by_ref() {
+                if c == REF {
+                    break;
+                }
+            }
             continue;
         }
         if let Some((f, slot)) = chain.resolve(ch) {
@@ -358,8 +376,8 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String
     let mut lines = Vec::new();
     let mut line = String::new();
     let mut width = 0.0f64;
-    for word in para.split_whitespace() {
-        let ww = chain.width_of(word, layout.size);
+    for word in words_carrying_refs(para) {
+        let ww = chain.width_of(&word, layout.size);
         let need = match line.is_empty() {
             true => ww,
             false => width + space + ww,
@@ -367,13 +385,13 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String
         if !line.is_empty() && need > layout.measure {
             lines.push(std::mem::take(&mut line));
             width = ww;
-            line.push_str(word);
+            line.push_str(&word);
             continue;
         }
         if !line.is_empty() {
             line.push(' ');
         }
-        line.push_str(word);
+        line.push_str(&word);
         width = need;
     }
     if !line.is_empty() {
@@ -837,7 +855,18 @@ pub fn symbol_char(name: &str) -> Option<char> {
 pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut in_spec = false;
     let mut face_code = false;
+    let mut in_ref = false;
     text.chars().filter(move |&ch| match ch {
+        // A cross-reference span -- the marker, its code, the label key, and
+        // the marker again -- is a question the typesetter answers by
+        // REPLACING it, so nothing inside one is ever drawn. A label survives
+        // to the page because that is how `label_pages` finds which page it
+        // fell on, and it must measure nothing where it stands.
+        REF => {
+            in_ref = !in_ref;
+            false
+        }
+        _ if in_ref => false,
         '\u{1}' => {
             in_spec = true;
             false
@@ -2029,7 +2058,15 @@ pub fn to_pdf(
     // `\tableofcontents` stood, because an entry names the page its chapter
     // starts on and no such page exists until the whole document has been
     // broken and paginated. See `TOC`.
-    let text = contents_set(text, layout, &width_of);
+    // A `\ref` is the number of the sectioning unit its label stands in, which
+    // no page has to be broken to know -- so it is resolved BEFORE the
+    // contents, and its digits are on the lines the contents then counts. See
+    // `REF`.
+    let numbered = refs_numbered(text);
+    let contented = contents_set(&numbered, layout, &width_of);
+    // A `\pageref` is the page its label fell on, which the contents moves:
+    // resolved after it, off the pages the contents itself is part of.
+    let text = refs_paged(&contented, layout, &width_of);
     let lines = break_lines_measured(&text, layout, &width_of);
 
     // The colour stack, seeded with what the document is set in where it has
@@ -2502,7 +2539,7 @@ fn fill(
         // what keeps the colour and face stacks walked exactly once and in
         // document order, which is the only order they mean anything in.
         let mut pieces: Vec<crate::linebreak::Piece> = Vec::new();
-        for word in stretch.split_whitespace() {
+        for word in words_carrying_refs(stretch) {
             // The space between two words is set in the face in force where it
             // falls, which is the one the word BEFORE it left; and the word
             // itself costs what it costs in the faces its own markers select.
@@ -2511,7 +2548,7 @@ fn fill(
             if let Some(previous) = pieces.last_mut() {
                 previous.after = crate::linebreak::After::Glue(width_of(" ", current_face(faces)));
             }
-            measure_word(word, colours, faces, width_of, &mut pieces);
+            measure_word(&word, colours, faces, width_of, &mut pieces);
         }
         // tex.web §813: the set of breakpoints that costs the WHOLE paragraph
         // least, rather than the ones a left-to-right fill happens to reach.
@@ -2582,7 +2619,12 @@ fn measure_word(
         width,
         after: After::Nothing,
     };
-    if word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP]) {
+    // A cross-reference span is one piece for a stronger reason than the face
+    // and colour markers are: it is DELIMITED by its markers, so a word broken
+    // between them -- and a pandoc label key is full of the hyphens the
+    // breakpoint scan below cuts at -- would leave a fragment with no opening
+    // marker on it, and the label key would be measured and drawn as text.
+    if word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP, REF]) {
         let width = word_width(word, colours, faces, width_of);
         out.push(whole(word, width));
         return;
@@ -3430,9 +3472,7 @@ fn contents_entries(text: &str, depth: usize) -> Vec<(usize, String)> {
 /// an entry asks -- and only the paginator knows where a page ends.
 fn heading_pages(lines: &[String], layout: &Layout, depth: usize) -> Vec<usize> {
     let mut found = Vec::new();
-    let mut folio = 1usize;
-    for page in paginate(lines, layout) {
-        let mut restart = false;
+    for (folio, page) in folio_pages(lines, layout) {
         for line in page {
             let mut chars = line.chars();
             while let Some(ch) = chars.next() {
@@ -3442,18 +3482,54 @@ fn heading_pages(lines: &[String], layout: &Layout, depth: usize) -> Vec<usize> 
                 let Some(code) = chars.next() else {
                     break;
                 };
-                match toc_level(code) {
-                    Some(level) if level <= depth => found.push(folio),
-                    _ => restart |= code == TOC_PAGE_ONE,
+                if matches!(toc_level(code), Some(level) if level <= depth) {
+                    found.push(folio);
                 }
             }
         }
+    }
+    found
+}
+
+/// Whether this line carries the mark saying the page after it is page 1.
+///
+/// The code character belongs to the mark whatever it is, so the scan steps
+/// over it: a contents mark reading `TOC` `TOC_CHAPTER` followed by a `p` the
+/// document wrote is not this.
+fn carries_page_one(line: &str) -> bool {
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch == TOC && chars.next() == Some(TOC_PAGE_ONE) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Every page of the document paired with the folio it prints, in the
+/// document's own page numbering.
+///
+/// The folio restarts at 1 on the page AFTER the one carrying `TOC_PAGE_ONE`,
+/// because that mark stands on a cover sheet the class does not number -- see
+/// `toc_page_one_mark`.
+///
+/// The contents and the cross-references ask the same question of the pages --
+/// which page did this mark land on -- so they ask it in one place rather than
+/// keeping two copies of the folio arithmetic that could drift apart.
+fn folio_pages<'a>(lines: &'a [String], layout: &Layout) -> Vec<(usize, Vec<&'a str>)> {
+    let mut folio = 1usize;
+    let mut pages = Vec::new();
+    for page in paginate(lines, layout) {
+        // Read off the page the mark stands on and applied to the NEXT one:
+        // the mark says the page after it is page 1.
+        let restart = page.iter().any(|line| carries_page_one(line));
+        pages.push((folio, page));
         folio = match restart {
             true => 1,
             false => folio + 1,
         };
     }
-    found
+    pages
 }
 
 /// One entry of the contents: its title, the leaders, and the page it starts
@@ -3602,6 +3678,334 @@ fn contents_set<'a>(
     std::borrow::Cow::Owned(with_contents(text, &entries, &pages, layout, width_of))
 }
 
+/// A cross-reference: `\ref` and `\pageref`, and the `\label` they name.
+///
+/// `\label` is 88,341 occurrences across the corpus and the prelude answered
+/// all three of these with nothing, so `See chapter \ref{ch:one} on page
+/// \pageref{ch:one}.` set as `See chapter  on page .` -- a book full of "see
+/// chapter" with no number after it, which reads as broken prose rather than
+/// as a missing feature.
+///
+/// A reference cannot be answered where it is written, for the same reason a
+/// contents entry cannot: the number belongs to a unit that may not have been
+/// read yet, and the page belongs to a pagination that has not happened. So
+/// what goes into the text is the QUESTION -- this marker, one character
+/// saying which of the three it is, the label key, and the marker again to
+/// close it -- and the typesetter answers it, in the two places either side of
+/// where the contents is built:
+///
+///   * `refs_numbered` gives a `\ref` the number of the sectioning unit its
+///     label stands in. That needs no page broken, so it runs BEFORE the
+///     contents is built and its digits are on the lines the contents counts;
+///   * `refs_paged` gives a `\pageref` the page its label fell on, which is
+///     only known AFTER the contents is in place -- the contents is pages of
+///     its own and moves every page after it.
+///
+/// U+0017 is the next free control character after U+0016; the `MARKERS`
+/// registry says what the rest are spent on.
+pub const REF: char = '\u{17}';
+
+/// A `\label`: the key it declares, standing where the document put it.
+pub const REF_LABEL: char = 'l';
+
+/// A `\ref`: the number of the unit holding this key.
+pub const REF_NUMBER: char = 'n';
+
+/// A `\pageref`: the page this key fell on.
+pub const REF_PAGE: char = 'p';
+
+/// What LaTeX sets for a reference whose label it has not got: `??`, from
+/// latex.ltx's `\@setref`, which sets that and warns.
+///
+/// Setting nothing was what this did, and a gap in a sentence is a fault the
+/// author cannot see. Two question marks are one they can.
+const UNRESOLVED: &str = "??";
+
+/// How many times the page references are resolved before their numbers are
+/// taken as settled, for the reason `CONTENTS_PASSES` gives: a `\pageref` that
+/// resolves from nothing to `12` is two characters wider than it was, and a
+/// line that then does not fit moves the page the next label falls on.
+const REF_PASSES: usize = 4;
+
+/// The mark naming one cross-reference, for the lowerer to write.
+///
+/// The key is stripped of whitespace and of control characters: the span is
+/// delimited by the marker, and a line is split into words on spaces, so a key
+/// holding either could not be read back whole. A LaTeX label key holds
+/// neither.
+pub fn ref_mark(code: char, key: &str) -> String {
+    let key: String = key
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    format!("{REF}{code}{key}{REF}")
+}
+
+/// One cross-reference span in the text.
+struct RefSpan<'a> {
+    /// Where the opening marker is.
+    at: usize,
+    /// One past the closing marker.
+    end: usize,
+    /// Which of the three this is: a label, a `\ref` or a `\pageref`.
+    code: char,
+    /// The label key between them.
+    key: &'a str,
+}
+
+/// The next cross-reference span at or after `from`, or `None`.
+///
+/// A marker with no closing marker after it is not a span. The lowerer writes
+/// both or neither, so this is only reached by a document that wrote the
+/// character itself -- and half a span read as a whole one would swallow the
+/// rest of the book.
+fn next_ref(text: &str, from: usize) -> Option<RefSpan<'_>> {
+    let at = from + text[from..].find(REF)?;
+    let after = at + REF.len_utf8();
+    let code = text[after..].chars().next()?;
+    let key_at = after + code.len_utf8();
+    let close = key_at + text[key_at..].find(REF)?;
+    Some(RefSpan {
+        at,
+        end: close + REF.len_utf8(),
+        code,
+        key: &text[key_at..close],
+    })
+}
+
+/// Whether this word is nothing but cross-reference spans.
+///
+/// Pandoc writes `\label` straight after the heading it names, so the label
+/// opens the paragraph under it and stands between the paragraph break and the
+/// first word -- a word of its own, once the text is split on whitespace. It
+/// prints nothing, so measured as a word it would pay for the space beside it:
+/// a space the document did not write, at 88,341 places in the corpus, at the
+/// head of the paragraph under every heading in every book.
+/// `words_carrying_refs` puts it onto the word that follows instead, where it
+/// measures nothing and marks the same place.
+fn is_ref_only(word: &str) -> bool {
+    let mut at = 0;
+    while let Some(span) = next_ref(word, at) {
+        if span.at != at {
+            return false;
+        }
+        at = span.end;
+    }
+    at > 0 && at == word.len()
+}
+
+/// The words of `text`, with every span that is nothing but a cross-reference
+/// carried onto the word after it.
+///
+/// Both breakers split a stretch into words here rather than each calling
+/// `split_whitespace` and deciding for itself what to do with a label, because
+/// a label measured as a word on one path and not on the other is two
+/// different books.
+fn words_carrying_refs(text: &str) -> Vec<std::borrow::Cow<'_, str>> {
+    let mut words: Vec<std::borrow::Cow<str>> = Vec::new();
+    let mut carried = String::new();
+    for word in text.split_whitespace() {
+        if is_ref_only(word) {
+            carried.push_str(word);
+            continue;
+        }
+        words.push(match carried.is_empty() {
+            true => std::borrow::Cow::Borrowed(word),
+            false => std::borrow::Cow::Owned(format!("{}{word}", std::mem::take(&mut carried))),
+        });
+    }
+    // A span the text ENDED on has no word to be carried onto and goes onto
+    // the word before it, so that the page it fell on can still be read back
+    // off the line. Text that is nothing but spans has no word either way; the
+    // label is then dropped, and a `\pageref` to it sets `??` -- which is the
+    // honest answer, since there is no line for it to have landed on.
+    if !carried.is_empty() {
+        if let Some(last) = words.last_mut() {
+            last.to_mut().push_str(&carried);
+        }
+    }
+    words
+}
+
+/// Whether the text holds a cross-reference of this kind.
+///
+/// Both resolving passes ask this first and hand the text straight back when
+/// the answer is no, so a document that writes no reference -- which is every
+/// document in the corpus, and every test that is not about this -- is not
+/// walked twice or rewritten at all.
+fn has_ref(text: &str, code: char) -> bool {
+    let mut at = 0;
+    while let Some(span) = next_ref(text, at) {
+        if span.code == code {
+            return true;
+        }
+        at = span.end;
+    }
+    false
+}
+
+/// The number the class prints for each label: `1` for a chapter, `2.1` for
+/// the first section of the second chapter, and so on down.
+///
+/// Counted off the contents marks, because those are the only record in the
+/// text of where a sectioning unit begins and how deep it is -- and the
+/// lowerer writes one for every heading whether or not a contents was asked
+/// for. `tocdepth` is not consulted: what the contents LISTS is a different
+/// question from what a unit is numbered.
+///
+/// Two limits, both of which the corpus reaches with nothing:
+///
+///   * a `\chapter*` is counted, because `toc_entry_mark` does not record the
+///     star. No document in the corpus writes a starred heading;
+///   * a `\subsubsection` carries no mark at all -- `toc_entry_mark` is empty
+///     past a subsection -- so a label under one takes its subsection's
+///     number. The corpus holds one `\subsubsection` in 169 files.
+///
+/// A label standing before any heading has no unit to be numbered by and is
+/// left out, so a `\ref` to it sets `??`, which is what LaTeX sets for a
+/// reference it cannot resolve.
+fn unit_numbers(text: &str) -> std::collections::HashMap<String, String> {
+    // Chapter, section, subsection: the three levels `toc_level` names.
+    let mut counters = [0usize; 3];
+    let mut current = String::new();
+    let mut numbers = std::collections::HashMap::new();
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            TOC => {
+                let Some(code) = chars.next() else { break };
+                let Some(level) = toc_level(code).filter(|l| *l < counters.len()) else {
+                    continue;
+                };
+                counters[level] += 1;
+                // A new chapter puts its sections back to zero: the second
+                // chapter's first section is 2.1 and not 2.4.
+                for deeper in counters[level + 1..].iter_mut() {
+                    *deeper = 0;
+                }
+                current = counters[..=level]
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<String>>()
+                    .join(".");
+            }
+            REF => {
+                let Some(code) = chars.next() else { break };
+                let key: String = chars.by_ref().take_while(|c| *c != REF).collect();
+                // The last definition of a key wins, which is what a rerun
+                // over LaTeX's own `.aux` does with a duplicated label.
+                if code == REF_LABEL && !current.is_empty() {
+                    numbers.insert(key, current.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    numbers
+}
+
+/// The text with every `\ref` replaced by the number of the unit its label
+/// stands in, and `??` where there is no such label.
+///
+/// Public because `--text` resolves them too: a document read as text has no
+/// pages, but it has its own structure, and "see chapter 2" is what the
+/// sentence says.
+pub fn refs_numbered(text: &str) -> std::borrow::Cow<'_, str> {
+    if !has_ref(text, REF_NUMBER) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let numbers = unit_numbers(text);
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(span) = next_ref(text, at) {
+        out.push_str(&text[at..span.at]);
+        match span.code == REF_NUMBER {
+            true => out.push_str(numbers.get(span.key).map_or(UNRESOLVED, String::as_str)),
+            // A label stays where it is: the pass that follows reads the page
+            // it lands on back out of it, exactly as a contents entry mark is
+            // left for `heading_pages`.
+            false => out.push_str(&text[span.at..span.end]),
+        }
+        at = span.end;
+    }
+    out.push_str(&text[at..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Which page of the document each label fell on, in the document's own page
+/// numbering.
+///
+/// The question `heading_pages` asks, asked at the labels instead and answered
+/// off the same pages.
+fn label_pages(lines: &[String], layout: &Layout) -> std::collections::HashMap<String, usize> {
+    let mut found = std::collections::HashMap::new();
+    for (folio, page) in folio_pages(lines, layout) {
+        for line in page {
+            let mut at = 0;
+            while let Some(span) = next_ref(line, at) {
+                if span.code == REF_LABEL {
+                    found.insert(span.key.to_string(), folio);
+                }
+                at = span.end;
+            }
+        }
+    }
+    found
+}
+
+/// The text with every `\pageref` replaced by the page its label fell on, and
+/// `??` where no page carries that label.
+fn with_pagerefs(text: &str, pages: &std::collections::HashMap<String, usize>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(span) = next_ref(text, at) {
+        out.push_str(&text[at..span.at]);
+        match span.code == REF_PAGE {
+            true => match pages.get(span.key) {
+                Some(page) => out.push_str(&page.to_string()),
+                None => out.push_str(UNRESOLVED),
+            },
+            false => out.push_str(&text[span.at..span.end]),
+        }
+        at = span.end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// The document's text with its page references resolved.
+///
+/// Run AFTER the contents is set, because the contents is pages of its own and
+/// moves every page after it: a number read before it was built would name the
+/// sheet the label stood on without it.
+///
+/// The fixed point is `contents_set`'s, for the same reason and to the same
+/// depth -- the number a reference sets is text on a line, so resolving one
+/// can move the page the next one names. Returns the text untouched, and does
+/// no work at all, for a document that wrote no `\pageref`.
+fn refs_paged<'a>(
+    text: &'a str,
+    layout: &Layout,
+    width_of: &dyn Fn(&str, Face) -> f64,
+) -> std::borrow::Cow<'a, str> {
+    if !has_ref(text, REF_PAGE) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut pages = std::collections::HashMap::new();
+    for _ in 0..REF_PASSES {
+        let staged = with_pagerefs(text, &pages);
+        let lines = break_lines_measured(&staged, layout, width_of);
+        let found = label_pages(&lines, layout);
+        // The numbers stopped moving, and the text they were read out of is
+        // the text that carries them.
+        if found == pages {
+            return std::borrow::Cow::Owned(staged);
+        }
+        pages = found;
+    }
+    std::borrow::Cow::Owned(with_pagerefs(text, &pages))
+}
+
 /// The left edge of a list item's lines, carried through the text the way
 /// centring is, with the nesting depth as the one character after it.
 ///
@@ -3669,6 +4073,10 @@ pub const MARKERS: &[(char, bool)] = &[
     // The contents marker, whose argument says which of the three things it
     // is: a request, a heading it lists, or where page 1 begins.
     (TOC, true),
+    // The cross-reference marker. Its argument says which of the three it is
+    // -- a label, a `\ref` or a `\pageref` -- and the label key follows, up to
+    // a second marker that closes the span.
+    (REF, true),
 ];
 
 /// The end of a line INSIDE a code listing, carried through the text the way a
