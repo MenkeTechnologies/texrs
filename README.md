@@ -243,6 +243,13 @@ than none.
   change it is.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), first-fit lines at a
   measure, stacked at a leading, shipped as DVI that `dvitype` reads.
+- `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
+  pages — `\ref` gives the sectioning number, `\pageref` the page it fell on.
+  Worth knowing what this is NOT evidence of: the corpus has 88,341 `\label{`
+  and zero `\ref{` or `\pageref{`, because Pandoc writes labels and never
+  references them. So this moves no book in the sweep. It is correctness for
+  LaTeX documents generally, not a corpus result, and re-running the sweep to
+  look for a change will find none.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
   chosen by minimising total demerits across the whole paragraph (`tex.web`
   §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
@@ -377,19 +384,24 @@ and three of the things a document controls survive the trip:
   and is regularly a directory that no longer exists, so a stale one is retried
   against the directory the document was read from, where the fonts are.
   The file is carried in the PDF as `/FontFile2` — `pdffonts` reports
-  `Arimo-VF TrueType yes` — once, and referred to from every page; lines are
+  `GLGNCA+Arimo-VF TrueType yes yes`, embedded AND subset — once, and referred
+  to from every page; lines are
   broken on that font's own advance widths, out of its `hmtx` through its
   `cmap`. A family nothing can be found for falls back to whichever of the
   fourteen carries the same metrics, not to Computer Modern. The face is
   SUBSET: only the glyphs the document actually set are kept, with `cmap`,
   `glyf`, `loca`, `hmtx`, `maxp` and `head` rebuilt rather than copied, and each
-  subset carries its own six-letter tag — a 5.6MB book comes out with
+  subset carries its own six-letter tag. A 5.6MB book comes out with
   `GLGNCA+Arimo-VF`, `TQIODW+Arimo-Italic-VF`, `HHQUFN+ShareTechMono-Regular`
-  and `MAZEDP+ArialUnicode`, at 2,566,115 bytes against 3,580,772 before.
-  lualatex writes 968,737 for the same book, and that is not a megabyte of fat
-  left in the subsetter: this document ships four faces of its own and borrows a
-  fifth for glyphs none of them carry, where lualatex embeds one subsetted Latin
-  Modern. The totals compare two font SETS, not two subsetters.
+  and `MAZEDP+ArialUnicode`, and the four embedded programs come to **177,248
+  bytes** where the three bundled faces alone are 1,082,736 on disk and the
+  fourth is a system face borrowed for glyphs the others lack. That pair is the
+  claim about subsetting.
+  The whole-file totals are a DIFFERENT claim and worth not confusing with it:
+  this book is 2.5MB against lualatex's 968,737, but the file also carries a
+  contents, folios, and four faces where lualatex embeds one subsetted Latin
+  Modern. Read as a subsetting result it says the subsetter is poor; it is
+  comparing two font sets.
 - **Colour.** `\definecolor`, `\providecolor` and `\colorlet` build the palette
   and `\color`, `\textcolor` and `\pagecolor` use it, in the `HTML`, `rgb`,
   `RGB`, `gray` and `cmyk` models. `\color` is a switch and ends with the group
