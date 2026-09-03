@@ -57,16 +57,15 @@ passing, so the list is a claim the harness enforces rather than a note.
   `src/expand.rs`, documented in the corpus, and pinned by `tests/futurelet.rs`.
   So was `\input`, which is now in `src/lower.rs` and pinned differentially by
   `tests/input.rs` — see "Finding files" below for what it does differently.
-- **`-output-directory=DIR` is accepted and ignored.** `src/cli.rs` parses it
-  into `Cli::output_directory` and nothing reads that field, so every output --
-  the `.pdf`, the `.dvi`, the AOT executable -- is written beside the INPUT file
-  instead. The flag is silent about it, which is the dangerous part: a build
-  script that points texrs at a corpus expecting its output in a scratch
-  directory writes into the corpus, and a `.pdf` written next to a `.tex`
-  overwrites whatever reference PDF was already there. That has happened, to a
-  tracked lualatex reference in `MenkeTechnologiesPublications`, restored from
-  git. Until the field is honoured, treat the flag as absent and use a copy of
-  the input where you want the output.
+`-output-directory=DIR` was on this list and is no longer: `src/cli.rs` parsed
+it into `Cli::output_directory` and nothing read the field, so every output went
+beside the INPUT instead, silently. It is honoured now (`src/main.rs`, pinned by
+`tests/cli.rs`), and the test asserts the half that was broken -- that nothing
+is left beside the input -- rather than only that the file arrives where it was
+asked for. Recorded because of what it cost while it was true: a `.pdf` written
+next to a `.tex` overwrites whatever reference was already there, which is how
+texrs output reached tracked lualatex references in
+`MenkeTechnologiesPublications`. Restored from git, byte-identical.
 
 - **`#{` parameter text.** A parameter delimited by the left brace, which tex
   then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs

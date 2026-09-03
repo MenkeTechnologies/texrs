@@ -315,7 +315,7 @@ pub const USAGE: &str = "\
   -jobname=NAME
           // Set the job name
   -output-directory=DIR
-          // ACCEPTED AND IGNORED: output lands beside the input file
+          // Write the output there instead of beside the input
   -progname=NAME
           // Set the program name
   -fmt=NAME

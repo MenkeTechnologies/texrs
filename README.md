@@ -129,7 +129,7 @@ tex's options:
 ```sh
 -interaction=MODE     batchmode, nonstopmode, scrollmode or errorstopmode
 -jobname=NAME         set the job name
--output-directory=DIR accepted and IGNORED: output lands beside the input
+-output-directory=DIR write the output there instead of beside the input
 -progname=NAME        set the program name
 -fmt=NAME             use a named format
 -ini                  be initex
