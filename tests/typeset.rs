@@ -1749,9 +1749,27 @@ fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
         }) else {
             continue;
         };
+        // The foot of the text block. Below it is page FURNITURE -- the folio
+        // LaTeX's plain style centres under the text -- which the document did
+        // not write, and which otherwise arrives as an extra run on the end of
+        // every page.
+        // Text baselines run from `height + margin - leading` down to about
+        // the margin; the folio sits a footskip BELOW the text block, well
+        // under it. The margin is the line between the two.
+        let bottom = texrs::typeset::Layout::default().margin;
         let mut runs = Vec::new();
         for line in stream.lines() {
             if let Some((body, _)) = line.rsplit_once(") Tj") {
+                // `... 1 0 0 1 X Y Tm (text)`: the baseline is the number
+                // before the operator.
+                let head: Vec<&str> = body.split_whitespace().collect();
+                let above = match head.iter().position(|t| *t == "Tm") {
+                    Some(at) if at >= 1 => head[at - 1].parse::<f64>().is_ok_and(|y| y >= bottom),
+                    _ => true,
+                };
+                if !above {
+                    continue;
+                }
                 if let Some((_, text)) = body.rsplit_once('(') {
                     runs.push(text.to_string());
                 }
@@ -2059,15 +2077,32 @@ fn page_texts(pdf: &[u8]) -> Vec<String> {
             rest = &body[end..];
             continue;
         }
+        // The foot of the text block: below it is page FURNITURE -- the folio
+        // LaTeX's plain style centres under the text -- and not what the
+        // document said. Without this every page came back with its own page
+        // number appended as though the document had written it.
+        // Text baselines run from `height + margin - leading` down to about
+        // the margin; the folio sits a footskip BELOW the text block, well
+        // under it. The margin is the line between the two.
+        let bottom = texrs::typeset::Layout::default().margin;
         // `(text) Tj` is how a run is drawn; the documents below draw no
-        // brackets of their own, so every bracketed stretch is a run.
+        // brackets of their own, so every bracketed stretch is a run. The `Tm`
+        // before it says where it sits.
         while let Some(open) = chunk.find('(') {
             let after = &chunk[open + 1..];
             let Some(close) = after.find(')') else {
                 break;
             };
-            text.push_str(&after[..close]);
-            text.push(' ');
+            // The baseline is the second-to-last number before the bracket.
+            let head: Vec<&str> = chunk[..open].split_whitespace().collect();
+            let above = match head.iter().position(|t| *t == "Tm") {
+                Some(at) if at >= 1 => head[at - 1].parse::<f64>().is_ok_and(|y| y >= bottom),
+                _ => true,
+            };
+            if above {
+                text.push_str(&after[..close]);
+                text.push(' ');
+            }
             chunk = &after[close + 1..];
         }
         pages.push(text);
@@ -2230,4 +2265,35 @@ fn a_document_that_asks_for_no_contents_is_set_exactly_as_it_was() {
         !pages.iter().any(|p| p.contains("Contents")),
         "nothing asked for one: {pages:?}"
     );
+}
+
+/// The page number LaTeX's plain style centres under the text.
+///
+/// texrs drew none, and it was the ONE thing holding every case of the parity
+/// ladder at PAGESIZE: lualatex's text for a one-line document is
+/// "Hello world. 1" against texrs's "Hello world.", exactly one word apart on
+/// every document, and that word is the folio. Nine of the ten cases climbed
+/// when it was drawn.
+#[test]
+fn every_page_carries_its_number_at_the_foot() {
+    let src = concat!(
+        "\\documentclass{article}\n\\begin{document}\n",
+        "alpha\n\\newpage\nbravo\n\\newpage\ncharlie\n\\end{document}\n"
+    );
+    let pdf = texrs::run_pdf(src).expect("pdf");
+    let runs = placed(&pdf);
+    let layout = texrs::typeset::Layout::default();
+    // One folio a page, counting from one, each below the text block.
+    let folios: Vec<&(f64, f64, String)> =
+        runs.iter().filter(|(_, y, _)| *y < layout.margin).collect();
+    let numbers: Vec<&str> = folios.iter().map(|(_, _, t)| t.as_str()).collect();
+    assert_eq!(numbers, ["1", "2", "3"], "one folio a page: {runs:?}");
+    // Centred: the page is 612 wide, so each sits just left of its middle by
+    // half its own width.
+    for (x, _, text) in &folios {
+        assert!(
+            (*x - 306.0).abs() < 6.0,
+            "the folio {text:?} is centred, not at x={x}"
+        );
+    }
 }

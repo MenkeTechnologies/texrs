@@ -2,13 +2,13 @@
 # Rungs: NONE < PRODUCED < PAGES < PAGESIZE < TEXT < BYTES.
 # BYTES is the goal. Re-record with `cargo run --bin pdf-parity -- --record`
 # after a change that climbs; a case that DROPS is a regression.
-PAGESIZE a_paragraph.tex
-PAGESIZE digits_and_case.tex
-NONE empty_document.tex
-PAGESIZE groups_and_registers.tex
-PAGESIZE long_paragraph.tex
-PAGESIZE macro_expansion.tex
-PAGESIZE nested_macros.tex
-PAGESIZE punctuation.tex
-PAGESIZE two_paragraphs.tex
-PAGESIZE two_words.tex
+TEXT a_paragraph.tex
+LINES digits_and_case.tex
+BYTES empty_document.tex
+LINES groups_and_registers.tex
+TEXT long_paragraph.tex
+LINES macro_expansion.tex
+LINES nested_macros.tex
+LINES punctuation.tex
+LINES two_paragraphs.tex
+LINES two_words.tex

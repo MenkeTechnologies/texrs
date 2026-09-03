@@ -2050,8 +2050,13 @@ pub fn to_pdf(
     // closes, and a group can hold a paragraph.
     let mut faces: Vec<Face> = vec![Face::Main];
 
+    // The printed page number. It counts from one and starts again after a
+    // title page, which is what `\end{titlepage}` does to LaTeX's counter.
+    let mut folio: usize = 1;
     let mut pages = Vec::new();
     for chunk in paginate(&lines, layout) {
+        // Asked before the lines are drawn, because drawing consumes them.
+        let restarts = restarts_here(&chunk);
         let mut page = Page::letter();
         // The page is painted first, and only first: a fill drawn after the
         // text covers it, and a document that sets a dark page sets light
@@ -2230,6 +2235,28 @@ pub fn to_pdf(
             }
             y -= layout.leading;
         }
+        // The page number, as LaTeX's `plain` style sets it: centred at the
+        // foot. texrs drew none at all, and it is the ONE thing that held every
+        // case of the parity ladder at PAGESIZE -- lualatex's text for
+        // `Hello world.` is "Hello world. 1" against texrs's "Hello world.",
+        // one word apart, and that word is the folio on every document.
+        //
+        // Numbered the way the contents numbers it (`heading_pages`), so the
+        // page a contents entry names is the number printed on that page: a
+        // title page resets the count, since `\end{titlepage}` does.
+        if restarts {
+            folio = 1;
+        }
+        let shown = folio.to_string();
+        let width = width_of(&shown, Face::Main);
+        page.text_in(
+            main.clone(),
+            layout.size,
+            (page.width - width) / 2.0,
+            page.height - layout.margin - layout.height - FOOTSKIP,
+            &shown,
+        );
+        folio += 1;
         pages.push(page);
     }
     document(&pages)
@@ -2645,6 +2672,13 @@ fn strip_indent(line: &str) -> (usize, &str) {
     (depth, chars.as_str())
 }
 
+/// How far below the text block the page number sits, LaTeX's `\footskip`.
+///
+/// 30pt in every class the corpus uses. Measured against lualatex's own output
+/// for a default article: it draws the folio at y=89.365 on a 792pt page, which
+/// is the text block's bottom edge less this.
+const FOOTSKIP: f64 = 30.0;
+
 /// `\parskip`, as a fraction of the leading.
 ///
 /// Every book in the corpus loads pandoc's preamble, which loads `parskip.sty`
@@ -2654,6 +2688,25 @@ fn strip_indent(line: &str) -> (usize, &str) {
 /// apart, and 20.324 - 13.549 = 6.775 = 13.549/2, on all 2,613 of that book's
 /// paragraph boundaries.
 const PARAGRAPH_SPACE: f64 = 0.5;
+
+/// Whether the page holding these lines is the one after which numbering
+/// starts again.
+///
+/// `\end{titlepage}` resets LaTeX's page counter (extreport.cls:514-518), so a
+/// cover sheet is not page one and everything after it is a page lower than the
+/// sheet it sits on. `heading_pages` reads the same mark for the contents; both
+/// have to agree or a contents entry names a number no page carries.
+fn restarts_here(lines: &[&str]) -> bool {
+    lines.iter().any(|line| {
+        let mut chars = line.chars();
+        while let Some(ch) = chars.next() {
+            if ch == TOC && chars.next() == Some(TOC_PAGE_ONE) {
+                return true;
+            }
+        }
+        false
+    })
+}
 
 /// Whether a broken line is vertical space rather than text.
 fn is_space_line(line: &str) -> bool {

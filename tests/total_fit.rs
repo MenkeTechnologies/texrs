@@ -33,6 +33,18 @@ fn lines(pdf: &[u8]) -> Vec<String> {
             .position(|t| *t == "Tm")
             .expect("a run is placed");
         let y = head[tm - 1].to_string();
+        // The folio at the foot is page FURNITURE, not a line of the
+        // paragraph: LaTeX's plain style centres the page number below the
+        // text block, and reading it back as a line put a bare "1" on the end
+        // of every paragraph pinned here. Anything below the text block is
+        // furniture.
+        // Text baselines run from `height + margin - leading` down to about
+        // the margin; the folio sits a footskip BELOW the text block, well
+        // under it. The margin is the line between the two.
+        let bottom = texrs::typeset::Layout::default().margin;
+        if head[tm - 1].parse::<f64>().is_ok_and(|at| at < bottom) {
+            continue;
+        }
         match y == last {
             true => out
                 .last_mut()
