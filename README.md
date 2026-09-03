@@ -64,9 +64,10 @@ does — minimising the total demerits of the whole paragraph over every feasibl
 set of breakpoints, with Liang hyphenation to widen the places a line may end —
 and writes the PDF itself. `--dvi` still fills each line with the first break
 that fits, because a DVI driver cannot set a run to a width and a breaker that
-prices glue has nothing to hand its answer to. Neither is `tex.web`'s stomach:
-no page breaking by penalties, no maths, no boxes a document can nest, and
-[0x06] says exactly what that costs.
+prices glue has nothing to hand its answer to. `--pdf` breaks its PAGES the
+same way, by LaTeX's widow, orphan, broken-line and heading penalties over the
+whole document. Neither is `tex.web`'s stomach: no maths, no boxes a document
+can nest, and [0x06] says exactly what that costs.
 
 ## [0x01] Install
 
@@ -306,11 +307,18 @@ which is what every word processor before TeX did and what TeX was written to
 improve on — because its driver cannot set a run to a width, and a breaker that
 decides some lines should be SHRUNK has nowhere to put that answer.
 
-Neither is `tex.web`'s stomach. No page breaking by penalties, no maths, no
-boxes a document can nest. `\tolerance`, `\pretolerance` and the demerit
-weights are constants rather than registers the document can set. A paragraph
-set here and the same paragraph set by `tex` will not agree line for line — see
-`docs/ROADMAP.md`.
+`--pdf` breaks its pages by penalty too, over the whole document rather than
+page by page: `\widowpenalty` and `\clubpenalty` keep one line of a paragraph
+off the top and the bottom of a page, `\brokenpenalty` discourages ending a
+page on a hyphenated line, and a heading is never left at the foot of a page
+away from the text it introduces (`\@secpenalty`, and the `\nobreak`
+`\@startsection` writes after a title). `--dvi` stacks a fixed number of lines
+on each page.
+
+Neither is `tex.web`'s stomach. No maths, no boxes a document can nest.
+`\tolerance`, `\pretolerance` and the demerit weights are constants rather
+than registers the document can set. A paragraph set here and the same
+paragraph set by `tex` will not agree line for line — see `docs/ROADMAP.md`.
 
 **Some LaTeX, no Lua.** texrs carries the part of LaTeX that lives in the mouth
 and the expander, as TeX rather than as Rust: `src/latex/prelude.tex` is a file

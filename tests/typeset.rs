@@ -2297,3 +2297,90 @@ fn every_page_carries_its_number_at_the_foot() {
         );
     }
 }
+
+/// A document of `count` sections, each a heading and the prose it introduces,
+/// with the prose lengths varying so the headings land at every offset down
+/// the page rather than all at the same one.
+fn sectioned(count: usize) -> String {
+    let mut body = String::new();
+    for k in 1..=count {
+        body.push_str(&format!("\\section{{Head{k}z}}\n\n"));
+        body.push_str(&format!("open{k}z "));
+        for w in 0..30 + (k % 17) * 3 {
+            body.push_str(&format!("word{k}x{w}z "));
+        }
+        body.push_str("\n\n");
+    }
+    format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\\end{{document}}\n")
+}
+
+#[test]
+fn a_heading_is_never_left_at_the_foot_of_a_page_without_its_text() {
+    // `\@xsect` is `\par \nobreak` after the title (latex.ltx:17282) and
+    // `\clubpenalty\@M` on the paragraph under it (latex.ltx:17322): the
+    // heading, the space below it and the first two lines of what it
+    // introduces are one block, and no page may end inside it. A paginator
+    // that fills to the height and breaks at the first line that does not fit
+    // has no way to say so, and strands a heading whenever one falls near the
+    // bottom.
+    let pages = by_page(&texrs::run_pdf(&sectioned(40)).expect("pdf"));
+    assert!(pages.len() > 4, "40 sections is several pages: {pages:?}");
+    let mut stranded = Vec::new();
+    for k in 1..=40 {
+        let title = format!("Head{k}z");
+        let under = format!("open{k}z");
+        let heading = page_of(&pages, |run| run.contains(&title))
+            .unwrap_or_else(|| panic!("{title} was not set at all"));
+        let text = page_of(&pages, |run| run.contains(&under))
+            .unwrap_or_else(|| panic!("{under} was not set at all"));
+        if heading != text {
+            stranded.push((title, heading, text));
+        }
+    }
+    assert!(
+        stranded.is_empty(),
+        "a heading may not end a page away from the text it introduces: {stranded:?}"
+    );
+}
+
+#[test]
+fn no_page_ends_on_a_paragraphs_first_line_or_begins_on_its_last() {
+    // `\clubpenalty` and `\widowpenalty`, both 150 (latex.ltx:500-501). One
+    // line of a paragraph alone at the foot of a page, or alone at the top of
+    // the next, is what they are there to stop, and filling to the height
+    // cannot: the page has no way of knowing that the line it is about to keep
+    // is the last of its paragraph.
+    let pages = by_page(&texrs::run_pdf(&sectioned(40)).expect("pdf"));
+    let mut orphans = Vec::new();
+    let mut widows = Vec::new();
+    for k in 1..=40usize {
+        // Which pages this paragraph put lines on, and how many on each.
+        let mut on: Vec<(usize, usize)> = Vec::new();
+        for (number, page) in pages.iter().enumerate() {
+            let lines = page
+                .iter()
+                .filter(|run| {
+                    run.contains(&format!("word{k}x")) || run.contains(&format!("open{k}z"))
+                })
+                .count();
+            if lines > 0 {
+                on.push((number, lines));
+            }
+        }
+        let Some((first, opened)) = on.first().copied() else {
+            panic!("paragraph {k} was not set at all");
+        };
+        let (last, closed) = *on.last().expect("checked above");
+        if on.len() > 1 && opened == 1 {
+            orphans.push((k, first));
+        }
+        if on.len() > 1 && closed == 1 {
+            widows.push((k, last));
+        }
+    }
+    assert!(
+        orphans.is_empty() && widows.is_empty(),
+        "orphans {orphans:?} and widows {widows:?} in {} pages",
+        pages.len()
+    );
+}

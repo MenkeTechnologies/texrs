@@ -80,8 +80,8 @@ breaks it into lines with the first break that fits, and ships a page a driver
 will open.  It is
 .B not
 .IR tex.web 's
-stomach \(em no page breaking by penalties, no maths, no boxes a document can
-nest.  How the lines are broken depends on the output:
+stomach \(em no maths, no boxes a document can nest.  How the lines and the
+pages are broken depends on the output:
 .B \-\-pdf
 minimises the total demerits of a whole paragraph over every feasible set of
 breakpoints and hyphenates with Liang patterns
@@ -868,9 +868,10 @@ the first break that fits -- and are not hyphenated, because a DVI driver cannot
 set a run to a width, so a breaker that prices glue has nothing to hand its
 answer to. \fB--pdf\fR does consider every feasible set of breakpoints for a
 whole paragraph and minimises the total demerits (\fItex.web\fR \(sc813), and
-hyphenates. Neither path has page breaking by penalties or maths, and this one
-sets one font. A paragraph set here and the same paragraph set by \fBtex\fR
-will not agree line for line.
+hyphenates, and breaks its PAGES by LaTeX's widow, orphan, broken\-line and
+heading penalties over the whole document; this path stacks a fixed number of
+lines on each page. Neither has maths, and this one sets one font. A paragraph
+set here and the same paragraph set by \fBtex\fR will not agree line for line.
 .TP
 .B \-\-text
 Print what the document SAYS -- its own words, after every macro has been

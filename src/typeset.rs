@@ -2743,8 +2743,16 @@ fn sets_text(para: &str) -> bool {
     printing_chars(para).any(|c| !c.is_whitespace())
 }
 
-/// Split broken lines into pages, at a forced break or when the page is full,
-/// carrying a longtable's head and foot onto every page it runs onto.
+/// Split broken lines into pages: at a forced break, and otherwise wherever
+/// LaTeX's penalties say a page costs least to end, carrying a longtable's
+/// head and foot onto every page it runs onto.
+///
+/// Two questions, and they are answered in two places. `page_items` says what
+/// the page HOLDS -- the lines that go together and the ones held back to be
+/// repeated -- and `plan_pages` says where each page ENDS. Splitting them is
+/// what lets the second be answered by cost over the whole document rather
+/// than by the first break that does not fit; the third piece, `page_stops`,
+/// is the fitting, and it is what the two share.
 ///
 /// `chunks` alone cannot do this: it fills every page to the brim, so a
 /// `\newpage` has nowhere to say anything and a chapter starts wherever the
@@ -2770,26 +2778,102 @@ fn sets_text(para: &str) -> bool {
 /// of `lines` like any other, so repeating one costs nothing -- the page holds
 /// the same `&str` again.
 fn paginate<'a>(lines: &'a [String], layout: &Layout) -> Vec<Vec<&'a str>> {
-    // The page is filled to its HEIGHT and not to a count of lines, because
-    // the lines are no longer all one height: a line of vertical space is half
-    // of one. A page held 48 lines whether or not seven of them were space.
-    let capacity = layout.height;
-    // Float slack, so a page that comes to exactly its height is not one line
-    // short of it.
-    const SLACK: f64 = 1e-6;
-    let height = |lines: &[&str]| -> f64 { lines.iter().map(|l| line_height(l, layout)).sum() };
-    let mut used = 0.0;
+    let items = page_items(lines, layout);
     let mut pages: Vec<Vec<&str>> = Vec::new();
-    let mut page: Vec<&str> = Vec::new();
-    // The table being set, if one is: the head that goes above each of its
-    // continuation pages, and the foot that goes below each page it runs past.
-    let mut head: Vec<&str> = Vec::new();
-    let mut foot: Vec<&str> = Vec::new();
+    for Planned { from, upto, foot } in plan_pages(&items, lines, layout) {
+        let mut page: Vec<&str> = Vec::new();
+        // The head of a table this page opens in the middle of.
+        if items[from].repeat_head {
+            let (at, end) = items[from].head;
+            page.extend(lines[at..end].iter().map(String::as_str));
+        }
+        for item in &items[from..upto] {
+            if !matches!(item.kind, Kind::Set(_)) {
+                continue;
+            }
+            page.extend(
+                lines[item.at..item.at + item.len]
+                    .iter()
+                    .map(String::as_str),
+            );
+        }
+        // And the foot of a table that runs past it.
+        if let Some((at, end)) = foot {
+            page.extend(lines[at..end].iter().map(String::as_str));
+        }
+        if !page.is_empty() {
+            pages.push(page);
+        }
+    }
+    pages
+}
+
+/// What one item of the page stream is.
+enum Kind {
+    /// A forced break: `\newpage`, which ends the page wherever it falls.
+    Break,
+    /// Lines the page sets nothing of, because they are a longtable's
+    /// repeating head or its foot: held back to be put where they belong.
+    Held,
+    /// Lines to set, of this height, that no page break may fall inside --
+    /// one ordinary line, or the several a table row wrapped onto.
+    Set(f64),
+}
+
+/// One thing the paginator moves: the unit a page holds a whole number of.
+///
+/// `paginate` used to walk the lines and decide as it went, which is why the
+/// two questions it answers -- WHAT a page holds and WHERE it ends -- were one
+/// loop and only the second of them could be reconsidered. Splitting the first
+/// out here is what lets the second be answered by cost over the whole
+/// document rather than by the first break that fits.
+///
+/// The item stream does not depend on where the pages end, and that is what
+/// makes this sound: the head a page repeats, the foot it holds back, and the
+/// number of lines a too-tall group is cut into -- `room` below, which is
+/// measured against the head and not against what the page has already used --
+/// are all fixed by the lines alone.
+struct Item {
+    /// Where in `lines` this item starts, and how many lines it is.
+    at: usize,
+    len: usize,
+    kind: Kind,
+    /// The head a page beginning with this item repeats above it.
+    head: (usize, usize),
+    repeat_head: bool,
+    /// The foot a page ending BEFORE this item carries below it, because the
+    /// table runs past that page.
+    foot: (usize, usize),
+}
+
+/// The height a run of lines takes.
+fn run_height(lines: &[String], run: (usize, usize), layout: &Layout) -> f64 {
+    lines[run.0..run.1]
+        .iter()
+        .map(|l| line_height(l, layout))
+        .sum()
+}
+
+/// Read the broken lines as the stream of items a page is filled with.
+///
+/// This is the walk `paginate` did, with the fitting taken out of it: every
+/// decision left here is about what the lines ARE.
+fn page_items(lines: &[String], layout: &Layout) -> Vec<Item> {
+    const EMPTY: (usize, usize) = (0, 0);
+    // A run of lines held back, extended one line at a time. They are written
+    // consecutively (`table_lines`), so the run is a range; a line that does
+    // not continue the run starts a new one rather than swallowing the gap.
+    let extend = |run: (usize, usize), at: usize| match run.0 != run.1 && run.1 == at {
+        true => (run.0, at + 1),
+        false => (at, at + 1),
+    };
+    let mut head = EMPTY;
+    let mut foot = EMPTY;
     let mut in_table = false;
+    let mut items = Vec::new();
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i].as_str();
-        i += 1;
         if is_break_line(line) {
             // A forced break cannot fall inside a table: a table is one
             // paragraph and is recognised as one before the break character is
@@ -2797,94 +2881,392 @@ fn paginate<'a>(lines: &'a [String], layout: &Layout) -> Vec<Vec<&'a str>> {
             // BETWEEN two of them, and the second must not inherit the first
             // one's head.
             in_table = false;
-            head.clear();
-            foot.clear();
-            // Consecutive breaks do not make blank pages: \clearpage after
-            // \newpage is one break, which is what both mean together.
-            if !page.is_empty() {
-                pages.push(std::mem::take(&mut page));
-                used = 0.0;
-            }
+            head = EMPTY;
+            foot = EMPTY;
+            items.push(Item {
+                at: i,
+                len: 1,
+                kind: Kind::Break,
+                head,
+                repeat_head: false,
+                foot,
+            });
+            i += 1;
             continue;
         }
         let Some(code) = longtable_code(line) else {
             // Out of the table again: the next one brings its own head, and
             // this one's must not be carried into the prose after it.
             in_table = false;
-            head.clear();
-            foot.clear();
-            let tall = line_height(line, layout);
-            if !page.is_empty() && used + tall > capacity + SLACK {
-                pages.push(std::mem::take(&mut page));
-                used = 0.0;
-            }
-            page.push(line);
-            used += tall;
+            head = EMPTY;
+            foot = EMPTY;
+            items.push(Item {
+                at: i,
+                len: 1,
+                kind: Kind::Set(line_height(line, layout)),
+                head,
+                repeat_head: false,
+                foot,
+            });
+            i += 1;
             continue;
         };
         if !in_table {
             in_table = true;
-            head.clear();
-            foot.clear();
+            head = EMPTY;
+            foot = EMPTY;
         }
         // What is only repeated is not set here.
-        if code == LT_REPEAT {
-            head.push(line);
-            continue;
-        }
-        if code == LT_FOOT {
-            foot.push(line);
+        if code == LT_REPEAT || code == LT_FOOT {
+            match code == LT_REPEAT {
+                true => head = extend(head, i),
+                false => foot = extend(foot, i),
+            }
+            items.push(Item {
+                at: i,
+                len: 1,
+                kind: Kind::Held,
+                head,
+                repeat_head: false,
+                foot,
+            });
+            i += 1;
             continue;
         }
         // What must not be broken into: the rest of this head, or the lines
         // this row wrapped onto.
-        let mut group = 1;
         let continues = match code {
             LT_HEAD => LT_HEAD,
             _ => LT_CONT,
         };
+        let mut group = 1;
         while lines
-            .get(i + group - 1)
+            .get(i + group)
             .is_some_and(|next| longtable_code(next) == Some(continues))
         {
             group += 1;
         }
         if code == LT_HEAD {
-            head.clear();
-            head.extend(lines[i - 1..i - 1 + group].iter().map(String::as_str));
+            head = (i, i + group);
         }
         // A group taller than the page it would be repeated on cannot be kept
         // whole; it is set where it falls rather than pushing every page after
         // it out of shape.
         // A table's lines are all lines of text, so the room a page under the
         // head has for them is what is left of it divided by the leading.
-        let room = ((capacity - height(&head)) / layout.leading)
+        let room = ((layout.height - run_height(lines, head, layout)) / layout.leading)
             .floor()
             .max(1.0) as usize;
         let step = group.min(room);
-        let tall = step as f64 * layout.leading;
-        // Room for the group AND for the foot under it: longtable keeps the
-        // foot's height back on every page for the same reason.
-        if !page.is_empty() && used + tall + height(&foot) > capacity + SLACK {
-            // The table runs past this page, so the foot goes under it and the
-            // head over the next -- unless the head is what is about to be set
-            // anyway, which is where the table starts on the new page.
-            page.extend(foot.iter().copied());
-            pages.push(std::mem::take(&mut page));
-            used = 0.0;
-            if code != LT_HEAD {
-                page.extend(head.iter().copied());
-                used += height(&head);
+        items.push(Item {
+            at: i,
+            len: step,
+            kind: Kind::Set(step as f64 * layout.leading),
+            head,
+            // A page opening with the head is where the table STARTS on it,
+            // and the head is what is about to be set anyway.
+            repeat_head: code != LT_HEAD,
+            foot,
+        });
+        i += step;
+    }
+    items
+}
+
+/// One page of the plan: the items it holds, and the foot that goes under it
+/// because a table runs past it.
+struct Planned {
+    from: usize,
+    upto: usize,
+    foot: Option<(usize, usize)>,
+}
+
+/// A place a page may end: the item the NEXT page starts at, the height this
+/// page comes to when it ends here, and the foot that goes under it.
+#[derive(Clone, Copy)]
+struct Stop {
+    next: usize,
+    used: f64,
+    foot: Option<(usize, usize)>,
+    /// The document, or a `\newpage`, ended the page rather than the fitting:
+    /// the room left over is not this break's fault and is not charged for.
+    forced: bool,
+}
+
+/// Every place a page filled from `from` may end, in order.
+///
+/// The last of them is where the old paginator broke -- the first break that
+/// did not fit -- and the ones before it are what it never offered.
+fn page_stops(items: &[Item], lines: &[String], layout: &Layout, from: usize) -> Vec<Stop> {
+    // Float slack, so a page that comes to exactly its height is not one line
+    // short of it.
+    const SLACK: f64 = 1e-6;
+    let mut stops = Vec::new();
+    let mut used = match items[from].repeat_head {
+        true => run_height(lines, items[from].head, layout),
+        false => 0.0,
+    };
+    let mut set = 0usize;
+    let mut j = from;
+    while j < items.len() {
+        let item = &items[j];
+        match item.kind {
+            // Consecutive breaks do not make blank pages: \clearpage after
+            // \newpage is one break, which is what both mean together.
+            Kind::Break if set == 0 => j += 1,
+            Kind::Break => {
+                stops.push(Stop {
+                    next: j + 1,
+                    used,
+                    foot: None,
+                    forced: true,
+                });
+                return stops;
+            }
+            Kind::Held => j += 1,
+            Kind::Set(tall) => {
+                if set > 0 {
+                    // Room for the group AND for the foot under it: longtable
+                    // keeps the foot's height back on every page for the same
+                    // reason.
+                    let foot = (item.foot.0 != item.foot.1).then_some(item.foot);
+                    let below = foot.map_or(0.0, |f| run_height(lines, f, layout));
+                    stops.push(Stop {
+                        next: j,
+                        used: used + below,
+                        foot,
+                        forced: false,
+                    });
+                    // Nothing further down the page can fit either.
+                    if used + below > layout.height + SLACK {
+                        return stops;
+                    }
+                }
+                used += tall;
+                set += 1;
+                j += 1;
             }
         }
-        page.extend(lines[i - 1..i - 1 + step].iter().map(String::as_str));
-        used += tall;
-        i += step - 1;
     }
-    if !page.is_empty() {
-        pages.push(page);
+    stops.push(Stop {
+        next: items.len(),
+        used,
+        foot: None,
+        forced: true,
+    });
+    stops
+}
+
+/// `\clubpenalty`: what leaving a paragraph's first line alone at the foot of
+/// a page costs. latex.ltx:500 of the 2026 release sets it to 150.
+const CLUB_PENALTY: f64 = 150.0;
+
+/// `\widowpenalty`: what leaving its last line alone at the top of the next
+/// page costs. latex.ltx:501 sets it to 150 as well.
+const WIDOW_PENALTY: f64 = 150.0;
+
+/// `\brokenpenalty` (latex.ltx:503), charged for ending a page on a line that
+/// broke inside a word.
+const BROKEN_PENALTY: f64 = 100.0;
+
+/// `\@secpenalty` (latex.ltx:17229), which `\@startsection` adds BEFORE the
+/// space above a heading (latex.ltx:17242): a page would rather end there than
+/// anywhere else nearby, which is what keeps a heading off the foot of a page.
+const SEC_PENALTY: f64 = -300.0;
+
+/// `\@M`. tex.web §157: a penalty this large or larger forbids the break.
+const FORBID_PENALTY: f64 = 10000.0;
+
+/// What a page pays for each leading of room it leaves empty.
+///
+/// The reference is set `\raggedbottom` -- report.cls:731-733 turns it on for
+/// every one-sided document and no book in the corpus is two-sided -- so the
+/// badness lualatex adds to a page's penalty is zero however short the page
+/// is, and its output routine takes the cheapest penalty on the page whatever
+/// that costs in white space. Priced that way, the least-cost plan for a WHOLE
+/// document is degenerate: every page could end after one line for nothing. So
+/// the room a page leaves is charged for, at a rate that says what the two are
+/// worth against each other -- a widow is worth a line and a half of white
+/// space, and a page is worth about thirty of them, so a page is added only
+/// where the penalties really have piled up.
+const SLACK_COST: f64 = 100.0;
+
+/// What ending a page immediately before each line costs.
+///
+/// The penalties are the ones LaTeX states and TeX adds up between the lines
+/// of a paragraph (tex.web §890): `\clubpenalty` after a paragraph's first
+/// line, `\widowpenalty` before its last, `\brokenpenalty` after a line that
+/// broke inside a word, and `\@M` -- no break at all -- inside a heading,
+/// between a heading and the text it introduces, and after the first line of
+/// that text. Two of them can fall in the same place and TeX charges both: the
+/// one break in a two-line paragraph is a club AND a widow.
+///
+/// A paragraph is a run of consecutive lines of text here, which is what one
+/// is on this side: the breaker puts a line of vertical space between two of
+/// them, and a table's lines say they are a table's. A code listing is such a
+/// run too and is treated as a paragraph -- leaving one line of a program
+/// alone at the top of a page is the same fault as leaving one line of prose
+/// there.
+fn break_penalties(lines: &[String]) -> Vec<f64> {
+    let n = lines.len();
+    let mut cost = vec![0.0f64; n + 1];
+    let space: Vec<bool> = lines.iter().map(|l| is_space_line(l)).collect();
+    let text: Vec<bool> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| !space[i] && !is_break_line(l) && longtable_code(l).is_none())
+        .collect();
+    let mut i = 0;
+    while i < n {
+        if !text[i] {
+            i += 1;
+            continue;
+        }
+        let from = i;
+        let mut upto = i;
+        while upto < n && text[upto] {
+            upto += 1;
+        }
+        i = upto;
+        if (from..upto).any(|k| heading_line(&lines[k])) {
+            // `\@xsect`: `\par \nobreak` after the title (latex.ltx:17282) and
+            // `\clubpenalty\@M` on the paragraph under it (latex.ltx:17322), so
+            // the heading, the space below it and the first two lines of that
+            // paragraph are one block. `\interlinepenalty\@M` (latex.ltx:17259)
+            // is what forbids a break inside a title that took two lines.
+            let mut below = upto;
+            while below < n && space[below] {
+                below += 1;
+            }
+            let held = match below < n && text[below] {
+                true => below + 1,
+                false => below,
+            };
+            cost[from + 1..=held.min(n)].fill(FORBID_PENALTY);
+            // `\addpenalty\@secpenalty\addvspace` (latex.ltx:17242): the
+            // penalty goes before the space above the heading, and that space
+            // is ONE `\vskip` -- so it is one breakpoint, at its head, and not
+            // one per line of it.
+            let mut above = from;
+            while above > 0 && space[above - 1] {
+                above -= 1;
+            }
+            // `.min(from)` because a heading with NO space above it -- one at
+            // the very head of the stream -- has no `\vskip` to forbid a break
+            // inside, and an empty range is what that has to come to. No
+            // document in the corpus reaches it, because `push_heading` always
+            // writes the space; the guard is here so that one which did would
+            // not index backwards.
+            cost[(above + 1).min(from)..from].fill(FORBID_PENALTY);
+            // Two headings running together: the space between them is the
+            // space below the first, which no break may fall in.
+            if cost[above] != FORBID_PENALTY {
+                cost[above] = SEC_PENALTY;
+            }
+            continue;
+        }
+        for e in from + 1..upto {
+            if e == from + 1 {
+                cost[e] += CLUB_PENALTY;
+            }
+            if e == upto - 1 {
+                cost[e] += WIDOW_PENALTY;
+            }
+            if printing_chars(&lines[e - 1]).last() == Some('-') {
+                cost[e] += BROKEN_PENALTY;
+            }
+        }
     }
-    pages
+    cost
+}
+
+/// Whether this line is a heading the contents lists.
+///
+/// The lowerer writes the mark and the code naming the level
+/// (`toc_entry_mark`) at the head of the title, and it survives the breaker:
+/// `heading_pages` reads the same mark off the pages to number the contents.
+fn heading_line(line: &str) -> bool {
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch == TOC && chars.next().is_some_and(|code| toc_level(code).is_some()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Where the pages end: the plan that costs the document least.
+///
+/// The first break that fits is what `paginate` used to take, and a page
+/// filled that way has no way of knowing that the line it is about to keep is
+/// the last of its paragraph, or that the heading it ends on introduces text
+/// that is now overleaf. So the breaks are chosen the way
+/// `linebreak::break_paragraph` chooses a paragraph's: every place a page MAY
+/// end is offered, each costs what it leaves empty plus what LaTeX's penalties
+/// say about the break itself, and the plan taken is the one whose total over
+/// the whole document is least. `best[k]` is what setting `items[k..]` costs
+/// with a page starting at `k`, so the answer is `best[0]` and it is built
+/// backwards from the end of the document.
+///
+/// Returns each page as the items it holds and the foot that goes under it.
+fn plan_pages(items: &[Item], lines: &[String], layout: &Layout) -> Vec<Planned> {
+    // Float slack, so a page that comes to exactly its height is not one line
+    // short of it.
+    const SLACK: f64 = 1e-6;
+    let penalty = break_penalties(lines);
+    let count = items.len();
+    let mut best = vec![f64::INFINITY; count + 1];
+    let mut chosen: Vec<Option<Stop>> = vec![None; count + 1];
+    best[count] = 0.0;
+    for from in (0..count).rev() {
+        // A page has to hold something and the document has to have a plan, so
+        // where every break is forbidden or none of them fits, the fullest is
+        // taken anyway -- which is what the old paginator did with all of them.
+        let mut fallback: Option<(Stop, f64)> = None;
+        for stop in page_stops(items, lines, layout, from) {
+            let room = layout.height - stop.used;
+            let fits = room >= -SLACK;
+            let empty = match stop.forced {
+                true => 0.0,
+                false => SLACK_COST * room.max(0.0) / layout.leading,
+            };
+            let rest = best[stop.next] + empty;
+            if fits || fallback.is_none() {
+                fallback = Some((stop, rest));
+            }
+            let broken = match stop.forced {
+                true => 0.0,
+                false => penalty[items[stop.next].at],
+            };
+            if !fits || broken >= FORBID_PENALTY {
+                continue;
+            }
+            if rest + broken < best[from] {
+                best[from] = rest + broken;
+                chosen[from] = Some(stop);
+            }
+        }
+        if chosen[from].is_none() {
+            if let Some((stop, cost)) = fallback {
+                best[from] = cost;
+                chosen[from] = Some(stop);
+            }
+        }
+    }
+    let mut plan = Vec::new();
+    let mut at = 0usize;
+    while at < count {
+        let Some(stop) = chosen[at] else {
+            break;
+        };
+        plan.push(Planned {
+            from: at,
+            upto: stop.next.min(count),
+            foot: stop.foot,
+        });
+        at = stop.next;
+    }
+    plan
 }
 
 /// A table of contents: where one belongs, which headings feed it, and where

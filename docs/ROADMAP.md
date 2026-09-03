@@ -48,14 +48,19 @@ width, so a breaker that decides some lines should be SHRUNK has nowhere to put
 that answer. An earlier attempt was reverted for exactly this: every shrunk line
 drew out past the measure.
 
-What is still NOT done, and what keeps the parity bar out of reach: no page
-breaking by penalties, no maths, no boxes a document can nest. `\tolerance`,
-`\pretolerance` and the demerit weights are constants rather than registers a
-document sets, and the interword glue stretches by cmr10's fractions rather than
-by each font's own. So byte-identical DVI against `tex` is not approached, and
-reading the existence of a `.dvi` or a `.pdf` as progress toward it would be
-wrong. Font embedding, listed here as missing, is done: `/FontFile2`, whole
-rather than subset.
+`--pdf` breaks its pages by penalty too, and over the whole document rather
+than page by page: `\widowpenalty`, `\clubpenalty` and `\brokenpenalty` at
+the values LaTeX sets them to, `\@secpenalty` before a heading and `\nobreak`
+after one, and the plan taken is the cheapest total (tex.web §970-§1010).
+`--dvi` stacks a fixed number of lines on each page.
+
+What is still NOT done, and what keeps the parity bar out of reach: no maths,
+no boxes a document can nest. `\tolerance`, `\pretolerance` and the demerit
+weights are constants rather than registers a document sets, and the interword
+glue stretches by cmr10's fractions rather than by each font's own. So
+byte-identical DVI against `tex` is not approached, and reading the existence
+of a `.dvi` or a `.pdf` as progress toward it would be wrong. Font embedding,
+listed here as missing, is done: `/FontFile2`, whole rather than subset.
 
 ## Known divergences
 

@@ -8,14 +8,6 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
-- CFF subsetting (`cff::subset`), the counterpart of the TrueType subsetter for
-  the outlines a TeX document is actually set in: Latin Modern's `CFF ` table
-  goes from 61 kB to 6 kB for a word. A CFF is addressed by offsets from its
-  own start, so the file is rebuilt rather than edited -- glyphs that were not
-  asked for become a single `endchar`, subroutines nobody calls become a single
-  `return`, the charset and strings are written afresh, and the Top DICT is
-  written with the new offsets in a form whose length does not depend on them.
-  Glyph numbers are kept, as in the TrueType subsetter.
 - `texrs FILE` writes `FILE.pdf`. texrs stands in for lualatex in a PDF
   pipeline, and `lualatex FILE` leaves a `FILE.pdf` behind; the bare invocation
   printed a line and wrote nothing. Standard output keeps the line tex prints

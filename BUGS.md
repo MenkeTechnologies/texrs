@@ -30,9 +30,13 @@ passing, so the list is a claim the harness enforces rather than a note.
   width, so a breaker that decides a line should be SHRUNK has nothing to hand
   its answer to.
 
-  What neither has: page breaking by penalties, maths, boxes a document can
-  nest. `\tolerance`, `\pretolerance` and the demerit weights are the
-  constants in `src/linebreak.rs` rather than registers a document can set, and
+  `--pdf` breaks its pages by penalty as well (§970-§1010): widows, orphans,
+  hyphenated lines and stranded headings, priced over the whole document, where
+  `--dvi` stacks a fixed number of lines on each page.
+
+  What neither has: maths, boxes a document can nest. `\tolerance`,
+  `\pretolerance` and the demerit weights are the constants in
+  `src/linebreak.rs` rather than registers a document can set, and
   the interword glue stretches and shrinks by cmr10's fractions rather than by
   each font's own. So a paragraph set here and the same paragraph set by `tex`
   do not agree line for line, and the milestone's real parity bar —

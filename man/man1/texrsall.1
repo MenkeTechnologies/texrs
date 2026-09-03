@@ -316,8 +316,13 @@ breakpoints and hyphenates with Liang patterns
 \(sc813\(en\(sc891);
 .B \-\-dvi
 takes the first break that fits and does not hyphenate, because a DVI driver
-cannot set a run to a width.  Neither has page breaking by penalties, maths, or
-boxes a document can nest, and the tolerances and demerit weights are constants
+cannot set a run to a width.
+.B \-\-pdf
+breaks its pages by penalty as well \(em widows, orphans, hyphenated lines and
+headings, priced over the whole document \(em where
+.B \-\-dvi
+stacks a fixed number of lines on each.  Neither has maths or boxes a document
+can nest, and the tolerances and demerit weights are constants
 rather than registers a document sets \(em so byte\-identical DVI parity is not
 approached.  No registers other than
 .BR \ecount .
