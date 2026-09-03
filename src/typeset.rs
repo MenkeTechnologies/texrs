@@ -388,6 +388,27 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String
 /// gets the same answer the driver will get when it goes looking for the same
 /// font. The fixed paths are the fallback for a machine without it.
 pub fn find_font(name: &str) -> Option<std::path::PathBuf> {
+    // Answered once per name per run. Finding a .tfm means spawning kpsewhich,
+    // which reads TeX Live's ls-R databases and costs the better part of a
+    // second; the typesetting path asks for the same handful of fonts over and
+    // over, and that -- not the typesetting -- was why setting a three-line
+    // document took twenty-four seconds.
+    static SEEN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Option<std::path::PathBuf>>>,
+    > = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(hit) = seen.lock().ok().and_then(|m| m.get(name).cloned()) {
+        return hit;
+    }
+    let found = find_font_uncached(name);
+    if let Ok(mut m) = seen.lock() {
+        m.insert(name.to_string(), found.clone());
+    }
+    found
+}
+
+/// The lookup itself, which is what costs.
+fn find_font_uncached(name: &str) -> Option<std::path::PathBuf> {
     let file = format!("{name}.tfm");
     if let Ok(out) = std::process::Command::new("kpsewhich").arg(&file).output() {
         if out.status.success() {
@@ -3947,6 +3968,25 @@ fn word_width(
 /// caller falls back to naming one of the fourteen, which gets the widths right
 /// and the shapes wrong -- better than refusing to typeset.
 pub fn find_family(family: &str) -> Option<std::path::PathBuf> {
+    // Memoised for the same reason `find_font` is: this spawns fc-match and,
+    // when that answers with something else, reads every font file in the
+    // system directories to check its name. Neither answer changes during a
+    // run.
+    static SEEN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Option<std::path::PathBuf>>>,
+    > = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(hit) = seen.lock().ok().and_then(|m| m.get(family).cloned()) {
+        return hit;
+    }
+    let found = find_family_uncached(family);
+    if let Ok(mut m) = seen.lock() {
+        m.insert(family.to_string(), found.clone());
+    }
+    found
+}
+
+fn find_family_uncached(family: &str) -> Option<std::path::PathBuf> {
     if let Ok(out) = std::process::Command::new("fc-match")
         .args(["-f", "%{file}", family])
         .output()
