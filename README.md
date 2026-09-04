@@ -59,17 +59,17 @@ its time in, and the half where a compiled implementation has something to prove
 every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends from `tex.web` through
 web2c and *interprets* the expander.
 
-There is now a third piece. `--pdf` breaks a paragraph the way `tex.web` §813
-does — minimising the total demerits of the whole paragraph over every feasible
-set of breakpoints, with Liang hyphenation to widen the places a line may end —
-and writes the PDF itself. `--dvi` still fills each line with the first break
-that fits, because a DVI driver cannot set a run to a width and a breaker that
-prices glue has nothing to hand its answer to. `--pdf` breaks its PAGES the
-same way, by LaTeX's widow, orphan, broken-line and heading penalties over the
-whole document. Maths is set from `tex.web`'s own `mlist_to_hlist`, and the
-boxes, glue setting and page builder underneath are ported too — what neither
-output does yet is consult a font's ligature and kern program, and [0x06] says
-exactly what that costs.
+There is now a third piece. Both outputs break a paragraph the way `tex.web`
+§813 does — minimising the total demerits of the whole paragraph over every
+feasible set of breakpoints, with Liang hyphenation to widen the places a line
+may end. `--pdf` writes the PDF itself; `--dvi` ships a box tree through
+`hlist_out`/`vlist_out` (§619-§640), so `hpack` sets each line's glue and the
+file carries it at the width it was set to. `--pdf` breaks its PAGES the same
+way, by LaTeX's widow, orphan, broken-line and heading penalties over the whole
+document. Maths is set from `tex.web`'s own `mlist_to_hlist`, the boxes, glue
+setting and page builder underneath are ported, and the `.tfm`'s ligature and
+kern program is consulted — so `tex`'s `fi` ligature is texrs's too. [0x06] says
+what is left.
 
 ## [0x01] Install
 
@@ -159,7 +159,7 @@ texrs --dump-ast file      # the command stream the frontend lowered to
 texrs --disasm file        # the lowered fusevm bytecode
 texrs --tiers file         # run it, then say which fusevm tier took it
 texrs --text file          # print the document's text, not only its messages
-texrs --dvi file           # typeset it: FILE.dvi, first-fit lines, no hyphenation
+texrs --dvi file           # typeset it: FILE.dvi, total-fit lines, hyphenated
 texrs --pdf file           # typeset it: FILE.pdf, total-fit lines, hyphenated
 texrs --build file         # compile into the bytecode cache and stop
 texrs --aot file           # compile it to a standalone native executable
@@ -317,14 +317,18 @@ diagnostic rather than a missing-function error later.
 
 ## [0x06] What does not
 
-There is a stomach now, and how good it is depends on which output you ask for.
-`--pdf` breaks paragraphs as `tex.web` §813-§890 does: every feasible set of
-breakpoints is priced by how far each line's glue is from its natural width, the
-cheapest set wins, and Liang hyphenation widens the places a line may end when
-no set between words is good enough. `--dvi` takes the first break that fits —
-which is what every word processor before TeX did and what TeX was written to
-improve on — because its driver cannot set a run to a width, and a breaker that
-decides some lines should be SHRUNK has nowhere to put that answer.
+There is a stomach now. Both outputs break a paragraph as `tex.web` §813-§890
+does: every feasible set of breakpoints is priced by how far each line's glue is
+from its natural width, the cheapest set wins, and Liang hyphenation widens the
+places a line may end when no set between words is good enough. `--dvi` took the
+first break that fits until it could ship a box tree, because a breaker that
+decides some lines should be SHRUNK had nowhere to put that answer;
+`src/shipout.rs` ports §619-§640's `hlist_out` and `vlist_out`, so the glue goes
+into the file at the width `hpack` set it to (§625) and the answer has somewhere
+to go. The `.tfm`'s ligature and kern program is on that path too (§906-§911's
+`reconstitute`), so `tex`'s `fi` ligature is texrs's, and its quotation marks
+and dashes with it — every document the two engines both set now agrees with
+`tex` on its text and its structure.
 
 `--pdf` breaks its pages by penalty too, over the whole document rather than
 page by page: `\widowpenalty` and `\clubpenalty` keep one line of a paragraph
@@ -367,8 +371,18 @@ machinery, footnotes, captions and the bibliography are ported. `\documentclass`
 and `\usepackage` are no longer silently consumed: the file is found with
 `kpsewhich` and its load is attempted, and a package that will not go through is
 reported by name with the control sequence that stopped it — `texrs: package
-xcolor is not loadable: Unsupported \edef body`. No package loads all the way
-through yet; the report is the list of what each one still wants. What is kept
+xcolor is not loadable: Unsupported \edef body`. Eleven files load all the way
+through — `minimal.cls`, and `ifthen`, `textcomp`, `inputenc`, `keyval`,
+`upquote`, `multirow`, `float`, `footnote`, `fontenc` and `lmodern` — and a
+package's own `\RequirePackage`s are followed, so `keyval` is read before the
+`graphicx` that asks for it. `article.cls` reaches its last line and reads
+`size10.clo`; what stops it there is the dimen scanner rather than the class,
+because `tex.web` §453's `<factor><internal unit>` is not implemented, so
+`10\p@` is `! Illegal unit of measure (pt inserted).` and `em` and `ex` are
+absent for the same reason. A package that loads and then breaks what the
+preamble already promised is reported rather than committed — measured, letting
+`calc` through took the corpus sweep from 229 documents to 145. For everything
+still refused, the report is the list of what each one wants. What is kept
 out of them is the page: a type size in the class options sets the text at that
 size on the leading LaTeX pairs with it, and `[margin=...]{geometry}` sets the
 margins and the measure and text height they leave on the paper. `\makeatletter`
@@ -379,14 +393,21 @@ what the chunk prints is read back as input, so `\count10=20
 a\directlua{tex.print(tex.count[10]+5)}b` typesets `a25b`. The `tex` table
 reaches the real registers, `token` reaches the input the chunk stands in front
 of, and a chunk that fails stops the run with its Lua error as a TeX error. What
-is absent is everything built on node lists: there is no `node` library, and
-`tex.skip`/`tex.getbox` refuse rather than invent a value, so a document that
-walks a node list is refused rather than quietly wrong.
+there is a `node` library over the engine's own node list, and what it carries
+is the half that does not need the document: a chunk builds a list and
+`node.hpack` measures it with §649's arithmetic, agreeing with luatex on the
+width, the badness, the glue ratio and both orders. `tex.skip` and the `\muskip`
+family hand over the `glue_spec` node the manual describes. What is absent is
+the other half, and not for want of a data structure: texrs sets a page from
+runs of strings, so there is no CURRENT node list — `tex.getbox`, `node.write`
+and every callback that would pass Lua the list TeX is building refuse by name,
+and a document that walks the document's own list is refused rather than quietly
+wrong.
 
 The number, run against the 274 `.tex` files of a real LaTeX/LuaLaTeX corpus
 (Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
 `--include-in-header` fragments, and texrs's own fixtures, including the ones
-written to be refused): **228 of 274 run to completion**, and say 75,621,539
+written to be refused): **229 of 274 run to completion**, and say 75,627,678
 bytes of text.
 
 That number went DOWN when Lua started running: the same corpus was 266 of 274
@@ -463,19 +484,35 @@ and three of the things a document controls survive the trip:
   PDF's own `rg` operator, and `\pagecolor` is painted under the text; under
   `--dvi` it is the `color push rgb R G B` / `color pop` `\special` pair that
   dvipdfmx and dvips both read.
-- **TikZ.** Paths as PDF path operators, built against PGF's own source rather
-  than an approximation of it: `--`, `-|`, `|-`, `..controls..`, `to` with
-  `out=`/`in=`/`bend`, `rectangle`, `circle`, `ellipse`, `arc`, `grid`,
-  `parabola` and `cycle`, painted by `\draw`, `\fill`, `\filldraw`, `\path`,
-  `\clip` or nothing, under either fill rule. Colour goes through the document's
-  own palette, and `line width=`, the named widths, the dash patterns, caps,
-  joins and opacity all reach an operator. `->`, `<-`, `<->`, `-stealth` and
-  `-latex` are drawn as the paths PGF draws them as, on a line shortened to make
-  room. Nodes carry text through the same typesetter the rest of the page uses,
-  placed by any of the nine anchors, in a rectangle or a circle. Coordinates may
-  be polar, named, relative or `calc` arithmetic; `\foreach` and nested `scope`s
-  are read. Not there: shadings, patterns, decorations, the matrix and graph
-  libraries, and node shapes beyond rectangle and circle.
+- **TikZ.** A `tikzpicture` (or `pgfpicture`) is drawn on the page under
+  `--pdf`. Its body is read RAW — a picture is TikZ, not TeX, and the prelude
+  used to consume `\draw … ;` and emit nothing, so every diagram in every
+  document reached the page as blank space — and it travels the text stream as
+  one marker the typesetter parses and draws. The picture takes its bounding
+  box's height, computed the way PGF computes one (a curve's control points
+  count, a stroked path grows by half its line width), so the paragraphs either
+  side flow around it; a bare coordinate is a centimetre, which is PGF's own
+  unit vector. Built against PGF's source rather than an approximation of it:
+  `--`, `-|`, `|-`, `..controls..`, `to` with `out=`/`in=`/`bend`, `rectangle`,
+  `circle`, `ellipse`, `arc`, `grid`, `parabola` and `cycle`, painted by
+  `\draw`, `\fill`, `\filldraw`, `\path`, `\clip`, `\shade`, `\shadedraw` or
+  nothing, under either fill rule. Colour goes through the document's own
+  palette; `line width=`, the named widths, the dash patterns, caps, joins and
+  `opacity=` all reach an operator, transparency through a registered
+  `/ExtGState`. `\shade`'s axis, radial and ball ramps are painted by `sh`
+  through the path as a clip, with the `/Shading` entry carried on the page.
+  `->`, `<-`, `<->`, `-stealth` and `-latex` are drawn as the paths PGF draws
+  them as, on a line shortened to make room; `snake`, `zigzag`, `saw` and
+  `brace` decorations replace the segment they are put on. Nodes carry text
+  through the same typesetter the rest of the page uses, placed by any of the
+  nine anchors or by the border at any angle, in a rectangle, circle, ellipse or
+  diamond. Coordinates may be polar, named, a node's anchor, relative, `pgfmath`
+  arithmetic or `calc`; `\foreach` and nested `scope`s are read. Not there:
+  patterns (a `pattern=` turns the fill off rather than hatching), the matrix
+  and graph libraries, `pic`s, and INLINE placement — lualatex sets a picture in
+  the line where it stands and this gives it lines of its own. `--dvi` and
+  `--text` draw no picture at all: DVI would need a `\special` every driver
+  reads differently, and a picture has no words.
 - **There is exactly one type size.** `\normalsize`, `\small`, `\large`,
   `\Large`, `\LARGE`, `\huge` and `\Huge` are all defined as empty in
   `src/latex/prelude.tex`, and `Layout::size` is a single document-wide `f64`
@@ -519,12 +556,11 @@ and three of the things a document controls survive the trip:
   `\includegraphics`, 136 times between them. `src/image.rs` reads image files
   but nothing on the typesetting path calls it yet.
 
-Boxes a document nests, and maths, still do not exist. Under `--dvi` lines break
-first-fit and are not hyphenated, which is the one place `--pdf` is meaningfully
-the better output rather than merely the other one. A draft reads correctly; a
-book being sold on its typography should still be set by an engine with a real
-stomach, and `scripts/texrs-pdf`
-says the same thing where a build would meet it.
+What `--dvi` still does not do is draw a picture or break its pages by penalty:
+it stacks a fixed number of lines on each, where `--pdf` prices the whole
+document. A draft reads correctly either way; a book being sold on its
+typography should still be set by an engine that has been doing it for forty
+years, and `scripts/texrs-pdf` says the same thing where a build would meet it.
 
 That script is a `.tex` to a `.pdf`, not a `pandoc --pdf-engine`: pandoc
 validates that flag against a fixed list of engines it knows and refuses any

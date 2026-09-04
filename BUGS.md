@@ -20,18 +20,18 @@ passing, so the list is a claim the harness enforces rather than a note.
 
 ## Not implemented
 
-- **`tex.web`'s stomach, on the DVI path.** Two outputs, and they are not
-  equally good. `--pdf` breaks a paragraph as §813-§890 does — every feasible
-  set of breakpoints priced by how far each line's glue is from its natural
-  width, the cheapest set taken, Liang hyphenation (§891) widening the places a
-  line may end — and sets each full line to the measure with PDF's `Tw`
-  (`src/linebreak.rs`, `src/typeset.rs`). `--dvi` still takes the first break
-  that fits and does not hyphenate, because a DVI driver cannot set a run to a
-  width, so a breaker that decides a line should be SHRUNK has nothing to hand
-  its answer to.
+- **`tex.web`'s stomach.** Both outputs break a paragraph as §813-§890 does —
+  every feasible set of breakpoints priced by how far each line's glue is from
+  its natural width, the cheapest set taken, Liang hyphenation (§891) widening
+  the places a line may end. `--pdf` sets each full line to the measure with
+  PDF's `Tw`; `--dvi` ships a box tree through §619-§640's `hlist_out` and
+  `vlist_out` (`src/shipout.rs`), so the glue reaches the file at the width
+  `hpack` set it to (§625). The `.tfm`'s ligature and kern program is on that
+  path (§906-§911's `reconstitute`, `src/tfm.rs`), so `tex`'s `fi` ligature is
+  texrs's, and its quotation marks and dashes with it.
 
   `--pdf` breaks its pages by penalty as well (§970-§1010): widows, orphans,
-  hyphenated lines and stranded headings, priced over the whole document, where
+  hyphenated lines and stranded headings, priced over the whole document.
   `--dvi` stacks a fixed number of lines on each page.
 
   `tex.web`'s own machinery underneath is ported: §108's integer badness and
@@ -39,34 +39,53 @@ passing, so the list is a claim the harness enforces rather than a note.
   (`src/pack.rs`), the boxes a document can nest (`src/box_.rs`), §877-§890's
   assembly of breakpoints into lines (`src/postline.rs`), and §967-§1028's page
   builder with insertions, `\vsplit`, the marks and an output routine over
-  `\box255` (`src/page.rs`). Maths is there too (§680-§767, `src/math.rs`).
-  What is NOT wired is the shipper: `hlist_out`/`vlist_out` (§619-§640) is not
-  ported, so `src/typeset.rs` writes from runs of strings and cannot draw a box
-  tree, which makes `src/postline.rs` and `src/page.rs` a library beside the
-  path a run takes rather than the path itself.
+  `\box255` (`src/page.rs`). Maths is there too (§680-§767 plus §810 and
+  §1204-§1206, `src/math.rs`).
 
-  What is still missing outright: the `.tfm`'s ligature and kern program on the
-  DVI path, so `tex` writes the `fi` ligature (character 0x0C) where texrs
-  writes `f` and `i` — the whole of the remaining text difference on
-  `two_paragraphs.tex` and `long_paragraph.tex`, seven of the ten DVI cases now
-  reaching STRUCTURE. `\tolerance`, `\pretolerance` and the demerit weights
-  are constants in `src/linebreak.rs` rather than registers a document can set,
-  and the interword glue stretches and shrinks by cmr10's fractions rather than
-  by each font's own. So the milestone's real parity bar — byte-identical DVI —
-  is not approached.
+  What is NOT wired is the last join: `src/shipout.rs` is handed line boxes
+  built from broken strings rather than a node list with breakpoint indices, so
+  `src/postline.rs`'s §877-§890 assembly and `src/page.rs`'s page builder are
+  still a library beside the path a `--dvi` run takes rather than the path
+  itself. `\tolerance`, `\pretolerance` and the demerit weights are constants
+  in `src/linebreak.rs` rather than registers a document can set. Every
+  document that both engines set now reaches STRUCTURE; what separates that
+  from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
+  and §607-§615's compact movement encoding.
 
-  Without `--dvi`, `\end` stops the run and ships nothing. `tex` prints
-  `No pages of output.` for the corpus here, which is why the parity contract
-  for the committed cases is still the `\message` stream rather than the page.
-- **`\muskip` and box registers.** No `\muskip` and no `\box`, so `\ifvoid`,
-  `\ifhbox` and `\ifvbox` are recognised as conditionals for skipping purposes
-  but cannot be evaluated. `\count`, `\dimen`, `\skip` and `\toks` are all
-  registers now, and `\ifdim` lowers to the same run-time branch `\ifnum` does
-  (`tex.web` §503 shares the comparison and differs only in the scanner).
+- **Box registers.** There is no `\setbox` and no `\box`, so every box register
+  is void — which is what `\ifvoid`, `\ifhbox` and `\ifvbox` now answer
+  (`tex.web` §462's `box(n)` is null for a register nothing filled, and that is
+  all 256 of them). They agree with tex for any document that fills no box; the
+  reference `tex` loads plain.tex, which fills `\box0` and puts an `\hbox` in
+  `\strutbox`, so those two disagree the way `\count0` does.
+  `tests/cases/box_conditionals.tex` pins it. `\count`, `\dimen`, `\skip`,
+  `\toks` and `\muskip` are all registers now — `\muskip` is `\skip` in mu
+  (§455 makes `mu` the only finite unit where a math glue is wanted, and no unit
+  at all anywhere else), with `\muskipdef` and `\muexpr`, pinned against luatex
+  by `tests/etex.rs`. `\newbox`, `\newread`, `\newwrite` and `\newinsert` are
+  `\chardef`s exactly as plain TeX makes them, so the NAME is a number and it is
+  the missing store rather than the missing name that stops a use.
+- **`<factor><internal unit>`.** §453's `15\p@` and `3em` are not implemented:
+  a dimension may be a literal with a unit or an internal dimen, but not a
+  coefficient times one. That, and `em`/`ex` being absent for the same reason,
+  is the whole of what stands between `article.cls` and a load — it reaches its
+  own last line and stops inside `size10.clo`.
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
-- **`\jobname`.** Stops the run with `! Undefined control sequence`.
+- **`\ifcsname` is implemented** (etex.ch's `if_cs_code`): it reads the name and
+  looks it up with `no_new_control_sequence` still true, so unlike `\csname` it
+  does not define what it does not find. `\ifx` also sees a `\csname`-made
+  `\relax` and the primitive `\relax` as the same command, which is what makes
+  LaTeX's `\@ifundefined` — and so `\@ifpackageloaded` and `\AtBeginDocument` —
+  run at all; `tests/etex.rs` compares the whole macro against luatex. It works
+  in running text; inside a `\message` body the `\expandafter`-over-`\fi` half
+  of the idiom does not, because a message's arms are still lowered as bounded
+  token regions.
+- **`\jobname`.** Stops the run with `! Undefined control sequence`. The
+  resolution logic exists and is correct at `src/lua.rs`'s `jobname()`; it is
+  private, and a second copy in the expander would be the same rule in two
+  places.
   `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase` and `\meaning`
   were on this list and are no longer missing: they are in `src/expand.rs` and
   `src/lower.rs`, documented in `src/corpus.rs`, and pinned by
@@ -297,28 +316,48 @@ carry the fonts, colour and layout beside the bytecode.
 ## PDF output is not LuaTeX's
 
 The goal is byte-identical, and the distance is large: for `Hello world.`
-luatex writes 11,729 bytes and texrs writes 791. `cargo run --bin pdf-parity`
+luatex writes 11,729 bytes and texrs writes 15,435, both of them mostly a subsetted Computer Modern. `cargo run --bin pdf-parity`
 measures it on a ladder rather than as a yes/no, because a harness that only
 answered "identical?" would say no every day and say nothing else.
 
-Where the ten corpus documents stand: seven at LINES, two at TEXT, and the
-empty document at BYTES, which is the goal. Every one of them climbed when the
-folio started being written — nine had been at PAGESIZE, differing from luatex
-by exactly one word, the page number — and the empty document climbed when
-texrs stopped writing a file for a document with no pages, as luatex does not.
+Where the ten corpus documents stand: seven at FONTS, two at TEXT, and the empty
+document at BYTES, which is the goal. The seven climbed when texrs stopped
+setting in Helvetica and began embedding a subsetted CMR10, as luatex does; the
+two at TEXT differ in where their lines break, which is line breaking rather
+than the writer.
 
-What blocks the seven at LINES is now a single thing: the FACE. luatex embeds a
-subsetted `CMR10` and texrs names a base-14 `Helvetica`, so the two set in
-different typefaces. The subsetting machinery, the subset tag and the descriptor
-are in place; what is left is that `src/typeset.rs` chooses the face. The two at
-TEXT differ in where the lines break.
+The face agrees now. A document that names no family is set in Computer Modern,
+because that is what TeX means by "the font" and what luatex embeds, and the
+program is cut to the glyphs the page drew, so `pdffonts` reports a subsetted
+CMR10 for both engines. Two bugs came out of that change and are worth recording
+because neither was visible in any test: CMR10 puts `emdash` at 124 where WinAnsi
+puts it at 151, so every em dash landed in an empty slot and VANISHED; and CMR10
+has `suppress` rather than a space at 32, so every word gap drew a small stroke.
+`add_font` now writes a `/Differences` array joining the code the driver used to
+the glyph the font calls it, matched through what a glyph MEANS rather than what
+it is named.
 
-Three things block BYTES beyond that, each measured. `Object::Dict` is a
-`BTreeMap`, so texrs writes keys alphabetically where luatex writes them in
-insertion order. luatex writes `/Resources` as an indirect reference where texrs
-inlines it. And luatex compresses content streams with FlateDecode where texrs
-writes them plain — `tests/typeset.rs` reads those streams as raw bytes, so that
-one is a test-shape question as much as a writer question.
+Dictionary key order is no longer a difference: `Object::Dict` holds its keys in
+the order they were put in, and the page, the font, the descriptor, the object
+stream and the cross-reference stream are all written in luatex's order — the
+descriptor agrees with it key for key. What is left, measured on `Hello world.`:
+luatex writes `/Resources 1 0 R` and `/Widths 7 0 R` where texrs inlines both;
+it compresses the content stream with FlateDecode where texrs writes it plain,
+and draws `[(Hello)-333(w)27(orld.)]TJ` at 9.96264 point where texrs draws
+`(Hello world.) Tj` at 10, which is line breaking and kerning rather than the
+writer; and it writes neither `/Encoding` nor `/ToUnicode`, leaving the subset's
+own encoding to speak, where texrs writes both so a copied ligature is told
+rather than guessed. `tests/typeset.rs` reads content streams as raw bytes and
+reads `/F1` out of the page dictionary, so the first two are test-shape questions
+as much as writer questions.
+
+A Type 1 program is subsetted now — the cleartext header, the `/CharStrings`
+dictionary and the eexec encryption all rebuilt — which took `Hello world.` from
+40,094 bytes to 15,435. What is NOT cut is the 102 subroutines cmr10 carries:
+hint replacement pushes a subroutine number, hands it to OtherSubr 3 and takes it
+back with `pop`, so a scanner reading the operand before `callsubr` does not see
+the call and would stub a subroutine the font goes on using. `xdvipdfmx`'s
+`t1_subset`, which this is ported from, carries them all for the same reason.
 
 Byte equality is only defined with `SOURCE_DATE_EPOCH` pinned: measured, luatex
 reproduces itself exactly when it is set and differs run to run when it is not,

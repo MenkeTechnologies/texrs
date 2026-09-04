@@ -65,17 +65,25 @@ the marks and an output routine over `\box255`. Maths is done too:
 formula's geometry is TeX's own even where the glyphs are drawn from the
 document's face.
 
-What is still NOT done, and what now bounds the parity bar: the DVI path does
-not consult the `.tfm`'s ligature and kern program, so `tex` writes the `fi`
-ligature where texrs writes `f` and `i` — the only remaining text difference on
-the recorded cases, seven of ten of which reach STRUCTURE. There is no
-node-list shipper either: `hlist_out`/`vlist_out` (§619-§640) is not ported, so
-`src/typeset.rs` writes DVI from runs of strings and cannot draw a box tree,
-which is what `src/postline.rs` and `src/page.rs` would need to be the path a
-run takes rather than a library beside it. `\tolerance`, `\pretolerance` and
-the demerit weights are constants rather than registers a document sets, and
-the interword glue stretches by cmr10's fractions rather than by each font's
-own.
+The ligature and kern program and the shipper both landed. `src/tfm.rs` carries
+§906-§911's `reconstitute` with all eight ligature ops and the boundary
+characters, applied where the text is measured and where it is drawn so the two
+cannot disagree; `src/shipout.rs` carries §619-§640's `ship_out`, `hlist_out`
+and `vlist_out`, and `--dvi` draws a `\vbox` of `\hbox`es through it. Each
+font's own `\fontdimen2/3/4` sets the interword glue (§1042), where cmr10's
+fractions had stood in for every face. Every document that both engines set now
+reaches STRUCTURE.
+
+What is still NOT done, and what now bounds the parity bar: the shipper is
+handed line boxes built from broken strings rather than a node list with
+breakpoint indices, so `src/postline.rs`'s §877-§890 assembly and
+`src/page.rs`'s page builder remain a library beside the path a `--dvi` run
+takes rather than the path itself — `--dvi` still stacks a fixed number of lines
+on each page where `--pdf` prices the whole document. `\tolerance`,
+`\pretolerance` and the demerit weights are constants rather than registers a
+document sets. STRUCTURE to BYTES is now positional plus the encoding: the
+writer does not choose tex's compact `w`/`x`/`y`/`z` movement reuse (§607-§615)
+and writes the `fnt_def` checksum as zero.
 
 The subsetter's own untested edge is nesting. `tests/glyf.rs`'s
 `an_accented_letter_brings_the_letter_with_it` pins one level — asking for
