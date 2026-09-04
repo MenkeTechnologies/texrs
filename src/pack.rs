@@ -1117,7 +1117,12 @@ mod tests {
     /// it is set -- `list_ptr(r)<>null` guards every report.
     #[test]
     fn an_empty_box_is_never_underfull() {
-        let packed = hpack(Vec::new(), Spec::Exactly(pt(100)), Tolerances::default(), None);
+        let packed = hpack(
+            Vec::new(),
+            Spec::Exactly(pt(100)),
+            Tolerances::default(),
+            None,
+        );
         assert_eq!(packed.report, None);
         assert_eq!(packed.badness, 0);
         assert_eq!(packed.node.width, pt(100));

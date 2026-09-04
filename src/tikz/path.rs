@@ -477,26 +477,10 @@ impl State<'_> {
         self.whole(Sub {
             start: (cx + rx, cy),
             segments: vec![
-                Segment::Curve(
-                    (cx + rx, cy + ky),
-                    (cx + kx, cy + ry),
-                    (cx, cy + ry),
-                ),
-                Segment::Curve(
-                    (cx - kx, cy + ry),
-                    (cx - rx, cy + ky),
-                    (cx - rx, cy),
-                ),
-                Segment::Curve(
-                    (cx - rx, cy - ky),
-                    (cx - kx, cy - ry),
-                    (cx, cy - ry),
-                ),
-                Segment::Curve(
-                    (cx + kx, cy - ry),
-                    (cx + rx, cy - ky),
-                    (cx + rx, cy),
-                ),
+                Segment::Curve((cx + rx, cy + ky), (cx + kx, cy + ry), (cx, cy + ry)),
+                Segment::Curve((cx - kx, cy + ry), (cx - rx, cy + ky), (cx - rx, cy)),
+                Segment::Curve((cx - rx, cy - ky), (cx - kx, cy - ry), (cx, cy - ry)),
+                Segment::Curve((cx + kx, cy - ry), (cx + rx, cy - ky), (cx + rx, cy)),
             ],
             closed: true,
         });
@@ -782,7 +766,10 @@ fn on_axis(value: &str, axis: f64) -> f64 {
 /// `2cm` or `2cm and 1cm`, in picture units on each axis.
 fn radii(text: &str, frame: &Frame) -> (f64, f64) {
     match text.split_once("and") {
-        Some((first, second)) => (on_axis(first, frame.x_scale), on_axis(second, frame.y_scale)),
+        Some((first, second)) => (
+            on_axis(first, frame.x_scale),
+            on_axis(second, frame.y_scale),
+        ),
         None => (on_axis(text, frame.x_scale), on_axis(text, frame.y_scale)),
     }
 }
@@ -826,10 +813,7 @@ fn parenthesised(text: &str) -> (Option<String>, &str) {
     let Some(close) = coord::matching(open) else {
         return (None, text);
     };
-    (
-        Some(open[..close].trim().to_string()),
-        &open[close + 1..],
-    )
+    (Some(open[..close].trim().to_string()), &open[close + 1..])
 }
 
 /// `{...}` at the front, brace-counted, and what follows it.

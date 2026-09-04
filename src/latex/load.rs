@@ -330,11 +330,7 @@ pub fn preamble(src: &str) -> (String, Vec<String>, String) {
                 ));
             }
             Outcome::Refused { reason, .. } => {
-                said.push(format!(
-                    "package {} {}",
-                    request.name,
-                    needs(&reason)
-                ));
+                said.push(format!("package {} {}", request.name, needs(&reason)));
             }
             Outcome::NotFound => {
                 said.push(format!(

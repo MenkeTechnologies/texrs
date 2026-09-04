@@ -327,7 +327,10 @@ fn table<'scope, 'env: 'scope>(
         ("get_next", "token userdata"),
         ("scan_token", "token userdata"),
         ("expand", "token userdata"),
-        ("scan_glue", "a glue_spec node; token.scan_dimen reads its width"),
+        (
+            "scan_glue",
+            "a glue_spec node; token.scan_dimen reads its width",
+        ),
         ("scan_toks", "a token table"),
         ("scan_list", "a hlist or vlist node"),
     ] {

@@ -62,7 +62,9 @@ pub fn parse(text: &str) -> Aux {
             let Some((key, rest)) = group(rest) else {
                 continue;
             };
-            let Some((body, _)) = group(rest) else { continue };
+            let Some((body, _)) = group(rest) else {
+                continue;
+            };
             let Some((value, rest)) = group(&body) else {
                 continue;
             };
@@ -164,7 +166,10 @@ pub fn cited(src: &str) -> Vec<String> {
 
 /// The labels `src` refers to, through any of the five commands that take one.
 pub fn referenced(src: &str) -> Vec<String> {
-    keys_after(src, &["\\ref", "\\pageref", "\\eqref", "\\autoref", "\\nameref"])
+    keys_after(
+        src,
+        &["\\ref", "\\pageref", "\\eqref", "\\autoref", "\\nameref"],
+    )
 }
 
 /// The labels `src` defines.
@@ -341,10 +346,7 @@ mod tests {
              \\newlabel{fig:b}{{3.4}{92}{A figure}{figure.3.4}{}}\n\
              \\bibcite{knuth84}{1}\n",
         );
-        assert_eq!(
-            aux.labels["sec:a"],
-            ("2.1".to_string(), "17".to_string())
-        );
+        assert_eq!(aux.labels["sec:a"], ("2.1".to_string(), "17".to_string()));
         assert_eq!(aux.labels["fig:b"], ("3.4".to_string(), "92".to_string()));
         assert_eq!(aux.citations["knuth84"], "1");
     }

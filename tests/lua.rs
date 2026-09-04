@@ -124,7 +124,10 @@ fn what_a_chunk_prints_is_read_as_tex_and_not_as_characters() {
 #[test]
 fn a_chunk_computes_with_the_real_lua_libraries() {
     assert_eq!(out(&lua_message("6*7")), "[42]");
-    assert_eq!(out(&lua_message("table.concat({\"a\",\"b\"}, \"-\")")), "[a-b]");
+    assert_eq!(
+        out(&lua_message("table.concat({\"a\",\"b\"}, \"-\")")),
+        "[a-b]"
+    );
     assert_eq!(out(&lua_message("string.rep(\"ab\", 3)")), "[ababab]");
     assert_eq!(out(&lua_message("math.max(3, 9, 4)")), "[9]");
     // 5.3's integer division, which 5.2 does not have and 5.4 spells the same.
@@ -142,10 +145,19 @@ fn the_interpreter_is_the_one_luatex_embeds() {
 
 #[test]
 fn a_chunk_reads_the_registers_the_document_set() {
-    assert_eq!(out(&format!("\\count10=20\n{}", lua_message("tex.count[10]"))), "[20]");
+    assert_eq!(
+        out(&format!("\\count10=20\n{}", lua_message("tex.count[10]"))),
+        "[20]"
+    );
     // A dimension is scaled points on the Lua side: 2pt is 2*65536.
-    assert_eq!(out(&format!("\\dimen3=2pt\n{}", lua_message("tex.dimen[3]"))), "[131072]");
-    assert_eq!(out(&format!("\\toks0={{abc}}\n{}", lua_message("tex.toks[0]"))), "[abc]");
+    assert_eq!(
+        out(&format!("\\dimen3=2pt\n{}", lua_message("tex.dimen[3]"))),
+        "[131072]"
+    );
+    assert_eq!(
+        out(&format!("\\toks0={{abc}}\n{}", lua_message("tex.toks[0]"))),
+        "[abc]"
+    );
     // The accessor functions, which are the same registers by another spelling.
     assert_eq!(
         out(&format!("\\count5=7\n{}", lua_message("tex.getcount(5)"))),
@@ -205,7 +217,10 @@ fn one_lua_state_serves_the_whole_document() {
     // Two chunks, one state: the manual's `\luafunction` example depends on
     // exactly this, and so does every package that sets a table up once.
     assert_eq!(
-        out(&format!("\\directlua{{answer = 42}}\n{}", lua_message("answer"))),
+        out(&format!(
+            "\\directlua{{answer = 42}}\n{}",
+            lua_message("answer")
+        )),
         "[42]"
     );
 }
@@ -215,9 +230,15 @@ fn print_is_a_line_and_sprint_is_part_of_one() {
     // Manual §10.3.14.1: "The very last string of the very last tex.print
     // command in a \directlua will not have the \endlinechar appended, all
     // others do" — so two prints give `p q`, not `pq` and not `p q `.
-    assert_eq!(text("m\\directlua{tex.print(\"p\")tex.print(\"q\")}n"), "mp qn");
+    assert_eq!(
+        text("m\\directlua{tex.print(\"p\")tex.print(\"q\")}n"),
+        "mp qn"
+    );
     // §10.3.14.2: sprint inserts no \endlinechar at all.
-    assert_eq!(text("x\\directlua{tex.sprint(\"p\")tex.sprint(\"q\")}y"), "xpqy");
+    assert_eq!(
+        text("x\\directlua{tex.sprint(\"p\")tex.sprint(\"q\")}y"),
+        "xpqy"
+    );
     // "TEX does not switch to the 'new line' state, so that leading spaces are
     // not ignored." A run of them is one space token, as it is mid-line.
     assert_eq!(text("s\\directlua{tex.sprint(\"  lead\")}e"), "s leade");
@@ -233,7 +254,10 @@ fn write_gives_every_character_a_catcode_of_its_own() {
         text("\\directlua{tex.write(string.char(92) .. \"message{x}\")}"),
         "\\message{x}"
     );
-    assert_eq!(out("\\directlua{tex.write(string.char(92) .. \"message{x}\")}"), "");
+    assert_eq!(
+        out("\\directlua{tex.write(string.char(92) .. \"message{x}\")}"),
+        ""
+    );
     // tex.print(-2, ...) is the same regime: "all category codes are 12 (other)
     // except for the space character".
     assert_eq!(
@@ -583,19 +607,43 @@ fn scan_keyword_and_scan_string_read_what_the_manual_says_they_read() {
     };
     // "returns true if the given keyword is gobbled; as with the regular TeX
     // keyword scanner this is case insensitive".
-    assert_eq!(out(&format!("{}PLUS", says("tostring(token.scan_keyword(\"plus\"))"))), "[true]");
-    assert_eq!(out(&format!("{}minus", says("tostring(token.scan_keyword(\"plus\"))"))), "[false]");
+    assert_eq!(
+        out(&format!(
+            "{}PLUS",
+            says("tostring(token.scan_keyword(\"plus\"))")
+        )),
+        "[true]"
+    );
+    assert_eq!(
+        out(&format!(
+            "{}minus",
+            says("tostring(token.scan_keyword(\"plus\"))")
+        )),
+        "[false]"
+    );
     // "The string scanner scans for something between curly braces and expands
     // on the way […] Otherwise it will scan characters with catcode letter or
     // other."
-    assert_eq!(out(&format!("{}{{abc}}", says("token.scan_string()"))), "[abc]");
-    assert_eq!(out(&format!("{}word ", says("token.scan_word()"))), "[word]");
+    assert_eq!(
+        out(&format!("{}{{abc}}", says("token.scan_string()"))),
+        "[abc]"
+    );
+    assert_eq!(
+        out(&format!("{}word ", says("token.scan_word()"))),
+        "[word]"
+    );
     // "returns foo after scanning \foo"
-    assert_eq!(out(&format!("{}\\relax", says("token.scan_csname()"))), "[relax]");
+    assert_eq!(
+        out(&format!("{}\\relax", says("token.scan_csname()"))),
+        "[relax]"
+    );
     // A braced group is EXPANDED on the way, which is what makes the scanner
     // useful for an argument a macro built.
     assert_eq!(
-        out(&format!("\\def\\v{{VAL}}{}{{x\\v y}}", says("token.scan_string()"))),
+        out(&format!(
+            "\\def\\v{{VAL}}{}{{x\\v y}}",
+            says("token.scan_string()")
+        )),
         "[xVALy]"
     );
 }
@@ -628,16 +676,31 @@ fn get_macro_and_get_meaning_answer_the_body_and_the_parameter_text() {
         format!("\\directlua{{tex.print(string.char(92) .. \"message{{[\" .. {what} .. \"]}}\")}}")
     };
     let defs = "\\catcode`\\#=6 \\def\\bar{bar}\\def\\foo#1{foo-#1}";
-    assert_eq!(out(&format!("{defs}{}", says("token.get_macro(\"bar\")"))), "[bar]");
-    assert_eq!(out(&format!("{defs}{}", says("token.get_macro(\"foo\")"))), "[foo-#1]");
+    assert_eq!(
+        out(&format!("{defs}{}", says("token.get_macro(\"bar\")"))),
+        "[bar]"
+    );
+    assert_eq!(
+        out(&format!("{defs}{}", says("token.get_macro(\"foo\")"))),
+        "[foo-#1]"
+    );
     // "->bar" and "#1->foo-#1": `\meaning` without its `macro:` prefix.
-    assert_eq!(out(&format!("{defs}{}", says("token.get_meaning(\"bar\")"))), "[->bar]");
-    assert_eq!(out(&format!("{defs}{}", says("token.get_meaning(\"foo\")"))), "[#1->foo-#1]");
+    assert_eq!(
+        out(&format!("{defs}{}", says("token.get_meaning(\"bar\")"))),
+        "[->bar]"
+    );
+    assert_eq!(
+        out(&format!("{defs}{}", says("token.get_meaning(\"foo\")"))),
+        "[#1->foo-#1]"
+    );
     // Not a macro, or not defined at all, answers NO VALUE in `luatex` rather
     // than nil or an empty string, so `select('#', ...)` is 0 and a chunk can
     // tell "no such macro" from "a macro whose body is empty".
     assert_eq!(
-        out(&format!("{defs}{}", says("select('#', token.get_macro(\"nosuch\"))"))),
+        out(&format!(
+            "{defs}{}",
+            says("select('#', token.get_macro(\"nosuch\"))")
+        )),
         "[0]"
     );
     assert_eq!(
@@ -667,7 +730,10 @@ fn the_scanners_are_gone_once_the_chunk_that_had_them_is() {
     // gets an error — which is the right answer, because by then there is
     // nothing to scan — and never a stale pointer.
     let e = fails("\\directlua{saved = token.scan_int}1\\directlua{saved()}");
-    assert!(!e.is_empty(), "calling a dead scanner must not succeed silently");
+    assert!(
+        !e.is_empty(),
+        "calling a dead scanner must not succeed silently"
+    );
 }
 
 #[test]
@@ -737,7 +803,9 @@ fn a_fallback_chain_the_chunk_builds_reaches_the_backend() {
         "the text reader cannot see a chain that is built, which is what makes this test worth having"
     );
     let mut lowerer = texrs::lower::Lowerer::new();
-    lowerer.lower(&format!("{}x", source(built))).expect("lower");
+    lowerer
+        .lower(&format!("{}x", source(built)))
+        .expect("lower");
     assert_eq!(
         lowerer.fonts.fallbacks,
         vec!["Arial Unicode MS".to_string(), "Noto Emoji".to_string()],

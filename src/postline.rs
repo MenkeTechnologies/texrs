@@ -218,7 +218,10 @@ pub fn post_line_break(
         }
 
         // §880: modify the end of the line to reflect the nature of the break.
-        let right_skip = Node::Glue(GlueNode::param(params.skips.right_skip, GlueSource::RightSkip));
+        let right_skip = Node::Glue(GlueNode::param(
+            params.skips.right_skip,
+            GlueSource::RightSkip,
+        ));
         let mut disc_break = false;
         let mut post_disc_break = false;
         let mut next;
@@ -277,7 +280,10 @@ pub fn post_line_break(
         if params.skips.left_skip != Glue::default() {
             line.insert(
                 0,
-                Node::Glue(GlueNode::param(params.skips.left_skip, GlueSource::LeftSkip)),
+                Node::Glue(GlueNode::param(
+                    params.skips.left_skip,
+                    GlueSource::LeftSkip,
+                )),
             );
         }
 
@@ -441,7 +447,12 @@ mod tests {
         let mut list = vec![word(pt(20)), Node::Penalty(-500), word(pt(20))];
         list.insert(2, space());
         let mut prev_depth = crate::node::IGNORE_DEPTH;
-        let par = post_line_break(list, &[1, usize::MAX], &ParParams::plain(pt(60)), &mut prev_depth);
+        let par = post_line_break(
+            list,
+            &[1, usize::MAX],
+            &ParParams::plain(pt(60)),
+            &mut prev_depth,
+        );
         let lines = boxes(&par.list);
         let first: Vec<u8> = lines[0].list.iter().map(Node::type_code).collect();
         // box, penalty, rightskip glue.
@@ -486,7 +497,12 @@ mod tests {
             word(pt(20)),
         ];
         let mut prev_depth = crate::node::IGNORE_DEPTH;
-        let par = post_line_break(list, &[1, usize::MAX], &ParParams::plain(pt(60)), &mut prev_depth);
+        let par = post_line_break(
+            list,
+            &[1, usize::MAX],
+            &ParParams::plain(pt(60)),
+            &mut prev_depth,
+        );
         let lines = boxes(&par.list);
         // First line: the 20pt word, the emptied disc, the 3pt hyphen, the
         // rightskip. The 9pt replacement is gone.
@@ -527,7 +543,12 @@ mod tests {
             word(pt(20)),
         ];
         let mut prev_depth = crate::node::IGNORE_DEPTH;
-        let par = post_line_break(list, &[usize::MAX], &ParParams::plain(pt(60)), &mut prev_depth);
+        let par = post_line_break(
+            list,
+            &[usize::MAX],
+            &ParParams::plain(pt(60)),
+            &mut prev_depth,
+        );
         let lines = boxes(&par.list);
         // One line box, and the adjustment box beside it on the vlist.
         assert_eq!(lines.len(), 2);

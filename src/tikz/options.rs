@@ -623,7 +623,10 @@ mod tests {
         assert_eq!(arrow_spec("<-"), Some((Some(Tip::To), None)));
         assert_eq!(arrow_spec("<->"), Some((Some(Tip::To), Some(Tip::To))));
         assert_eq!(arrow_spec("-stealth"), Some((None, Some(Tip::Stealth))));
-        assert_eq!(arrow_spec("latex-latex"), Some((Some(Tip::Latex), Some(Tip::Latex))));
+        assert_eq!(
+            arrow_spec("latex-latex"),
+            Some((Some(Tip::Latex), Some(Tip::Latex)))
+        );
         // `dash dot` has no hyphen and `even-odd` is not a tip name: neither
         // is an arrow, and reading either as one loses the style it names.
         assert_eq!(arrow_spec("dash dot"), None);

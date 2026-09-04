@@ -212,10 +212,7 @@ fn shortened(
         let angle = (toward.1 - start.1).atan2(toward.0 - start.0);
         let reach = arrows::head(tip, path.width).reach;
         tips.push((tip, start, angle + std::f64::consts::PI, path.width));
-        start = (
-            start.0 + reach * angle.cos(),
-            start.1 + reach * angle.sin(),
-        );
+        start = (start.0 + reach * angle.cos(), start.1 + reach * angle.sin());
     }
     if let Some(tip) = path.arrow_end {
         let last = segments.len() - 1;
@@ -245,14 +242,7 @@ fn end_of(segment: &Segment) -> (f64, f64) {
 }
 
 /// One arrow tip, placed and turned by a `cm` matrix the way PGF places one.
-fn write_tip(
-    out: &mut String,
-    tip: Tip,
-    at: (f64, f64),
-    angle: f64,
-    width: f64,
-    style: &Path,
-) {
+fn write_tip(out: &mut String, tip: Tip, at: (f64, f64), angle: f64, width: f64, style: &Path) {
     let head = arrows::head(tip, width);
     let (sin, cos) = angle.sin_cos();
     let _ = writeln!(
@@ -312,10 +302,7 @@ fn write_node(out: &mut String, pic: &Picture, node: &Node, ox: f64, oy: f64) {
     // point moved back by however far the anchor is from it: a node written
     // `above` a point has its south edge on the point and its middle a half
     // height further up.
-    let (ax, ay) = (
-        ox + node.at.0 * pic.x_scale,
-        oy + node.at.1 * pic.y_scale,
-    );
+    let (ax, ay) = (ox + node.at.0 * pic.x_scale, oy + node.at.1 * pic.y_scale);
     let (half_width, half_height) = node.half_size();
     let (dx, dy) = node.anchor.offset();
     let (cx, cy) = (ax - dx * half_width, ay - dy * half_height);
@@ -354,10 +341,26 @@ fn write_node(out: &mut String, pic: &Picture, node: &Node, ox: f64, oy: f64) {
             let k = 0.552_284_75 * radius;
             let _ = writeln!(out, "{:.2} {cy:.2} m", cx + radius);
             for (c1, c2, to) in [
-                ((cx + radius, cy + k), (cx + k, cy + radius), (cx, cy + radius)),
-                ((cx - k, cy + radius), (cx - radius, cy + k), (cx - radius, cy)),
-                ((cx - radius, cy - k), (cx - k, cy - radius), (cx, cy - radius)),
-                ((cx + k, cy - radius), (cx + radius, cy - k), (cx + radius, cy)),
+                (
+                    (cx + radius, cy + k),
+                    (cx + k, cy + radius),
+                    (cx, cy + radius),
+                ),
+                (
+                    (cx - k, cy + radius),
+                    (cx - radius, cy + k),
+                    (cx - radius, cy),
+                ),
+                (
+                    (cx - radius, cy - k),
+                    (cx - k, cy - radius),
+                    (cx, cy - radius),
+                ),
+                (
+                    (cx + k, cy - radius),
+                    (cx + radius, cy - k),
+                    (cx + radius, cy),
+                ),
             ] {
                 let _ = writeln!(
                     out,

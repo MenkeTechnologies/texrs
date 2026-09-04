@@ -136,10 +136,10 @@ fn what_a_chunk_prints_is_input_and_not_a_message() {
     assert_eq!(out(src), "after");
     // And it really did run: a chunk that fails stops the run, which a
     // consumed chunk could not do.
-    assert!(texrs::run_messages(
-        "\\documentclass{article}\n\\directlua{error('boom')}\n\\end\n"
-    )
-    .is_err());
+    assert!(
+        texrs::run_messages("\\documentclass{article}\n\\directlua{error('boom')}\n\\end\n")
+            .is_err()
+    );
 }
 
 #[test]

@@ -1039,7 +1039,13 @@ impl PageBuilder {
             vfuzz: MAX_DIMEN,
             ..self.params.tolerances
         };
-        let page = vpackage(kept, Spec::Exactly(self.best_size), self.page_max_depth, quiet).node;
+        let page = vpackage(
+            kept,
+            Spec::Exactly(self.best_size),
+            self.page_max_depth,
+            quiet,
+        )
+        .node;
         self.boxes.insert(255, page.clone());
 
         self.start_new_page();
@@ -1415,7 +1421,14 @@ mod tests {
     #[test]
     fn vsplit_refuses_an_hbox() {
         let boxed = crate::pack::hpack(Vec::new(), NATURAL, Tolerances::plain(), None).node;
-        assert!(vsplit(boxed, pt(10), pt(4), Glue::fixed(pt(10)), Tolerances::plain()).is_none());
+        assert!(vsplit(
+            boxed,
+            pt(10),
+            pt(4),
+            Glue::fixed(pt(10)),
+            Tolerances::plain()
+        )
+        .is_none());
     }
 
     /// §1001: the first box on a page gets `\topskip`, and the glue is

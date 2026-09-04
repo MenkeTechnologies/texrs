@@ -57,9 +57,8 @@ pub fn definitions(text: &str) -> String {
     if names.is_empty() {
         return String::new();
     }
-    let mut out = String::from(
-        "% The \\newif switches this file declares -- see src/latex/switches.rs.\n",
-    );
+    let mut out =
+        String::from("% The \\newif switches this file declares -- see src/latex/switches.rs.\n");
     for name in names {
         out.push_str(&format!(
             "\\expandafter\\def\\csname {name}true\\endcsname\

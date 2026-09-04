@@ -139,7 +139,10 @@ fn a_circle_is_four_cubics_at_pgfs_own_constant() {
     // A radius given for one axis only still draws a circle, because `circle`
     // is `ellipse` with both radii the same.
     let round = emitted(r"\draw (0,0) circle [x radius=1cm];");
-    assert!(round.contains("28.45 15.71 15.71 28.45 0.00 28.45 c\n"), "{round}");
+    assert!(
+        round.contains("28.45 15.71 15.71 28.45 0.00 28.45 c\n"),
+        "{round}"
+    );
 }
 
 #[test]
@@ -156,7 +159,11 @@ fn an_arc_starts_at_the_current_point_and_not_at_the_centre() {
         ops.contains("56.91 31.43 31.43 56.91 0.00 56.91 c\n"),
         "one cubic ending at the top of the circle: {ops}"
     );
-    assert_eq!(ops.matches(" c\n").count(), 1, "90 degrees is one piece: {ops}");
+    assert_eq!(
+        ops.matches(" c\n").count(),
+        1,
+        "90 degrees is one piece: {ops}"
+    );
 }
 
 #[test]
@@ -182,7 +189,10 @@ fn a_curve_keeps_both_of_its_control_points() {
     // used to do -- draws a chord where the document drew an S.
     let ops = emitted(r"\draw (0,0) .. controls (1,1) and (2,-1) .. (3,0);");
     assert!(ops.contains("1.00 1.00 2.00 -1.00 3.00 0.00 c\n"), "{ops}");
-    assert!(!ops.contains(" l\n"), "no straight line was invented: {ops}");
+    assert!(
+        !ops.contains(" l\n"),
+        "no straight line was invented: {ops}"
+    );
 }
 
 #[test]
@@ -193,8 +203,14 @@ fn a_parabola_uses_pgfs_two_control_fractions() {
     // 3.18909/28.3468 is .1125 and 6.37819/28.3468 is .225 -- the fractions
     // `\pgfpathparabola` calls "found by trial and error".
     let ops = emitted(r"\draw (0,0) parabola bend (1,1) (2,0);");
-    assert!(ops.contains("0.11 0.23 0.50 1.00 1.00 1.00 c\n"), "up: {ops}");
-    assert!(ops.contains("1.50 1.00 1.89 0.22 2.00 0.00 c\n"), "down: {ops}");
+    assert!(
+        ops.contains("0.11 0.23 0.50 1.00 1.00 1.00 c\n"),
+        "up: {ops}"
+    );
+    assert!(
+        ops.contains("1.50 1.00 1.89 0.22 2.00 0.00 c\n"),
+        "down: {ops}"
+    );
 }
 
 #[test]
@@ -203,9 +219,15 @@ fn the_two_right_angle_connectors_go_the_two_ways_round() {
     // as `0.0 56.69362 l  56.69362 56.69362 l`: across then up, or up then
     // across. Getting them the wrong way round draws the other corner.
     let horizontal = emitted(r"\draw (0,0) -| (2,2);");
-    assert!(horizontal.contains("2.00 0.00 l\n2.00 2.00 l\n"), "{horizontal}");
+    assert!(
+        horizontal.contains("2.00 0.00 l\n2.00 2.00 l\n"),
+        "{horizontal}"
+    );
     let vertical = emitted(r"\draw (0,0) |- (2,2);");
-    assert!(vertical.contains("0.00 2.00 l\n2.00 2.00 l\n"), "{vertical}");
+    assert!(
+        vertical.contains("0.00 2.00 l\n2.00 2.00 l\n"),
+        "{vertical}"
+    );
 }
 
 #[test]
@@ -216,7 +238,11 @@ fn a_grid_is_the_lines_pgf_draws_in_the_order_it_draws_them() {
     assert!(ops.contains("0.00 0.00 m\n2.00 0.00 l\n"), "y=0: {ops}");
     assert!(ops.contains("0.00 2.00 m\n2.00 2.00 l\n"), "y=2: {ops}");
     assert!(ops.contains("1.00 0.00 m\n1.00 2.00 l\n"), "x=1: {ops}");
-    assert_eq!(ops.matches("\nS\n").count(), 1, "one stroke for all six: {ops}");
+    assert_eq!(
+        ops.matches("\nS\n").count(),
+        1,
+        "one stroke for all six: {ops}"
+    );
     // A step of a half doubles the count on each axis.
     let fine = emitted(r"\draw (0,0) grid [step=0.5] (1,1);");
     assert_eq!(fine.matches(" m\n").count(), 6, "three each way: {fine}");
@@ -245,7 +271,10 @@ fn a_clip_is_not_wrapped_in_a_save_and_restore() {
     let ops = emitted(r"\clip (0,0) rectangle (1,1); \draw (0,0) -- (2,2);");
     let clip = ops.find("W\nn\n").expect("a clip: {ops}");
     let restore = ops.rfind("Q\n").expect("the picture closes");
-    assert!(clip < restore, "the clip is inside the picture's own q/Q: {ops}");
+    assert!(
+        clip < restore,
+        "the clip is inside the picture's own q/Q: {ops}"
+    );
     assert!(
         !ops[..clip].ends_with("q\n"),
         "and not inside one of its own: {ops}"
@@ -304,7 +333,10 @@ fn an_arrow_shortens_the_line_and_draws_a_tip_at_the_new_end() {
     // where the full length is 56.69362, and puts the tip's own path at that
     // point -- 54.7011 big points is 54.91 points.
     let ops = emitted(r"\draw[-stealth] (0,0) -- (2cm,0);");
-    assert!(ops.contains("54.91 0.00 l\n"), "the line stops short: {ops}");
+    assert!(
+        ops.contains("54.91 0.00 l\n"),
+        "the line stops short: {ops}"
+    );
     assert!(ops.contains("cm\n"), "the tip is placed by a matrix: {ops}");
     assert!(ops.contains("2.00000 0.00000 m\n"), "5u forward: {ops}");
     assert!(ops.contains("\nf\n"), "stealth is filled: {ops}");
@@ -312,7 +344,10 @@ fn an_arrow_shortens_the_line_and_draws_a_tip_at_the_new_end() {
     let to = emitted(r"\draw[->] (0,0) -- (2cm,0);");
     assert!(to.contains("56.45 0.00 l\n"), "shortened by 0.458pt: {to}");
     assert!(to.contains("0.32 w\n"), "0.8 of 0.4pt: {to}");
-    assert!(to.contains("\nS\n1 J\n1 j\n") || to.contains("1 J\n1 j\n"), "{to}");
+    assert!(
+        to.contains("\nS\n1 J\n1 j\n") || to.contains("1 J\n1 j\n"),
+        "{to}"
+    );
 }
 
 #[test]
@@ -365,7 +400,10 @@ fn a_loop_draws_one_path_per_value() {
     let ops = to_pdf_ops(&pic, 0.0, 0.0);
     assert_eq!(ops.matches("\nS\n").count(), 3, "{ops}");
     // A range counts, and `\x/\y` takes two values from one entry.
-    let pairs = parse("", r"\foreach \a/\b in {1/2, 3/4} { \draw (\a,0) -- (\b,0); }");
+    let pairs = parse(
+        "",
+        r"\foreach \a/\b in {1/2, 3/4} { \draw (\a,0) -- (\b,0); }",
+    );
     assert_eq!(pairs.paths.len(), 2);
     assert_eq!(pairs.paths[1].points, vec![(3.0, 0.0), (4.0, 0.0)]);
 }
@@ -380,14 +418,26 @@ fn relative_and_named_coordinates_land_where_lualatex_puts_them() {
     let cm = 72.27 / 2.54;
     let points = &pic.paths[0].points;
     assert!((points[0].0 - 2.0 * cm * 30f64.to_radians().cos()).abs() < 1e-6);
-    assert!((points[1].0 - (points[0].0 + cm)).abs() < 1e-6, "{points:?}");
-    assert!((points[2].0 - points[1].0).abs() < 1e-6, "+ does not move x");
-    assert!((points[2].1 - (points[1].1 + cm)).abs() < 1e-6, "{points:?}");
+    assert!(
+        (points[1].0 - (points[0].0 + cm)).abs() < 1e-6,
+        "{points:?}"
+    );
+    assert!(
+        (points[2].0 - points[1].0).abs() < 1e-6,
+        "+ does not move x"
+    );
+    assert!(
+        (points[2].1 - (points[1].1 + cm)).abs() < 1e-6,
+        "{points:?}"
+    );
     // A named coordinate is the point it was given.
     let named = parse("", r"\coordinate (a) at (1,1); \draw (a) -- (2,2);");
     assert_eq!(named.paths[0].points, vec![(1.0, 1.0), (2.0, 2.0)]);
     // And `calc` walks between two of them.
-    let mid = parse("", r"\coordinate (a) at (0,0); \coordinate (b) at (4,2); \draw ($(a)!.5!(b)$) -- (9,9);");
+    let mid = parse(
+        "",
+        r"\coordinate (a) at (0,0); \coordinate (b) at (4,2); \draw ($(a)!.5!(b)$) -- (9,9);",
+    );
     assert_eq!(mid.paths[0].points[0], (2.0, 1.0));
 }
 
@@ -441,7 +491,10 @@ fn a_node_border_is_the_text_box_plus_the_inner_separation() {
     // (pgfmoduleshapes.code.tex line 888). The half-width is half the text
     // plus that, which is exactly what lualatex's `-7.0566 -6.88724 14.1132
     // 13.77448 re` is for a one-letter node.
-    let pic = parse("", r"\node[draw,inner sep=2pt,minimum size=0pt] at (0,0) {AB};");
+    let pic = parse(
+        "",
+        r"\node[draw,inner sep=2pt,minimum size=0pt] at (0,0) {AB};",
+    );
     let node = &pic.nodes[0];
     let (half_width, _) = node.half_size();
     assert_eq!(node.measured.0, 2.0 * 0.5 * 10.0, "two half-em characters");
@@ -490,8 +543,14 @@ fn opacity_names_a_graphics_state_the_page_has_to_carry() {
     assert!(ops.contains("/pgf@CA0.5 gs\n"), "{ops}");
     assert!(ops.contains("/pgf@ca0.5 gs\n"), "{ops}");
     let states = pic.ext_gstates();
-    assert!(states.contains(&("pgf@CA0.5".to_string(), "CA", 0.5)), "{states:?}");
-    assert!(states.contains(&("pgf@ca0.5".to_string(), "ca", 0.5)), "{states:?}");
+    assert!(
+        states.contains(&("pgf@CA0.5".to_string(), "CA", 0.5)),
+        "{states:?}"
+    );
+    assert!(
+        states.contains(&("pgf@ca0.5".to_string(), "ca", 0.5)),
+        "{states:?}"
+    );
     // A picture that never sets opacity needs no dictionaries at all.
     assert!(parse("", r"\draw (0,0) -- (1,1);").ext_gstates().is_empty());
 }
@@ -539,7 +598,8 @@ fn node_text_is_drawn_by_the_same_call_every_other_glyph_is() {
     let x = 110.0 - node.measured.0 / 2.0;
     let y = 220.0 - node.baseline_drop();
     assert!(
-        page.content.contains(&format!("1 0 0 1 {x} {y} Tm (Hi) Tj")),
+        page.content
+            .contains(&format!("1 0 0 1 {x} {y} Tm (Hi) Tj")),
         "{}",
         page.content
     );
@@ -572,7 +632,10 @@ fn to_bends_when_its_options_bend_it_and_not_otherwise() {
     );
     // A bare `to` is a straight line: `to path/.initial` is `-- (target)`.
     let straight = emitted(r"\draw (0,0) to (3,0);");
-    assert!(straight.contains("0.00 0.00 m\n3.00 0.00 l\n"), "{straight}");
+    assert!(
+        straight.contains("0.00 0.00 m\n3.00 0.00 l\n"),
+        "{straight}"
+    );
     assert!(!straight.contains(" c\n"), "no curve invented: {straight}");
     // `bend left` measures its angle from the line, so a bend on a vertical
     // line is not the same curve as the same bend on a horizontal one.

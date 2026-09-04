@@ -155,12 +155,19 @@ fn decrypt(bytes: &[u8], key: u16, skip: usize) -> Vec<u8> {
 /// tried first for a font that came from somewhere else, and `kpsewhich`
 /// second, which is how everything else in the tree finds a TeX file.
 fn afm_beside(path: &Path) -> Option<AfmMetrics> {
-    let read = |at: &Path| std::fs::read_to_string(at).ok().map(|t| AfmMetrics::parse(&t));
+    let read = |at: &Path| {
+        std::fs::read_to_string(at)
+            .ok()
+            .map(|t| AfmMetrics::parse(&t))
+    };
     if let Some(found) = read(&path.with_extension("afm")) {
         return Some(found);
     }
     let name = format!("{}.afm", path.file_stem()?.to_string_lossy());
-    let out = std::process::Command::new("kpsewhich").arg(&name).output().ok()?;
+    let out = std::process::Command::new("kpsewhich")
+        .arg(&name)
+        .output()
+        .ok()?;
     let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
     match found.is_empty() {
         true => None,

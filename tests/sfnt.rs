@@ -224,7 +224,9 @@ fn the_glyph_names_are_the_ones_otfinfo_lists() {
 /// -- a glyph-addressed subset drops it and this one cannot.
 #[test]
 fn a_font_addressed_by_character_keeps_its_cmap_and_drops_the_rest() {
-    let path = Path::new("/usr/local/texlive/2026/texmf-dist/fonts/truetype/google/arimo/Arimo-Regular.ttf");
+    let path = Path::new(
+        "/usr/local/texlive/2026/texmf-dist/fonts/truetype/google/arimo/Arimo-Regular.ttf",
+    );
     if !path.exists() {
         return;
     }

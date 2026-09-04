@@ -61,17 +61,9 @@ pub fn head(which: Tip, line_width: f64) -> Head {
         Tip::Latex => Head {
             start: (9.0 * u, 0.0),
             segments: vec![
-                Segment::Curve(
-                    (6.3333 * u, 0.5 * u),
-                    (2.0 * u, 2.0 * u),
-                    (-u, 3.75 * u),
-                ),
+                Segment::Curve((6.3333 * u, 0.5 * u), (2.0 * u, 2.0 * u), (-u, 3.75 * u)),
                 Segment::Line((-u, -3.75 * u)),
-                Segment::Curve(
-                    (2.0 * u, -2.0 * u),
-                    (6.3333 * u, -0.5 * u),
-                    (9.0 * u, 0.0),
-                ),
+                Segment::Curve((2.0 * u, -2.0 * u), (6.3333 * u, -0.5 * u), (9.0 * u, 0.0)),
             ],
             filled: true,
             width: line_width,
@@ -83,11 +75,7 @@ pub fn head(which: Tip, line_width: f64) -> Head {
         Tip::To => Head {
             start: (-3.0 * u, 4.0 * u),
             segments: vec![
-                Segment::Curve(
-                    (-2.75 * u, 2.5 * u),
-                    (0.0, 0.25 * u),
-                    (0.75 * u, 0.0),
-                ),
+                Segment::Curve((-2.75 * u, 2.5 * u), (0.0, 0.25 * u), (0.75 * u, 0.0)),
                 Segment::Curve(
                     (0.0, -0.25 * u),
                     (-2.75 * u, -2.5 * u),
@@ -117,7 +105,11 @@ mod tests {
         //   1.99252 0.0 m -1.19551 1.59401 l 0.0 0.0 l -1.19551 -1.59401 l f
         // and shortens the line from 56.69362 to 54.7011 -- 1.99252 of reach.
         let head = head(Tip::Stealth, 0.4);
-        assert!((head.start.0 / BP - 1.99252).abs() < 1e-4, "{:?}", head.start);
+        assert!(
+            (head.start.0 / BP - 1.99252).abs() < 1e-4,
+            "{:?}",
+            head.start
+        );
         assert!((head.reach / BP - 1.99252).abs() < 1e-4, "{}", head.reach);
         assert_eq!(head.segments.len(), 3);
         match head.segments[0] {
@@ -127,7 +119,10 @@ mod tests {
             }
             ref other => panic!("straight, not {other:?}"),
         }
-        assert!(head.filled, "stealth is filled, and lualatex ends it with `f`");
+        assert!(
+            head.filled,
+            "stealth is filled, and lualatex ends it with `f`"
+        );
     }
 
     #[test]
@@ -136,7 +131,11 @@ mod tests {
         //   3.58653 0.0 m 2.52383 0.19925 0.797 0.797 -0.3985 1.49438 c
         //   -0.3985 -1.49438 l 0.797 -0.797 2.52383 -0.19925 3.58653 0.0 c f
         let head = head(Tip::Latex, 0.4);
-        assert!((head.start.0 / BP - 3.58653).abs() < 1e-4, "{:?}", head.start);
+        assert!(
+            (head.start.0 / BP - 3.58653).abs() < 1e-4,
+            "{:?}",
+            head.start
+        );
         match head.segments[0] {
             Segment::Curve((c1x, c1y), (c2x, c2y), (x, y)) => {
                 assert!((c1x / BP - 2.52383).abs() < 1e-3, "{c1x}");
@@ -157,8 +156,16 @@ mod tests {
         let head = head(Tip::To, 0.4);
         assert!(!head.filled);
         assert!((head.width / BP - 0.31879).abs() < 1e-4, "{}", head.width);
-        assert!((head.start.0 / BP + 1.19551).abs() < 1e-4, "{:?}", head.start);
-        assert!((head.start.1 / BP - 1.59401).abs() < 1e-4, "{:?}", head.start);
+        assert!(
+            (head.start.0 / BP + 1.19551).abs() < 1e-4,
+            "{:?}",
+            head.start
+        );
+        assert!(
+            (head.start.1 / BP - 1.59401).abs() < 1e-4,
+            "{:?}",
+            head.start
+        );
         // The line is shortened by 0.4583pt, which is where lualatex's
         // 56.23534 comes from against a full length of 56.69362.
         assert!((head.reach / BP - 0.45828).abs() < 1e-4, "{}", head.reach);

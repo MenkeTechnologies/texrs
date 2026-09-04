@@ -147,9 +147,9 @@ pub fn parse(inside: &str) -> Option<Coord> {
     }
     // Anything left that is not a number is a name, with an optional anchor.
     match text.split_once('.') {
-        Some((name, anchor)) if !anchor.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
-            Some(Coord::Named(name.trim().to_string(), Some(anchor.trim().to_string())))
-        }
+        Some((name, anchor)) if !anchor.chars().next().is_some_and(|c| c.is_ascii_digit()) => Some(
+            Coord::Named(name.trim().to_string(), Some(anchor.trim().to_string())),
+        ),
         _ => Some(Coord::Named(text.to_string(), None)),
     }
 }

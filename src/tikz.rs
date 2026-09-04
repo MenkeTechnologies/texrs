@@ -268,12 +268,7 @@ pub fn parse(options: &str, body: &str) -> Picture {
 }
 
 /// The same, against a document's own palette and font metrics.
-pub fn parse_with(
-    options: &str,
-    body: &str,
-    colours: &Colours,
-    metrics: &dyn Metrics,
-) -> Picture {
+pub fn parse_with(options: &str, body: &str, colours: &Colours, metrics: &dyn Metrics) -> Picture {
     let mut pic = Picture {
         x_scale: option_length(options, "x").unwrap_or(1.0),
         y_scale: option_length(options, "y").unwrap_or(1.0),
@@ -364,9 +359,7 @@ fn emit(
         Action::FillDraw => (true, true),
         // `\path[draw]` and `\path[fill]` are what `\draw` and `\fill` stand
         // for, so a bare `\path` paints exactly what its options asked for.
-        Action::None | Action::Shade | Action::Clip | Action::Node => {
-            (style.draw, style.filled)
-        }
+        Action::None | Action::Shade | Action::Clip | Action::Node => (style.draw, style.filled),
     };
     let action = match (action, draw, filled) {
         (Action::None, true, true) => Action::FillDraw,
@@ -384,9 +377,7 @@ fn emit(
                 .iter()
                 .map(|segment| match segment {
                     Segment::Line(to) => Segment::Line(point(*to)),
-                    Segment::Curve(a, b, to) => {
-                        Segment::Curve(point(*a), point(*b), point(*to))
-                    }
+                    Segment::Curve(a, b, to) => Segment::Curve(point(*a), point(*b), point(*to)),
                 })
                 .collect(),
             closed: sub.closed,
@@ -475,10 +466,7 @@ pub fn draw_on(
         if node.text.trim().is_empty() {
             continue;
         }
-        let (ax, ay) = (
-            ox + node.at.0 * pic.x_scale,
-            oy + node.at.1 * pic.y_scale,
-        );
+        let (ax, ay) = (ox + node.at.0 * pic.x_scale, oy + node.at.1 * pic.y_scale);
         let (half_width, half_height) = node.half_size();
         let (dx, dy) = node.anchor.offset();
         let (cx, cy) = (ax - dx * half_width, ay - dy * half_height);

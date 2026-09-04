@@ -873,11 +873,7 @@ fn build(owner: usize) -> mlua::Result<Runtime> {
     globals.set("status", status_table(&lua)?)?;
     globals.set("luatexbase", luatexbase_table(&lua)?)?;
     globals.set("luaotfload", luaotfload_table(&lua, &bridge)?)?;
-    Ok(Runtime {
-        lua,
-        bridge,
-        owner,
-    })
+    Ok(Runtime { lua, bridge, owner })
 }
 
 /// Lua's own `tostring`, so a number reaches TeX formatted as Lua formats it.
@@ -1089,7 +1085,9 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
                 // `tex.setcount(["global",] n, v)`.
                 let args = drop_global(&args);
                 let [key, value] = &args[..] else {
-                    return Err(mlua::Error::runtime("tex.set* wants a register and a value"));
+                    return Err(mlua::Error::runtime(
+                        "tex.set* wants a register and a value",
+                    ));
                 };
                 let mut b = b.borrow_mut();
                 let reg = resolve(&b, kind, key)?;
@@ -1162,14 +1160,7 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
     // "attempt to call a nil value" would not tell a document's author which of
     // the two engines' worlds it had walked into.
     for name in [
-        "getbox",
-        "setbox",
-        "splitbox",
-        "getlist",
-        "setlist",
-        "getnest",
-        "getmath",
-        "setmath",
+        "getbox", "setbox", "splitbox", "getlist", "setlist", "getnest", "getmath", "setmath",
     ] {
         tex.set(
             name,
@@ -1245,7 +1236,9 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
         lua.create_function(move |_, args: Variadic<Value>| {
             let args = drop_global(&args);
             let [key, value] = &args[..] else {
-                return Err(mlua::Error::runtime("tex.settoks wants a register and a string"));
+                return Err(mlua::Error::runtime(
+                    "tex.settoks wants a register and a string",
+                ));
             };
             let mut b = b.borrow_mut();
             let reg = resolve(&b, Kind::Toks, key)?;
@@ -1282,9 +1275,14 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
     )?;
     tex.set(
         "scale",
-        lua.create_function(|_, (v, delta): (f64, f64)| Ok(clamp_register((v * delta).round() as i64)))?,
+        lua.create_function(|_, (v, delta): (f64, f64)| {
+            Ok(clamp_register((v * delta).round() as i64))
+        })?,
     )?;
-    tex.set("number", lua.create_function(|_, n: i64| Ok(n.to_string()))?)?;
+    tex.set(
+        "number",
+        lua.create_function(|_, n: i64| Ok(n.to_string()))?,
+    )?;
     tex.set(
         "romannumeral",
         lua.create_function(|_, n: i64| Ok(roman(n)))?,
@@ -1375,7 +1373,9 @@ fn resolve(b: &Bridge, kind: Kind, key: &Value) -> mlua::Result<i64> {
         return Ok(base + n * stride);
     }
     let Value::String(s) = key else {
-        return Err(mlua::Error::runtime("register index must be a number or a name"));
+        return Err(mlua::Error::runtime(
+            "register index must be a number or a name",
+        ));
     };
     let name = s.to_str()?.to_string();
     let found = match kind {
@@ -1458,7 +1458,9 @@ fn scaled_value(kind: Kind, v: &Value) -> mlua::Result<i64> {
         return Ok(clamp_register(n.round() as i64));
     }
     let Value::String(s) = v else {
-        return Err(mlua::Error::runtime("register value must be a number or a dimension"));
+        return Err(mlua::Error::runtime(
+            "register value must be a number or a dimension",
+        ));
     };
     if kind != Kind::Dimen {
         return Err(mlua::Error::runtime("register value must be a number"));

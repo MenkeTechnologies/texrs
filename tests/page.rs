@@ -9,13 +9,13 @@
 //! first baseline 10pt down and `\baselineskip` puts each of the rest 12pt
 //! below the last, and 10 + 43*12 is 526 — not because 44 was written down.
 
+use std::collections::BTreeMap;
 use texrs::box_::{Boxes, Registers};
 use texrs::dimen::UNITY;
 use texrs::glue::Glue;
 use texrs::node::{BoxNode, GlueNode, InsNode, Node, Scaled, IGNORE_DEPTH};
 use texrs::pack::{append_to_vlist, glue_widths, hpack, Baselines, Spec, Tolerances, NATURAL};
 use texrs::page::{Fired, InsertClass, PageBuilder, PageParams};
-use std::collections::BTreeMap;
 
 fn pt(n: i64) -> Scaled {
     n * UNITY
@@ -295,7 +295,13 @@ fn a_tight_line_shrinks_and_reports_the_badness_tex_would() {
             ..Glue::default()
         }))
     };
-    let list = vec![word(pt(100)), space(), word(pt(100)), space(), word(pt(100))];
+    let list = vec![
+        word(pt(100)),
+        space(),
+        word(pt(100)),
+        space(),
+        word(pt(100)),
+    ];
     let natural = hpack(list.clone(), NATURAL, Tolerances::plain(), None);
     // Shrink the line by exactly half of what its two spaces can give back.
     let give = 2 * 72_818;

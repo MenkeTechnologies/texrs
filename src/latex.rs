@@ -167,7 +167,10 @@ fn numbering(src: &str) -> &'static str {
 \\def\\thefigure{\\arabic{figure}}\n\
 \\def\\thetable{\\arabic{table}}\n\
 \\def\\theequation{\\arabic{equation}}\n";
-    let Some(class) = load::requests(src).into_iter().find(|r| r.extension == "cls") else {
+    let Some(class) = load::requests(src)
+        .into_iter()
+        .find(|r| r.extension == "cls")
+    else {
         return "";
     };
     let Some(path) = load::resolve(&class.name, "cls") else {

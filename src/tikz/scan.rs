@@ -192,7 +192,10 @@ fn foreach(text: &str) -> (String, &str) {
     let mut rest = text.trim_start();
     let mut variables = Vec::new();
     while let Some(after) = rest.strip_prefix('\\') {
-        let name: String = after.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        let name: String = after
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
         if name.is_empty() {
             break;
         }

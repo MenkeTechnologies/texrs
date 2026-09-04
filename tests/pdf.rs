@@ -285,9 +285,12 @@ fn a_reader_refuses_a_file_whose_table_is_wrong() {
     let mut nostart = good[..at].to_vec();
     nostart.extend(format!("startxref\n{}\n%%EOF\n", good.len() + 4096).as_bytes());
     std::fs::write(&probe, &nostart).unwrap();
-    let said = Command::new("pdfinfo").arg(&probe).output().expect("pdfinfo");
-    let complained = !said.status.success()
-        || !String::from_utf8_lossy(&said.stderr).trim().is_empty();
+    let said = Command::new("pdfinfo")
+        .arg(&probe)
+        .output()
+        .expect("pdfinfo");
+    let complained =
+        !said.status.success() || !String::from_utf8_lossy(&said.stderr).trim().is_empty();
     if !complained {
         return;
     }
@@ -1224,8 +1227,8 @@ fn the_trailer_names_an_information_dictionary_and_a_stable_identifier() {
     // name for its bytes -- which is what §14.4 asks the identifier to be.
     let mut other = Page::letter();
     other.text("Helvetica", 12.0, 72.0, 700.0, "Goodbye");
-    let other = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&document(&[other])))
-        .into_owned();
+    let other =
+        String::from_utf8_lossy(&texrs::pdf::inflate_streams(&document(&[other]))).into_owned();
     let other = other.split("/ID [").nth(1).expect("an /ID").to_string();
     assert_ne!(
         halves[0],

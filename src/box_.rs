@@ -28,9 +28,7 @@
 
 use crate::dimen::UNITY;
 use crate::glue::Glue;
-use crate::node::{
-    BoxNode, GlueNode, LeaderKind, Node, RuleNode, Scaled, IGNORE_DEPTH, NULL_FLAG,
-};
+use crate::node::{BoxNode, GlueNode, LeaderKind, Node, RuleNode, Scaled, IGNORE_DEPTH, NULL_FLAG};
 use crate::pack::{hpack, vpack, vpackage, vtop, Baselines, Packed, Spec, Tolerances};
 use std::collections::BTreeMap;
 
@@ -291,9 +289,12 @@ impl ListBuilder {
     /// already there.
     pub fn box_(&mut self, b: BoxNode) {
         match self.mode {
-            Mode::Vertical => {
-                crate::pack::append_to_vlist(&mut self.list, b, &mut self.prev_depth, self.baselines)
-            }
+            Mode::Vertical => crate::pack::append_to_vlist(
+                &mut self.list,
+                b,
+                &mut self.prev_depth,
+                self.baselines,
+            ),
             Mode::Horizontal => self.list.push(Node::Box(b)),
         }
     }
@@ -674,7 +675,10 @@ mod tests {
         let mut regs = Boxes::default();
         regs.set_box(0, Some(boxed(pt(10), 0, 0, false)));
         let mut v = ListBuilder::new(Mode::Vertical);
-        assert_eq!(v.unbox(&mut regs, 0, false), Err(BoxError::IncompatibleList));
+        assert_eq!(
+            v.unbox(&mut regs, 0, false),
+            Err(BoxError::IncompatibleList)
+        );
         // Refused means untouched: the register still holds the box.
         assert!(regs.box_register(0).is_some());
         assert!(v.list.is_empty());
@@ -918,7 +922,10 @@ mod tests {
         b.kern(pt(2));
         b.penalty(150);
 
-        assert!(b.remove_last(Removable::Glue).is_none(), "a penalty is not glue");
+        assert!(
+            b.remove_last(Removable::Glue).is_none(),
+            "a penalty is not glue"
+        );
         assert!(matches!(
             b.remove_last(Removable::Penalty),
             Some(Node::Penalty(150))
@@ -927,7 +934,10 @@ mod tests {
             b.remove_last(Removable::Kern),
             Some(Node::Kern { width, .. }) if width == pt(2)
         ));
-        assert!(matches!(b.remove_last(Removable::Glue), Some(Node::Glue(_))));
+        assert!(matches!(
+            b.remove_last(Removable::Glue),
+            Some(Node::Glue(_))
+        ));
         // Only the box is left, and no \unskip can reach it.
         assert!(b.remove_last(Removable::Glue).is_none());
         assert_eq!(b.list.len(), 1);
