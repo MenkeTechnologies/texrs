@@ -56,6 +56,88 @@ pub enum Step {
     Kern { next: u8, by: f64 },
 }
 
+/// What a run of characters actually puts on the page once the font's own
+/// ligature and kern program has had its say.
+///
+/// This is the distinction that makes a `.tfm` more than a table of widths:
+/// the characters a document holds are NOT the characters TeX draws. `f` then
+/// `i` in cmr10 is one character, code 0o14, and `A` then `V` is two
+/// characters with a negative movement between them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Set {
+    /// A character actually drawn.
+    Char(u8),
+    /// An explicit kern between the characters either side, in design-size
+    /// units. `tex.web` §625 draws it as a movement, not as a glyph.
+    Kern(f64),
+}
+
+/// `tex.web` §545's `non_char`: 256, a value no character code can take, used
+/// for "no character here" and for the implicit boundary either side of a run.
+const NON_CHAR: u16 = 256;
+
+/// §545's `stop_flag` and `kern_flag`, which share the value 128: a `skip_byte`
+/// of 128 or more ends a program, and an `op_byte` of 128 or more is a kern.
+const STOP_FLAG: u8 = 128;
+const KERN_FLAG: u8 = 128;
+
+/// §906's "pseudo-ligature": a character a ligature op has invented, waiting to
+/// the right of the cursor, and the original character it stands in front of.
+#[derive(Debug, Clone, Copy)]
+struct LigItem {
+    character: u16,
+    lig_ptr: Option<u8>,
+}
+
+/// §910's `wrap_lig`: turn what has been built since `cur_q` into one ligature
+/// character.
+///
+/// `new_ligature(hf,cur_l,link(cur_q))` hangs the characters that were consumed
+/// off the new node as its `lig_ptr` list, and a driver draws only the node's
+/// own character. So the consumed characters leave the page, which is why this
+/// truncates rather than appends: `fi` is ONE character, not three.
+///
+/// `lft_hit` and `rt_hit` are not tracked. They only set the ligature node's
+/// subtype, which says whether a boundary character was eaten — a fact
+/// `\showlists` prints and the page does not carry.
+fn wrap_lig(out: &mut Vec<Set>, cur_q: usize, cur_l: u16, ligature_present: &mut bool) {
+    if !*ligature_present {
+        return;
+    }
+    out.truncate(cur_q);
+    if cur_l < NON_CHAR {
+        out.push(Set::Char(cur_l as u8));
+    }
+    *ligature_present = false;
+}
+
+/// §910's `pop_lig_stack`: take the pseudo-ligature at the cursor, put back the
+/// character it stood in front of, and re-read `cur_r`.
+fn pop_lig_stack(
+    lig_stack: &mut Vec<LigItem>,
+    out: &mut Vec<Set>,
+    hu: &[u16],
+    last: usize,
+    bchar: u16,
+    j: &mut usize,
+    cur_r: &mut u16,
+) {
+    let Some(top) = lig_stack.pop() else {
+        return;
+    };
+    if let Some(c) = top.lig_ptr {
+        // "this is a charnode for hu[j+1]"
+        out.push(Set::Char(c));
+        *j += 1;
+    }
+    // §908's `set_cur_r`, with `cur_rh` always `non_char` here.
+    *cur_r = match lig_stack.last() {
+        Some(next) => next.character,
+        None if *j < last => hu[*j + 1],
+        None => bchar,
+    };
+}
+
 /// The `fontdimen` parameters, by the names `tex.web` §547 gives them.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Params {
@@ -89,6 +171,12 @@ pub struct Tfm {
     chars: Vec<Option<CharMetrics>>,
     lig_kern: Vec<[u8; 4]>,
     kerns: Vec<f64>,
+    /// §545: the font's right boundary character, when its lig/kern array's
+    /// FIRST instruction has `skip_byte=255`. `non_char` when it has none.
+    bchar: u16,
+    /// §545: where the LEFT boundary character's own lig/kern program starts,
+    /// when the array's LAST instruction has `skip_byte=255`.
+    bchar_label: Option<usize>,
 }
 
 impl Tfm {
@@ -240,6 +328,21 @@ impl Tfm {
             extra_space: p(6),
         };
 
+        // §545: "If the very first instruction of the lig_kern array has
+        // skip_byte=255, the next_char byte is the so-called boundary
+        // character of this font ... If the very last instruction of the
+        // lig_kern array has skip_byte=255, there is a special
+        // ligature/kerning program for a boundary character at the left,
+        // beginning at location 256*op_byte+remainder."
+        let bchar = match program.first() {
+            Some(f) if f[0] == 255 => f[1] as u16,
+            _ => NON_CHAR,
+        };
+        let bchar_label = match program.last() {
+            Some(l) if l[0] == 255 => Some(256 * l[2] as usize + l[3] as usize),
+            _ => None,
+        };
+
         Ok(Tfm {
             checksum,
             design_size,
@@ -252,6 +355,8 @@ impl Tfm {
             chars,
             lig_kern: program,
             kerns,
+            bchar,
+            bchar_label,
         })
     }
 
@@ -320,6 +425,229 @@ impl Tfm {
         None
     }
 
+    /// Where `code`'s ligature/kern program starts, following §545's jump when
+    /// the first instruction is one.
+    ///
+    /// "If the very first instruction of a character's lig_kern program has
+    /// skip_byte>128, the program actually begins in location
+    /// 256*op_byte+remainder. This feature allows access to large lig_kern
+    /// arrays, because the first instruction must otherwise appear in a
+    /// location <=255."
+    fn program_start(&self, code: u16) -> Option<usize> {
+        // §909: `if cur_l=non_char then k:=bchar_label[hf]`.
+        if code == NON_CHAR {
+            return self.bchar_label;
+        }
+        let code = code as u8;
+        if self.tag(code) != Tag::LigKern {
+            return None;
+        }
+        let mut k = self.char(code)?.remainder as usize;
+        match self.lig_kern.get(k) {
+            Some(q) if q[0] > STOP_FLAG => k = 256 * q[2] as usize + q[3] as usize,
+            _ => {}
+        }
+        Some(k)
+    }
+
+    /// What `codes` actually sets in this font: `tex.web` §906-§911's
+    /// `reconstitute`, run over the whole run.
+    ///
+    /// This is the routine TeX itself uses to rebuild a word once it knows the
+    /// characters, and it is the same algorithm the main loop (§1034-§1040)
+    /// runs while reading one. `reconstitute` translates a "cut prefix" and
+    /// returns how far it got; the caller repeats from there until the run is
+    /// consumed, which is what §913 does around it.
+    ///
+    /// The run is a single font's, with nothing between the characters: a
+    /// space is glue and a font switch is a boundary, and TeX's ligature
+    /// machinery does not reach across either. The implicit boundary
+    /// characters of §545 are supplied here, so a font that has them (cmr10
+    /// does not) behaves as it does under tex.
+    pub fn set_run(&self, codes: &[u8]) -> Vec<Set> {
+        if codes.is_empty() {
+            return Vec::new();
+        }
+        // §545: "TeX puts implicit boundary characters before and after each
+        // consecutive string of characters from the same font."
+        let mut hu: Vec<u16> = Vec::with_capacity(codes.len() + 1);
+        if self.bchar_label.is_some() {
+            hu.push(NON_CHAR);
+        }
+        hu.extend(codes.iter().map(|&c| c as u16));
+
+        let mut out = Vec::with_capacity(codes.len());
+        let mut j = 0usize;
+        while j < hu.len() {
+            j = self.reconstitute(&hu, j, &mut out) + 1;
+        }
+        out
+    }
+
+    /// One call of §906's `reconstitute`: translate `hu[j..]` as far as it can
+    /// go and return the index of the last character consumed.
+    ///
+    /// Hyphenation is not in play here — this is called on a word that is
+    /// already broken — so §906's `hyf`, `hchar` and `cur_rh` are the constants
+    /// they take when no hyphen is being tried: `hyf[j]` even everywhere and
+    /// `hchar=non_char`, which makes `test_char` always `cur_r` and
+    /// `hyphen_passed` always zero. §908's `init_list` case (`j=0`) is likewise
+    /// empty, because nothing precedes the run.
+    fn reconstitute(&self, hu: &[u16], j0: usize, out: &mut Vec<Set>) -> usize {
+        let last = hu.len() - 1;
+        let mut j = j0;
+        let mut bchar = self.bchar;
+        // §906: `w` is the amount of kerning found, appended below.
+        let mut w = 0.0f64;
+        let mut ligature_present = false;
+        let mut lig_stack: Vec<LigItem> = Vec::new();
+
+        // §908: set up data structures with the cursor following position j.
+        let mut cur_l = hu[j];
+        let mut cur_q = out.len();
+        if cur_l < NON_CHAR {
+            out.push(Set::Char(cur_l as u8));
+        }
+        let mut cur_r = if j < last { hu[j + 1] } else { bchar };
+
+        // §911 calls `check_interrupt` here, "to allow a way out in case
+        // there's an infinite ligature loop" — a font whose program turns one
+        // character into another and back. A library cannot be interrupted, so
+        // the way out is a budget: every turn of this loop either advances the
+        // cursor or applies one more lig/kern step, so a run that has taken
+        // more turns than either could account for is a font cycling.
+        let mut budget = 4 * hu.len() + self.lig_kern.len() + 8;
+
+        'restart: loop {
+            budget -= 1;
+            if budget == 0 {
+                return j;
+            }
+            // §909: if there's a ligature or kern at the cursor position,
+            // update the data structures, possibly advancing j.
+            'program: {
+                let Some(mut k) = self.program_start(cur_l) else {
+                    break 'program;
+                };
+                // The array is finite, so bound the walk by its length rather
+                // than trusting a malformed program to stop.
+                for _ in 0..=self.lig_kern.len() {
+                    let Some(&q) = self.lig_kern.get(k) else {
+                        break 'program;
+                    };
+                    let (skip, next, op, rem) = (q[0], q[1], q[2], q[3]);
+                    if next as u16 == cur_r && skip <= STOP_FLAG {
+                        if op >= KERN_FLAG {
+                            // §909: "this kern will be inserted below".
+                            w = self
+                                .kerns
+                                .get(256 * (op as usize - KERN_FLAG as usize) + rem as usize)
+                                .copied()
+                                .unwrap_or(0.0);
+                            break 'program;
+                        }
+                        // §911: carry out a ligature replacement.
+                        match op {
+                            // =:| and =:|> — the left character is replaced
+                            // and the right one is kept.
+                            1 | 5 => {
+                                cur_l = rem as u16;
+                                ligature_present = true;
+                            }
+                            // |=: and |=:> — the left character is kept and
+                            // the right one is replaced.
+                            2 | 6 => {
+                                cur_r = rem as u16;
+                                match lig_stack.last_mut() {
+                                    Some(top) => top.character = cur_r,
+                                    None => {
+                                        let lig_ptr = match j == last {
+                                            true => {
+                                                bchar = NON_CHAR;
+                                                None
+                                            }
+                                            false => Some(hu[j + 1] as u8),
+                                        };
+                                        lig_stack.push(LigItem {
+                                            character: cur_r,
+                                            lig_ptr,
+                                        });
+                                    }
+                                }
+                            }
+                            // |=:| — both characters are kept and a new one
+                            // is inserted between them.
+                            3 => {
+                                cur_r = rem as u16;
+                                lig_stack.push(LigItem {
+                                    character: cur_r,
+                                    lig_ptr: None,
+                                });
+                            }
+                            // |=:|> and |=:|>> — the same, but the cursor
+                            // passes the inserted character, so what is built
+                            // so far is wrapped first.
+                            7 | 11 => {
+                                wrap_lig(out, cur_q, cur_l, &mut ligature_present);
+                                cur_q = out.len();
+                                cur_l = rem as u16;
+                                ligature_present = true;
+                            }
+                            // =: — both characters become one.
+                            _ => {
+                                cur_l = rem as u16;
+                                ligature_present = true;
+                                if !lig_stack.is_empty() {
+                                    pop_lig_stack(
+                                        &mut lig_stack,
+                                        out,
+                                        hu,
+                                        last,
+                                        bchar,
+                                        &mut j,
+                                        &mut cur_r,
+                                    );
+                                } else if j == last {
+                                    break 'program;
+                                } else {
+                                    out.push(Set::Char(cur_r as u8));
+                                    j += 1;
+                                    cur_r = if j < last { hu[j + 1] } else { bchar };
+                                }
+                            }
+                        }
+                        // §911: "if op_byte(q)>4 then if op_byte(q)<>7 then
+                        // goto done" — the ops that pass over a character are
+                        // finished with this cursor position.
+                        if op > 4 && op != 7 {
+                            break 'program;
+                        }
+                        continue 'restart;
+                    }
+                    if skip >= STOP_FLAG {
+                        break 'program;
+                    }
+                    k += skip as usize + 1;
+                }
+                break 'program;
+            }
+
+            // §910: append a ligature and/or kern to the translation.
+            wrap_lig(out, cur_q, cur_l, &mut ligature_present);
+            if w != 0.0 {
+                out.push(Set::Kern(w));
+                w = 0.0;
+            }
+            let Some(top) = lig_stack.last().copied() else {
+                return j;
+            };
+            cur_q = out.len();
+            cur_l = top.character;
+            ligature_present = true;
+            pop_lig_stack(&mut lig_stack, out, hu, last, bchar, &mut j, &mut cur_r);
+        }
+    }
+
     /// The width of `text` set in this font, in design-size units, with the
     /// font's own ligatures and kerns applied — which is the only way to
     /// measure it that agrees with what TeX will print. A character the font
@@ -330,30 +658,13 @@ impl Tfm {
             .filter(|c| c.is_ascii())
             .map(|c| c as u8)
             .collect();
-        let mut total = 0.0;
-        let mut i = 0;
-        while i < codes.len() {
-            let code = codes[i];
-            // A ligature replaces both characters with one, so its width is
-            // the replacement's, not the pair's.
-            if let Some(&next) = codes.get(i + 1) {
-                match self.step(code, next) {
-                    // Only the plain ligature (op 0) replaces both; the others
-                    // keep one or both characters, so they are left to the
-                    // stomach rather than guessed at here.
-                    Some(Step::Ligature { with, op: 0, .. }) => {
-                        total += self.char(with).map(|c| c.width).unwrap_or(0.0);
-                        i += 2;
-                        continue;
-                    }
-                    Some(Step::Kern { by, .. }) => total += by,
-                    _ => {}
-                }
-            }
-            total += self.char(code).map(|c| c.width).unwrap_or(0.0);
-            i += 1;
-        }
-        total
+        self.set_run(&codes)
+            .into_iter()
+            .map(|set| match set {
+                Set::Char(c) => self.char(c).map(|m| m.width).unwrap_or(0.0),
+                Set::Kern(by) => by,
+            })
+            .sum()
     }
 
     /// A summary a person reads, in the units `tftopl` prints.

@@ -230,3 +230,85 @@ fn the_ligature_program_of_cmr10_is_the_one_tftopl_prints() {
         "cmr10 has a lig/kern program; only {pairs} pairs were checked"
     );
 }
+
+/// What a word actually SETS, not what it holds.
+///
+/// `Tfm::set_run` is `tex.web` §906-§911's `reconstitute` -- the routine TeX
+/// uses to rebuild a word once it knows its characters, and the same algorithm
+/// the main loop runs while reading one (§1034-§1040). It is what turns `f`
+/// and `i` into cmr10's single character 0o14, and it has to CHAIN: `ffi` is
+/// two ligature steps, `f`+`f` to 0o13 and then 0o13+`i` to 0o16, so a reader
+/// that only looked at neighbouring pairs of the ORIGINAL text would get 0o13
+/// followed by a bare `i`.
+///
+/// The expected codes are read off `tftopl`'s own ligature table for the font,
+/// so this is checked against Knuth's program rather than against itself.
+#[test]
+fn a_word_is_set_as_the_characters_the_ligature_program_produces() {
+    use texrs::tfm::{Set, Tfm};
+    let Some(path) = installed("cmr10.tfm") else {
+        eprintln!("skipping: no cmr10.tfm");
+        return;
+    };
+    let tfm = Tfm::open(&path).expect("cmr10 reads");
+    let table = pl(&path).expect("tftopl runs");
+
+    // The pairs this asserts, confirmed present in the font's own table so a
+    // font that stopped carrying them would fail here rather than pass wrongly.
+    for wanted in [
+        "(LABEL C f)",
+        "(LIG C i O 14)",
+        "(LIG C f O 13)",
+        "(LABEL O 13)",
+        "(LIG C i O 16)",
+        "(LABEL O 140)",
+        "(LIG O 140 O 134)",
+        "(LABEL O 55)",
+        "(LIG O 55 O 173)",
+        "(LABEL O 173)",
+        "(LIG O 55 O 174)",
+    ] {
+        assert!(
+            table.contains(wanted),
+            "cmr10's ligature table no longer has {wanted}"
+        );
+    }
+
+    let chars = |text: &str| -> Vec<u8> {
+        tfm.set_run(text.as_bytes())
+            .into_iter()
+            .filter_map(|s| match s {
+                Set::Char(c) => Some(c),
+                Set::Kern(_) => None,
+            })
+            .collect()
+    };
+
+    assert_eq!(chars("fi"), vec![0o14], "f i is one character");
+    assert_eq!(chars("ff"), vec![0o13]);
+    // Two steps: ff, then ffi. The `o` and the `ce` are untouched.
+    assert_eq!(chars("office"), vec![b'o', 0o16, b'c', b'e']);
+    assert_eq!(chars("fluffy"), vec![0o15, b'u', 0o13, b'y'], "fl, then ff");
+    // Three characters into one, in two steps: f+f to 0o13, then 0o13+l to
+    // 0o17. This is the case that says `set_run` re-reads the character it has
+    // just made rather than walking the original text in pairs.
+    assert_eq!(chars("shuffle"), vec![b's', b'h', b'u', 0o17, b'e']);
+    // The quotes and the dashes are ligatures too, which is why a document
+    // that writes ``like this'' gets real quotation marks.
+    assert_eq!(chars("``"), vec![0o134]);
+    assert_eq!(chars("''"), vec![0o42]);
+    assert_eq!(chars("--"), vec![0o173], "an en dash");
+    assert_eq!(chars("---"), vec![0o174], "an em dash, in two steps");
+
+    // A kern is NOT a character: it is a movement between two that stay.
+    let av = tfm.set_run(b"AV");
+    assert_eq!(av.len(), 3, "A, a kern, V: {av:?}");
+    match av[1] {
+        Set::Kern(by) => assert!((by + 0.111112).abs() < 5e-7, "{by}"),
+        ref other => panic!("the middle of AV is a kern, not {other:?}"),
+    }
+
+    // A word with neither is itself, and an empty run is empty.
+    assert_eq!(chars("box"), vec![b'b', b'o', b'x']);
+    assert!(tfm.set_run(b"").is_empty());
+}

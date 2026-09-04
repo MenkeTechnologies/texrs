@@ -1,17 +1,19 @@
 //! Reading DVI, ported from tectonic's `xdv`.
 //!
-//! texrs has no stomach yet: it stops where the boxes would begin, so nothing
-//! in it produces a page today. Both halves of the format are here anyway, and
-//! for the same reason. Reading, because the parity contract stops in the same
-//! place -- today the harness compares `\message` streams, which is everything
-//! the mouth and the expander produce and nothing the rest of TeX does, and the
-//! moment texrs sets a character the reference to compare against is what real
-//! tex shipped, which is a DVI file. Writing, because that is what the stomach
-//! will call, and a DVI file is more than its opcodes: it is a linked list read
-//! backwards, and the pointers can only be filled in while writing. Both are
-//! held against the tools that read the format -- `dvitype` accepts what
-//! [`Writer`] writes, and a file of real tex's, read and written back, is the
-//! same document.
+//! Both halves of the format are here. Reading, because that is what the
+//! parity harness compares against: the moment texrs sets a character, the
+//! reference is what real tex shipped, which is a DVI file. Writing, because
+//! that is what the stomach calls -- `shipout::ship_out` draws a box tree
+//! through [`Writer`] -- and a DVI file is more than its opcodes: it is a
+//! linked list read backwards, and the pointers can only be filled in while
+//! writing. Both are held against the tools that read the format --
+//! `dvitype` accepts what [`Writer`] writes, and a file of real tex's, read
+//! and written back, is the same document.
+//!
+//! What [`Writer`] does NOT do is decide where anything goes. It is told to
+//! move and to set, and it counts what it has been told so it can fill in the
+//! postamble; the arithmetic that produces those instructions is `src/pack.rs`
+//! and `src/shipout.rs`, which is where `tex.web` puts it too.
 //!
 //! It is also the honest shape of the port. tectonic's `xdv` is a parser and an
 //! event stream, not a typesetter; the typesetter is `engine_xetex`, which is a

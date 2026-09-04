@@ -96,16 +96,65 @@ fn the_current_differences_are_the_ones_recorded() {
         sd.text()
     );
 
-    // tex reaches for the `fi` ligature in cmr10; texrs sets f and i.
+    // tex reaches for the `fi` ligature in cmr10, and so does texrs now that
+    // the `.tfm`'s ligature program is run over each word (tex.web 906-911,
+    // 1034-1040). This assertion used to say texrs did NOT -- that was the
+    // divergence, and this is the same fact pinned from the other side.
     assert!(
         rd.text().contains('\u{c}'),
         "tex uses the fi ligature (character 0x0C), got {:?}",
         rd.text()
     );
     assert!(
-        !sd.text().contains('\u{c}'),
-        "texrs does not use it yet, got {:?}",
+        sd.text().contains('\u{c}'),
+        "texrs uses it too, got {:?}",
         sd.text()
+    );
+    // And the whole of the page's text agrees, character for character, which
+    // is what the ladder calls TEXT. `The first paragraph` reads
+    // `The\u{c}rstparagraph` in both files: no space glyphs, one ligature.
+    assert_eq!(
+        rd.text(),
+        sd.text(),
+        "the two engines set the same characters"
+    );
+}
+
+/// The ligature program reaches the file, in the two shapes cmr10 has: a
+/// ligature that REPLACES two characters with one, and a kern that moves
+/// between two it leaves alone.
+///
+/// The ladder says STRUCTURE, which is one number for a page. This says what
+/// bytes are in the file, so a regression names itself.
+#[test]
+fn a_word_is_shipped_with_its_ligatures_and_its_kerns() {
+    let Some(path) = texrs::typeset::find_font("cmr10") else {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    };
+    let font = texrs::tfm::Tfm::open(&path).expect("cmr10 reads");
+    let layout = texrs::typeset::Layout::default();
+
+    // `office` is `o`, the ffi ligature (0o16), `c`, `e`: cmr10 turns f+f into
+    // 0o13 and then 0o13+i into 0o16, so three characters become one.
+    let dvi = texrs::typeset::to_dvi("office", &font, "cmr10", &layout);
+    let text = texrs::dvi::Dvi::parse(&dvi).expect("parse").text();
+    assert!(
+        text.contains("o\u{e}ce"),
+        "office is set with the ffi ligature at 0o16: {text:?}"
+    );
+
+    // `AV` kerns by -0.111112 design-size units, which at 10pt is
+    // -0.111112 * 10 * 65536 sp. A DVI carries that as a rightward movement
+    // of a negative amount between the two characters.
+    let dvi = texrs::typeset::to_dvi("AV", &font, "cmr10", &layout);
+    let kern = (-0.111112 * layout.size * 65536.0) as i32;
+    // 142+3 is `right3`, and -72829sp is the widest of the four that fits.
+    let wanted = [145u8, (kern >> 16) as u8, (kern >> 8) as u8, kern as u8];
+    assert!(
+        dvi.windows(4).any(|w| w == wanted),
+        "the A/V kern is a right3 of {kern}sp: {:02x?}",
+        &dvi[..dvi.len().min(120)]
     );
 }
 

@@ -2,9 +2,11 @@
 //!
 //! The second axis, and the attainable one. A DVI file is a short uncompressed
 //! stream of drawing commands with no fonts inside it and no compression, so
-//! byte-identical output is a realistic goal: for `Hello world.` tex writes 224
-//! bytes and texrs writes 260, where the same document in PDF is 11,729 against
-//! 615. The two files already agree on everything but the preamble.
+//! byte-identical output is a realistic goal: for `two_words.tex` tex writes
+//! 224 bytes and texrs writes 192, where the same document in PDF is tens of
+//! kilobytes against hundreds of bytes. Every document that both engines set
+//! now agrees on the CHARACTERS and on everything `Dvi::compare` can see; what
+//! is left is where each of them lands.
 //!
 //! The structural comparison is `Dvi::compare`, which `-X dvi` already needed —
 //! this adds the ladder and the oracle around it rather than a second way of
