@@ -137,6 +137,19 @@ flate2 = "1"
 # happens ONLY on `-X bundle fetch` — never inside a build.
 ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 
+# The Lua behind `\directlua` (src/lua.rs). `lua53` rather than `lua54`, and
+# that is the version LuaTeX itself embeds rather than a preference: the LuaTeX
+# manual (1.24.0, TeX Live 2026) says "We currently use Lua 5.3 and will follow
+# developments of the language but normally with some delay" (§4.2.1) and
+# `lua.version` there answers "Lua 5.3". A document's chunk is written against
+# THAT language -- 5.4's integer division, `<close>` variables and the changed
+# `math.random` seeding are differences a chunk can see -- so the engine that
+# runs it is the one LuaTeX runs it on. `vendored` builds PUC-Lua's own C
+# sources through `cc`, so a build needs no system Lua and every platform gets
+# the same interpreter; fusevm is not an option here, it hosts seventeen
+# frontends and none of them is Lua.
+mlua = { version = "0.12.1", features = ["lua53", "vendored"] }
+
 [[bench]]
 name = "pipeline"
 harness = false
