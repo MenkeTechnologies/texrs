@@ -18,7 +18,7 @@
 //!  * [`seeds`] turns it into the `\newlabel` calls that go in the preamble,
 //!    which is exactly what LaTeX's `\@input{JOB.aux}` does;
 //!  * [`pass`] runs the document once with `\label` diverted into the message
-//!    stream, and [`write`] puts what came back into the file;
+//!    stream, and [`write()`] puts what came back into the file;
 //!  * [`rerun_needed`] compares the two, which is the condition LaTeX prints
 //!    the warning on.
 //!
