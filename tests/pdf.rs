@@ -1184,8 +1184,8 @@ fn a_truetype_face_is_embedded_subsetted_and_still_drawn() {
 ///
 /// LuaTeX writes both for every file it produces -- measured on
 /// `tests/pdf_cases/two_words.tex`, `11 0 obj << /Producer (LuaTeX-1.24.0)
-/// /Creator (TeX) /CreationDate (D:19691231190000-05'00') ... /Trapped /False
-/// >>` and `/ID [ <23826C1D...> <23826C1D...> ]` in the `/XRef` dictionary --
+/// /Creator (TeX) /CreationDate (D:19691231190000-05'00') ... /Trapped /False >>`
+/// and `/ID [ <23826C1D...> <23826C1D...> ]` in the `/XRef` dictionary --
 /// and texrs wrote neither. Reproducibility is the reason to care: `/ID` is a
 /// digest and `/CreationDate` a clock, and if either is drawn from the run
 /// rather than from the document then no two builds of it are the same file and
