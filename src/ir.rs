@@ -57,6 +57,11 @@ pub enum MsgOp {
     /// A glue, rendered from its four slots: natural, stretch, shrink and the
     /// packed orders.
     Glue([Num; 4]),
+    /// The same four slots, written in MATH units: `\the\muskip0` gives
+    /// `3.0mu`, not `3.0pt`. The numbers are identical -- a mu is 65536ths as a
+    /// point is -- so this differs from `Glue` only in what §1060 prints after
+    /// each finite component.
+    MuGlue([Num; 4]),
     /// A number computed and thrown away, for a call made for its effect —
     /// `\rustcall` in running text rather than inside a message body. It rides
     /// the message machinery because that is where a run-time value already has
@@ -95,6 +100,24 @@ pub enum Cmd {
     SetCount(i64, Num),
     /// `\advance`/`\multiply`/`\divide` on a count register.
     Arith(Arith, i64, Num),
+    /// Where the next command would be reported from, as `tex.web` §311's
+    /// context display for that point in the source.
+    ///
+    /// An interpreter reads the display off the input stack at the moment the
+    /// error happens. A compiled engine has no input stack left by then --
+    /// `\multiply` overflows on the VM, long after the mouth closed the file --
+    /// so the display is taken while lowering and carried to the run. Emitted
+    /// only in front of a command that can report, which is the checked
+    /// arithmetic of §1236 and nothing else so far.
+    ErrorSite(String),
+    /// `tex.web` §1335's `(see the transcript file for additional information)`,
+    /// printed at the END of a run that reported anything.
+    ///
+    /// A command rather than text because §1335 consults `history`, which is a
+    /// fact about the whole run: an error the VM reported is as much a reason
+    /// to print it as one the lowerer reported, and only the VM knows whether
+    /// one happened. Emits nothing when the run was clean.
+    TranscriptNotice,
     /// A run of the document's own text.
     ///
     /// Ordinary characters -- the words of the document, as opposed to what
@@ -196,6 +219,8 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             Cmd::Arith(op, reg, num) => {
                 out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
             }
+            Cmd::ErrorSite(site) => out.push_str(&format!("{pad}ErrorSite {site:?}\n")),
+            Cmd::TranscriptNotice => out.push_str(&format!("{pad}TranscriptNotice\n")),
             Cmd::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
             Cmd::FileClose => out.push_str(&format!("{pad}FileClose\n")),
             Cmd::Message(ops) => {
@@ -270,6 +295,9 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
             MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
             MsgOp::Dimen(n) => out.push_str(&format!("{pad}Dimen {}\n", num_text(n))),
             MsgOp::Glue(parts) => out.push_str(&format!("{pad}Glue {}\n", num_text(&parts[0]))),
+            MsgOp::MuGlue(parts) => {
+                out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0])))
+            }
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
             MsgOp::If {
                 left,

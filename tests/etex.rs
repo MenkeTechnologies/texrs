@@ -226,3 +226,155 @@ fn glueexpr_combines_components_by_order() {
         assert_eq!(got, want, "{body}");
     }
 }
+
+#[test]
+fn ifcsname_asks_without_answering() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // The whole primitive is in the third bracket. `\csname` DEFINES a name it
+    // does not find (`tex.web` §372 makes it `\relax`), so asking with it
+    // changes the answer for every later ask; etex.ch's `if_cs_code` looks the
+    // name up with `no_new_control_sequence` still true and leaves the hash
+    // table alone, so the second ask about `\nope` must still say NO.
+    let body = "\\def\\foo{F}\
+        \\ifcsname foo\\endcsname\\message{[YES]}\\else\\message{[NO]}\\fi\
+        \\ifcsname nope\\endcsname\\message{[YES]}\\else\\message{[NO]}\\fi\
+        \\ifcsname nope\\endcsname\\message{[YES]}\\else\\message{[NO]}\\fi";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want, "\\ifcsname must not define what it does not find");
+}
+
+#[test]
+fn ifcsname_and_ifdefined_decide_inside_a_message() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // §1279 expands a `\message` body, so a conditional in one is decided
+    // rather than printed. Both of these read the macro table, which is a
+    // frontend fact, so neither becomes a run-time branch.
+    let body = "\\def\\foo{F}\
+        \\message{[\\ifdefined\\foo YES\\else NO\\fi][\\ifdefined\\bar YES\\else NO\\fi]}\
+        \\message{[\\ifcsname foo\\endcsname YES\\else NO\\fi]\
+        [\\ifcsname bar\\endcsname YES\\else NO\\fi]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn a_csname_that_found_nothing_compares_equal_to_relax() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // LaTeX's older `\@ifundefined` is this line and nothing else, and it is
+    // the reason `\ifx` has to see a `\csname`-made `\relax` and the primitive
+    // `\relax` as the same command. `\let\a=\relax` is the same comparison
+    // reached the other way.
+    let body = "\\def\\foo{F}\\let\\a=\\relax\
+        \\expandafter\\ifx\\csname nope\\endcsname\\relax\\message{[UNDEF]}\\else\\message{[DEF]}\\fi\
+        \\expandafter\\ifx\\csname foo\\endcsname\\relax\\message{[UNDEF]}\\else\\message{[DEF]}\\fi\
+        \\ifx\\a\\relax\\message{[LET]}\\else\\message{[NOTLET]}\\fi";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn muskip_is_a_glue_register_measured_in_mu() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // Everything a `\skip` does, in the other unit: the components print with
+    // `mu` after them, an infinite one is still `fil`, a copy carries all four,
+    // `\advance` combines by order and `\multiply` scales every component. The
+    // `\muskipdef` name has to work in the same positions the spelt-out form
+    // does, and a register nothing has written is `0.0mu` rather than `0.0pt`.
+    let body = "\\muskip0=3mu plus 1mu minus 2mu\\message{[\\the\\muskip0]}\
+        \\muskip1=1mu plus 2fil\\message{[\\the\\muskip1]}\
+        \\muskip2=\\muskip0 \\advance\\muskip2 by 1mu plus 1mu\\message{[\\the\\muskip2]}\
+        \\multiply\\muskip2 by 2\\message{[\\the\\muskip2]}\
+        \\muskipdef\\mymu=3 \\mymu=7mu\\message{[\\the\\mymu][\\the\\muskip3]}\
+        \\message{[\\the\\muskip9]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn a_muskip_is_restored_by_the_group_that_set_it() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // A math glue lives in the same slot file every other register does, so it
+    // is saved and restored by the same machinery. Worth its own test because
+    // it is four slots, and restoring three of four would look right in every
+    // probe that only reads the natural component back.
+    let body = "\\muskip0=3mu plus 1mu\
+        {\\muskip0=99mu minus 4mu \\message{[\\the\\muskip0]}}\\message{[\\the\\muskip0]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn muexpr_is_glueexpr_in_the_other_unit() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let body = "\\muskip0=\\muexpr 3mu plus 1mu + 2mu plus 2mu\\relax\\message{[\\the\\muskip0]}\
+        \\muskip1=\\muexpr 2mu plus 1fil*3\\relax\\message{[\\the\\muskip1]}\
+        \\muskip2=\\muexpr 6mu plus 6mu/2\\relax\\message{[\\the\\muskip2]}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn latexs_ifundefined_answers_and_keeps_answering() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // LaTeX's `\@ifundefined`, spelt without the `@` because that character is
+    // catcode 12 in INITEX and both engines would read `\@` as its own control
+    // sequence. This is the whole reason `\ifcsname` is worth having: the test
+    // must not DEFINE the name it asks about, or the second ask answers
+    // differently from the first. The three `\expandafter`s are the other half
+    // -- they expand the `\fi` and the `\else` away so the two-argument macro
+    // takes the arguments that follow the conditional.
+    let body = "\\catcode`\\#=6 \\def\\firstoftwo#1#2{#1}\\def\\secondoftwo#1#2{#2}\
+        \\def\\ifundef#1{\\ifcsname #1\\endcsname\
+        \\expandafter\\ifx\\csname #1\\endcsname\\relax\
+        \\expandafter\\expandafter\\expandafter\\firstoftwo\
+        \\else\\expandafter\\expandafter\\expandafter\\secondoftwo\\fi\
+        \\else\\expandafter\\firstoftwo\\fi}\
+        \\def\\known{K}\
+        \\ifundef{known}{\\message{[UNDEF]}}{\\message{[DEF]}}\
+        \\ifundef{missing}{\\message{[UNDEF]}}{\\message{[DEF]}}\
+        \\ifundef{missing}{\\message{[UNDEF2]}}{\\message{[DEF2]}}";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn unless_negates_whichever_engine_decides_the_conditional() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    // `\unless` is one flag spent by the conditional that follows, and the
+    // conditionals are settled in two different places here: `\ifnum` becomes
+    // a run-time branch the lowerer builds, `\ifdefined` and `\ifcsname` are
+    // decided by the expander. A flag either of them could leave behind would
+    // negate the NEXT conditional instead, which is why all three are in one
+    // document rather than three.
+    let body = "\\def\\k{K}\
+        \\unless\\ifdefined\\k \\message{[A-NO]}\\else\\message{[A-YES]}\\fi\
+        \\unless\\ifcsname k\\endcsname \\message{[B-NO]}\\else\\message{[B-YES]}\\fi\
+        \\unless\\ifcsname zz\\endcsname \\message{[C-NO]}\\else\\message{[C-YES]}\\fi\
+        \\count1=5 \\unless\\ifnum\\count1>3 \\message{[D-NO]}\\else\\message{[D-YES]}\\fi";
+    let (want, got) = both(&lua, body);
+    assert_eq!(got, want);
+}

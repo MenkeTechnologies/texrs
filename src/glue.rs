@@ -19,6 +19,15 @@ pub fn order_unit(order: Order) -> &'static str {
     }
 }
 
+/// What one component of a glue is written in: its infinity, or the glue's own
+/// unit when it is finite.
+fn component_unit(unit: &str, order: Order) -> &str {
+    match order {
+        0 => unit,
+        other => order_unit(other),
+    }
+}
+
 /// The order a run of letters names, if it names one.
 ///
 /// `fil`, `fill` and `filll` and nothing else: TeX stops at three l's, so
@@ -44,19 +53,37 @@ pub fn print_glue(
     shrink: i64,
     shrink_order: Order,
 ) -> String {
-    let mut out = format!("{}pt", crate::dimen::print_scaled(natural));
+    print_glue_in("pt", natural, stretch, stretch_order, shrink, shrink_order)
+}
+
+/// The same, in whatever unit the glue is measured in.
+///
+/// `tex.web` §178's `print_spec` takes the unit as an argument for exactly one
+/// reason: §1060 prints a math glue with `print_spec(p,"mu")`. Only the FINITE
+/// components carry it -- an infinite one is `fil`, `fill` or `filll` whichever
+/// file it came from -- which is why the unit is not simply appended to every
+/// number below.
+pub fn print_glue_in(
+    unit: &str,
+    natural: i64,
+    stretch: i64,
+    stretch_order: Order,
+    shrink: i64,
+    shrink_order: Order,
+) -> String {
+    let mut out = format!("{}{unit}", crate::dimen::print_scaled(natural));
     if stretch != 0 {
         out.push_str(&format!(
             " plus {}{}",
             crate::dimen::print_scaled(stretch),
-            order_unit(stretch_order)
+            component_unit(unit, stretch_order)
         ));
     }
     if shrink != 0 {
         out.push_str(&format!(
             " minus {}{}",
             crate::dimen::print_scaled(shrink),
-            order_unit(shrink_order)
+            component_unit(unit, shrink_order)
         ));
     }
     out

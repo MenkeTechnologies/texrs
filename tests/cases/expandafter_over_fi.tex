@@ -1,0 +1,26 @@
+% The idiom LaTeX's \@ifnextchar and \@ifundefined are built on: three
+% \expandafter's whose purpose is to EXPAND the \fi and then the \else away, so
+% the two-argument macro lands OUTSIDE the conditional and takes the arguments
+% that follow it. It works only if ONE condition stack (tex.web 489) is kept
+% for every conditional -- a \fi expanded out of an arm pops the same stack the
+% \else of the conditional around it pops. Deciding a conditional's arms as a
+% bounded token region instead makes the two disagree, and the run stops with
+% `! Extra \else.'
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\firstoftwo#1#2{#1}
+\def\secondoftwo#1#2{#2}
+\def\same{S}
+\def\other{S}
+\def\pick{\iftrue
+    \ifx\same\other
+      \expandafter\expandafter\expandafter\firstoftwo
+    \else
+      \expandafter\expandafter\expandafter\secondoftwo
+    \fi
+  \else
+    \expandafter\firstoftwo
+  \fi}
+\pick{\message{[EQ]}}{\message{[NE]}}
+\def\other{Z}
+\pick{\message{[EQ]}}{\message{[NE]}}
+\end

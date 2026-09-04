@@ -10,6 +10,8 @@
 A IN MARK B X MARK [5]
 #==# backtick_codes.tex
 65-66
+#==# box_conditionals.tex
+[VOID] [NOTHBOX] [NOTVBOX] [V][N][N]
 #==# caret_hex_notation.tex
 [A][J][tA]
 #==# caret_in_control_sequence_name.tex
@@ -60,6 +62,8 @@ VALUE
 [BIG] [GE] [EQ] [LT] [RATIO] [NATURAL] [INCH]
 #==# dimension_units.tex
 [1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
+#==# divide_by_zero.tex
+! Arithmetic overflow.l.8 \divide\count1 by 0                       [7] [3] )(see the transcript file for additional information
 #==# edef_expands_now.tex
 4-9
 #==# edef_freezes_a_macro.tex
@@ -74,6 +78,8 @@ ZERO
 \b
 #==# expandafter_brace_arg.tex
 [INNER]
+#==# expandafter_over_fi.tex
+[EQ] [NE]
 #==# expandafter_toplevel.tex
 BUILT
 #==# gdef_survives_group.tex

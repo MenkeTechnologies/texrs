@@ -24,6 +24,19 @@ thread_local! {
     static TEXT: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
+thread_local! {
+    /// `tex.web` §311's context display for the command about to run, put here
+    /// by [`b_err_site`] and read by whatever reports.
+    ///
+    /// A compiled engine has no input stack when a run-time error happens, so
+    /// the display cannot be derived then; the lowerer takes it off the mouth
+    /// and the chunk carries it.
+    static ERROR_SITE: RefCell<String> = const { RefCell::new(String::new()) };
+    /// Whether anything was REPORTED during the run, which is what §1335
+    /// consults before printing `(see the transcript file …)`.
+    static REPORTED: RefCell<bool> = const { RefCell::new(false) };
+}
+
 /// Append a run of the document's text.
 fn b_text(vm: &mut VM, _argc: u8) -> Value {
     let piece = render(&vm.pop());
@@ -113,6 +126,48 @@ fn fault(vm: &mut VM, msg: impl Into<String>) -> Value {
     Value::Undef
 }
 
+/// Report `msg` and CARRY ON — `tex.web` §82's `print_err` followed by `error`,
+/// which is what all but §93's fatal conditions do.
+///
+/// The report is pushed onto the message being BUILT rather than recorded as a
+/// message of its own, and that is the whole formatting rule: `print_ln` ends
+/// the error's context display and adds no character, so the `\message` that
+/// follows begins hard against it on the same terminal line. It is the same
+/// arrangement `lower.rs`'s `reports` makes for an error the mouth reported;
+/// this is the run-time half, so that a `\multiply` overflow and a `\count`
+/// constant that is too big read identically.
+fn report(msg: &str) {
+    let site = ERROR_SITE.with(|s| s.borrow().clone());
+    REPORTED.with(|r| *r.borrow_mut() = true);
+    BUILDING.with(|b| {
+        b.borrow_mut()
+            .push_str(&format!("! {msg}.{}", site.replace('\n', "")))
+    });
+}
+
+/// Record where the command about to run would be reported from. One argument.
+fn b_err_site(vm: &mut VM, _argc: u8) -> Value {
+    let site = render(&vm.pop());
+    ERROR_SITE.with(|s| *s.borrow_mut() = site);
+    Value::Int(0)
+}
+
+/// §1335: the transcript note, written only if the run reported something.
+///
+/// The `)` in front of it is the document's own closing paren, which tex writes
+/// when the file ends and which is otherwise the last character of the run.
+fn b_transcript_notice(_vm: &mut VM, _argc: u8) -> Value {
+    if REPORTED.with(|r| *r.borrow()) {
+        let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+        MESSAGES.with(|m| {
+            m.borrow_mut().push(format!(
+                "{held})(see the transcript file for additional information"
+            ))
+        });
+    }
+    Value::Int(0)
+}
+
 /// Compile and register a `\rust{ … }` block. One argument: the base64 body.
 ///
 /// The error is raised on the VM rather than swallowed: a block that does not
@@ -155,8 +210,10 @@ fn b_ffi_call(vm: &mut VM, argc: u8) -> Value {
 /// division by zero. Measured against tex 3.141592653: `\count1=2000000000
 /// \multiply\count1 by 2` raises and the register still reads 2000000000.
 ///
-/// texrs stops the run where tex reports and carries on -- its error model, and
-/// the one difference recorded in BUGS.md rather than papered over.
+/// The recovery is tex's too: §1236 reports through `error` rather than
+/// `fatal_error`, so the run CONTINUES with the register untouched. Returning
+/// the old value is what leaves it untouched -- the caller's `SetSlot` writes
+/// whatever comes back, and writing the old value is a no-op.
 fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     let which = vm.pop().to_int();
     let operand = vm.pop().to_int();
@@ -170,7 +227,10 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     };
     match result {
         Some(v) if (i32::MIN as i64..=i32::MAX as i64).contains(&v) => Value::Int(v),
-        _ => fault(vm, "Arithmetic overflow"),
+        _ => {
+            report("Arithmetic overflow");
+            Value::Int(old)
+        }
     }
 }
 
@@ -200,12 +260,22 @@ fn b_msg_dimen(vm: &mut VM, _argc: u8) -> Value {
 
 /// Append a glue the way TeX writes one.
 fn b_msg_glue(vm: &mut VM, _argc: u8) -> Value {
+    append_glue(vm, "pt")
+}
+
+/// The same in MATH units (`tex.web` §1060's `print_spec(p,"mu")`).
+fn b_msg_muglue(vm: &mut VM, _argc: u8) -> Value {
+    append_glue(vm, "mu")
+}
+
+fn append_glue(vm: &mut VM, unit: &str) -> Value {
     // Pushed natural, stretch, shrink, orders -- so they come back reversed.
     let orders = vm.pop().to_int();
     let shrink = vm.pop().to_int();
     let stretch = vm.pop().to_int();
     let natural = vm.pop().to_int();
-    let text = crate::glue::print_glue(natural, stretch, orders / 4, shrink, orders % 4);
+    let text =
+        crate::glue::print_glue_in(unit, natural, stretch, orders / 4, shrink, orders % 4);
     BUILDING.with(|b| b.borrow_mut().push_str(&text));
     Value::Int(0)
 }
@@ -225,6 +295,9 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
     vm.register_builtin(ops::MSG_GLUE, b_msg_glue);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
+    vm.register_builtin(ops::MSG_MUGLUE, b_msg_muglue);
+    vm.register_builtin(ops::ERR_SITE, b_err_site);
+    vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
 }
@@ -244,6 +317,8 @@ fn run_with(
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
     FAULT.with(|f| *f.borrow_mut() = None);
+    ERROR_SITE.with(|s| s.borrow_mut().clear());
+    REPORTED.with(|r| *r.borrow_mut() = false);
     // The decision needs the ops, and `VM::new` takes the chunk by value.
     let chunk_for_jit = chunk.clone();
     let mut vm = VM::new(chunk);
@@ -270,6 +345,14 @@ fn run_with(
         None => {}
     }
     let result = vm.run();
+    // A report with nothing printed after it still has to be printed. In an
+    // ordinary run the buffer is empty here -- every `\message` flushes its
+    // own -- so this only ever carries an error §82 reported after the last
+    // one, which tex writes on the terminal as it happens.
+    let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    if !held.is_empty() {
+        MESSAGES.with(|m| m.borrow_mut().push(held));
+    }
     // A builtin that faulted halted the VM, so the halt has to be read as the
     // error it stands for rather than as a clean finish.
     if let Some(f) = FAULT.with(|f| f.borrow_mut().take()) {

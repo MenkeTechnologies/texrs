@@ -1,0 +1,12 @@
+% tex.web 503's box conditionals, on registers nothing has filled. texrs has no
+% \setbox, so every box register is void -- which is the ANSWER rather than a
+% refusal: 462's box(n) is null for a register nothing filled, and tex agrees
+% for a document that fills none. The registers are high ones deliberately: the
+% oracle loads plain.tex, which fills \box0 and puts an \hbox in \strutbox
+% (\box11), the same startup-state difference plain_count0.tex records.
+\catcode`\{=1 \catcode`\}=2
+\ifvoid200 \message{[VOID]}\else\message{[FULL]}\fi
+\ifhbox201 \message{[HBOX]}\else\message{[NOTHBOX]}\fi
+\ifvbox202 \message{[VBOX]}\else\message{[NOTVBOX]}\fi
+\message{[\ifvoid203 V\else F\fi][\ifhbox203 H\else N\fi][\ifvbox203 B\else N\fi]}
+\end

@@ -151,6 +151,27 @@ pub struct Engine {
     /// before the assignment replaces the first, as it does there.
     after_assignment: Option<Token>,
     advice_depth: u32,
+    /// Whether an `\unless` is waiting for the conditional it negates.
+    ///
+    /// eTeX's `\unless` is not a conditional of its own: it flips the sense of
+    /// the NEXT one, which is why this is a flag the conditional spends rather
+    /// than a second set of primitives. It lives on the engine rather than on
+    /// the lowerer because both decide conditionals -- `\ifnum` becomes a
+    /// run-time branch the lowerer builds and `\ifx` is settled here -- and two
+    /// flags would leave whichever one did not run the conditional still set,
+    /// so the NEXT conditional would be negated instead.
+    unless: bool,
+    /// Whether the scanner is reading MATH units.
+    ///
+    /// `tex.web` §448 passes this as `scan_dimen`'s `mu` argument, and §455 is
+    /// what it decides: where a mu is wanted, `mu` is the only finite unit and
+    /// every other one is illegal; where a mu is not wanted, `mu` is illegal
+    /// and the rest are legal. The arithmetic is the same either way -- a mu
+    /// is 65536ths exactly as a point is -- so this is the whole difference.
+    /// A field rather than an argument because the mode has to survive down
+    /// through `scan_glue` into `scan_dimen_or_fil`, and threading it would
+    /// change five signatures that are already public.
+    mu_units: bool,
     /// Errors REPORTED rather than raised, in the order they happened.
     ///
     /// `tex.web` §82's `error` prints the message and carries on; only a few
@@ -218,10 +239,12 @@ const ASSIGNMENTS: &[&str] = &[
     "countdef",
     "dimendef",
     "skipdef",
+    "muskipdef",
     "toksdef",
     "count",
     "dimen",
     "skip",
+    "muskip",
     "toks",
     "advance",
     "multiply",
@@ -279,6 +302,8 @@ impl Engine {
             protected: false,
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
+            unless: false,
+            mu_units: false,
             errors: Vec::new(),
             after_group_tokens: Vec::new(),
             after_assignment: None,
@@ -738,6 +763,10 @@ impl Engine {
     // ── conditionals ─────────────────────────────────────────────────────
 
     fn do_conditional(&mut self, lx: &mut Lexer, name: &str, pending_only: bool) -> R<()> {
+        // `\unless` negates whatever this one decides. Taken BEFORE the test so
+        // that a conditional inside the test -- `\ifx` over two macros one of
+        // which expands -- cannot spend it.
+        let negated = std::mem::take(&mut self.unless);
         let truth = match name {
             "iftrue" => true,
             "iffalse" => false,
@@ -768,6 +797,21 @@ impl Engine {
                 Some(Token::Cs(n)) => self.meanings.contains_key(&n),
                 _ => false,
             },
+            // etex.ch's `if_cs_code`. It reads the characters up to
+            // `\endcsname` exactly as `\csname` does and then asks whether that
+            // name is defined -- but its `id_lookup` runs with
+            // `no_new_control_sequence` still TRUE, so a name it does not find
+            // is not entered in the hash table. That single difference is the
+            // whole primitive: `tex.web` §372's `\csname` DEFINES what it does
+            // not find (as `\relax`), which makes it useless for asking the
+            // question, and `\ifcsname` answers without changing the answer.
+            //
+            // The predicate is the same one `\ifdefined` above uses, because
+            // etex's is: both test `eq_type(cur_cs) <> undefined_cs`.
+            "ifcsname" => {
+                let built = self.read_csname(lx, pending_only)?;
+                self.meanings.contains_key(&CsId::intern(&built))
+            }
             "ifx" => {
                 let a = self.take(lx, pending_only);
                 let b = self.take(lx, pending_only);
@@ -780,13 +824,35 @@ impl Engine {
                 let b = self.expand_one_char(lx, pending_only)?;
                 a == b
             }
+            // `tex.web` §503's box conditionals. Each reads an eight-bit
+            // register number (§433) and asks what is in that box register: is
+            // it empty, does it hold an \hbox, does it hold a \vbox.
+            //
+            // texrs has no `\setbox`, so every box register is VOID -- which is
+            // not a refusal to answer, it is the answer. §462's `box(n)` is
+            // `null` for a register nothing has filled, and that is the state
+            // of all 256 of them here. So `\ifvoid` is true, `\ifhbox` and
+            // `\ifvbox` are false, and a document that reads one gets what tex
+            // would give it for the same document -- one that cannot have
+            // filled a box, because `\setbox` stops the run before it could.
+            //
+            // The day `\setbox` exists this has to consult it. It is written as
+            // one arm over the three names so that there is one place to
+            // change rather than three.
+            "ifvoid" | "ifhbox" | "ifvbox" => {
+                let reg = self.scan_number(lx, pending_only)?;
+                if !(0..=255).contains(&reg) {
+                    self.report(lx, &format!("Bad register code ({reg})"));
+                }
+                name == "ifvoid"
+            }
             "ifcase" => {
                 let n = self.scan_number(lx, pending_only)?;
                 return self.do_ifcase(lx, n, pending_only);
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
-        match truth {
+        match truth != negated {
             true => self.conds.push(CondState::Taken),
             false => {
                 // Skip to `\else` (run that branch) or `\fi` (run nothing).
@@ -891,6 +957,21 @@ impl Engine {
                 match (self.meanings.get(x), self.meanings.get(y)) {
                     (None, None) => true,
                     (Some(mx), Some(my)) => mx == my,
+                    // One side is a bare primitive and the other has been GIVEN
+                    // that primitive as its meaning. texrs does not enter a
+                    // primitive in `meanings` -- primitives are dispatched by
+                    // name -- so `\relax` itself is absent from the table while
+                    // a name `\let` to it, or one `tex.web` §372's `\csname`
+                    // made `\relax` because it found nothing, carries
+                    // `Primitive(relax)`. §507 compares the COMMAND, and both
+                    // of these are the same command.
+                    //
+                    // This is what `\expandafter\ifx\csname NAME\endcsname\relax`
+                    // rests on -- LaTeX's older `\@ifundefined` is exactly that
+                    // line -- and it answered "not \relax" for every name until
+                    // this arm existed.
+                    (Some(Meaning::Primitive(p)), None) => p == y,
+                    (None, Some(Meaning::Primitive(p))) => p == x,
                     _ => false,
                 }
             }
@@ -980,6 +1061,30 @@ impl Engine {
         Ok((sign, int, crate::dimen::round_decimals(&fraction)))
     }
 
+    /// A finite unit's value in scaled points, under the mode the scanner is in.
+    ///
+    /// `tex.web` §455: in mu mode `mu` is the only unit there is, and outside it
+    /// `mu` is not a unit at all. A mu scales exactly as a point does -- both
+    /// are 65536ths -- so the conversion is the identity and the whole content
+    /// of the rule is which spellings are accepted where.
+    fn finite_unit(&self, int: i64, frac: i64, unit: &str) -> Option<i64> {
+        match self.mu_units {
+            true => (unit == "mu").then(|| int * crate::dimen::UNITY + frac),
+            false => crate::dimen::to_scaled(int, frac, unit),
+        }
+    }
+
+    /// §454's complaint, which names the unit it would have inserted: `pt`
+    /// where a dimension was wanted and `mu` where a math glue was. Measured
+    /// against luatex, which says `Illegal unit of measure (mu inserted)` for
+    /// `\muskip0=1pt`.
+    fn illegal_unit(&self) -> TexError {
+        match self.mu_units {
+            true => TexError("Illegal unit of measure (mu inserted)".into()),
+            false => TexError("Illegal unit of measure (pt inserted)".into()),
+        }
+    }
+
     /// A dimension: the number, then a unit (`tex.web` §448-453). The result is
     /// scaled points, which is the only form a dimension ever has.
     pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
@@ -1013,8 +1118,8 @@ impl Engine {
                 }
             }
         }
-        let Some(sp) = crate::dimen::to_scaled(int, frac, &unit) else {
-            return Err(TexError("Illegal unit of measure (pt inserted)".into()));
+        let Some(sp) = self.finite_unit(int, frac, &unit) else {
+            return Err(self.illegal_unit());
         };
         // One optional space is absorbed after a unit, as after a constant.
         if let Some(t) = self.take(lx, pending_only) {
@@ -1116,6 +1221,10 @@ impl Engine {
     /// The register a slot number names, spelt as the document would spell it.
     fn register_name(&self, slot: i64) -> String {
         let e = self.escape;
+        if slot >= crate::compiler::MUSKIP_BASE {
+            let n = (slot - crate::compiler::MUSKIP_BASE) / crate::compiler::SKIP_STRIDE;
+            return format!("{e}muskip{n}");
+        }
         if slot >= crate::compiler::SKIP_BASE {
             let n = (slot - crate::compiler::SKIP_BASE) / crate::compiler::SKIP_STRIDE;
             return format!("{e}skip{n}");
@@ -1372,13 +1481,13 @@ impl Engine {
                 taken = n;
                 break;
             }
-            if crate::dimen::unit_ratio(candidate).is_some() && n == 2 {
+            if n == 2 && self.finite_unit(0, 0, candidate).is_some() {
                 taken = 2;
                 break;
             }
         }
         if taken == 0 {
-            return Err(TexError("Illegal unit of measure (pt inserted)".into()));
+            return Err(self.illegal_unit());
         }
         // Letters past the unit were never part of it.
         for t in extra[taken..].iter().rev() {
@@ -1387,9 +1496,12 @@ impl Engine {
         let unit = &letters[..taken];
         let sp = match order {
             // An infinite component's number is not converted: `1fil` is one,
-            // in the same 65536ths a point uses, at a different order.
-            0 => crate::dimen::to_scaled(int, frac, unit)
-                .ok_or_else(|| TexError("Illegal unit of measure (pt inserted)".into()))?,
+            // in the same 65536ths a point uses, at a different order. §455's
+            // infinities are the same in mu mode, which is why only the finite
+            // branch consults the unit table.
+            0 => self
+                .finite_unit(int, frac, unit)
+                .ok_or_else(|| self.illegal_unit())?,
             _ => int * crate::dimen::UNITY + frac,
         };
         if let Some(t) = self.take(lx, pending_only) {
@@ -1512,11 +1624,29 @@ impl Engine {
         }
     }
 
+    /// The same, in MATH units: `\muskip0=3mu plus 1mu minus 2mu`.
+    ///
+    /// One scanner, one mode flag. `tex.web` §461's `scan_glue(mu_val)` is
+    /// literally §461's `scan_glue(glue_val)` with `mu` passed down to every
+    /// `scan_dimen` inside it, and a second copy here would be a second place
+    /// for the `plus`/`minus` grammar to drift.
+    pub fn scan_muglue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
+        self.mu_units = true;
+        let got = self.scan_glue(lx);
+        self.mu_units = false;
+        got
+    }
+
     /// `<dimen> [plus <dimen|fil>] [minus <dimen|fil>]` — a glue.
     pub fn scan_glue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
-        // `\glueexpr ...\relax` stands where a glue does.
+        // `\glueexpr ...\relax` stands where a glue does, and `\muexpr` where a
+        // math glue does -- eTeX gives each unit its own expression primitive
+        // so that the operands cannot be mixed, and the mode the scanner is in
+        // is what says which of the two is the one being read.
+        let mu = self.mu_units;
         if let Some(t) = self.take(lx, false) {
-            let is_expr = matches!(&t, Token::Cs(n) if n.name() == "glueexpr");
+            let is_expr = matches!(&t, Token::Cs(n)
+                if (mu && n.name() == "muexpr") || (!mu && n.name() == "glueexpr"));
             lx.push_back(std::slice::from_ref(&t));
             if is_expr {
                 let _ = self.take(lx, false);
@@ -1875,7 +2005,7 @@ impl Engine {
         // stop at 255 and name the table they overran.
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
-            "dimendef" | "skipdef" | "toksdef" => (255, "register code"),
+            "dimendef" | "skipdef" | "muskipdef" | "toksdef" => (255, "register code"),
             "chardef" => (255, "character code"),
             _ => (255, "register code"),
         };
@@ -1900,6 +2030,11 @@ impl Engine {
             "toksdef" => Meaning::ToksDef(v),
             "skipdef" => {
                 Meaning::CountDef(crate::compiler::SKIP_BASE + v * crate::compiler::SKIP_STRIDE)
+            }
+            // A math glue register is a glue register in the second glue file,
+            // so its name stands for a slot exactly as `\skipdef`'s does.
+            "muskipdef" => {
+                Meaning::CountDef(crate::compiler::MUSKIP_BASE + v * crate::compiler::SKIP_STRIDE)
             }
             _ => Meaning::CountDef(v),
         };
@@ -2623,6 +2758,71 @@ impl Engine {
         Ok(out)
     }
 
+    /// `tex.web` §366's `scan_toks(macro_def, xpand)`: expand an `\edef` body
+    /// the whole way, so what gets DEFINED is the token run the expansion
+    /// produced rather than the recipe for producing it.
+    ///
+    /// Two things follow from that and neither is optional. A conditional in
+    /// the body is decided HERE -- `\edef\a{\ifcase\count1 ZERO\else OTHER\fi}`
+    /// freezes to `ZERO` when `\count1` is 0, and a later `\count1=5` cannot
+    /// move it. And `\the` produces §478's CHARACTERS, so two bodies that
+    /// froze to the same run compare equal under `\ifx`, which they cannot do
+    /// while one of them still holds the conditional.
+    ///
+    /// The caller decides when this may be used: the registers read have to be
+    /// ones whose values the lowerer can prove, because a compiled engine holds
+    /// them in VM slots and cannot read one whose value depends on the run.
+    pub fn expand_edef_body(&mut self, toks: &[Token]) -> R<Vec<Token>> {
+        let mut lx = Lexer::new("");
+        lx.push_back(toks);
+        let mut out = Vec::new();
+        let mut steps = 0usize;
+        while let Some(t) = lx.pending.pop() {
+            steps += 1;
+            if steps > 200_000 {
+                return Err(TexError("TeX capacity exceeded".into()));
+            }
+            let Token::Cs(name) = &t else {
+                out.push(t);
+                continue;
+            };
+            let name = *name;
+            // `\unexpanded{...}` is the one thing that stops this pass: its
+            // group goes into the body AS TOKENS, so a macro inside it is
+            // called when the body runs rather than now. `\expanded{...}` is
+            // the opposite and needs no more than the wrapper coming off,
+            // because everything here is expanded anyway.
+            if name.name() == "unexpanded" {
+                let group = self.read_group_tokens(&mut lx)?;
+                out.extend(group);
+                continue;
+            }
+            if name.name() == "expanded" {
+                let group = self.read_group_tokens(&mut lx)?;
+                lx.push_back(&group);
+                continue;
+            }
+            // §478's `the_toks`, which is what `\the` means inside an \edef:
+            // the value as characters, not the reading it stands for.
+            if name.name() == "the" || name.name() == "number" {
+                let text = self.read_the(&mut lx, name.name() == "number")?;
+                out.extend(text.chars().map(|c| Token::Char(c, Cat::Other)));
+                continue;
+            }
+            // §366 does not expand a `\protected` macro, which is the whole
+            // point of the prefix: it survives as itself and runs when the
+            // body does.
+            let protected = matches!(
+                self.meanings.get(&name),
+                Some(Meaning::Macro(m)) if m.protected
+            );
+            if protected || !self.try_expand(&mut lx, name, true)? {
+                out.push(t);
+            }
+        }
+        Ok(out)
+    }
+
     /// Fully expand a token list and render it, for `\message`.
     fn expand_to_text(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<String> {
         let saved: Vec<Token> = std::mem::take(&mut lx.pending);
@@ -3078,6 +3278,16 @@ impl Engine {
 
 /// More frontend surface for the lowering pass.
 impl Engine {
+    /// Arm `\unless` for the next conditional, or read and clear it.
+    ///
+    /// The lowerer builds the run-time conditionals itself, so it needs to
+    /// spend the same flag `do_conditional` spends for the ones it settles.
+    pub fn set_unless(&mut self, on: bool) {
+        self.unless = on;
+    }
+    pub fn take_unless(&mut self) -> bool {
+        std::mem::take(&mut self.unless)
+    }
     pub fn is_macro(&self, name: CsId) -> bool {
         matches!(self.meanings.get(&name), Some(Meaning::Macro(_)))
     }

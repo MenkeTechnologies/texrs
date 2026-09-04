@@ -81,6 +81,8 @@
     "\\dimendef"
     "\\skip"
     "\\skipdef"
+    "\\muskip"
+    "\\muskipdef"
     "\\toks"
     "\\toksdef"
     "\\numexpr"
@@ -94,6 +96,7 @@
     "\\unexpanded"
     "\\begincsname"
     "\\glueexpr"
+    "\\muexpr"
     "\\input"
     "\\rust"
     "\\rustcall"
@@ -213,16 +216,16 @@
     (puthash "\\or" "\\or  —  Start the next case of an `\\ifcase`: the case before the first `\\or` is 0, and each `\\or` moves to the next. [Conditionals]" table)
     (puthash "\\fi" "\\fi  —  End a conditional. [Conditionals]" table)
     (puthash "\\ifcat" "\\ifcat  —  RECOGNISED BUT NOT EVALUATED. [Conditionals]" table)
-    (puthash "\\ifdim" "\\ifdim  —  RECOGNISED BUT NOT EVALUATED: there are no dimen registers yet. [Conditionals]" table)
-    (puthash "\\ifvoid" "\\ifvoid  —  RECOGNISED BUT NOT EVALUATED: there are no box registers yet. [Conditionals]" table)
-    (puthash "\\ifhbox" "\\ifhbox  —  RECOGNISED BUT NOT EVALUATED: there are no box registers yet. [Conditionals]" table)
-    (puthash "\\ifvbox" "\\ifvbox  —  RECOGNISED BUT NOT EVALUATED: there are no box registers yet. [Conditionals]" table)
+    (puthash "\\ifdim" "\\ifdim  —  Compare two dimensions. [Conditionals]" table)
+    (puthash "\\ifvoid" "\\ifvoid  —  Is box register N empty? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
+    (puthash "\\ifhbox" "\\ifhbox  —  Does box register N hold an \\hbox? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
+    (puthash "\\ifvbox" "\\ifvbox  —  Does box register N hold a \\vbox? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
     (puthash "\\ifvmode" "\\ifvmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifhmode" "\\ifhmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifmmode" "\\ifmmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifinner" "\\ifinner  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifeof" "\\ifeof  —  RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. [Conditionals]" table)
-    (puthash "\\ifcsname" "\\ifcsname  —  RECOGNISED BUT NOT EVALUATED. [Conditionals]" table)
+    (puthash "\\ifcsname" "\\ifcsname  —  Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered — which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web §372) and so changes the answer for every later ask. [Conditionals]" table)
     (puthash "\\count" "\\count  —  A count register. [Registers]" table)
     (puthash "\\advance" "\\advance  —  Add to a register. [Registers]" table)
     (puthash "\\multiply" "\\multiply  —  Multiply a register. [Registers]" table)
@@ -244,6 +247,8 @@
     (puthash "\\dimendef" "\\dimendef  —  Give a dimension register a name, as `\\countdef` does for a count. [Registers]" table)
     (puthash "\\skip" "\\skip  —  A glue register: a natural dimension that can stretch and shrink. [Registers]" table)
     (puthash "\\skipdef" "\\skipdef  —  Give a glue register a name, as `\\countdef` and `\\dimendef` do for theirs. [Registers]" table)
+    (puthash "\\muskip" "\\muskip  —  A MATH glue register: the same natural-plus-stretch-minus-shrink a `\\skip` holds, measured in mu. [Registers]" table)
+    (puthash "\\muskipdef" "\\muskipdef  —  Give a math glue register a name, as `\\skipdef` does for an ordinary one. [Registers]" table)
     (puthash "\\toks" "\\toks  —  A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why `\\toks0={\\x}` reads back as `\\x` whatever `\\x` means. [Registers]" table)
     (puthash "\\toksdef" "\\toksdef  —  Give a token register a name, as `\\countdef` does for a count. [Registers]" table)
     (puthash "\\numexpr" "\\numexpr  —  An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. [Registers]" table)
@@ -257,6 +262,7 @@
     (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)
     (puthash "\\begincsname" "\\begincsname  —  `\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. [Expansion]" table)
     (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
+    (puthash "\\muexpr" "\\muexpr  —  The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts — eTeX gives each unit its own primitive so the two cannot be mixed. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)

@@ -49,6 +49,15 @@ pub mod ops {
     /// Append a glue, written as TeX writes one: four arguments -- natural,
     /// stretch, shrink, and the packed orders.
     pub const MSG_GLUE: u16 = 4009;
+    /// Append a MATH glue, written as TeX writes one: the same four arguments
+    /// `MSG_GLUE` takes, with `mu` for the unit.
+    pub const MSG_MUGLUE: u16 = 4014;
+    /// Record where the command about to run would be reported from: one
+    /// argument, `tex.web` §311's context display for that point in the source.
+    pub const ERR_SITE: u16 = 4012;
+    /// §1335's `(see the transcript file for additional information)`, written
+    /// only if something was reported during the run. No arguments.
+    pub const TRANSCRIPT_NOTICE: u16 = 4013;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
@@ -67,6 +76,14 @@ pub const DIMEN_BASE: i64 = 256;
 pub const SKIP_BASE: i64 = 512;
 /// How many slots one glue register occupies.
 pub const SKIP_STRIDE: i64 = 4;
+/// Where the MATH glue registers start, past the 256 ordinary ones.
+///
+/// `\muskip` is `\skip` measured in mu (`tex.web` §455): the arithmetic is
+/// identical -- a mu is 65536ths like a point -- and only the unit it is
+/// written and read in differs. So it is four slots in the same file, at the
+/// same stride, and everything a glue register already does (a group's save and
+/// restore, `\advance`, `\the`) works for it with no second mechanism.
+pub const MUSKIP_BASE: i64 = SKIP_BASE + 256 * SKIP_STRIDE;
 
 pub struct Compiler {
     b: ChunkBuilder,
@@ -217,6 +234,16 @@ impl Compiler {
                 self.b.emit(Op::CallBuiltin(ops::MSG_CLOSE, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
+            Cmd::ErrorSite(site) => {
+                let k = self.str_const(site)?;
+                self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::CallBuiltin(ops::ERR_SITE, 1), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::TranscriptNotice => {
+                self.b.emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
             Cmd::Color { rgb, body } => {
                 let (r, g, b) = *rgb;
                 for v in [r, g, b] {
@@ -352,6 +379,15 @@ impl Compiler {
                     self.b.emit(Op::CallBuiltin(ops::MSG_GLUE, 4), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
+                // The same four slots through a builtin that writes `mu` after
+                // each finite component (`tex.web` §1060's `print_spec(p,"mu")`).
+                MsgOp::MuGlue(parts) => {
+                    for n in parts.iter() {
+                        self.num(n)?;
+                    }
+                    self.b.emit(Op::CallBuiltin(ops::MSG_MUGLUE, 4), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
                 MsgOp::Dimen(n) => {
                     self.num(n)?;
                     self.b.emit(Op::CallBuiltin(ops::MSG_DIMEN, 1), self.line);
@@ -448,8 +484,9 @@ fn slot(reg: i64) -> u16 {
     u16::try_from(reg).unwrap_or(0).min(TOTAL_SLOTS - 1)
 }
 
-/// Counts and dimensions together.
-pub const TOTAL_SLOTS: u16 = 1536;
+/// Every register kind that lives in the slot file, end to end: 256 counts, 256
+/// dimensions, then 256 glues and 256 math glues at four slots each.
+pub const TOTAL_SLOTS: u16 = 2560;
 
 impl Default for Compiler {
     fn default() -> Self {

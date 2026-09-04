@@ -1,0 +1,13 @@
+% \divide by zero: tex.web 1236 sets arith_error for a zero divisor exactly as
+% it does for a product past the 32-bit range, so the SAME "! Arithmetic
+% overflow." is reported, the register is left alone, and the run carries on.
+% The recovery is the point of the case: a second \message after it still
+% prints, and the transcript note goes on the end.
+\catcode`\{=1 \catcode`\}=2
+\count1=7
+\divide\count1 by 0
+\message{[\the\count1]}
+\count1=12
+\divide\count1 by 4
+\message{[\the\count1]}
+\end

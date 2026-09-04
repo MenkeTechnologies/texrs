@@ -79,8 +79,8 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\edef",
         "Macro definition",
-        "Define with the body expanded NOW, so a register read is frozen at definition time and a later assignment cannot move it. texrs freezes a `\\the\\count` read into a scratch register (taken from the top of the count range). It does NOT yet decide a conditional in the body at definition time \u{2014} see BUGS.md.",
-        "\\edef\\name{<body>}\n\\count1=1\n\\edef\\frozen{\\the\\count1}\n\\count1=2\n\\message{\\frozen}   % => 1",
+        "Define with the body expanded NOW, so a register read is frozen at definition time and a later assignment cannot move it. tex.web \u{a7}366 expands the body while READING it, which decides a conditional in it there and turns `\\the` into \u{a7}478's characters. texrs does that whenever it can prove the registers the body reads \u{2014} a register nothing has assigned yet is at INITEX's zero, which is what the compiler writes into every slot \u{2014} and otherwise falls back to snapshotting the `\\the\\count` read into a scratch register (taken from the top of the count range) and carrying the conditional. The fallback is the case BUGS.md records: a conditional over a register the program HAS written is still decided at use time.",
+        "\\edef\\name{<body>}\n\\count1=1\n\\edef\\frozen{\\the\\count1}\n\\count1=2\n\\message{\\frozen}   % => 1\n\\edef\\case{\\ifcase\\count2 ZERO\\else OTHER\\fi}\n\\count2=5\n\\message{\\case}      % => ZERO",
     ),
     (
         "\\xdef",
@@ -273,26 +273,26 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ifdim",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED: there are no dimen registers yet. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
-        "\\ifdim<dimen><rel><dimen> <true>\\else <false>\\fi",
+        "Compare two dimensions. tex.web \u{a7}503 shares the comparison with `\\ifnum` and differs only in the scanner, and a dimension is an integer in a slot here, so this lowers to the same run-time branch `\\ifnum` does rather than being recognised and skipped.",
+        "\\ifdim<dimen><rel><dimen> <true>\\else <false>\\fi\n\\dimen1=2pt\n\\ifdim\\dimen1>1pt \\message{[WIDER]}\\else \\message{[NARROWER]}\\fi   % => [WIDER]",
     ),
     (
         "\\ifvoid",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED: there are no box registers yet. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
-        "\\ifvoid<N> <true>\\else <false>\\fi",
+        "Is box register N empty? The register number is read as tex.web \u{a7}433 reads one, and the answer is that the register is VOID \u{2014} which is what it is: texrs has no `\\setbox`, \u{a7}462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. So this is decided while lowering, in running text and inside a `\\message` alike, and agrees with tex for every document that fills no box. The reference `tex` loads plain.tex, which fills `\\box0` and puts an \\hbox in `\\box11`, so those two disagree the way `\\count0` does.",
+        "\\ifvoid<N> <true>\\else <false>\\fi\n\\ifvoid200 \\message{[EMPTY]}\\else \\message{[FULL]}\\fi   % => [EMPTY]",
     ),
     (
         "\\ifhbox",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED: there are no box registers yet. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
-        "\\ifhbox<N> <true>\\else <false>\\fi",
+        "Does box register N hold an \\hbox? The register number is read as tex.web \u{a7}433 reads one, and the answer is that the register is VOID \u{2014} which is what it is: texrs has no `\\setbox`, \u{a7}462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. So this is decided while lowering, in running text and inside a `\\message` alike, and agrees with tex for every document that fills no box. The reference `tex` loads plain.tex, which fills `\\box0` and puts an \\hbox in `\\box11`, so those two disagree the way `\\count0` does.",
+        "\\ifhbox<N> <true>\\else <false>\\fi\n\\ifhbox200 \\message{[H]}\\else \\message{[NO]}\\fi   % => [NO]",
     ),
     (
         "\\ifvbox",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED: there are no box registers yet. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
-        "\\ifvbox<N> <true>\\else <false>\\fi",
+        "Does box register N hold a \\vbox? The register number is read as tex.web \u{a7}433 reads one, and the answer is that the register is VOID \u{2014} which is what it is: texrs has no `\\setbox`, \u{a7}462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. So this is decided while lowering, in running text and inside a `\\message` alike, and agrees with tex for every document that fills no box. The reference `tex` loads plain.tex, which fills `\\box0` and puts an \\hbox in `\\box11`, so those two disagree the way `\\count0` does.",
+        "\\ifvbox<N> <true>\\else <false>\\fi\n\\ifvbox200 \\message{[V]}\\else \\message{[NO]}\\fi   % => [NO]",
     ),
     (
         "\\ifvmode",
@@ -327,8 +327,8 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ifcsname",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED. Use `\\ifdefined` on a `\\csname`-built token instead. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
-        "\\ifcsname <characters>\\endcsname <true>\\else <false>\\fi",
+        "Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered \u{2014} which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web \u{a7}372) and so changes the answer for every later ask. Decided while lowering, in running text and inside a `\\message` body alike, because the macro table is a frontend fact. LaTeX's `\\@ifundefined` is built on this.",
+        "\\ifcsname <characters>\\endcsname <true>\\else <false>\\fi\n\\def\\foo{F}\n\\ifcsname foo\\endcsname \\message{[YES]}\\else \\message{[NO]}\\fi   % => [YES]\n\\ifcsname nope\\endcsname \\message{[YES]}\\else \\message{[NO]}\\fi  % => [NO], twice over",
     ),
     // ══ Registers — compiler::COUNT_SLOTS, expand::do_arith ════════════════
     (
@@ -459,6 +459,18 @@ pub const CORPUS: &[Entry] = &[
         "\\skipdef\\skip@=0\n\\skip@=1pt plus 2pt",
     ),
     (
+        "\\muskip",
+        "Registers",
+        "A MATH glue register: the same natural-plus-stretch-minus-shrink a `\\skip` holds, measured in mu. tex.web \u{a7}455 makes `mu` the only finite unit a math glue may be written in, and the only place `mu` is a unit at all \u{2014} `\\muskip0=1pt` and `\\dimen0=1mu` are both `! Illegal unit of measure.` The arithmetic is a point's: a mu is 65536ths, so `\\advance`, `\\multiply` and a group's save and restore are the ones `\\skip` already had. An infinite component is still `fil`, `fill` or `filll`, in either kind of glue.",
+        "\\muskip0=3mu plus 1mu minus 2mu\n\\message{[\\the\\muskip0]}   % => [3.0mu plus 1.0mu minus 2.0mu]",
+    ),
+    (
+        "\\muskipdef",
+        "Registers",
+        "Give a math glue register a name, as `\\skipdef` does for an ordinary one. The name stands for the register everywhere the spelt-out form works, and only where a math glue is wanted: a `\\muskipdef` name is not accepted as the source of a `\\skip` assignment, nor the other way about.",
+        "\\muskipdef\\thinmuskip=0\n\\thinmuskip=3mu",
+    ),
+    (
         "\\toks",
         "Registers",
         "A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why `\\toks0={\\x}` reads back as `\\x` whatever `\\x` means. `\\toks1=\\toks0` copies one register to another. `\\the` writes the list back by the token-list rule rather than `\\string`'s: a control word carries a trailing space however short, a one-character control sequence does not.",
@@ -534,8 +546,14 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\glueexpr",
         "Registers",
-        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. An eTeX primitive.",
+        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. An eTeX primitive. The operands are glue WRITTEN OUT; a register standing where one is wanted is not read yet.",
         "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4fil\\relax",
+    ),
+    (
+        "\\muexpr",
+        "Registers",
+        "The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts \u{2014} eTeX gives each unit its own primitive so the two cannot be mixed. Its operands are written in mu, and like `\\glueexpr`'s they are glue written out rather than registers.",
+        "\\muskip0=\\muexpr 3mu plus 1mu + 2mu plus 2mu\\relax   % => 5.0mu plus 3.0mu",
     ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
