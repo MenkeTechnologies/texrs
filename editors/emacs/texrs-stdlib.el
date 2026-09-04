@@ -26,6 +26,9 @@
     "\\csname"
     "\\endcsname"
     "\\string"
+    "\\meaning"
+    "\\uppercase"
+    "\\lowercase"
     "\\the"
     "\\number"
     "\\expandafter"
@@ -100,6 +103,8 @@
     "}"
     "\\begingroup"
     "\\endgroup"
+    "\\aftergroup"
+    "\\afterassignment"
     "\\newcommand"
     "\\renewcommand"
     "\\providecommand"
@@ -184,6 +189,9 @@
     (puthash "\\csname" "\\csname  —  Build a control sequence out of the characters up to `\\endcsname`, so a macro can name another macro. [Expansion]" table)
     (puthash "\\endcsname" "\\endcsname  —  Terminate a `\\csname`. [Expansion]" table)
     (puthash "\\string" "\\string  —  Print a control sequence as text, escape character included — the inverse of `\\csname`. [Expansion]" table)
+    (puthash "\\meaning" "\\meaning  —  What a token MEANS, as characters (tex.web §296's print_meaning). [Expansion]" table)
+    (puthash "\\uppercase" "\\uppercase  —  Read the following group WITHOUT expanding it, replace every character by its `\\uccode` and put the result back to be read again (tex.web §1288). [Expansion]" table)
+    (puthash "\\lowercase" "\\lowercase  —  The same as `\\uppercase` over the `\\lccode` table: the group is read unexpanded, every character is replaced by its lowercase code, and the result is read again with its category codes intact. [Expansion]" table)
     (puthash "\\the" "\\the  —  The value of a register, as characters. [Expansion]" table)
     (puthash "\\number" "\\number  —  A scanned number, as characters, with no leading zeros or plus sign. [Expansion]" table)
     (puthash "\\expandafter" "\\expandafter  —  One token of lookahead: hold the next token back, expand what follows it once, then put the held token in front of the result. [Expansion]" table)
@@ -191,7 +199,7 @@
     (puthash "\\message" "\\message  —  Write to the terminal. [Expansion]" table)
     (puthash "\\relax" "\\relax  —  Do nothing. [Expansion]" table)
     (puthash "\\par" "\\par  —  End a paragraph. [Expansion]" table)
-    (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow. [Expansion]" table)
+    (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow (tex.web §1060). [Expansion]" table)
     (puthash "\\end" "\\end  —  Stop the run, and ship what it built. [Expansion]" table)
     (puthash "\\ifnum" "\\ifnum  —  Compare two numbers with `<`, `=` or `>`. [Conditionals]" table)
     (puthash "\\ifodd" "\\ifodd  —  True when a number is odd. [Conditionals]" table)
@@ -258,6 +266,8 @@
     (puthash "}" "}  —  Close a group (category code 2), undoing every non-global assignment made inside it. [Grouping]" table)
     (puthash "\\begingroup" "\\begingroup  —  Open a group without braces, scoping the macro table and the registers written inside it. [Grouping]" table)
     (puthash "\\endgroup" "\\endgroup  —  Close a `\\begingroup`, undoing every non-global assignment made since it. [Grouping]" table)
+    (puthash "\\aftergroup" "\\aftergroup  —  Hold the next token and insert it after the enclosing group closes (tex.web §326). [Grouping]" table)
+    (puthash "\\afterassignment" "\\afterassignment  —  Hold the next token until the following ASSIGNMENT has finished (tex.web §1269). [Grouping]" table)
     (puthash "\\newcommand" "\\newcommand  —  Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. [LaTeX]" table)
     (puthash "\\renewcommand" "\\renewcommand  —  Redefine a macro. [LaTeX]" table)
     (puthash "\\providecommand" "\\providecommand  —  Define a macro only if the name is free. [LaTeX]" table)
@@ -316,7 +326,7 @@
     (puthash "\\setromanfont" "\\setromanfont  —  The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps. [LaTeX]" table)
     (puthash "\\setsansfont" "\\setsansfont  —  Record the document's sans-serif family. [LaTeX]" table)
     (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`, and the face `\\ttfamily` selects. [LaTeX]" table)
-    (puthash "\\directlua" "\\directlua  —  Hand a chunk to LuaTeX's embedded Lua interpreter. [LaTeX]" table)
+    (puthash "\\directlua" "\\directlua  —  Hand a chunk to an embedded Lua interpreter, and RUN it: PUC-Lua 5.3, the version LuaTeX itself embeds. [LaTeX]" table)
     (puthash "\\ttfamily" "\\ttfamily  —  Set in the monospace face, until the group holding the declaration closes. [LaTeX]" table)
     (puthash "\\bfseries" "\\bfseries  —  Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. [LaTeX]" table)
     (puthash "\\itshape" "\\itshape  —  Set in the italic face, until the group holding the declaration closes; `\\textit{...}` and `\\emph{...}` are both `{\\itshape ...}`. [LaTeX]" table)

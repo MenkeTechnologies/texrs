@@ -54,15 +54,28 @@ the values LaTeX sets them to, `\@secpenalty` before a heading and `\nobreak`
 after one, and the plan taken is the cheapest total (tex.web §970-§1010).
 `--dvi` stacks a fixed number of lines on each page.
 
-What is still NOT done, and what keeps the parity bar out of reach: no maths,
-no boxes a document can nest. `\tolerance`, `\pretolerance` and the demerit
-weights are constants rather than registers a document sets, and the interword
-glue stretches by cmr10's fractions rather than by each font's own. So
-byte-identical DVI against `tex` is not approached, and reading the existence
-of a `.dvi` or a `.pdf` as progress toward it would be wrong. Font embedding,
-listed here as missing, is done, and subset rather than whole: `/FontFile2`
-carrying only the glyphs the document set, the tables rebuilt, one six-letter
-tag per face.
+Underneath both, `tex.web`'s own machinery is now ported rather than
+approximated: `src/pack.rs` carries §108's integer badness and §644-§679's
+`hpack`/`vpack` with order-of-infinity glue setting, `src/box_.rs` the boxes a
+document can nest, `src/postline.rs` §877-§890's assembly of breakpoints into
+lines, and `src/page.rs` §967-§1028's page builder with insertions, `\vsplit`,
+the marks and an output routine over `\box255`. Maths is done too:
+`src/math.rs` carries §680-§698's mlist, §764's spacing table verbatim and
+§704-§767's `mlist_to_hlist`, driven by the `fontdimen`s of §700-§701 — so a
+formula's geometry is TeX's own even where the glyphs are drawn from the
+document's face.
+
+What is still NOT done, and what now bounds the parity bar: the DVI path does
+not consult the `.tfm`'s ligature and kern program, so `tex` writes the `fi`
+ligature where texrs writes `f` and `i` — the only remaining text difference on
+the recorded cases, seven of ten of which reach STRUCTURE. There is no
+node-list shipper either: `hlist_out`/`vlist_out` (§619-§640) is not ported, so
+`src/typeset.rs` writes DVI from runs of strings and cannot draw a box tree,
+which is what `src/postline.rs` and `src/page.rs` would need to be the path a
+run takes rather than a library beside it. `\tolerance`, `\pretolerance` and
+the demerit weights are constants rather than registers a document sets, and
+the interword glue stretches by cmr10's fractions rather than by each font's
+own.
 
 The subsetter's own untested edge is nesting. `tests/glyf.rs`'s
 `an_accented_letter_brings_the_letter_with_it` pins one level — asking for

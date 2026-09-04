@@ -66,8 +66,10 @@ and writes the PDF itself. `--dvi` still fills each line with the first break
 that fits, because a DVI driver cannot set a run to a width and a breaker that
 prices glue has nothing to hand its answer to. `--pdf` breaks its PAGES the
 same way, by LaTeX's widow, orphan, broken-line and heading penalties over the
-whole document. Neither is `tex.web`'s stomach: no maths, no boxes a document
-can nest, and [0x06] says exactly what that costs.
+whole document. Maths is set from `tex.web`'s own `mlist_to_hlist`, and the
+boxes, glue setting and page builder underneath are ported too — what neither
+output does yet is consult a font's ligature and kern program, and [0x06] says
+exactly what that costs.
 
 ## [0x01] Install
 
@@ -239,8 +241,18 @@ than none.
   `lstlisting`, `minted`, `alltt`, `filecontents` — where the catcodes are
   suspended, so `#`, `&` and `\` inside one are characters rather than markup.
 - The LaTeX layer of [0x06]: `\newcommand` and its three relatives dispatched
-  natively, the preamble directives consumed, `\makeatletter` as the catcode
-  change it is.
+  natively, `latex.ltx`'s counters, cross references, options, footnotes,
+  captions and bibliography ported into `src/latex/kernel.tex`, a real load
+  attempted for every `\usepackage`, `\makeatletter` as the catcode change it
+  is.
+- Maths. `$…$`, `$$…$$`, `\(`, `\[`, `equation` and its relatives are parsed
+  into an mlist and converted by `mlist_to_hlist`: styles, sub- and
+  superscripts with §756-§759's shifts, `\over`/`\frac`, `\sqrt`,
+  `\left…\right` with delimiter growth, `\limits`, the operator names, and the
+  Greek and symbol tables plain.tex names — with §764's spacing table ported
+  verbatim.
+- Lua. `\directlua` runs its chunk in PUC-Lua 5.3, with `tex`, `token`,
+  `texio`, `status` and `luatexbase` reaching the engine's real state.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), first-fit lines at a
   measure, stacked at a leading, shipped as DVI that `dvitype` reads.
 - `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
@@ -322,38 +334,69 @@ away from the text it introduces (`\@secpenalty`, and the `\nobreak`
 `\@startsection` writes after a title). `--dvi` stacks a fixed number of lines
 on each page.
 
-Neither is `tex.web`'s stomach. No maths, no boxes a document can nest.
-`\tolerance`, `\pretolerance` and the demerit weights are constants rather
-than registers the document can set. A paragraph set here and the same
-paragraph set by `tex` will not agree line for line — see `docs/ROADMAP.md`.
+Under both, `tex.web`'s own machinery is ported rather than approximated:
+`hpack`/`vpack` with §108's integer badness and §658's order-of-infinity glue
+setting (`src/pack.rs`); the boxes a document can nest — `\hbox`, `\vbox`,
+`\vtop`, `\raise`, `\unhbox`, `\leaders`, `\lastbox`, `\unskip`
+(`src/box_.rs`); lines assembled from breakpoints with `\rightskip`,
+`\parshape` and `\vadjust` (`src/postline.rs`, §877-§890); and a page builder
+with `\insert`, `\vsplit`, `\topmark`/`\firstmark`/`\botmark` and an output
+routine over `\box255` (`src/page.rs`, §967-§1028). Maths is there too: `$…$`,
+`$$…$$`, `\(`, `\[` and the display environments are read into an mlist and
+converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
+`fontdimen`s (`src/math.rs`).
 
-**Some LaTeX, no Lua.** texrs carries the part of LaTeX that lives in the mouth
-and the expander, as TeX rather than as Rust: `src/latex/prelude.tex` is a file
-of `\newcommand`s compiled into the binary, and a document that writes
-`\documentclass` or `\usepackage` is recognised as LaTeX and lowered against it.
-`\newcommand`, `\renewcommand`, `\providecommand` and `\DeclareRobustCommand`
-are dispatched natively; `\documentclass`, `\usepackage`, `\RequirePackage` and
-the `\PassOptionsTo*` pair are consumed rather than loaded, because a package is
-TeX that builds boxes and nothing here builds boxes — `--dvi` sets lines of text,
-which is not the same thing and is not enough to run a package. What is kept out
-of them is the page: a type size in the class options sets the text at that size
-on the leading LaTeX pairs with it, and `[margin=...]{geometry}` sets the margins
-and the measure and text height they leave on the paper. `\makeatletter` is a
-catcode change and works as one.
+What that leaves: `\tolerance`, `\pretolerance` and the demerit weights are
+constants rather than registers the document can set, and the shipper still
+writes runs of strings rather than a box tree, so `src/postline.rs` and
+`src/page.rs` are a library beside the path a run takes rather than the path
+itself.
 
-What that buys, and what it does not: a macro that would have drawn something
-yields its text instead, and a document whose meaning IS its layout will not
-survive it. `\directlua` is consumed rather than run — there is no Lua here — so
-a document whose output depended on what its Lua computed is WRONG rather than
-refused, which is the one failure mode worth knowing about before trusting this.
+What is still missing is the ligature and kern program on the DVI path: `tex`
+writes the `fi` ligature (character 0x0C) where texrs writes `f` and `i`, and
+that is the whole of the remaining text difference on the two DVI cases that
+have one. Seven of the ten now reach STRUCTURE — see `BUGS.md`.
 
-The number, run against the 167 `.tex` files of a real LaTeX/LuaLaTeX corpus
+**Some LaTeX, and Lua.** texrs carries the part of LaTeX that lives in the mouth
+and the expander, as TeX rather than as Rust, in two files compiled into the
+binary: `src/latex/prelude.tex` is a stand-in — a macro that would have drawn
+something yields its text instead — and `src/latex/kernel.tex` is a port of
+`latex.ltx`, with the place each definition came from written above it and every
+substitution named. Counters, cross references, `\newenvironment`, the option
+machinery, footnotes, captions and the bibliography are ported. `\documentclass`
+and `\usepackage` are no longer silently consumed: the file is found with
+`kpsewhich` and its load is attempted, and a package that will not go through is
+reported by name with the control sequence that stopped it — `texrs: package
+xcolor is not loadable: Unsupported \edef body`. No package loads all the way
+through yet; the report is the list of what each one still wants. What is kept
+out of them is the page: a type size in the class options sets the text at that
+size on the leading LaTeX pairs with it, and `[margin=...]{geometry}` sets the
+margins and the measure and text height they leave on the paper. `\makeatletter`
+is a catcode change and works as one.
+
+`\directlua` runs its chunk, in PUC-Lua 5.3 — the version LuaTeX embeds — and
+what the chunk prints is read back as input, so `\count10=20
+a\directlua{tex.print(tex.count[10]+5)}b` typesets `a25b`. The `tex` table
+reaches the real registers, `token` reaches the input the chunk stands in front
+of, and a chunk that fails stops the run with its Lua error as a TeX error. What
+is absent is everything built on node lists: there is no `node` library, and
+`tex.skip`/`tex.getbox` refuse rather than invent a value, so a document that
+walks a node list is refused rather than quietly wrong.
+
+The number, run against the 274 `.tex` files of a real LaTeX/LuaLaTeX corpus
 (Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
-`--include-in-header` fragments): **167 of 167 run to completion**, and say
-71,388,811 bytes of text. The document count is a fact about the corpus; the
-byte count is a fact about this engine on this day, and it rises as more of
-what a document says reaches the output — it was 69,751,923 before pages
-carried numbers, contents and `\parskip`.
+`--include-in-header` fragments, and texrs's own fixtures, including the ones
+written to be refused): **228 of 274 run to completion**, and say 75,621,539
+bytes of text.
+
+That number went DOWN when Lua started running: the same corpus was 266 of 274
+before it. 42 of the 46 failures are one family of header fragments carrying an
+unsubstituted `@FALLBACK_LIST@` placeholder inside a `\directlua`, which is not
+valid Lua — texrs used to "complete" them only because it consumed the chunk
+unread. `lualatex` refuses those same files too (`! LaTeX Error: \usepackage
+before \documentclass`), so the drop is the engine reading what it used to skip
+rather than a capability lost. Of the remaining four, three are texrs's own DVI
+fixtures needing `\hsize` and one is written to fail.
 
 That is a measurement, so it is re-measurable rather than remembered:
 
@@ -408,6 +451,11 @@ and three of the things a document controls survive the trip:
   contents, folios, and four faces where lualatex embeds one subsetted Latin
   Modern. Read as a subsetting result it says the subsetter is poor; it is
   comparing two font sets.
+  The descriptor states what the METRICS file states rather than the bounding
+  box's extremes — `/Ascent 694 /CapHeight 683 /Descent -194 /XHeight 431` for
+  `cmr10`, out of `cmr10.afm`, which is what luatex writes for it byte for
+  byte and none of which is anywhere in the `.pfb`. A Type 1 program still goes
+  in whole.
 - **Colour.** `\definecolor`, `\providecolor` and `\colorlet` build the palette
   and `\color`, `\textcolor` and `\pagecolor` use it, in the `HTML`, `rgb`,
   `RGB`, `gray` and `cmyk` models. `\color` is a switch and ends with the group
@@ -415,10 +463,19 @@ and three of the things a document controls survive the trip:
   PDF's own `rg` operator, and `\pagecolor` is painted under the text; under
   `--dvi` it is the `color push rgb R G B` / `color pop` `\special` pair that
   dvipdfmx and dvips both read.
-- **TikZ.** The subset these documents actually draw with: `\draw` polylines
-  built from `--`, an optional `cycle`, a line width and the picture's x/y
-  scale, emitted as PDF path operators. Curves (`..controls`), nodes, arrows,
-  patterns and shadings are not there.
+- **TikZ.** Paths as PDF path operators, built against PGF's own source rather
+  than an approximation of it: `--`, `-|`, `|-`, `..controls..`, `to` with
+  `out=`/`in=`/`bend`, `rectangle`, `circle`, `ellipse`, `arc`, `grid`,
+  `parabola` and `cycle`, painted by `\draw`, `\fill`, `\filldraw`, `\path`,
+  `\clip` or nothing, under either fill rule. Colour goes through the document's
+  own palette, and `line width=`, the named widths, the dash patterns, caps,
+  joins and opacity all reach an operator. `->`, `<-`, `<->`, `-stealth` and
+  `-latex` are drawn as the paths PGF draws them as, on a line shortened to make
+  room. Nodes carry text through the same typesetter the rest of the page uses,
+  placed by any of the nine anchors, in a rectangle or a circle. Coordinates may
+  be polar, named, relative or `calc` arithmetic; `\foreach` and nested `scope`s
+  are read. Not there: shadings, patterns, decorations, the matrix and graph
+  libraries, and node shapes beyond rectangle and circle.
 - **There is exactly one type size.** `\normalsize`, `\small`, `\large`,
   `\Large`, `\LARGE`, `\huge` and `\Huge` are all defined as empty in
   `src/latex/prelude.tex`, and `Layout::size` is a single document-wide `f64`

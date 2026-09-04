@@ -20,11 +20,11 @@ passing, so the list is a claim the harness enforces rather than a note.
 
 ## Not implemented
 
-- **`tex.web`'s stomach.** Two outputs, and they are not equally good.
-  `--pdf` breaks a paragraph as §813-§890 does — every feasible set of
-  breakpoints priced by how far each line's glue is from its natural width, the
-  cheapest set taken, Liang hyphenation (§891) widening the places a line may
-  end — and sets each full line to the measure with PDF's `Tw`
+- **`tex.web`'s stomach, on the DVI path.** Two outputs, and they are not
+  equally good. `--pdf` breaks a paragraph as §813-§890 does — every feasible
+  set of breakpoints priced by how far each line's glue is from its natural
+  width, the cheapest set taken, Liang hyphenation (§891) widening the places a
+  line may end — and sets each full line to the measure with PDF's `Tw`
   (`src/linebreak.rs`, `src/typeset.rs`). `--dvi` still takes the first break
   that fits and does not hyphenate, because a DVI driver cannot set a run to a
   width, so a breaker that decides a line should be SHRUNK has nothing to hand
@@ -34,29 +34,46 @@ passing, so the list is a claim the harness enforces rather than a note.
   hyphenated lines and stranded headings, priced over the whole document, where
   `--dvi` stacks a fixed number of lines on each page.
 
-  What neither has: maths, boxes a document can nest. `\tolerance`,
-  `\pretolerance` and the demerit weights are the constants in
-  `src/linebreak.rs` rather than registers a document can set, and
-  the interword glue stretches and shrinks by cmr10's fractions rather than by
-  each font's own. So a paragraph set here and the same paragraph set by `tex`
-  do not agree line for line, and the milestone's real parity bar —
-  byte-identical DVI — is not approached.
+  `tex.web`'s own machinery underneath is ported: §108's integer badness and
+  §644-§679's `hpack`/`vpack` with order-of-infinity glue setting
+  (`src/pack.rs`), the boxes a document can nest (`src/box_.rs`), §877-§890's
+  assembly of breakpoints into lines (`src/postline.rs`), and §967-§1028's page
+  builder with insertions, `\vsplit`, the marks and an output routine over
+  `\box255` (`src/page.rs`). Maths is there too (§680-§767, `src/math.rs`).
+  What is NOT wired is the shipper: `hlist_out`/`vlist_out` (§619-§640) is not
+  ported, so `src/typeset.rs` writes from runs of strings and cannot draw a box
+  tree, which makes `src/postline.rs` and `src/page.rs` a library beside the
+  path a run takes rather than the path itself.
+
+  What is still missing outright: the `.tfm`'s ligature and kern program on the
+  DVI path, so `tex` writes the `fi` ligature (character 0x0C) where texrs
+  writes `f` and `i` — the whole of the remaining text difference on
+  `two_paragraphs.tex` and `long_paragraph.tex`, seven of the ten DVI cases now
+  reaching STRUCTURE. `\tolerance`, `\pretolerance` and the demerit weights
+  are constants in `src/linebreak.rs` rather than registers a document can set,
+  and the interword glue stretches and shrinks by cmr10's fractions rather than
+  by each font's own. So the milestone's real parity bar — byte-identical DVI —
+  is not approached.
 
   Without `--dvi`, `\end` stops the run and ships nothing. `tex` prints
   `No pages of output.` for the corpus here, which is why the parity contract
   for the committed cases is still the `\message` stream rather than the page.
-- **Registers other than `\count`.** No `\dimen`, `\skip`, `\muskip`, `\toks`,
-  `\box`, so `\ifdim`, `\ifvoid`, `\ifhbox` and `\ifvbox` are recognised as
-  conditionals for skipping purposes but cannot be evaluated.
+- **`\muskip` and box registers.** No `\muskip` and no `\box`, so `\ifvoid`,
+  `\ifhbox` and `\ifvbox` are recognised as conditionals for skipping purposes
+  but cannot be evaluated. `\count`, `\dimen`, `\skip` and `\toks` are all
+  registers now, and `\ifdim` lowers to the same run-time branch `\ifnum` does
+  (`tex.web` §503 shares the comparison and differs only in the scanner).
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
-- **`\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase`, `\meaning`,
-  `\jobname`.** Each stops the run with `! Undefined control sequence`.
-  `\futurelet` was on this list and is no longer missing: it is in
-  `src/expand.rs`, documented in the corpus, and pinned by `tests/futurelet.rs`.
-  So was `\input`, which is now in `src/lower.rs` and pinned differentially by
-  `tests/input.rs` — see "Finding files" below for what it does differently.
+- **`\jobname`.** Stops the run with `! Undefined control sequence`.
+  `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase` and `\meaning`
+  were on this list and are no longer missing: they are in `src/expand.rs` and
+  `src/lower.rs`, documented in `src/corpus.rs`, and pinned by
+  `tests/cases/after_tokens.tex`, `case_shift.tex` and `meaning_prim.tex`.
+  `\futurelet` came off it earlier, pinned by `tests/futurelet.rs`, and so did
+  `\input`, pinned differentially by `tests/input.rs` — see "Finding files"
+  below for what it does differently.
 `-output-directory=DIR` was on this list and is no longer: `src/cli.rs` parsed
 it into `Cli::output_directory` and nothing read the field, so every output went
 beside the INPUT instead, silently. It is honoured now (`src/main.rs`, pinned by
@@ -67,13 +84,19 @@ next to a `.tex` overwrites whatever reference was already there, which is how
 texrs output reached tracked lualatex references in
 `MenkeTechnologiesPublications`. Restored from git, byte-identical.
 
-- **`#{` parameter text.** A parameter delimited by the left brace, which tex
-  then puts back: `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. texrs
-  refuses the definition. Until `cargo fuzz run lower` found it, the argument
-  reader indexed past the end of the parameter list on the trailing `#` and
-  PANICKED; `src/expand.rs` now validates the parameter text at definition time,
-  as `tex.web` §476 does, and `fuzz/corpus/lower/crash_param_brace.tex` keeps the
-  crashing input.
+- **`#{` parameter text** is implemented. §476 puts the left brace in the
+  parameter text so it delimits the last argument, and §473 appends it to the
+  body, so `\def\a#{[X]}` called as `\a{Y}` prints `[X]{Y}`. Pinned by
+  `tests/cases/param_brace_delim.tex` and `param_brace_argument.tex`. Until
+  `cargo fuzz run lower` found it, the argument reader indexed past the end of
+  the parameter list on the trailing `#` and PANICKED; `src/expand.rs` validates
+  the parameter text at definition time and the crashing input is kept as
+  `fuzz/corpus/lower/param_brace_zero_params.tex` — renamed out of its `crash_`
+  prefix when it stopped crashing, which is how `tests/fuzz_smoke.rs` reports a
+  seed that has started compiling. What it now compiles to is a divergence of
+  its own: with `#{` there are no NUMBERED parameters, so tex reports
+  `! Illegal parameter number in definition of \greet.` where texrs accepts the
+  body. `tests/cases/param_brace_illegal_number.tex` pins it.
 - **`\edef` does not freeze a conditional.** tex decides `\ifcase`/`\ifodd`
   inside an `\edef` body while READING it, so the body becomes the token run
   the branch produced and a later register change cannot move it. texrs keeps
@@ -85,12 +108,42 @@ texrs output reached tracked lualatex references in
 - **Errors.** An undefined control sequence is not an error: texrs prints its
   name into the message stream and exits 0, where tex reports `! Undefined
   control sequence.` and expands it to nothing. `tests/cases/undefined_cs.tex`
-  pins it. Every other error path is the same shape -- texrs either handles the
-  construct or stops with one `TexError`, and does not have tex's recover-and-
-  continue behaviour.
+  pins it, and the reason it is hard is that §1279 expands a `\message` body
+  while reading it from the file, so tex's context display splits the line at
+  the offending token while texrs has already read to the `}`.
+
+  Two conditions DO now report and carry on the way tex does: a constant above
+  2147483647 (§445) and a character or register code out of range (§433, §434).
+  Each writes `! <reason>.` followed by §311's two-line context display into the
+  message stream, clamps the value where tex clamps it, and the run continues;
+  `tests/cases/number_too_big.tex`, `chardef_bad_code.tex` and
+  `error_context_trimmed.tex` pin all of it, including the `...` trimming at
+  `half_error_line` and `error_line`. Every other error path still stops with
+  one `TexError`: `\multiply` overflow is raised on the VM (`src/runtime.rs`)
+  rather than in the expander, and `\outer` is not policed at all.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).
+
+## `\directlua` does not expand inside a `\message`
+
+`\directlua` is EXPANDABLE, so luatex runs the chunk while it reads a
+`\message` body and what the chunk printed lands in the stream. Measured
+against luatex 1.24.0, for `\count10=20` and
+`\message{a\directlua{tex.print(tex.count[10]+5)}b}`:
+
+```
+luatex : (./pt2.tex a25b)
+texrs  : (./pt2.tex a\directlua {tex.print(tex.count[10]+5)}b )
+```
+
+The chunk RUNS where the document meets it — `--text` on the same arithmetic in
+a `\documentclass` document says `a25b` — but a `\message` body is read into a
+token list before anything expands, so the chunk is printed rather than run.
+This is the same shape as the `undefined_cs.tex` gap recorded above, and has the
+same cause: tex.web §1279 expands a message body while reading it from the file
+and texrs slurps it first. It is not in `tests/cases` because the oracle there
+is `tex`, which has no `\directlua` to compare against.
 
 ## Divergences from tex
 
@@ -124,16 +177,6 @@ texrs output reached tracked lualatex references in
   scratch value. texrs starts every register at zero, as INITEX does.
   `tests/cases/plain_count0.tex` pins that, and `scripts/fuzz/gen.pl` generates
   against `\count1`..`\count9`, the window where both engines start equal.
-- **A negative `\ifcase` selector takes case 0.** `tex.web` §509 skips n cases
-  and takes the (n+1)th, so a selector below zero — or past the last `\or` with
-  no `\else` — matches nothing and the `\else` branch runs. `do_ifcase` counts
-  down with `while remaining > 0`, which a negative n never enters, so it falls
-  through to case 0: `\ifcase -1 ZERO\else DEFAULT\fi` prints `ZERO` where tex
-  prints `DEFAULT`. Like `def_in_conditional_arm.tex` this is a wrong answer
-  rather than a refusal — nothing errors. Pinned by
-  `tests/cases/cond_ifcase_negative.tex`. The fix looks like one branch in
-  `do_ifcase`, but it is a semantics change and is recorded here first, as the
-  roadmap's rule requires.
 - **`\edef` scratch registers.** Freezing `\the\count0` into a macro body needs
   somewhere to put the value now, and the count registers are the only run-time
   store this milestone has. texrs takes them from the top (255 downward), so a
@@ -237,21 +280,28 @@ carry the fonts, colour and layout beside the bytecode.
 ## PDF output is not LuaTeX's
 
 The goal is byte-identical, and the distance is large: for `Hello world.`
-luatex writes 11,729 bytes and texrs writes 615. `cargo run --bin pdf-parity`
+luatex writes 11,729 bytes and texrs writes 791. `cargo run --bin pdf-parity`
 measures it on a ladder rather than as a yes/no, because a harness that only
 answered "identical?" would say no every day and say nothing else.
 
-Where the ten corpus documents stand: nine at PAGESIZE — same page count, same
-page size, and the words differ by exactly one, the folio. luatex ships a page
-number and texrs does not. The tenth is an empty document, where the engines
-disagree about whether to write a file at all: luatex writes none ("no pages of
-output") and texrs writes a 233-byte PDF.
+Where the ten corpus documents stand: seven at LINES, two at TEXT, and the
+empty document at BYTES, which is the goal. Every one of them climbed when the
+folio started being written — nine had been at PAGESIZE, differing from luatex
+by exactly one word, the page number — and the empty document climbed when
+texrs stopped writing a file for a document with no pages, as luatex does not.
 
-Two more things have to agree before BYTES, and each is a rung. The words must
-fall on the same LINES, which is where line breaking and glue setting show
-themselves. And the FONTS must match: luatex embeds a subsetted `CMR10`, texrs
-names a base-14 `Helvetica` it does not embed, so the two set in different
-typefaces today.
+What blocks the seven at LINES is now a single thing: the FACE. luatex embeds a
+subsetted `CMR10` and texrs names a base-14 `Helvetica`, so the two set in
+different typefaces. The subsetting machinery, the subset tag and the descriptor
+are in place; what is left is that `src/typeset.rs` chooses the face. The two at
+TEXT differ in where the lines break.
+
+Three things block BYTES beyond that, each measured. `Object::Dict` is a
+`BTreeMap`, so texrs writes keys alphabetically where luatex writes them in
+insertion order. luatex writes `/Resources` as an indirect reference where texrs
+inlines it. And luatex compresses content streams with FlateDecode where texrs
+writes them plain — `tests/typeset.rs` reads those streams as raw bytes, so that
+one is a test-shape question as much as a writer question.
 
 Byte equality is only defined with `SOURCE_DATE_EPOCH` pinned: measured, luatex
 reproduces itself exactly when it is set and differs run to run when it is not,
@@ -301,10 +351,13 @@ too-big negative gives -2147483647 rather than -2147483648. texrs checked only
 for host `i64` overflow until this was measured, so `\count1=99999999999` was
 accepted outright and printed back.
 
-The one divergence left is the recovery, not the arithmetic: tex reports and
-carries on, texrs stops, which is the error model recorded under
-"Not implemented". `tests/cases/multiply_overflow.tex` and
-`tests/cases/number_too_big.tex` pin it.
+The one divergence left is the recovery from a RUN-TIME overflow. `\multiply`
+past the range is detected on the VM (`src/runtime.rs`), which stops rather than
+reporting, so `tests/cases/multiply_overflow.tex` is still a written-down gap.
+The scanner's own limit recovers the way tex does — `\count1=99999999999`
+reports `! Number too big.`, clamps to 2147483647 and carries on — and
+`tests/cases/number_too_big.tex` and `tests/cases/error_context_trimmed.tex` pin
+that, context display included.
 
 ## The JIT
 
