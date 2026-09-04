@@ -227,15 +227,67 @@ pub fn plain(list: &[Noad]) -> String {
                 out.push_str(&plain(&f.denominator));
             }
             Noad::Radical(r) => {
+                // `\sqrt[3]{x}` reads as a cube root, which is where its index
+                // goes when it is written rather than set: in front of the
+                // sign and raised, the way `∛` is one character.
+                if let Some(index) = &r.index {
+                    out.push_str(&script(&plain(index), true));
+                }
                 out.push('√');
                 out.push_str(&plain_field(&r.nucleus.nucleus));
             }
-            Noad::Over(a) | Noad::Under(a) => out.push_str(&plain_field(&a.nucleus)),
+            Noad::Over(a) | Noad::Under(a) | Noad::VCenter(a) => {
+                out.push_str(&plain_field(&a.nucleus))
+            }
+            // An accent reads as the letter with the mark on it, which is what
+            // a reader would say: `\hat x` is `x̂`, one letter and one
+            // combining character.
+            Noad::Accent(a) => {
+                out.push_str(&plain_field(&a.atom.nucleus));
+                if let Some(mark) = combining(a.accent) {
+                    out.push(mark);
+                }
+                if !a.atom.supscr.is_empty() {
+                    out.push_str(&script(&plain_field(&a.atom.supscr), true));
+                }
+                if !a.atom.subscr.is_empty() {
+                    out.push_str(&script(&plain_field(&a.atom.subscr), false));
+                }
+            }
+            // `\mathchoice`'s text list: a formula printed for a reader is not
+            // in any style, and the text one is what `$...$` in a paragraph
+            // would have chosen (§731).
+            Noad::Choice(c) => out.push_str(&plain(&c.text)),
             Noad::Left(_) | Noad::Right(_) | Noad::Style(_) => {}
-            Noad::Glue(_) | Noad::Kern(_) | Noad::Node(_) => {}
+            Noad::Glue(_) | Noad::Kern(_) | Noad::MuGlue(_) | Noad::MuKern(_) => {}
+            Noad::Node(_) => {}
         }
     }
     out
+}
+
+/// The combining character that spells one of plain.tex's math accents
+/// (plain.tex:939-950), for a reader who asked for `--text`.
+///
+/// The accent's own slot says nothing here: `cmr10`'s `"16` is a macron and
+/// `cmex10`'s `"62` is a wide circumflex, and neither is the character a
+/// reader wants beside the letter. Unicode's combining marks are.
+fn combining(accent: super::noad::MathChar) -> Option<char> {
+    match (accent.fam, accent.character) {
+        (0, 0x12) => Some('\u{300}'),
+        (0, 0x13) => Some('\u{301}'),
+        (0, 0x14) => Some('\u{30C}'),
+        (0, 0x15) => Some('\u{306}'),
+        (0, 0x16) => Some('\u{304}'),
+        (0, 0x5E) => Some('\u{302}'),
+        (0, 0x5F) => Some('\u{307}'),
+        (0, 0x7E) => Some('\u{303}'),
+        (0, 0x7F) => Some('\u{308}'),
+        (1, 0x7E) => Some('\u{20D7}'),
+        (3, 0x62) => Some('\u{302}'),
+        (3, 0x65) => Some('\u{303}'),
+        _ => None,
+    }
 }
 
 fn plain_field(f: &Field) -> String {

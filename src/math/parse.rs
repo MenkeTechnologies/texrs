@@ -36,14 +36,59 @@ pub enum Stop {
     Cs(&'static str),
 }
 
+/// One formula, read: its rows and columns, and the equation number beside it.
+///
+/// A `$x+y$` is one row of one column and no number, which is what every
+/// formula was before `&` and `\eqno` meant anything.
+#[derive(Clone, Debug, Default)]
+pub struct Formula {
+    /// The rows, each a list of columns: `\\` ends a row and `&` a column.
+    pub rows: Vec<Vec<Vec<Noad>>>,
+    /// `\eqno`'s or `\leqno`'s mlist (§1204). It is MATH -- `$$x=y\eqno(3)$$`
+    /// sets its number in a formula -- so it is an mlist like any other.
+    pub number: Option<Vec<Noad>>,
+    /// `\leqno` rather than `\eqno`: §1206's `l`, the number at the left.
+    pub number_left: bool,
+}
+
+impl Formula {
+    /// Every noad of every cell, in reading order.
+    ///
+    /// What a formula MEANS when the columns are not being lined up: one list,
+    /// which is what a `$...$` in a paragraph is and what `set::plain` spells.
+    pub fn flat(&self) -> Vec<Noad> {
+        self.rows.iter().flatten().flatten().cloned().collect()
+    }
+
+    /// Whether this is the ordinary case: one row, one column.
+    pub fn is_single(&self) -> bool {
+        self.rows.len() == 1 && self.rows[0].len() == 1
+    }
+}
+
 /// Read a formula from `lx`, expanding macros as `main_control` would.
 ///
 /// Expansion happens HERE rather than beforehand for the reason §1151 reads
 /// the input one token at a time: `\frac` takes two arguments and a macro that
 /// produces one of them has to expand before the argument is delimited, while
 /// `\sqrt` and `\left` must NOT have their delimiter expanded away.
-pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Vec<Noad>> {
-    Scanner { eng, depth: 0 }.mlist(lx, stop)
+pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Formula> {
+    let mut scanner = Scanner {
+        eng,
+        depth: 0,
+        rows: Vec::new(),
+        cells: Vec::new(),
+        number: None,
+        number_left: false,
+    };
+    let last = scanner.mlist(lx, stop)?;
+    scanner.cells.push(last);
+    scanner.rows.push(std::mem::take(&mut scanner.cells));
+    Ok(Formula {
+        rows: scanner.rows,
+        number: scanner.number,
+        number_left: scanner.number_left,
+    })
 }
 
 struct Scanner<'a> {
@@ -52,6 +97,13 @@ struct Scanner<'a> {
     /// diagnostic rather than exhausting the host stack -- the bound `block`
     /// keeps on the lowerer, for the same reason.
     depth: usize,
+    /// The rows closed by a `\\`, and the cells of the row in hand. Only the
+    /// OUTERMOST level fills them: an `&` inside a `\hbox` or a `\left(` group
+    /// belongs to whatever is there, not to the display's columns.
+    rows: Vec<Vec<Vec<Noad>>>,
+    cells: Vec<Vec<Noad>>,
+    number: Option<Vec<Noad>>,
+    number_left: bool,
 }
 
 const MAX_DEPTH: usize = 48;
@@ -109,10 +161,13 @@ impl Scanner<'_> {
                     let field = self.field(lx)?;
                     self.attach(&mut list, field, false);
                 }
-                // An alignment tab inside `align` is where a column would
-                // begin. There are no columns here, so it is where one row's
-                // material meets the next -- see `crate::math`'s note on what
-                // `align` costs.
+                // §768: an alignment tab ends the column in hand. Only at the
+                // outermost level of a formula -- an `&` inside a group is
+                // that group's business.
+                Token::Char(_, Cat::AlignTab) if self.depth == 1 => {
+                    let cell = self.finish(std::mem::take(&mut list), incompleat.take());
+                    self.cells.push(cell);
+                }
                 Token::Char(_, Cat::AlignTab) => {}
                 Token::Char(c, _) => {
                     let code = mathcode(c);
@@ -147,6 +202,25 @@ impl Scanner<'_> {
                         if n == want {
                             return Ok(self.finish(list, incompleat));
                         }
+                    }
+                    // §774's `car_ret`: `\cr` ends a row, and LaTeX's `\\` is
+                    // spelled for it. `\\*` is the same row end with a page
+                    // break forbidden after it, which is a penalty this path
+                    // has nowhere to put.
+                    if self.depth == 1 && matches!(n, "\\" | "cr" | "crcr") {
+                        let _ = self.eng.skip_optional_star(lx);
+                        let cell = self.finish(std::mem::take(&mut list), incompleat.take());
+                        self.cells.push(cell);
+                        self.rows.push(std::mem::take(&mut self.cells));
+                        continue;
+                    }
+                    // §1204's `start_eq_no`: everything after `\eqno` is a
+                    // formula of its own, and it ends where this one does.
+                    if self.depth == 1 && matches!(n, "eqno" | "leqno") {
+                        self.number_left = n == "leqno";
+                        let number = self.mlist(lx, stop)?;
+                        self.number = Some(number);
+                        return Ok(self.finish(list, incompleat));
                     }
                     if let Some(f) = self.generalized_fraction(lx, n)? {
                         if incompleat.is_none() {
@@ -219,8 +293,9 @@ impl Scanner<'_> {
     fn attach(&mut self, list: &mut Vec<Noad>, field: Field, superscript: bool) {
         fn slot(item: &mut Noad) -> Option<&mut Atom> {
             match item {
-                Noad::Atom(a) | Noad::Over(a) | Noad::Under(a) => Some(a),
+                Noad::Atom(a) | Noad::Over(a) | Noad::Under(a) | Noad::VCenter(a) => Some(a),
                 Noad::Radical(r) => Some(&mut r.nucleus),
+                Noad::Accent(acc) => Some(&mut acc.atom),
                 _ => None,
             }
         }
@@ -336,6 +411,118 @@ impl Scanner<'_> {
         }
     }
 
+    /// `math_ac` (§1165): the `accent_noad` a `\mathaccent` code makes.
+    ///
+    /// The code is fifteen bits like a `\mathchardef`'s: the class is read and
+    /// discarded -- an accent has no class of its own, and §761 leaves it Ord
+    /// -- and what is kept is the family and the character. The nucleus is the
+    /// next subformula, exactly as `scan_math` reads one.
+    fn accent_noad(&mut self, lx: &mut Lexer, code: i64) -> R<Noad> {
+        let accent = MathChar {
+            fam: ((code / 256) % 16) as usize,
+            character: (code % 256) as u8,
+        };
+        let nucleus = self.field(lx)?;
+        Ok(Noad::Accent(Accent {
+            accent,
+            atom: Atom::new(Class::Ord, nucleus),
+        }))
+    }
+
+    /// One `<mudimen>` (§448, §455): an optional sign, a decimal constant, and
+    /// the unit `mu`.
+    ///
+    /// The value is returned IN `mu`, scaled by $2^{16}$ the way every other
+    /// dimension is held: `5mu` is `5*65536`. It is not converted to points
+    /// here because a `mu` is one eighteenth of the `math_quad` of the size the
+    /// glue finally lands in, which the reader cannot know (§716).
+    ///
+    /// The three names plain.tex gives (plain.tex:373-375) stand where a
+    /// number does, because `\mskip\thinmuskip` is how `\,` is written.
+    fn mu_dimen(&mut self, lx: &mut Lexer) -> R<Scaled> {
+        Ok(self.mu_glue_amount(lx)?.natural)
+    }
+
+    /// One `<muglue>`: a `<mudimen>` and the optional `plus` and `minus` parts.
+    fn mu_glue(&mut self, lx: &mut Lexer) -> R<MuGlue> {
+        let mut glue = self.mu_glue_amount(lx)?;
+        if self.eng.scan_keyword(lx, "plus", false) {
+            glue.stretch = self.mu_glue_amount(lx)?.natural;
+        }
+        if self.eng.scan_keyword(lx, "minus", false) {
+            glue.shrink = self.mu_glue_amount(lx)?.natural;
+        }
+        Ok(glue)
+    }
+
+    /// A `<mudimen>` or one of plain.tex's three named mu glues, with the sign
+    /// in front of it that `\mskip-\thinmuskip` writes (plain.tex:733).
+    fn mu_glue_amount(&mut self, lx: &mut Lexer) -> R<MuGlue> {
+        // §440: any number of signs and spaces, of which only the minus signs
+        // count.
+        let mut negative = false;
+        let mut digits: Vec<u8> = Vec::new();
+        let mut fraction: Vec<u8> = Vec::new();
+        loop {
+            let Some(tok) = lx.next_token(&self.eng.cats) else {
+                return Ok(MuGlue::default());
+            };
+            match tok {
+                Token::Char(_, Cat::Space) => continue,
+                Token::Char('-', _) => negative = !negative,
+                Token::Char('+', _) => {}
+                Token::Char(c, _) if c.is_ascii_digit() || c == '.' || c == ',' => {
+                    lx.push_back(&[tok]);
+                    break;
+                }
+                // An internal mu glue: the three plain.tex names.
+                Token::Cs(name) => {
+                    let spec = match name.name() {
+                        "thinmuskip" => THIN_MU_SKIP,
+                        "medmuskip" => MED_MU_SKIP,
+                        "thickmuskip" => THICK_MU_SKIP,
+                        _ => return Ok(MuGlue::default()),
+                    };
+                    let glue = MuGlue::of(spec);
+                    return Ok(match negative {
+                        true => glue.negated(),
+                        false => glue,
+                    });
+                }
+                other => {
+                    lx.push_back(&[other]);
+                    break;
+                }
+            }
+        }
+        // §444-§452: the integer part, then at most seventeen digits of
+        // fraction, then the unit.
+        let mut past_point = false;
+        while let Some(tok) = lx.next_token(&self.eng.cats) {
+            match tok {
+                Token::Char(c, _) if c.is_ascii_digit() => match past_point {
+                    true => fraction.push(c as u8 - b'0'),
+                    false => digits.push(c as u8 - b'0'),
+                },
+                Token::Char('.', _) | Token::Char(',', _) if !past_point => past_point = true,
+                other => {
+                    lx.push_back(&[other]);
+                    break;
+                }
+            }
+        }
+        if !self.eng.scan_keyword(lx, "mu", false) {
+            return Err(TexError("Illegal unit of measure (mu inserted)".into()));
+        }
+        let whole: i64 = digits.iter().fold(0i64, |a, d| a * 10 + *d as i64);
+        fraction.truncate(17);
+        let amount = whole * 65536 + round_decimals(&fraction);
+        Ok(MuGlue::fixed(match negative {
+            true => -amount,
+            false => amount,
+        }))
+    }
+
     /// Everything a control sequence can mean inside a formula.
     fn control_sequence(
         &mut self,
@@ -408,15 +595,28 @@ impl Scanner<'_> {
                     }
                     _ => Delimiter::from_code(0x270370),
                 };
-                // LaTeX's `\sqrt[n]{x}` is plain.tex's `\root n \of {x}`,
-                // which builds its index out of boxes rather than out of a
-                // noad. The index is read and dropped rather than set in the
-                // wrong place.
-                let _ = self.eng.read_optional_bracket(lx)?;
+                // LaTeX's `\sqrt[n]{x}` is plain.tex's `\root n \of {x}`
+                // (plain.tex:1018-1022), which builds its index out of BOXES
+                // around the radical rather than out of a noad. The tokens are
+                // read here and `make_root` places them.
+                let index = match self.eng.read_optional_bracket(lx)? {
+                    Some(tokens) => {
+                        // The index's tokens are already read, so they go back
+                        // in front of a closing brace of this scanner's own
+                        // making and are read as one subformula -- which is
+                        // what `{#1}` inside `\root`'s `\hbox` makes of them.
+                        let mut back = tokens;
+                        back.push(Token::Char('}', Cat::EndGroup));
+                        lx.push_back(&back);
+                        Some(self.mlist(lx, Stop::Brace)?)
+                    }
+                    None => None,
+                };
                 let body = self.argument(lx)?;
                 out.push(Noad::Radical(Radical {
                     left_delimiter: delim,
                     nucleus: Atom::new(Class::Ord, Field::List(body)),
+                    index,
                 }));
             }
             // LaTeX's `\frac`, which is `\over` written with its two arguments
@@ -465,11 +665,11 @@ impl Scanner<'_> {
             }
             // plain.tex:730-733 and the `\quad` family: pure spacing, in mu
             // and in em respectively.
-            "," => out.push(Noad::Glue(mu(THIN_MU_SKIP.0))),
-            ">" => out.push(Noad::Glue(mu(MED_MU_SKIP.0))),
-            ";" => out.push(Noad::Glue(mu(THICK_MU_SKIP.0))),
-            "!" => out.push(Noad::Glue(-mu(THIN_MU_SKIP.0))),
-            "thinspace" => out.push(Noad::Glue(mu(THIN_MU_SKIP.0))),
+            "," => out.push(Noad::MuGlue(MuGlue::of(THIN_MU_SKIP))),
+            ">" => out.push(Noad::MuGlue(MuGlue::of(MED_MU_SKIP))),
+            ";" => out.push(Noad::MuGlue(MuGlue::of(THICK_MU_SKIP))),
+            "!" => out.push(Noad::MuGlue(MuGlue::of(THIN_MU_SKIP).negated())),
+            "thinspace" => out.push(Noad::MuGlue(MuGlue::of(THIN_MU_SKIP))),
             "quad" => out.push(Noad::Glue(mu(18 * 65536))),
             "qquad" => out.push(Noad::Glue(mu(36 * 65536))),
             " " | "enspace" => out.push(Noad::Glue(mu(9 * 65536))),
@@ -484,6 +684,46 @@ impl Scanner<'_> {
                     .filter_map(|_| atom_for_code(code).map(Noad::Atom))
                     .collect();
                 out.push(Noad::Atom(Atom::new(Class::Inner, Field::List(dots))));
+            }
+            // `math_ac` (§1165): `\mathaccent"7013` and the twelve plain.tex
+            // names for it (plain.tex:939-950).
+            "mathaccent" => {
+                let code = self.eng.scan_number_pending(lx)?;
+                out.push(self.accent_noad(lx, code)?);
+            }
+            _ if MATH_ACCENTS.iter().any(|(a, _)| *a == n) => {
+                let code = MATH_ACCENTS
+                    .iter()
+                    .find(|(a, _)| *a == n)
+                    .map(|(_, c)| *c)
+                    .unwrap_or(0);
+                out.push(self.accent_noad(lx, code)?);
+            }
+            // §1167: `\vcenter{...}` leaves a `vcenter_noad` whose nucleus is
+            // the vbox the group packed.
+            "vcenter" => {
+                let body = self.argument(lx)?;
+                out.push(Noad::VCenter(Atom::new(Class::Ord, Field::List(body))));
+            }
+            // §1171-§1174: `\mathchoice` reads four groups, one per style.
+            "mathchoice" => {
+                out.push(Noad::Choice(Box::new(Choice {
+                    display: self.argument(lx)?,
+                    text: self.argument(lx)?,
+                    script: self.argument(lx)?,
+                    script_script: self.argument(lx)?,
+                })));
+            }
+            // §1171: `\mkern` and `\mskip`, written in `mu` by the document.
+            // They stay in `mu` until `mlist_to_hlist` knows the size they
+            // land in (§716-§717), which is the whole point of the unit.
+            "mkern" => {
+                let amount = self.mu_dimen(lx)?;
+                out.push(Noad::MuKern(amount));
+            }
+            "mskip" => {
+                let glue = self.mu_glue(lx)?;
+                out.push(Noad::MuGlue(glue));
             }
             // A family switch: `\mathrm{x}` sets its argument in family 0, and
             // `\mathit` in family 1. The other three name faces this port has
@@ -562,6 +802,41 @@ impl Scanner<'_> {
 fn mu(amount: i64) -> Scaled {
     amount / 18
 }
+
+/// `round_decimals(k)` (§102): the digits after a decimal point, as a fraction
+/// of $2^{16}$.
+///
+/// Knuth's own loop, verbatim: it works backwards from the last digit,
+/// doubling into `two = 2^17` so that the final halving rounds to nearest.
+fn round_decimals(digits: &[u8]) -> Scaled {
+    let mut a: i64 = 0;
+    for d in digits.iter().rev() {
+        a = (a + *d as i64 * 131_072) / 10;
+    }
+    (a + 1) / 2
+}
+
+/// The `\mathaccent` codes plain.tex names (plain.tex:939-950), and the two
+/// LaTeX spellings of the same accents.
+///
+/// A `"70..` code is class 7 -- "use the current `\fam`" -- out of family 0,
+/// which is `cmr10`'s accents; `\vec`, `\widehat` and `\widetilde` are class
+/// 0 out of family 1 and 3, where the wide variants have charlists to walk
+/// (§741).
+pub const MATH_ACCENTS: &[(&str, i64)] = &[
+    ("acute", 0x7013),
+    ("grave", 0x7012),
+    ("ddot", 0x707F),
+    ("tilde", 0x707E),
+    ("bar", 0x7016),
+    ("breve", 0x7015),
+    ("check", 0x7014),
+    ("hat", 0x705E),
+    ("vec", 0x017E),
+    ("dot", 0x705F),
+    ("widetilde", 0x0365),
+    ("widehat", 0x0362),
+];
 
 /// Rewrite every `math_char` in a list into family `fam`, which is what
 /// `\mathrm` and `\mathit` do to their argument.

@@ -190,6 +190,18 @@ pub enum Noad {
     Over(Atom),
     /// An `under_noad` (§687): the nucleus, underlined.
     Under(Atom),
+    /// An `accent_noad` (§687): `\hat`, `\bar`, `\vec` and their siblings.
+    Accent(Accent),
+    /// A `vcenter_noad` (§687): a box centred on the axis.
+    ///
+    /// Its nucleus is always a `sub_box` holding a VLIST, which is what §736
+    /// checks for and what `\vcenter{...}` leaves behind (§1167).
+    VCenter(Atom),
+    /// A `choice_node` (§689): `\mathchoice`'s four lists.
+    ///
+    /// Boxed because it is four mlists where every other variant is one, and
+    /// an unboxed one would make every `Noad` in a formula that size.
+    Choice(Box<Choice>),
     /// A `left_noad` (§687). It appears only as the first item of an mlist.
     Left(Delimiter),
     /// A `right_noad` (§687). It appears only as the last.
@@ -200,6 +212,11 @@ pub enum Noad {
     Glue(Scaled),
     /// A `kern_node` in an mlist (§730).
     Kern(Scaled),
+    /// A `glue_node` whose `subtype` is `mu_glue` (§732): `\mskip`, and every
+    /// space §764's table asks for.
+    MuGlue(MuGlue),
+    /// A `kern_node` whose `subtype` is `mu_glue` (§717): `\mkern`.
+    MuKern(Scaled),
     /// A box the formula carries whole -- what `\hbox{...}` and `\mathrm{...}`
     /// leave behind once their contents have been set as text.
     Node(Node),
@@ -256,6 +273,78 @@ pub struct Fraction {
 pub struct Radical {
     pub left_delimiter: Delimiter,
     pub nucleus: Atom,
+    /// `\root n \of {x}`'s index, which is NOT part of `radical_noad`.
+    ///
+    /// TeX has no field for it: plain.tex:1018-1022 builds the index out of
+    /// BOXES around the radical the noad makes, and `\sqrt[n]{x}` is LaTeX's
+    /// spelling of the same macro. It rides here because the radical is the
+    /// only thing that knows it has one.
+    pub index: Option<Vec<Noad>>,
+}
+
+/// An `accent_noad` (§683, §687): a nucleus with a character over it.
+///
+/// `accent_chr` is a `math_char` field of its own, beside the nucleus and the
+/// two scripts every noad carries.
+#[derive(Clone, Debug)]
+pub struct Accent {
+    /// `accent_chr(q)` (§683).
+    pub accent: MathChar,
+    /// The noad proper: nucleus, subscript, superscript.
+    pub atom: Atom,
+}
+
+/// A `choice_node` (§689): the four mlists `\mathchoice` names, of which
+/// §731 keeps the one the current style asks for.
+#[derive(Clone, Debug, Default)]
+pub struct Choice {
+    pub display: Vec<Noad>,
+    pub text: Vec<Noad>,
+    pub script: Vec<Noad>,
+    pub script_script: Vec<Noad>,
+}
+
+/// A glue or a kern written in `mu` rather than in points (§716-§717).
+///
+/// `mu` is a MATH unit: one eighteenth of the `math_quad` of the size the
+/// glue lands in, so `\mskip3mu` is a different number of points in a script
+/// than in text. It therefore cannot be converted where it is READ -- which
+/// is what `\thinmuskip` and its two siblings need, and what `\mkern` and
+/// `\mskip` written by a document need too.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MuGlue {
+    pub natural: Scaled,
+    pub stretch: Scaled,
+    pub shrink: Scaled,
+}
+
+impl MuGlue {
+    /// A rigid `mu` glue: `\mskip 5mu` with no stretch and no shrink.
+    pub fn fixed(natural: Scaled) -> MuGlue {
+        MuGlue {
+            natural,
+            ..MuGlue::default()
+        }
+    }
+
+    /// The three components of one of plain.tex's math skips, as they are
+    /// written there (plain.tex:373-375).
+    pub fn of(spec: (i64, i64, i64)) -> MuGlue {
+        MuGlue {
+            natural: spec.0,
+            stretch: spec.1,
+            shrink: spec.2,
+        }
+    }
+
+    /// `-\thinmuskip`, which is what `\!` is (plain.tex:733).
+    pub fn negated(self) -> MuGlue {
+        MuGlue {
+            natural: -self.natural,
+            stretch: -self.stretch,
+            shrink: -self.shrink,
+        }
+    }
 }
 
 /// The 64-digit string of §764, verbatim.
@@ -321,6 +410,24 @@ pub const DELIMITER_SHORTFALL: Scaled = 5 * 65536;
 /// `\nulldelimiterspace=1.2pt` (plain.tex:346): the width `var_delimiter`
 /// returns for a delimiter that is not there (§706).
 pub const NULL_DELIMITER_SPACE: Scaled = 78643;
+
+/// `\skewchar` of each family, as plain.tex sets them (plain.tex:474-475).
+///
+/// §742 computes how far an accent is moved to the right by looking up the
+/// kern between the accented character and this character in the same font.
+/// `cmmi10`'s skew character is `'177` and `cmsy10`'s is `'60`; plain.tex's
+/// `\defaultskewchar` is -1 (plain.tex:324), so families 0 and 3 have none and
+/// nothing set from them is skewed.
+pub const SKEW_CHAR: [Option<u8>; 4] = [None, Some(0o177), Some(0o60), None];
+
+/// `\binoppenalty=700` and `\relpenalty=500` (plain.tex:288-289): what §767
+/// charges for breaking a formula after a binary operator or a relation.
+pub const BIN_OP_PENALTY: i64 = 700;
+pub const REL_PENALTY: i64 = 500;
+
+/// `inf_penalty` (§157): the penalty §767 reads as "do not break here", and
+/// the one every noad but a Bin and a Rel carries.
+pub const INF_PENALTY: i64 = 10000;
 
 #[cfg(test)]
 mod tests {

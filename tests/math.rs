@@ -667,3 +667,530 @@ fn an_operator_name_is_upright_roman_and_takes_a_thin_space() {
         "the `o` of `log` was pushed right by an italic correction §752 suppresses"
     );
 }
+
+/// `half(x)` (§100), which is what every shift in `mlist_to_hlist` is halved
+/// with: an odd number rounds away from zero upward, so `x/2` is off by one on
+/// half the values a test would otherwise agree with by luck.
+fn half(x: i64) -> i64 {
+    match x % 2 == 0 {
+        true => x / 2,
+        false => (x + 1) / 2,
+    }
+}
+
+/// The kern between `left` and `right` in a family's text font, in scaled
+/// points -- the lig/kern lookup §742 and §752 both make.
+fn kern_between(f: &MathFonts, fam: usize, left: u8, right: u8) -> i64 {
+    let Some(font) = f.font(fam, 0) else { return 0 };
+    match font.tfm.step(left, right) {
+        Some(texrs::tfm::Step::Kern { by, .. }) => (by * font.at * 65536.0).round() as i64,
+        _ => 0,
+    }
+}
+
+/// `cur_mu` (§703): one math unit, at a size, in scaled points.
+fn cur_mu(f: &MathFonts, size: usize) -> i64 {
+    f.math_quad(size) / 18
+}
+
+/// §739 and §742: the accent is centred over the accentee and skewed right by
+/// the kern between the accented character and the font's `\skewchar`, and the
+/// accent's own width is treated as zero.
+///
+/// `cmmi10`'s `\skewchar` is `'177` (plain.tex:474), and the skew is what puts
+/// `\hat f` further right than `\hat x` -- a slanted letter is not centred on
+/// its own box.
+#[test]
+fn a_math_accent_is_centred_over_its_nucleus_and_skewed_by_section_742() {
+    let Some(f) = fonts() else { return };
+    let Some(s) = set("\\hat x", TEXT_STYLE) else {
+        return;
+    };
+    let roman = f.font(0, 0).expect("cmr10 is loaded");
+    let italic = f.font(1, 0).expect("cmmi10 is loaded");
+    // `\hat` is `\mathaccent"705E` (plain.tex:946): cmr10's circumflex.
+    let accent = roman.metrics(0x5E).expect("cmr10 has a circumflex accent");
+    let accent_box = accent.width + accent.italic;
+    // §720's `clean_box` of a single character: the box is as wide as the
+    // character plus its italic correction.
+    let x = italic.metrics(b'x').expect("cmmi10 has an x");
+    let w = x.width + x.italic;
+    // The formula is exactly as wide as its nucleus: §738 says the accent's
+    // width counts for nothing.
+    assert_eq!(
+        s.width, w,
+        "the accent widened the formula, where §738 gives it no width at all"
+    );
+    let skew = kern_between(&f, 1, b'x', 0o177);
+    let placed = glyph(&s, '\u{5E}').expect("the accent is drawn");
+    assert_eq!(
+        placed.1,
+        skew + half(w - accent_box),
+        "the accent sits at {} sp where §739's `s+half(w-width(y))` puts it at {}",
+        placed.1,
+        skew + half(w - accent_box)
+    );
+    // §739: the accent is lowered onto the nucleus by `delta`, which is the
+    // nucleus's height or the accent font's x-height, whichever is less.
+    let delta = x.height.min(roman.param(5));
+    let natural = accent.height + accent.depth - delta + x.height;
+    // §740: a box shorter than the nucleus keeps the nucleus's height.
+    let height = natural.max(x.height);
+    let expected = height - (height - natural) - accent.height;
+    assert_eq!(
+        placed.2, expected,
+        "the accent's baseline is at {} sp where §739 lowers it to {}",
+        placed.2, expected
+    );
+}
+
+/// §739: over a letter TALLER than the accent font's x-height the accent is
+/// lowered by the x-height and no further, so `\bar A` and `\bar x` do not
+/// carry their bars at the same distance above the baseline.
+#[test]
+fn an_accent_over_a_tall_letter_is_lowered_by_the_x_height() {
+    let Some(f) = fonts() else { return };
+    let Some(s) = set("\\bar A", TEXT_STYLE) else {
+        return;
+    };
+    let roman = f.font(0, 0).expect("cmr10 is loaded");
+    let italic = f.font(1, 0).expect("cmmi10 is loaded");
+    // `\bar` is `\mathaccent"7016` (plain.tex:943): cmr10's macron.
+    let accent = roman.metrics(0x16).expect("cmr10 has a macron");
+    let a = italic.metrics(b'A').expect("cmmi10 has an A");
+    let x_height = roman.param(5);
+    assert!(
+        a.height > x_height,
+        "the test needs a letter taller than the x-height; `A` is {} sp against {}",
+        a.height,
+        x_height
+    );
+    let delta = x_height;
+    let natural = accent.height + accent.depth - delta + a.height;
+    let height = natural.max(a.height);
+    let expected = height - (height - natural) - accent.height;
+    let placed = glyph(&s, '\u{AF}').expect("the macron is drawn");
+    assert_eq!(
+        placed.2, expected,
+        "the bar over a capital is at {} sp where §739's x-height rule puts it at {}",
+        placed.2, expected
+    );
+}
+
+/// §741: `\widehat` walks its charlist for the widest variant that is still no
+/// wider than what it covers, so a wide subformula gets a wider accent.
+#[test]
+fn a_wide_accent_walks_the_charlist_for_the_widest_that_fits() {
+    let Some(f) = fonts() else { return };
+    let ext = f.font(3, 0).expect("cmex10 is loaded");
+    let italic = f.font(1, 0).expect("cmmi10 is loaded");
+    // The width of the accentee, as `clean_box` measures it: a list of
+    // characters is as wide as their widths, and the last one's italic
+    // correction (§755).
+    let width_of = |letters: &str| -> i64 {
+        let mut total = 0;
+        let bytes: Vec<u8> = letters.bytes().collect();
+        for (at, b) in bytes.iter().enumerate() {
+            let m = italic.metrics(*b).expect("cmmi10 has the letter");
+            total += m.width;
+            // §752: a letter followed by another of the same family is a
+            // `math_text_char`; cmmi10 has no `space` parameter, so §755 keeps
+            // its italic correction anyway.
+            let _ = at;
+            total += m.italic;
+            if at + 1 < bytes.len() {
+                total += kern_between(&f, 1, *b, bytes[at + 1]);
+            }
+        }
+        total
+    };
+    // §741's own loop, run here from the metrics rather than from the engine.
+    let chosen = |w: i64| -> u8 {
+        // `\widehat` is `\mathaccent"0362` (plain.tex:950).
+        let mut c = 0x62u8;
+        while let Some(next) = ext.next_larger(c) {
+            let Some(m) = ext.metrics(next) else { break };
+            if m.width > w {
+                break;
+            }
+            c = next;
+        }
+        c
+    };
+    let narrow_w = width_of("x");
+    let wide_w = width_of("xyz");
+    let (narrow_c, wide_c) = (chosen(narrow_w), chosen(wide_w));
+    assert!(
+        wide_c > narrow_c,
+        "the charlist offers no wider variant between {narrow_w} sp and {wide_w} sp, \
+         so this test would pass without walking it"
+    );
+    for (source, w, code, skewed) in [
+        ("\\widehat x", narrow_w, narrow_c, true),
+        ("\\widehat{xyz}", wide_w, wide_c, false),
+    ] {
+        let Some(s) = set(source, TEXT_STYLE) else {
+            return;
+        };
+        let m = ext.metrics(code).expect("cmex10 has the variant");
+        // §742 skews by the kern in the NUCLEUS's font, not the accent's, and
+        // only when the nucleus is a single character: `\widehat{xyz}` is a
+        // list, so nothing is looked up for it.
+        let skew = match skewed {
+            true => kern_between(&f, 1, b'x', 0o177),
+            false => 0,
+        };
+        let expected = skew + half(w - (m.width + m.italic));
+        let placed = glyph(&s, '\u{2C6}').expect("the wide accent is drawn");
+        assert_eq!(
+            placed.1, expected,
+            "{source}: the accent is at {} sp where §739 centres variant {code:#04x} at {}",
+            placed.1, expected
+        );
+    }
+}
+
+/// §736: a `\vcenter` box is centred on the axis -- the line a fraction bar
+/// and a `\left(` are centred on -- so its height is the axis height plus half
+/// of everything in it, whatever that is.
+#[test]
+fn a_vcentered_box_is_centred_on_the_axis() {
+    let Some(f) = fonts() else { return };
+    let axis = f.axis_height(0);
+    // `\vcenter`'s own height is stated in §736; what goes INSIDE it is
+    // whatever the same material comes to unvcentred, which is what the
+    // second setting of each pair measures.
+    for (source, bare) in [
+        ("\\vcenter{x}", "x"),
+        ("\\vcenter{\\frac{a}{b}}", "\\frac{a}{b}"),
+    ] {
+        let (Some(s), Some(plain)) = (set(source, TEXT_STYLE), set(bare, TEXT_STYLE)) else {
+            return;
+        };
+        let delta = plain.height + plain.depth;
+        assert_eq!(
+            s.height,
+            axis + half(delta),
+            "{source}: the box is {} sp tall where §736 makes it the {} sp axis              plus half of its {} sp",
+            s.height,
+            axis,
+            delta
+        );
+        // And everything inside is lifted by exactly the difference between
+        // the two heights, which is what "centred on the axis" looks like on
+        // the page: the same material, moved onto the axis and not redrawn.
+        let lift = axis + half(delta) - plain.height;
+        let moved: Vec<i64> = s.glyphs.iter().map(|g| g.y).collect();
+        let expected: Vec<i64> = plain.glyphs.iter().map(|g| g.y + lift).collect();
+        assert_eq!(
+            moved, expected,
+            "{source}: the content sits at {moved:?} where a lift of {lift} sp onto the axis puts it at {expected:?}"
+        );
+    }
+}
+
+/// §731: a `\mathchoice` keeps the one of its four lists the current style
+/// names, and throws the other three away.
+#[test]
+fn mathchoice_keeps_the_list_the_current_style_names() {
+    let Some(f) = fonts() else { return };
+    let source = "\\mathchoice{a}{b}{c}{d}";
+    for (style, letter, size) in [
+        (DISPLAY_STYLE, 'a', 0usize),
+        (TEXT_STYLE, 'b', 0),
+        (SCRIPT_STYLE, 'c', 1),
+    ] {
+        let Some(s) = set(source, style) else { return };
+        let drawn: Vec<char> = s.glyphs.iter().map(|g| g.ch).collect();
+        assert_eq!(
+            drawn,
+            vec![letter],
+            "style {style} drew {drawn:?} where §731 keeps `{letter}` alone"
+        );
+        // And it is set at the size that style implies (§703), which is the
+        // other half of what `\mathchoice` is for.
+        let at = (f.at(1, size) * 65536.0).round() as i64;
+        assert_eq!(
+            s.glyphs[0].size, at,
+            "style {style} set its choice at {} sp where §703 gives size {size}, {at} sp",
+            s.glyphs[0].size
+        );
+    }
+}
+
+/// `\sqrt[3]{x}` is plain.tex's `\root 3 \of {x}` (plain.tex:1018-1022): the
+/// index in a `\scriptscriptstyle` box, five `mu` in front of it, raised by
+/// six tenths of the radical's height less its depth, and ten `mu` back.
+#[test]
+fn a_root_index_is_set_by_plain_texs_own_three_amounts() {
+    let Some(f) = fonts() else { return };
+    let (Some(plain), Some(rooted)) = (
+        set("\\sqrt{x}", TEXT_STYLE),
+        set("\\sqrt[3]{x}", TEXT_STYLE),
+    ) else {
+        return;
+    };
+    // The index is a `\scriptscriptstyle` box, so it comes out of cmr5.
+    let tiny = f.font(0, 2).expect("cmr5 is loaded");
+    let three = tiny.metrics(b'3').expect("cmr5 has a three");
+    let index_width = three.width + three.italic;
+    let mu = cur_mu(&f, 0);
+    // `\mkern5mu ... \mkern-10mu`, which is five mu less than the index's own
+    // width -- the ten pulls the radical back over the index.
+    let expected = index_width + 5 * mu - 10 * mu;
+    assert_eq!(
+        rooted.width - plain.width,
+        expected,
+        "the index widened the radical by {} sp where plain.tex's three amounts \
+         come to {}",
+        rooted.width - plain.width,
+        expected
+    );
+    let three_glyph = glyph(&rooted, '3').expect("the index is drawn");
+    let at = (f.at(0, 2) * 65536.0).round() as i64;
+    assert_eq!(
+        three_glyph.3, at,
+        "the index is set at {} sp where `\\scriptscriptstyle` is cmr5 at {}",
+        three_glyph.3, at
+    );
+    // `\dimen@\ht\z@ \advance\dimen@-\dp\z@` then `\raise.6\dimen@`. §453
+    // reads `.6` as 39322 sixty-five-thousand-five-hundred-and-thirty-sixths.
+    let dimen = plain.height - plain.depth;
+    let raise = ((dimen as i128 * 39322) / 65536) as i64;
+    assert_eq!(
+        three_glyph.2, raise,
+        "the index sits at {} sp where `\\raise.6\\dimen@` of {} sp puts it at {}",
+        three_glyph.2, dimen, raise
+    );
+}
+
+/// §716-§717: a `mu` is one eighteenth of the `math_quad` of the size the glue
+/// LANDS in, so the same `\mkern` is a different number of points in a script
+/// than in text.
+#[test]
+fn a_mu_is_measured_at_the_size_the_glue_lands_in() {
+    let Some(f) = fonts() else { return };
+    for (style, size) in [(TEXT_STYLE, 0usize), (SCRIPT_STYLE, 1)] {
+        let mu = cur_mu(&f, size);
+        let (Some(bare), Some(kerned), Some(thinned)) = (
+            set("ab", style),
+            set("a\\mkern18mu b", style),
+            set("a\\,b", style),
+        ) else {
+            return;
+        };
+        assert_eq!(
+            kerned.width - bare.width,
+            18 * mu,
+            "style {style}: `\\mkern18mu` came to {} sp where eighteen mu at that \
+             size is {}",
+            kerned.width - bare.width,
+            18 * mu
+        );
+        // `\,` is `\mskip\thinmuskip` (plain.tex:730) and `\thinmuskip` is 3mu
+        // (plain.tex:373) -- which is three mu of THIS size, not of the text
+        // size the formula was read in.
+        assert_eq!(
+            thinned.width - bare.width,
+            3 * mu,
+            "style {style}: `\\,` came to {} sp where three mu at that size is {}",
+            thinned.width - bare.width,
+            3 * mu
+        );
+    }
+}
+
+/// §810: a column is as wide as its widest entry, so the `=` of every row of
+/// an `align` starts at the same place however long the left sides are.
+#[test]
+fn a_displays_columns_are_as_wide_as_their_widest_entry() {
+    if fonts().is_none() {
+        return;
+    }
+    let f = texrs::math::read_formula("a &= b \\\\ xyzw &= c").expect("the display parses");
+    assert_eq!(f.rows.len(), 2, "the `\\\\` did not end a row: {:?}", f.rows);
+    assert_eq!(f.rows[0].len(), 2, "the `&` did not end a column");
+    let Some(rows) = texrs::math::set_display(&f, DISPLAY_STYLE, SIZE, "align", 469.75) else {
+        return;
+    };
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].width, rows[1].width,
+        "the two rows came to {} sp and {} sp, so nothing could line them up",
+        rows[0].width, rows[1].width
+    );
+    let first = glyph(&rows[0], '=').expect("the first row's relation is set");
+    let second = glyph(&rows[1], '=').expect("the second row's relation is set");
+    assert_eq!(
+        first.1, second.1,
+        "the relations start at {} sp and {} sp, so the columns are not aligned",
+        first.1, second.1
+    );
+    // The left column is flush RIGHT (amsmath.sty:2359), so the longer left
+    // side is the one that starts at the column's left edge.
+    let a = glyph(&rows[0], 'a').expect("the first row's left side is set");
+    let x = glyph(&rows[1], 'x').expect("the second row's left side is set");
+    assert!(
+        a.1 > x.1,
+        "the shorter left side starts at {} sp and the longer at {} sp, \
+         where a right-aligned column puts the shorter one further right",
+        a.1,
+        x.1
+    );
+}
+
+/// §1204-§1206: a display is centred on `\displaywidth` and its equation
+/// number is set hard against the right edge of it.
+#[test]
+fn an_equation_number_sits_at_the_edge_of_the_display_width() {
+    if fonts().is_none() {
+        return;
+    }
+    const MEASURE: f64 = 469.75;
+    let z = (MEASURE * 65536.0).round() as i64;
+    let f = texrs::math::read_formula("x=y\\eqno(3)").expect("the display parses");
+    let number = f.number.clone().expect("`\\eqno` gave the display a number");
+    let (Some(body), Some(a)) = (
+        set_mlist(&f.rows[0][0], DISPLAY_STYLE, SIZE),
+        // §1199: the number is set at TEXT style whatever the display is in.
+        set_mlist(&number, TEXT_STYLE, SIZE),
+    ) else {
+        return;
+    };
+    let Some(rows) = texrs::math::set_display(&f, DISPLAY_STYLE, SIZE, "equation", MEASURE) else {
+        return;
+    };
+    assert_eq!(rows.len(), 1);
+    let line = &rows[0];
+    assert_eq!(
+        line.width, z,
+        "the display line is {} sp wide where `\\displaywidth` is {}",
+        line.width, z
+    );
+    // §1206: `d:=half(z-w)`, and the number's width is nowhere near half the
+    // measure, so the display stays centred.
+    let d = half(z - body.width);
+    let x = glyph(line, 'x').expect("the formula is set");
+    assert_eq!(
+        x.1, d,
+        "the display starts at {} sp where §1206 displaces it by {}",
+        x.1, d
+    );
+    let open = glyph(line, '(').expect("the equation number is set");
+    assert_eq!(
+        open.1,
+        z - a.width,
+        "the number starts at {} sp where the right edge of a {} sp measure \
+         puts a {} sp number at {}",
+        open.1,
+        z,
+        a.width,
+        z - a.width
+    );
+}
+
+/// The rows of an `align` reach both halves of the engine: a reader gets both
+/// of them, and the page draws both.
+///
+/// The unit tests above measure what `mlist_to_hlist` produced; this is the
+/// path from `\begin{align}` through the lowerer to the page, where an `&`
+/// used to be dropped and a two-row display used to set as one row.
+#[test]
+fn an_align_environment_sets_every_row_of_itself() {
+    let source = "\\documentclass{article}\n\\begin{document}\n\
+                  \\begin{align}\na &= b + c \\\\\nxyzw &= d\n\\end{align}\n\
+                  \\end{document}\n";
+    let text = texrs::run_text(source).expect("the document runs");
+    assert!(
+        text.contains("a=b+c"),
+        "the first row did not reach the reader: {text:?}"
+    );
+    assert!(
+        text.contains("xyzw=d"),
+        "the second row did not reach the reader: {text:?}"
+    );
+    let pdf = texrs::run_pdf(source).expect("the document sets");
+    assert!(
+        texrs::pdf_page_count(&pdf) >= 1,
+        "the display produced no page"
+    );
+}
+
+/// `\hat`, `\sqrt[3]` and `\vcenter` reach a reader as words, which is the
+/// half of a formula `--text` prints.
+#[test]
+fn the_new_constructions_read_back_as_their_own_words() {
+    let source = "\\documentclass{article}\n\\begin{document}\n\
+                  Here are $\\hat x$, $\\bar y$, $\\sqrt[3]{z}$ and $\\vcenter{w}$.\n\
+                  \\end{document}\n";
+    let text = texrs::run_text(source).expect("the document runs");
+    for (what, expected) in [
+        ("an accent", "x\u{302}"),
+        ("a bar", "y\u{304}"),
+        ("a cube root", "\u{B3}\u{221A}z"),
+        ("a vcentered box", "w"),
+    ] {
+        assert!(
+            text.contains(expected),
+            "{what} did not reach the reader as {expected:?}: {text:?}"
+        );
+    }
+}
+
+/// §761 and §767: a formula set inside a paragraph offers a break after a
+/// binary operator and after a relation, and nowhere else.
+///
+/// `\binoppenalty` is 700 and `\relpenalty` 500 (plain.tex:288-289). Nothing
+/// reads these yet -- a set formula reaches the paragraph breaker as one word
+/// -- so this measures the mlist rather than a broken line, which is what
+/// there is to measure.
+#[test]
+fn a_formula_in_a_paragraph_carries_section_767s_break_penalties() {
+    use texrs::node::Node;
+    let Some(f) = fonts() else { return };
+    let penalties = |source: &str, with: bool| -> Vec<i64> {
+        let list = parse_formula(source).expect("the formula parses");
+        let b = match with {
+            true => texrs::math::mlist::set_with_penalties(&f, &list, TEXT_STYLE),
+            false => texrs::math::mlist::set(&f, &list, TEXT_STYLE),
+        };
+        b.list
+            .iter()
+            .filter_map(|n| match n {
+                Node::Penalty(p) => Some(*p),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        penalties("a+b=c", true),
+        vec![700, 500],
+        "§767 charges `\\binoppenalty` after the Bin and `\\relpenalty` after the Rel"
+    );
+    // §1199: a DISPLAY inserts none of them, because a display is not inside a
+    // paragraph that could break.
+    assert!(
+        penalties("a+b=c", false).is_empty(),
+        "a display carried break penalties, where §1199 turns them off"
+    );
+    // §729 turns a Bin with a Rel after it into an Ord, and an Ord is not a
+    // breakpoint -- so only the relation's own penalty is left.
+    assert_eq!(
+        penalties("a+=b", true),
+        vec![500],
+        "a Bin that §729 made an Ord kept its `\\binoppenalty`"
+    );
+    // §726 converts a final Bin to an Ord too, so a formula that ENDS in an
+    // operator offers a break only at its relation.
+    assert_eq!(
+        penalties("a=b+", true),
+        vec![500],
+        "a trailing Bin was still charged `\\binoppenalty`"
+    );
+    // §767 inserts nothing where `link(q)` is null: there is nothing after the
+    // break to move onto the next line.
+    assert!(
+        penalties("a=", true).is_empty(),
+        "a formula ending at its relation offered a break with nothing after it"
+    );
+}

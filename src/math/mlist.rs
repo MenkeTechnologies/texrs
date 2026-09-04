@@ -86,6 +86,11 @@ pub struct Converter<'a> {
     style: Style,
     size: usize,
     mu: Scaled,
+    /// `mlist_penalties` (§719): whether §767's break penalties are inserted.
+    ///
+    /// §1194 sets it from the mode -- true for a formula inside a paragraph,
+    /// false for a display (§1199) and false for every recursive call (§720).
+    penalties: bool,
 }
 
 /// Which noad a `r_type` names during the first pass. `left_noad` and
@@ -108,6 +113,9 @@ struct Translated {
     /// The delimiter a `left_noad` or `right_noad` will be grown into once
     /// `max_h` and `max_d` are known (§762).
     delimiter: Option<Delimiter>,
+    /// `pen` (§761): what §767 charges for breaking the formula after this
+    /// noad. `inf_penalty` for everything but a Bin and a Rel.
+    penalty: i64,
 }
 
 impl Translated {
@@ -117,6 +125,7 @@ impl Translated {
             hlist: vec![node],
             style: None,
             delimiter: None,
+            penalty: INF_PENALTY,
         }
     }
 }
@@ -128,9 +137,17 @@ impl<'a> Converter<'a> {
             style: TEXT_STYLE,
             size: TEXT_SIZE,
             mu: 0,
+            penalties: false,
         };
         c.set_style(TEXT_STYLE);
         c
+    }
+
+    /// `mlist_penalties := #` (§719). A recursive call always turns them off
+    /// (§720), which is why this is set on the outermost conversion only.
+    pub fn with_penalties(mut self, on: bool) -> Converter<'a> {
+        self.penalties = on;
+        self
     }
 
     /// "Set up the values of `cur_size` and `cur_mu`, based on `cur_style`"
@@ -242,6 +259,10 @@ impl<'a> Converter<'a> {
     /// `clean_box(p,s)` (§720): a noad field, boxed in a given style, with a
     /// `shift_amount` of zero.
     fn clean_box(&mut self, field: &Field, style: Style) -> BoxNode {
+        // §720: `mlist_penalties := false` for the whole of a recursive
+        // conversion. A formula cannot break inside a subscript, a numerator
+        // or anything else that is about to be packed into one box.
+        let penalties = std::mem::replace(&mut self.penalties, false);
         let q: Vec<Node> = match field {
             // §720's `sub_box` case: the box goes to `found` as it stands,
             // shift and all. It is NOT simply handed back -- a box with a
@@ -277,6 +298,7 @@ impl<'a> Converter<'a> {
         if x.list.len() == 2 && x.list[0].is_char() && matches!(x.list[1], Node::Kern { .. }) {
             x.list.truncate(1);
         }
+        self.penalties = penalties;
         x
     }
 
@@ -465,6 +487,161 @@ impl<'a> Converter<'a> {
         let bar = self.overbar(x, clr, y_height);
         let list = vec![Node::Box(y), Node::Box(bar)];
         r.nucleus.nucleus = Field::Box(hpack(list, NATURAL, Tolerances::plain(), None).node);
+    }
+
+    /// `\root n \of {x}`, which is what `\sqrt[n]{x}` means
+    /// (plain.tex:1018-1022).
+    ///
+    /// There is no noad for it: plain.tex sets the index in an hbox of its own
+    /// at `\scriptscriptstyle`, sets the radical in a second box, and then
+    /// puts the two beside each other with three explicit amounts --
+    ///
+    /// ```text
+    /// \def\root#1\of{\setbox\rootbox
+    ///   \hbox{$\m@th\scriptscriptstyle{#1}$}\mathpalette\r@@t}
+    /// \def\r@@t#1#2{\setbox\z@\hbox{$\m@th#1\sqrt{#2}$}\dimen@\ht\z@
+    ///   \advance\dimen@-\dp\z@
+    ///   \mkern5mu\raise.6\dimen@\copy\rootbox \mkern-10mu\box\z@}
+    /// ```
+    ///
+    /// -- five `mu` in front of the index, six tenths of the radical's height
+    /// less its depth to raise it by, and ten `mu` back so the index sits
+    /// INSIDE the radical's opening. `\mathpalette` is what makes the radical
+    /// itself come out in the surrounding style (plain.tex:1015-1016), which
+    /// is the style this is already being converted in.
+    fn make_root(&mut self, r: &mut Radical, index: &[Noad]) {
+        let z = match &r.nucleus.nucleus {
+            Field::Box(b) => b.clone(),
+            _ => return,
+        };
+        let mut root = self.clean_box(&Field::List(index.to_vec()), SCRIPT_SCRIPT_STYLE);
+        // `\dimen@\ht\z@ \advance\dimen@-\dp\z@`, then `\raise.6\dimen@`.
+        // §453 reads `.6` as a coefficient in $2^{16}$ths -- `round_decimals`
+        // of one digit 6 is 39322 -- and multiplies with `xn_over_d` (§455).
+        // A raise is a NEGATIVE shift, because §623 displaces a box in an
+        // hlist downward by its shift amount.
+        let dimen = z.height - z.depth;
+        root.shift_amount = -xn_over_d(dimen, 39322, 65536);
+        let list = vec![
+            kern(self.mu_mult(5 * 65536)),
+            Node::Box(root),
+            kern(self.mu_mult(-10 * 65536)),
+            Node::Box(z),
+        ];
+        r.nucleus.nucleus = Field::Box(hpack(list, NATURAL, Tolerances::plain(), None).node);
+    }
+
+    /// `make_vcenter(q)` (§736): the box, centred on the axis.
+    ///
+    /// §736 insists the nucleus is a vlist -- `\vcenter` is `\vbox`'s sibling
+    /// and §1167 leaves one behind -- so a nucleus that is still an mlist is
+    /// packaged into one first, which is what `\vcenter{...}` written with a
+    /// formula inside it asks for.
+    fn make_vcenter(&mut self, a: &mut Atom) {
+        let mut v = match &a.nucleus {
+            Field::Box(b) if b.vertical => b.clone(),
+            other => {
+                let inner = self.clean_box(other, self.style);
+                vpack(vec![Node::Box(inner)], NATURAL, Tolerances::plain()).node
+            }
+        };
+        let delta = v.height + v.depth;
+        v.height = self.axis_height() + half(delta);
+        v.depth = delta - v.height;
+        a.nucleus = Field::Box(v);
+    }
+
+    /// `make_math_accent(q)` (§738-§742).
+    ///
+    /// §738: "Slants are not considered when placing accents in math mode. The
+    /// accenter is centered over the accentee, and the accent width is treated
+    /// as zero with respect to the size of the final box."
+    fn make_math_accent(&mut self, acc: &mut Accent) {
+        let Some((f, _)) = self.fetch(acc.accent, self.size) else {
+            // §739 does nothing at all when the accent character is not in the
+            // font: `if char_exists(cur_i)` guards the whole procedure.
+            return;
+        };
+        let mut c = acc.accent.character;
+        // §742: how far to skew the accent to the right -- the kern between
+        // the accented character and its font's `\skewchar`.
+        let s = self.skew(&acc.atom);
+        let mut x = self.clean_box(&acc.atom.nucleus, cramped_style(self.style));
+        let w = x.width;
+        let mut h = x.height;
+        // §741: walk the charlist for the widest accent that still fits over
+        // the nucleus. The chain stops at the first variant WIDER than the
+        // accentee, so the accent never overhangs what it accents.
+        loop {
+            let Some(y) = f.next_larger(c) else { break };
+            let Some(m) = f.metrics(y) else { break };
+            if m.width > w {
+                break;
+            }
+            c = y;
+        }
+        // §739: the accent is lowered onto a nucleus shorter than the
+        // x-height, and no further than the x-height for a taller one -- which
+        // is what puts `\hat x` and `\hat A` at the same height above their
+        // letters rather than at the same height above the baseline.
+        let x_height = f.param(5);
+        let mut delta = h.min(x_height);
+        // §743: a script on an accented noad belongs to the WHOLE accented
+        // thing, so the nucleus and its two scripts are boxed together first
+        // and the accent then goes over that box.
+        if !acc.atom.supscr.is_empty() || !acc.atom.subscr.is_empty() {
+            if matches!(acc.atom.nucleus, Field::Char(_)) {
+                let inner = Noad::Atom(Atom {
+                    class: ClassOrOrd(Class::Ord),
+                    nucleus: std::mem::take(&mut acc.atom.nucleus),
+                    supscr: std::mem::take(&mut acc.atom.supscr),
+                    subscr: std::mem::take(&mut acc.atom.subscr),
+                    limits: acc.atom.limits,
+                });
+                acc.atom.nucleus = Field::List(vec![inner]);
+                x = self.clean_box(&acc.atom.nucleus, self.style);
+                delta += x.height - h;
+                h = x.height;
+            }
+        }
+        // §739: the accent box, centred over the accentee and skewed, with a
+        // width of zero so that it costs the final box nothing.
+        let mut y = self.char_box(acc.accent.fam, self.size, c);
+        y.shift_amount = s + half(w - y.width);
+        y.width = 0;
+        let list = vec![Node::Box(y), kern(-delta), Node::Box(x.clone())];
+        let mut y = vpack(list, NATURAL, Tolerances::plain()).node;
+        y.width = x.width;
+        // §740: an accent that ends up shorter than what it accents does not
+        // shrink the nucleus; the box keeps the nucleus's own height.
+        if y.height < h {
+            let gap = h - y.height;
+            y.list.insert(0, kern(gap));
+            y.height = h;
+        }
+        acc.atom.nucleus = Field::Box(y);
+    }
+
+    /// "Compute the amount of skew" (§742).
+    ///
+    /// The lig/kern program of the accented character is searched for a step
+    /// whose next character is the font's `\skewchar`; its kern is how far
+    /// right the accent moves. `cmmi10`'s skew character is `'177`
+    /// (plain.tex:474), which is why `\hat f` sits further right than `\hat x`.
+    fn skew(&self, a: &Atom) -> Scaled {
+        let Field::Char(c) = a.nucleus else {
+            return 0;
+        };
+        let Some(skew_char) = SKEW_CHAR.get(c.fam).copied().flatten() else {
+            return 0;
+        };
+        let Some(f) = self.fonts.font(c.fam, self.size) else {
+            return 0;
+        };
+        match f.tfm.step(c.character, skew_char) {
+            Some(crate::tfm::Step::Kern { by, .. }) => (by * f.at * 65536.0).round() as i64,
+            _ => 0,
+        }
     }
 
     /// `make_fraction(q)` (§743-§748). Unlike the others it produces the
@@ -820,44 +997,88 @@ impl<'a> Converter<'a> {
     /// `mlist_to_hlist` (§726): the whole conversion, in the given style.
     pub fn convert(&mut self, mlist: &[Noad], style: Style) -> Vec<Node> {
         self.set_style(style);
-        let mut items: Vec<Translated> = Vec::with_capacity(mlist.len());
+        // §731 REWRITES the list it is walking: a `choice_node` becomes a
+        // style node followed by whichever of its four mlists the current
+        // style names, and the rest of the list follows that. So the pass runs
+        // over a working copy that can be spliced rather than over the
+        // caller's slice.
+        let mut work: Vec<Noad> = mlist.to_vec();
+        let mut items: Vec<Translated> = Vec::with_capacity(work.len());
         let mut r_index: Option<usize> = None;
         let mut r_type = RType::Class(Class::Op);
         let mut max_h: Scaled = 0;
         let mut max_d: Scaled = 0;
 
-        for (at, item) in mlist.iter().enumerate() {
-            // §730: the nodes that can appear among noads.
-            match item {
+        let mut at = 0;
+        while at < work.len() {
+            // §730-§732: the nodes that can appear among noads.
+            match &work[at] {
                 Noad::Style(s) => {
-                    self.set_style(*s);
+                    let s = *s;
+                    self.set_style(s);
                     items.push(Translated {
                         class: None,
                         hlist: Vec::new(),
-                        style: Some(*s),
+                        style: Some(s),
                         delimiter: None,
+                        penalty: INF_PENALTY,
                     });
+                    at += 1;
+                    continue;
+                }
+                // §731: "Change this node to a style node followed by the
+                // correct choice", indexed by `cur_style div 2`.
+                Noad::Choice(c) => {
+                    let chosen = match self.style / 2 {
+                        0 => c.display.clone(),
+                        1 => c.text.clone(),
+                        2 => c.script.clone(),
+                        _ => c.script_script.clone(),
+                    };
+                    let mut replacement = vec![Noad::Style(self.style)];
+                    replacement.extend(chosen);
+                    work.splice(at..=at, replacement);
                     continue;
                 }
                 Noad::Glue(w) => {
-                    items.push(Translated::plain(Node::Glue(GlueNode::new(Glue::fixed(
-                        *w,
-                    )))));
+                    let w = *w;
+                    items.push(Translated::plain(Node::Glue(GlueNode::new(Glue::fixed(w)))));
+                    at += 1;
+                    continue;
+                }
+                // §732: `\mskip` is written in `mu` and becomes ordinary glue
+                // here, where the size it lands in is finally known.
+                Noad::MuGlue(g) => {
+                    let glue = self.math_glue(g.natural, g.stretch, g.shrink);
+                    items.push(Translated::plain(Node::Glue(GlueNode::new(glue))));
+                    at += 1;
                     continue;
                 }
                 Noad::Kern(w) => {
-                    items.push(Translated::plain(kern(*w)));
+                    let w = *w;
+                    items.push(Translated::plain(kern(w)));
+                    at += 1;
+                    continue;
+                }
+                // `math_kern(p,cur_mu)` (§717): the same conversion for a
+                // `\mkern`.
+                Noad::MuKern(w) => {
+                    let w = self.mu_mult(*w);
+                    items.push(Translated::plain(kern(w)));
+                    at += 1;
                     continue;
                 }
                 Noad::Node(n) => {
-                    items.push(Translated::plain(n.clone()));
+                    let n = n.clone();
+                    items.push(Translated::plain(n));
+                    at += 1;
                     continue;
                 }
                 _ => {}
             }
 
             // §728's Bin-to-Ord rewrites, which depend on what came before.
-            let mut class = class_of(item);
+            let mut class = class_of(&work[at]);
             if class == RType::Class(Class::Bin)
                 && matches!(
                     r_type,
@@ -882,30 +1103,51 @@ impl<'a> Converter<'a> {
                 if r_type == RType::Class(Class::Bin) {
                     if let Some(i) = r_index {
                         items[i].class = Some(RType::Class(Class::Ord));
+                        items[i].penalty = INF_PENALTY;
                     }
                 }
             }
 
-            let (hlist, delimiter) = match item {
+            let item = work[at].clone();
+            let next = work.get(at + 1).cloned();
+            let (hlist, delimiter) = match &item {
                 Noad::Left(d) | Noad::Right(d) => (Vec::new(), Some(*d)),
                 Noad::Fraction(f) => (self.make_fraction(f), None),
                 Noad::Radical(r) => {
                     let mut r = r.clone();
                     self.make_radical(&mut r);
-                    (
-                        self.nucleus_and_scripts(&r.nucleus, 0, mlist.get(at + 1)),
-                        None,
-                    )
+                    // plain.tex's `\root`, which is `\sqrt[n]{x}`: the index
+                    // goes on AFTER the radical exists, because it is placed
+                    // by the radical's own height.
+                    if let Some(index) = r.index.clone() {
+                        self.make_root(&mut r, &index);
+                    }
+                    (self.nucleus_and_scripts(&r.nucleus, 0, next.as_ref()), None)
                 }
                 Noad::Over(a) => {
                     let mut a = a.clone();
                     self.make_over(&mut a);
-                    (self.nucleus_and_scripts(&a, 0, mlist.get(at + 1)), None)
+                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
                 }
                 Noad::Under(a) => {
                     let mut a = a.clone();
                     self.make_under(&mut a);
-                    (self.nucleus_and_scripts(&a, 0, mlist.get(at + 1)), None)
+                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
+                }
+                // §733: `accent_noad: make_math_accent(q)`.
+                Noad::Accent(acc) => {
+                    let mut acc = acc.clone();
+                    self.make_math_accent(&mut acc);
+                    (
+                        self.nucleus_and_scripts(&acc.atom, 0, next.as_ref()),
+                        None,
+                    )
+                }
+                // §733: `vcenter_noad: make_vcenter(q)`.
+                Noad::VCenter(a) => {
+                    let mut a = a.clone();
+                    self.make_vcenter(&mut a);
+                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
                 }
                 Noad::Atom(a) => {
                     let mut a = a.clone();
@@ -921,7 +1163,7 @@ impl<'a> Converter<'a> {
                     }
                     match built {
                         Some(b) => (b, None),
-                        None => (self.nucleus_and_scripts(&a, delta, mlist.get(at + 1)), None),
+                        None => (self.nucleus_and_scripts(&a, delta, next.as_ref()), None),
                     }
                 }
                 _ => (Vec::new(), None),
@@ -941,12 +1183,21 @@ impl<'a> Converter<'a> {
                 hlist,
                 style: None,
                 delimiter,
+                // §761: only a Bin and a Rel are breakable, and only in a
+                // formula `mlist_penalties` was turned on for.
+                penalty: match class {
+                    RType::Class(Class::Bin) => BIN_OP_PENALTY,
+                    RType::Class(Class::Rel) => REL_PENALTY,
+                    _ => INF_PENALTY,
+                },
             });
+            at += 1;
         }
         // §726's closing `Convert a final bin_noad to an ord_noad`.
         if r_type == RType::Class(Class::Bin) {
             if let Some(i) = r_index {
                 items[i].class = Some(RType::Class(Class::Ord));
+                items[i].penalty = INF_PENALTY;
             }
         }
         self.second_pass(items, style, max_h, max_d)
@@ -993,8 +1244,12 @@ impl<'a> Converter<'a> {
             Field::Empty => Vec::new(),
             Field::Box(b) => vec![Node::Box(b.clone())],
             Field::List(l) => {
+                // §754: `mlist_penalties := false` here too -- the list is
+                // about to become one box, so nothing inside it can break.
                 let save = self.style;
+                let penalties = std::mem::replace(&mut self.penalties, false);
                 let inner = self.convert(l, save);
+                self.penalties = penalties;
                 self.set_style(save);
                 vec![Node::Box(
                     hpack(inner, NATURAL, Tolerances::plain(), None).node,
@@ -1027,13 +1282,13 @@ impl<'a> Converter<'a> {
         let mut out: Vec<Node> = Vec::new();
         let mut r_type: Option<Class> = None;
         self.set_style(style);
-        for item in items {
+        for (at, item) in items.iter().enumerate() {
             if let Some(s) = item.style {
                 self.set_style(s);
                 continue;
             }
             let Some(class) = item.class else {
-                out.extend(item.hlist);
+                out.extend(item.hlist.iter().cloned());
                 continue;
             };
             // §761: a `left_noad` or a `right_noad` becomes an Open or a
@@ -1045,8 +1300,8 @@ impl<'a> Converter<'a> {
                 (RType::Right, Some(d)) => {
                     (Class::Close, self.make_left_right(d, style, max_d, max_h))
                 }
-                (RType::Class(c), _) => (c, item.hlist),
-                _ => (Class::Ord, item.hlist),
+                (RType::Class(c), _) => (c, item.hlist.clone()),
+                _ => (Class::Ord, item.hlist.clone()),
             };
             if let Some(r) = r_type {
                 if let Some(g) = self.inter_element(r, t) {
@@ -1054,6 +1309,22 @@ impl<'a> Converter<'a> {
                 }
             }
             out.extend(hlist);
+            // §767: a penalty after the hlist of a Bin or a Rel, so a long
+            // formula can break there and nowhere else -- but never before the
+            // end of the formula, and never in front of a Rel, which would put
+            // the break where the relation's own penalty already offers one.
+            if self.penalties && item.penalty < INF_PENALTY {
+                // §767 reads `type(link(q))` -- the node immediately after,
+                // whatever it is -- and inserts nothing when the formula ends
+                // there, when a penalty node already stands there, or when a
+                // Rel follows, whose own penalty would offer the same break.
+                if let Some(following) = items.get(at + 1) {
+                    let already = matches!(following.hlist.as_slice(), [Node::Penalty(_)]);
+                    if !already && following.class != Some(RType::Class(Class::Rel)) {
+                        out.push(Node::Penalty(item.penalty));
+                    }
+                }
+            }
             r_type = Some(t);
         }
         out
@@ -1077,24 +1348,29 @@ impl<'a> Converter<'a> {
         Some(self.math_glue(w, plus, minus))
     }
 
-    /// `math_glue(g,m)` (§716): a glue written in `mu`, in points.
+    /// One `mu` amount, in points at the current size (§716).
     ///
     /// §716 splits `cur_mu` into an integer part `n` and a fraction `f` and
-    /// computes `n*w + xn_over_d(w,f,"200000)` for each component, which is
-    /// `w * cur_mu / 65536` done without a 64-bit multiply.
-    fn math_glue(&self, w: Scaled, plus: Scaled, minus: Scaled) -> Glue {
+    /// computes `n*x + xn_over_d(x,f,"200000)`, which is `x * cur_mu / 65536`
+    /// done without a 64-bit multiply. `math_kern` (§717) does the same
+    /// arithmetic on a kern's single width.
+    fn mu_mult(&self, x: Scaled) -> Scaled {
         let mut n = x_over_n(self.mu, 65536);
         let mut f = self.mu - n * 65536;
         if f < 0 {
             n -= 1;
             f += 65536;
         }
-        let mult = |x: Scaled| n * x + xn_over_d(x, f, 65536);
+        n * x + xn_over_d(x, f, 65536)
+    }
+
+    /// `math_glue(g,m)` (§716): a glue written in `mu`, in points.
+    fn math_glue(&self, w: Scaled, plus: Scaled, minus: Scaled) -> Glue {
         Glue {
-            natural: mult(w),
-            stretch: mult(plus),
+            natural: self.mu_mult(w),
+            stretch: self.mu_mult(plus),
             stretch_order: 0,
-            shrink: mult(minus),
+            shrink: self.mu_mult(minus),
             shrink_order: 0,
         }
     }
@@ -1104,11 +1380,16 @@ impl<'a> Converter<'a> {
 fn class_of(item: &Noad) -> RType {
     match item {
         Noad::Atom(a) => RType::Class(a.class()),
-        // §761: a fraction, a radical, an overline and an underline are all
-        // Ord for spacing purposes.
-        Noad::Fraction(_) | Noad::Radical(_) | Noad::Over(_) | Noad::Under(_) => {
-            RType::Class(Class::Ord)
-        }
+        // §761: a fraction, a radical, an overline, an underline, an accent
+        // and a `\vcenter` are all Ord for spacing purposes -- the case in
+        // §761 assigns `t` for none of them, so each keeps the `t:=ord_noad`
+        // the switch was entered with.
+        Noad::Fraction(_)
+        | Noad::Radical(_)
+        | Noad::Over(_)
+        | Noad::Under(_)
+        | Noad::Accent(_)
+        | Noad::VCenter(_) => RType::Class(Class::Ord),
         Noad::Left(_) => RType::Left,
         Noad::Right(_) => RType::Right,
         _ => RType::Class(Class::Ord),
@@ -1118,5 +1399,19 @@ fn class_of(item: &Noad) -> RType {
 /// The formula, boxed: what `\hbox`ing the result of `mlist_to_hlist` gives.
 pub fn set(fonts: &MathFonts, mlist: &[Noad], style: Style) -> BoxNode {
     let list = Converter::new(fonts).convert(mlist, style);
+    hpack(list, NATURAL, Tolerances::plain(), None).node
+}
+
+/// The formula, boxed, with §767's break penalties in it.
+///
+/// §1194 turns them on for a formula set inside a paragraph and §1199 leaves
+/// them off for a display. They are inert until a formula's hlist reaches the
+/// paragraph breaker, which it does not here -- `src/typeset.rs` measures a
+/// set formula as ONE word -- so this is the shape of the port rather than a
+/// place a line breaks today. See `crate::math`'s note.
+pub fn set_with_penalties(fonts: &MathFonts, mlist: &[Noad], style: Style) -> BoxNode {
+    let list = Converter::new(fonts)
+        .with_penalties(true)
+        .convert(mlist, style);
     hpack(list, NATURAL, Tolerances::plain(), None).node
 }

@@ -8,7 +8,7 @@
 //! x-height's four fifths, and set with `\scriptspace` reserved after it.
 //! Every one of those numbers comes out of `cmsy10`'s `fontdimen`s.
 //!
-//! The port is in four pieces, each named for the sections of `tex.web` it
+//! The port is in six pieces, each named for the sections of `tex.web` it
 //! carries:
 //!
 //! | module | `tex.web` | what it is |
@@ -18,6 +18,7 @@
 //! | [`parse`] | §1090-§1206 | reading a formula into an mlist |
 //! | [`mlist`] | §704-§767 | `mlist_to_hlist`: the formula, as boxes |
 //! | [`set`] | §619-§640 | where each glyph of it lands |
+//! | [`align`] | §810, §1204-§1206 | a display's columns, and its equation number |
 //!
 //! ## How a formula reaches the page
 //!
@@ -33,22 +34,32 @@
 //!
 //! ## What is not here
 //!
-//! - `\mathaccent` (§738-§742): `\hat`, `\bar`, `\vec` and their siblings.
-//! - `\vcenter` (§736), `\mathchoice` (§689), and `\mkern`/`\mskip` written
-//!   by the document rather than by the spacing table.
-//! - The penalties §761 and §767 insert, because nothing breaks a line inside
-//!   a formula here.
+//! - The general alignment of §768-§800. `&` now lines a display's columns up
+//!   by §810's rule and `\\` starts a row, but `\halign`'s preamble, `\span`,
+//!   `\omit`, `\noalign` and `\tabskip` are not ported and cannot be: no path
+//!   in this engine reaches `\halign` from a formula, and the preambles the
+//!   environments use are written in package macros this port does not run.
+//!   [`align`] says exactly what that costs.
+//! - LaTeX's `equation` counter. `\eqno` and `\leqno` are read and placed by
+//!   §1204-§1206, but `\begin{equation}` cannot put a NUMBER beside its
+//!   display: a counter is a `\count` register (`src/latex/counters.rs`), a
+//!   register is run-time state, and a formula is SET while the document is
+//!   lowered -- so the digits do not exist yet when the glyphs are placed.
+//!   Numbering it needs either a marker that carries a register into a set
+//!   formula or a right-flush line in `src/typeset.rs`; neither is here.
+//! - The penalties of §761 and §767 are inserted -- `\binoppenalty` after a
+//!   Bin and `\relpenalty` after a Rel -- but nothing reads them: a set
+//!   formula reaches the paragraph breaker as ONE word, so no line breaks
+//!   inside one.
 //! - The ligature half of `make_ord` (§752-§753). Computer Modern's math
 //!   families define no ligature programs, so it has nothing to do; the KERNS
 //!   of the same routine are ported.
-//! - `\eqno`, equation numbering, and the alignment of `align`: an `&` is
-//!   dropped rather than lining a column up, so a two-column display sets as
-//!   one row of material.
 //! - `\mathcode` and `\delcode` assignments made BY A DOCUMENT. The tables in
 //!   [`parse`] are INITEX's and plain.tex's, which is what `$x+y$` means;
 //!   `\mathchardef` IS read from the engine, because `src/expand.rs` already
 //!   carries it.
 
+pub mod align;
 pub mod font;
 pub mod mlist;
 pub mod noad;
@@ -135,6 +146,58 @@ pub fn set_mlist(list: &[Noad], style: Style, size: f64) -> Option<Setting> {
     Some(set::flatten(&b, &|i| set::font_size(fonts, i)))
 }
 
+/// The same, with §767's penalties in a formula that is set inside a
+/// paragraph.
+///
+/// §1194: `mlist_penalties := (mode > 0)`, which is true for a `$…$` in
+/// running text and false for a display (§1199).
+fn set_formula(list: &[Noad], style: Style, size: f64, display: bool) -> Option<Setting> {
+    let fonts = fonts_at(size)?;
+    let b = match display {
+        true => mlist::set(fonts, list, style),
+        false => mlist::set_with_penalties(fonts, list, style),
+    };
+    Some(set::flatten(&b, &|i| set::font_size(fonts, i)))
+}
+
+/// Set a whole display: its rows lined up at shared column widths, and the
+/// equation number `\eqno` put beside it.
+///
+/// One `Setting` per row, because a row is set as a display line of its own --
+/// see [`align`] for why. `measure` is `\displaywidth` in points, which only
+/// an equation number needs.
+pub fn set_display(
+    f: &parse::Formula,
+    style: Style,
+    size: f64,
+    environment: &str,
+    measure: f64,
+) -> Option<Vec<Setting>> {
+    let fonts = fonts_at(size)?;
+    let widest = f.rows.iter().map(|r| r.len()).max().unwrap_or(1);
+    let columns = align::columns(environment, widest);
+    let mut boxes = align::rows(fonts, &f.rows, style, &columns);
+    if let Some(number) = &f.number {
+        // §1199: the equation number is an mlist of its own, set at TEXT
+        // style whatever style the display is in, and packed at its natural
+        // width before §1204 places it.
+        let a = mlist::set(fonts, number, TEXT_STYLE);
+        let z = (measure * 65536.0).round() as noad::Scaled;
+        // §1204 places ONE display. A numbered `align` numbers each row; the
+        // number this path carries came from a single `\eqno`, so it goes
+        // beside the last row, which is where `$$…\eqno(3)$$` puts it.
+        if let Some(last) = boxes.pop() {
+            boxes.push(align::numbered(fonts, last, a, z, f.number_left));
+        }
+    }
+    Some(
+        boxes
+            .iter()
+            .map(|b| set::flatten(b, &|i| set::font_size(fonts, i)))
+            .collect(),
+    )
+}
+
 /// Read a formula from a source string, for a test or a caller that has the
 /// formula and not a lexer.
 ///
@@ -143,9 +206,16 @@ pub fn set_mlist(list: &[Noad], style: Style, size: f64) -> Option<Setting> {
 /// -- plain.tex, or `src/latex/prelude.tex` -- has set them, so a formula read
 /// under INITEX's own table would take `\frac{a}{b}` as five symbols.
 pub fn parse_formula(source: &str) -> Result<Vec<Noad>, TexError> {
+    Ok(read_formula(source)?.flat())
+}
+
+/// The same, keeping the rows, the columns and the equation number a display
+/// can carry.
+pub fn read_formula(source: &str) -> Result<parse::Formula, TexError> {
     let mut eng = Engine::new();
     eng.cats.set('{', crate::catcode::Cat::BeginGroup);
     eng.cats.set('}', crate::catcode::Cat::EndGroup);
+    eng.cats.set('&', crate::catcode::Cat::AlignTab);
     let mut lx = Lexer::new(source);
     parse::formula(&mut eng, &mut lx, parse::Stop::MathShift)
 }
@@ -213,6 +283,7 @@ const BODY: &str = "document";
 pub fn lower_math(
     eng: &mut Engine,
     size: f64,
+    measure: f64,
     lx: &mut Lexer,
     tok: &Token,
     out: &mut Vec<Cmd>,
@@ -246,11 +317,11 @@ pub fn lower_math(
                     eng.cats.set('$', crate::catcode::Cat::MathShift);
                     return Ok(false);
                 }
-                Some(_) => {
+                Some(name) => {
                     consume_environment_name(eng, lx);
-                    let list = parse::formula(eng, lx, parse::Stop::Cs("end"))?;
+                    let f = parse::formula(eng, lx, parse::Stop::Cs("end"))?;
                     consume_end(eng, lx);
-                    emit(out, &list, DISPLAY_STYLE, size, true);
+                    emit(out, &f, DISPLAY_STYLE, size, true, name, measure);
                     return Ok(true);
                 }
                 None => return Ok(false),
@@ -259,13 +330,21 @@ pub fn lower_math(
         },
         _ => return Ok(false),
     };
-    let list = parse::formula(eng, lx, stop)?;
+    let f = parse::formula(eng, lx, stop)?;
     // `$$…$$` closes with two math-shift characters, and the scan stopped at
     // the first.
     if style == DISPLAY_STYLE && stop == parse::Stop::MathShift {
         let _ = second_shift(eng, lx);
     }
-    emit(out, &list, style, size, style == DISPLAY_STYLE);
+    emit(
+        out,
+        &f,
+        style,
+        size,
+        style == DISPLAY_STYLE,
+        "",
+        measure,
+    );
     Ok(true)
 }
 
@@ -337,16 +416,54 @@ fn consume_end(eng: &mut Engine, lx: &mut Lexer) {
 ///
 /// A display goes on a line of its own and centred, which is what a display IS
 /// -- the paragraph breaks either side are how the text stream says so, and
-/// the centring marker is the one `\begin{center}` writes.
-fn emit(out: &mut Vec<Cmd>, list: &[Noad], style: Style, size: f64, display: bool) {
-    let Some(setting) = set_mlist(list, style, size) else {
+/// the centring marker is the one `\begin{center}` writes. A display with
+/// COLUMNS in it -- an `align`, an `eqnarray` -- writes one such line per row,
+/// every one of them packed to the same width, which is what lines the columns
+/// up: see [`align`] for why the rows are not one vertical box.
+#[allow(clippy::too_many_arguments)]
+fn emit(
+    out: &mut Vec<Cmd>,
+    f: &parse::Formula,
+    style: Style,
+    size: f64,
+    display: bool,
+    environment: &str,
+    measure: f64,
+) {
+    let flat = f.flat();
+    // The ordinary case, and the only one before `&` and `\eqno` meant
+    // anything: one row, one column, no number.
+    if f.is_single() && f.number.is_none() {
+        let Some(setting) = set_formula(&flat, style, size, display) else {
+            push(out, &set::plain(&flat));
+            return;
+        };
+        push_setting(out, &setting, &set::plain(&flat), display);
+        return;
+    }
+    let Some(settings) = set_display(f, style, size, environment, measure) else {
         // No math fonts on this machine: the formula still says what it says,
         // so it is written as text rather than dropped.
-        push(out, &set::plain(list));
+        push(out, &set::plain(&flat));
         return;
     };
-    let spelled = set::plain(list);
-    let marked = format!("\u{1}{SETTING}{}\u{2}{spelled}\u{3}", set::encode(&setting));
+    let last = f.rows.len().saturating_sub(1);
+    for (at, (row, setting)) in f.rows.iter().zip(settings.iter()).enumerate() {
+        let mut spelled: String = row.iter().map(|cell| set::plain(cell)).collect();
+        // The equation number goes beside the row it was placed beside, so a
+        // reader gets it where the page draws it.
+        if at == last {
+            if let Some(number) = &f.number {
+                spelled.push_str(&set::plain(number));
+            }
+        }
+        push_setting(out, setting, &spelled, display);
+    }
+}
+
+/// One set formula, as the marker the typesetter reads.
+fn push_setting(out: &mut Vec<Cmd>, setting: &Setting, spelled: &str, display: bool) {
+    let marked = format!("\u{1}{SETTING}{}\u{2}{spelled}\u{3}", set::encode(setting));
     match display {
         true => push(
             out,

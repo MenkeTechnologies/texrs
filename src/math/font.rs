@@ -372,9 +372,28 @@ fn roman(code: u8) -> Option<char> {
     const GREEK: [char; 11] = ['Γ', 'Δ', 'Θ', 'Λ', 'Ξ', 'Π', 'Σ', 'Υ', 'Φ', 'Ψ', 'Ω'];
     match code {
         0x00..=0x0A => Some(GREEK[code as usize]),
-        // OT1 puts the ligatures and the accents below 0x20; a formula reaches
-        // none of them.
-        0x20..=0x7E => Some(code as char),
+        // The accents OT1 puts below 0x20, which `\mathaccent` reaches and
+        // nothing else does (plain.tex:939-948). Unicode's SPACING accents,
+        // because a formula draws the accent as a glyph of its own at a
+        // position `make_math_accent` computed -- a combining character would
+        // be composed onto whatever the face drew last instead.
+        0x12 => Some('\u{2CB}'),
+        0x13 => Some('\u{2CA}'),
+        0x14 => Some('\u{2C7}'),
+        0x15 => Some('\u{2D8}'),
+        0x16 => Some('\u{AF}'),
+        0x20..=0x5E => Some(code as char),
+        // OT1's top five slots are not ASCII: `"5F` is the dot accent, `"7B`
+        // and `"7C` the two dashes, `"7D` the hungarumlaut, `"7E` the tilde
+        // accent and `"7F` the dieresis. A formula reaches the four accents
+        // through `\dot`, `\tilde` and `\ddot`.
+        0x5F => Some('\u{2D9}'),
+        0x60..=0x7A => Some(code as char),
+        0x7B => Some('\u{2013}'),
+        0x7C => Some('\u{2014}'),
+        0x7D => Some('\u{2DD}'),
+        0x7E => Some('\u{2DC}'),
+        0x7F => Some('\u{A8}'),
         _ => None,
     }
 }
@@ -500,6 +519,12 @@ fn extension(code: u8) -> Option<char> {
         0x56 | 0x5E => Some('∧'),
         0x57 | 0x5F => Some('∨'),
         0x60 | 0x61 => Some('∐'),
+        // The wide accents `\widehat` and `\widetilde` reach (plain.tex:949-
+        // 950), each a charlist of three ever-wider variants that §741 walks.
+        // Unicode has no wide circumflex, so all three of each draw the
+        // spacing accent the narrow one does.
+        0x62..=0x64 => Some('\u{2C6}'),
+        0x65..=0x67 => Some('\u{2DC}'),
         0x70..=0x75 => Some('√'),
         _ => None,
     }
