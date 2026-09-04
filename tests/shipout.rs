@@ -166,7 +166,12 @@ fn a_glue_of_the_wrong_order_does_not_move_when_the_box_is_stretched() {
 fn a_vertical_list_puts_each_box_a_baseline_further_down_and_at_one_left_edge() {
     // §629's invariant: a vlist keeps `cur_h = left_edge`, so nothing in it
     // drifts sideways however wide the boxes are, and only `cur_v` moves.
-    let a = hpack(vec![ch('a', 5 * PT, PT, 0)], NATURAL, Tolerances::plain(), None);
+    let a = hpack(
+        vec![ch('a', 5 * PT, PT, 0)],
+        NATURAL,
+        Tolerances::plain(),
+        None,
+    );
     let b = hpack(
         vec![ch('b', 40 * PT, PT, 0)],
         NATURAL,
@@ -336,7 +341,12 @@ fn leaders_replicate_a_box_across_the_glue_they_are_set_in() {
     // §626-§628. A table of contents' dots are leaders, and the count is not a
     // property of the glue node: it is how many copies fit in the width the
     // glue was SET to. Five 4pt copies fit in 20pt.
-    let dot = hpack(vec![ch('.', 4 * PT, PT, 0)], NATURAL, Tolerances::plain(), None);
+    let dot = hpack(
+        vec![ch('.', 4 * PT, PT, 0)],
+        NATURAL,
+        Tolerances::plain(),
+        None,
+    );
     let line = hpack(
         vec![
             ch('a', 5 * PT, PT, 0),

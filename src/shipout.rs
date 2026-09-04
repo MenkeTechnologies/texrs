@@ -289,8 +289,7 @@ impl Shipper<'_> {
             self.synch_h();
             self.cur_v = base_line + rule_dp;
             self.synch_v();
-            self.w
-                .rule(dvi_scaled(rule_ht), dvi_scaled(rule_wd), true);
+            self.w.rule(dvi_scaled(rule_ht), dvi_scaled(rule_wd), true);
             self.cur_v = base_line;
             // `set_rule` moves the reader right as well as drawing.
             self.dvi_h += rule_wd;
@@ -475,8 +474,7 @@ impl Shipper<'_> {
         if rule_ht > 0 && rule_wd > 0 {
             self.synch_h();
             self.synch_v();
-            self.w
-                .rule(dvi_scaled(rule_ht), dvi_scaled(rule_wd), false);
+            self.w.rule(dvi_scaled(rule_ht), dvi_scaled(rule_wd), false);
         }
     }
 

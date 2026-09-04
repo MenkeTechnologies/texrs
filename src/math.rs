@@ -336,15 +336,7 @@ pub fn lower_math(
     if style == DISPLAY_STYLE && stop == parse::Stop::MathShift {
         let _ = second_shift(eng, lx);
     }
-    emit(
-        out,
-        &f,
-        style,
-        size,
-        style == DISPLAY_STYLE,
-        "",
-        measure,
-    );
+    emit(out, &f, style, size, style == DISPLAY_STYLE, "", measure);
     Ok(true)
 }
 

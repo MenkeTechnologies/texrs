@@ -836,7 +836,8 @@ fn shows(chunk: &str) -> String {
 /// Rules rather than glyphs on purpose: a rule's width is a number the node
 /// carries in BOTH engines, where a glyph's comes from the font, so a rule list
 /// is the shape whose packaging can be compared against luatex at all.
-const RULES: &str = "local function r(w) local n=node.new(\"rule\") n.width=w n.height=0 n.depth=0 return n end \
+const RULES: &str =
+    "local function r(w) local n=node.new(\"rule\") n.width=w n.height=0 n.depth=0 return n end \
                      local function list() local a=r(655360) local g=node.new(\"glue\") \
                      g.width=327680 g.stretch=327680 g.shrink=131072 local b=r(655360) \
                      a.next=g g.next=b return a end ";
@@ -1109,7 +1110,10 @@ fn everything_that_would_reach_the_documents_own_list_refuses_by_name() {
         ("node.ligaturing(node.new(\"penalty\"))", "lig/kern"),
         ("node.kerning(node.new(\"penalty\"))", "lig/kern"),
         ("node.hyphenating(node.new(\"penalty\"))", "Liang"),
-        ("node.set_attribute(node.new(\"penalty\"), 1, 1)", "attribute"),
+        (
+            "node.set_attribute(node.new(\"penalty\"), 1, 1)",
+            "attribute",
+        ),
         ("local d = node.direct.getfield", "node.direct"),
         ("node.rangedimensions(1, 2)", "parent"),
     ] {
@@ -1155,12 +1159,27 @@ fn a_field_luatex_has_and_texrs_has_not_is_an_error_rather_than_nil() {
     // quiet wrongness the whole module exists to avoid.
     for (chunk, want) in [
         ("local h = node.new(\"hlist\") local d = h.dir", "direction"),
-        ("local k = node.new(\"kern\") local e = k.expansion_factor", "expansion"),
-        ("local d = node.new(\"disc\") local r = d.replace", "replace_count"),
-        ("local d = node.new(\"disc\") local p = d.penalty", "hyphenpenalty"),
+        (
+            "local k = node.new(\"kern\") local e = k.expansion_factor",
+            "expansion",
+        ),
+        (
+            "local d = node.new(\"disc\") local r = d.replace",
+            "replace_count",
+        ),
+        (
+            "local d = node.new(\"disc\") local p = d.penalty",
+            "hyphenpenalty",
+        ),
         ("local m = node.new(\"math\") local w = m.width", "mathskip"),
-        ("local g = node.new(\"glyph\") local c = g.components", "component"),
-        ("local p = node.new(\"penalty\") p.attr = 1", "attribute list"),
+        (
+            "local g = node.new(\"glyph\") local c = g.components",
+            "component",
+        ),
+        (
+            "local p = node.new(\"penalty\") p.attr = 1",
+            "attribute list",
+        ),
     ] {
         let e = fails(&format!("\\directlua{{{chunk}}}"));
         assert!(e.contains(want), "expected {want:?} in {e:?} for {chunk}");
@@ -1185,9 +1204,7 @@ fn a_list_that_points_back_into_itself_is_refused_rather_than_hung() {
     // stops and says why.
     let e = fails("\\directlua{local p = node.new(\"penalty\") p.next = p node.length(p)}");
     assert!(e.contains("no end"), "{e}");
-    let e = fails(
-        "\\directlua{local p = node.new(\"penalty\") p.next = p node.hpack(p)}",
-    );
+    let e = fails("\\directlua{local p = node.new(\"penalty\") p.next = p node.hpack(p)}");
     assert!(e.contains("no end"), "{e}");
 }
 
@@ -1254,7 +1271,8 @@ fn the_muskip_registers_reach_lua_the_same_way_the_skips_do() {
             .to_string(),
         "\\directlua{tex.setmuglue(4, 196608, 65536, 0, 0, 0)}\\message{[\\the\\muskip4]}"
             .to_string(),
-        "\\directlua{tex.muskip[5] = node.new(\"glue_spec\")}\\message{[\\the\\muskip5]}".to_string(),
+        "\\directlua{tex.muskip[5] = node.new(\"glue_spec\")}\\message{[\\the\\muskip5]}"
+            .to_string(),
     ] {
         let (want, got) = both(&lua, &body);
         assert!(!want.is_empty(), "the oracle said nothing for {body}");
@@ -1286,11 +1304,17 @@ fn an_internal_parameter_refuses_and_names_where_the_value_really_lives() {
         ("everypar", "output routine"),
     ] {
         let e = fails(&format!("\\directlua{{local v = tex.{name}}}"));
-        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.{name}");
+        assert!(
+            e.contains(want),
+            "expected {want:?} in {e:?} for tex.{name}"
+        );
         // The write refuses too, or a chunk would set a parameter that reaches
         // nothing and read its own value back as though TeX had taken it.
         let e = fails(&format!("\\directlua{{tex.{name} = 1}}"));
-        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.{name}");
+        assert!(
+            e.contains(want),
+            "expected {want:?} in {e:?} for tex.{name}"
+        );
         // And through the function spelling, which is the same parameters.
         let e = fails(&format!("\\directlua{{tex.get(\"{name}\")}}"));
         assert!(e.contains(want), "expected {want:?} in {e:?} for tex.get");

@@ -1138,10 +1138,7 @@ impl<'a> Converter<'a> {
                 Noad::Accent(acc) => {
                     let mut acc = acc.clone();
                     self.make_math_accent(&mut acc);
-                    (
-                        self.nucleus_and_scripts(&acc.atom, 0, next.as_ref()),
-                        None,
-                    )
+                    (self.nucleus_and_scripts(&acc.atom, 0, next.as_ref()), None)
                 }
                 // §733: `vcenter_noad: make_vcenter(q)`.
                 Noad::VCenter(a) => {

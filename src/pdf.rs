@@ -1684,8 +1684,10 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
     // The font cut down to those glyphs, under a subset name. A font nothing
     // was drawn in cannot be measured for use and goes in whole, which is what
     // every Type 1 font did before there was a subset at all.
-    let keep: std::collections::BTreeSet<String> =
-        codes.iter().filter_map(|&code| wanted(type1, code)).collect();
+    let keep: std::collections::BTreeSet<String> = codes
+        .iter()
+        .filter_map(|&code| wanted(type1, code))
+        .collect();
     let cut = match keep.is_empty() {
         true => None,
         false => {

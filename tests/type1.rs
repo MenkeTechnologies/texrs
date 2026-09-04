@@ -324,7 +324,11 @@ fn a_subset_carries_the_glyphs_it_was_cut_to_and_no_others() {
 
     // Read back through the parser, which undoes both encryptions.
     let (bytes, clear, binary, trailer) = cut.embeddable();
-    assert_eq!(bytes.len(), clear + binary + trailer, "the lengths cover it");
+    assert_eq!(
+        bytes.len(),
+        clear + binary + trailer,
+        "the lengths cover it"
+    );
     let again = Type1::parse(&bytes).expect("the subset reads back");
     assert_eq!(again.font_name, "ABCDEF+CMR10");
     assert_eq!(again.glyph_names(), cut.glyph_names());
@@ -336,7 +340,10 @@ fn a_subset_carries_the_glyphs_it_was_cut_to_and_no_others() {
         assert_eq!(now.width, was.width, "{name}'s width changed");
     }
     // And what it left behind is gone.
-    assert!(again.glyph("Omega").is_none(), "a glyph nobody drew is in it");
+    assert!(
+        again.glyph("Omega").is_none(),
+        "a glyph nobody drew is in it"
+    );
 
     // Much smaller than the font it came out of, which is the point.
     let size = std::fs::metadata(&pfb).expect("the font").len() as usize;

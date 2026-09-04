@@ -208,7 +208,10 @@ fn a_file_in_the_tex_tree_is_found_when_nothing_beside_the_document_is() {
         eprintln!("skipping: kpsewhich cannot find size10.clo");
         return;
     }
-    let dir = documents(&format!("{CATS}\\input size10.clo\n\\message{{[after]}}\n\\end\n"), &[]);
+    let dir = documents(
+        &format!("{CATS}\\input size10.clo\n\\message{{[after]}}\n\\end\n"),
+        &[],
+    );
     let out = Command::new(env!("CARGO_BIN_EXE_texrs"))
         .arg("case.tex")
         .current_dir(dir.path())

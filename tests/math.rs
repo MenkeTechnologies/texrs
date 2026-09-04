@@ -1008,7 +1008,12 @@ fn a_displays_columns_are_as_wide_as_their_widest_entry() {
         return;
     }
     let f = texrs::math::read_formula("a &= b \\\\ xyzw &= c").expect("the display parses");
-    assert_eq!(f.rows.len(), 2, "the `\\\\` did not end a row: {:?}", f.rows);
+    assert_eq!(
+        f.rows.len(),
+        2,
+        "the `\\\\` did not end a row: {:?}",
+        f.rows
+    );
     assert_eq!(f.rows[0].len(), 2, "the `&` did not end a column");
     let Some(rows) = texrs::math::set_display(&f, DISPLAY_STYLE, SIZE, "align", 469.75) else {
         return;
@@ -1049,7 +1054,10 @@ fn an_equation_number_sits_at_the_edge_of_the_display_width() {
     const MEASURE: f64 = 469.75;
     let z = (MEASURE * 65536.0).round() as i64;
     let f = texrs::math::read_formula("x=y\\eqno(3)").expect("the display parses");
-    let number = f.number.clone().expect("`\\eqno` gave the display a number");
+    let number = f
+        .number
+        .clone()
+        .expect("`\\eqno` gave the display a number");
     let (Some(body), Some(a)) = (
         set_mlist(&f.rows[0][0], DISPLAY_STYLE, SIZE),
         // §1199: the number is set at TEXT style whatever the display is in.

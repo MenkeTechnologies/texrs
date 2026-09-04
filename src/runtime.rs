@@ -274,8 +274,7 @@ fn append_glue(vm: &mut VM, unit: &str) -> Value {
     let shrink = vm.pop().to_int();
     let stretch = vm.pop().to_int();
     let natural = vm.pop().to_int();
-    let text =
-        crate::glue::print_glue_in(unit, natural, stretch, orders / 4, shrink, orders % 4);
+    let text = crate::glue::print_glue_in(unit, natural, stretch, orders / 4, shrink, orders % 4);
     BUILDING.with(|b| b.borrow_mut().push_str(&text));
     Value::Int(0)
 }

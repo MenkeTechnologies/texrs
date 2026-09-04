@@ -295,9 +295,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
             MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
             MsgOp::Dimen(n) => out.push_str(&format!("{pad}Dimen {}\n", num_text(n))),
             MsgOp::Glue(parts) => out.push_str(&format!("{pad}Glue {}\n", num_text(&parts[0]))),
-            MsgOp::MuGlue(parts) => {
-                out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0])))
-            }
+            MsgOp::MuGlue(parts) => out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0]))),
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
             MsgOp::If {
                 left,

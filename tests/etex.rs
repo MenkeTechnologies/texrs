@@ -243,7 +243,10 @@ fn ifcsname_asks_without_answering() {
         \\ifcsname nope\\endcsname\\message{[YES]}\\else\\message{[NO]}\\fi\
         \\ifcsname nope\\endcsname\\message{[YES]}\\else\\message{[NO]}\\fi";
     let (want, got) = both(&lua, body);
-    assert_eq!(got, want, "\\ifcsname must not define what it does not find");
+    assert_eq!(
+        got, want,
+        "\\ifcsname must not define what it does not find"
+    );
 }
 
 #[test]

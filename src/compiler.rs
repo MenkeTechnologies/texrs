@@ -241,7 +241,8 @@ impl Compiler {
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::TranscriptNotice => {
-                self.b.emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 0), self.line);
+                self.b
+                    .emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Color { rgb, body } => {

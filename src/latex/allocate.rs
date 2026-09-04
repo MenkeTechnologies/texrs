@@ -263,8 +263,16 @@ mod tests {
         // A control word's name is LETTERS, so the names have to be too: `\n0`
         // is the one-letter name `n` followed by a digit, and a hundred of
         // those are one register between them.
-        let name = |i: usize| format!("n{}{}", (b'a' + (i / 26) as u8) as char, (b'a' + (i % 26) as u8) as char);
-        let src: String = (0..120).map(|i| format!("\\newcount\\{}\n", name(i))).collect();
+        let name = |i: usize| {
+            format!(
+                "n{}{}",
+                (b'a' + (i / 26) as u8) as char,
+                (b'a' + (i % 26) as u8) as char
+            )
+        };
+        let src: String = (0..120)
+            .map(|i| format!("\\newcount\\{}\n", name(i)))
+            .collect();
         let out = definitions(&src);
         assert!(
             out.contains(&format!("\\countdef\\{}=99", name(89))),
@@ -283,7 +291,10 @@ mod tests {
     fn the_block_makes_the_at_sign_a_letter_and_puts_it_back() {
         let out = definitions("\\newcount\\c@foo");
         assert!(out.starts_with("% The registers"), "{out}");
-        assert!(out.contains("\\catcode`\\@=11\n\\countdef\\c@foo=10"), "{out}");
+        assert!(
+            out.contains("\\catcode`\\@=11\n\\countdef\\c@foo=10"),
+            "{out}"
+        );
         assert!(out.trim_end().ends_with("\\catcode`\\@=12"), "{out}");
     }
 }

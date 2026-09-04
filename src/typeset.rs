@@ -289,12 +289,7 @@ fn page_box(lines: &[BrokenLine], folio: usize, chain: &FontChain, layout: &Layo
         explicit: false,
     });
     list.push(Node::Box(foot));
-    crate::pack::vpack(
-        list,
-        crate::pack::NATURAL,
-        crate::pack::Tolerances::plain(),
-    )
-    .node
+    crate::pack::vpack(list, crate::pack::NATURAL, crate::pack::Tolerances::plain()).node
 }
 
 /// §679: the glue that separates two baselines.
@@ -1275,9 +1270,11 @@ impl FontChain {
     fn run_width(&self, font: usize, sets: &[crate::tfm::Set]) -> f64 {
         sets.iter()
             .map(|set| match set {
-                crate::tfm::Set::Char(c) => {
-                    self.fonts[font].tfm.char(*c).map(|m| m.width).unwrap_or(0.0)
-                }
+                crate::tfm::Set::Char(c) => self.fonts[font]
+                    .tfm
+                    .char(*c)
+                    .map(|m| m.width)
+                    .unwrap_or(0.0),
                 crate::tfm::Set::Kern(by) => *by,
             })
             .sum()
@@ -2541,9 +2538,7 @@ pub fn to_pdf(
                 // centred line of text is -- `\begin{center}` around a
                 // `tikzpicture` is how most documents put a drawing on a page.
                 let left = match is_centred(line) {
-                    true => {
-                        layout.margin + (layout.measure - (max_x - min_x)).max(0.0) / 2.0
-                    }
+                    true => layout.margin + (layout.measure - (max_x - min_x)).max(0.0) / 2.0,
                     false => layout.margin,
                 };
                 let bottom = y - height;

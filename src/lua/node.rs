@@ -204,19 +204,31 @@ fn want_id(v: &Value) -> mlua::Result<u8> {
 /// author is owed the specific thing that is missing.
 fn why_not_new(id: u8) -> &'static str {
     match id {
-        3 => "an `ins` node's `spec` is a glue_spec NODE in LuaTeX, where \
-              texrs's InsNode carries a plain Glue",
-        4 => "a `mark` node's `mark` is a token list in LuaTeX, where texrs's \
-              Node::Mark carries already-expanded text",
-        8 => "a `whatsit` is differentiated by subtype alone and texrs's \
-              Node::Whatsit carries one string, not LuaTeX's zoo of subtypes",
-        6 | 9 | 10 | 15 | 28 => "texrs's node list is TeX82's (tex.web \
-              §133-§161) and has no variant for this LuaTeX addition",
-        16..=27 => "this is a math noad, and texrs's mlists (crate::math) are \
-              not made of crate::node::Node",
+        3 => {
+            "an `ins` node's `spec` is a glue_spec NODE in LuaTeX, where \
+              texrs's InsNode carries a plain Glue"
+        }
+        4 => {
+            "a `mark` node's `mark` is a token list in LuaTeX, where texrs's \
+              Node::Mark carries already-expanded text"
+        }
+        8 => {
+            "a `whatsit` is differentiated by subtype alone and texrs's \
+              Node::Whatsit carries one string, not LuaTeX's zoo of subtypes"
+        }
+        6 | 9 | 10 | 15 | 28 => {
+            "texrs's node list is TeX82's (tex.web \
+              §133-§161) and has no variant for this LuaTeX addition"
+        }
+        16..=27 => {
+            "this is a math noad, and texrs's mlists (crate::math) are \
+              not made of crate::node::Node"
+        }
         38 | 40 => "texrs's nodes carry no attribute list",
-        _ => "this is one of LuaTeX's internal types, which are not part of a \
-              document's node list",
+        _ => {
+            "this is one of LuaTeX's internal types, which are not part of a \
+              document's node list"
+        }
     }
 }
 
@@ -609,7 +621,11 @@ impl NodeRef {
                 if name == "stretch_order" || name == "shrink_order" {
                     from_luatex_order(n)?;
                 }
-                self.arena.borrow_mut().get_mut(self.at)?.nums.insert(field.name, n);
+                self.arena
+                    .borrow_mut()
+                    .get_mut(self.at)?
+                    .nums
+                    .insert(field.name, n);
             }
             Kind::Ratio => {
                 let r = value
@@ -668,12 +684,15 @@ impl UserData for NodeRef {
             Value::String(s) => this.read(lua, &s.to_str()?),
             _ => Ok(Value::Nil),
         });
-        methods.add_meta_method(MetaMethod::NewIndex, |_, this, (key, value): (Value, Value)| {
-            let Value::String(s) = &key else {
-                return Err(mlua::Error::runtime("a node field is named by a string"));
-            };
-            this.write(&s.to_str()?, value)
-        });
+        methods.add_meta_method(
+            MetaMethod::NewIndex,
+            |_, this, (key, value): (Value, Value)| {
+                let Value::String(s) = &key else {
+                    return Err(mlua::Error::runtime("a node field is named by a string"));
+                };
+                this.write(&s.to_str()?, value)
+            },
+        );
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| this.show());
         // "you are actually comparing indices into the node memory".
         methods.add_meta_method(MetaMethod::Eq, |_, this, other: mlua::AnyUserData| {
@@ -1015,7 +1034,12 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table
     )?;
 
     // — walking —
-    for (name, forward) in [("next", true), ("prev", false), ("getnext", true), ("getprev", false)] {
+    for (name, forward) in [
+        ("next", true),
+        ("prev", false),
+        ("getnext", true),
+        ("getprev", false),
+    ] {
         let a = hold(arena);
         node.set(
             name,
@@ -1130,16 +1154,12 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table
     let a = hold(arena);
     node.set(
         "insert_after",
-        lua.create_function(move |lua, args: Variadic<Value>| {
-            insert(lua, &a, &args, true)
-        })?,
+        lua.create_function(move |lua, args: Variadic<Value>| insert(lua, &a, &args, true))?,
     )?;
     let a = hold(arena);
     node.set(
         "insert_before",
-        lua.create_function(move |lua, args: Variadic<Value>| {
-            insert(lua, &a, &args, false)
-        })?,
+        lua.create_function(move |lua, args: Variadic<Value>| insert(lua, &a, &args, false))?,
     )?;
     let a = hold(arena);
     node.set(
@@ -1293,10 +1313,9 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table
             // Measured: `false, <id>` for a non-glyph.
             Ok(match cell.id == GLYPH {
                 true => Variadic::from_iter([Value::Integer(cell.num("char")), Value::Integer(0)]),
-                false => Variadic::from_iter([
-                    Value::Boolean(false),
-                    Value::Integer(cell.id as i64),
-                ]),
+                false => {
+                    Variadic::from_iter([Value::Boolean(false), Value::Integer(cell.id as i64)])
+                }
             })
         })?,
     )?;
@@ -1344,9 +1363,15 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table
             // "If you pass no values or if a value is not a number the
             // corresponding property will become a zero."
             let n = |i: usize| args.get(i).and_then(|v| v.as_integer()).unwrap_or(0);
-            for (i, name) in ["width", "stretch", "shrink", "stretch_order", "shrink_order"]
-                .into_iter()
-                .enumerate()
+            for (i, name) in [
+                "width",
+                "stretch",
+                "shrink",
+                "stretch_order",
+                "shrink_order",
+            ]
+            .into_iter()
+            .enumerate()
             {
                 let v = n(i + 1);
                 if name.ends_with("order") {
@@ -1424,9 +1449,7 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table
         let a = hold(arena);
         node.set(
             name,
-            lua.create_function(move |lua, args: Variadic<Value>| {
-                pack(lua, &a, &args, vertical)
-            })?,
+            lua.create_function(move |lua, args: Variadic<Value>| pack(lua, &a, &args, vertical))?,
         )?;
     }
     let a = hold(arena);
@@ -1485,10 +1508,7 @@ const REFUSED: &[(&str, &str)] = &[
         "texrs's nodes live in a per-document arena rather than in one node \
          memory it can enumerate",
     ),
-    (
-        "current_attr",
-        "texrs's nodes carry no attribute list",
-    ),
+    ("current_attr", "texrs's nodes carry no attribute list"),
     ("has_attribute", "texrs's nodes carry no attribute list"),
     ("get_attribute", "texrs's nodes carry no attribute list"),
     ("set_attribute", "texrs's nodes carry no attribute list"),
@@ -1522,7 +1542,10 @@ const REFUSED: &[(&str, &str)] = &[
     ("has_glyph", "a glyph here can only carry font 0"),
     ("uses_font", "texrs has no font table for Lua to index"),
     ("family_font", "texrs has no math font families"),
-    ("make_extensible", "texrs has no extensible recipes on the Lua side"),
+    (
+        "make_extensible",
+        "texrs has no extensible recipes on the Lua side",
+    ),
     ("protect_glyph", "texrs's glyphs have no protection flag"),
     ("protect_glyphs", "texrs's glyphs have no protection flag"),
     ("unprotect_glyph", "texrs's glyphs have no protection flag"),
@@ -1567,9 +1590,18 @@ const REFUSED: &[(&str, &str)] = &[
     ),
     ("getproperty", "texrs keeps no per-node properties table"),
     ("setproperty", "texrs keeps no per-node properties table"),
-    ("get_properties_table", "texrs keeps no per-node properties table"),
-    ("flush_properties_table", "texrs keeps no per-node properties table"),
-    ("set_properties_mode", "texrs keeps no per-node properties table"),
+    (
+        "get_properties_table",
+        "texrs keeps no per-node properties table",
+    ),
+    (
+        "flush_properties_table",
+        "texrs keeps no per-node properties table",
+    ),
+    (
+        "set_properties_mode",
+        "texrs keeps no per-node properties table",
+    ),
     (
         "whatsits",
         "texrs's Node::Whatsit carries one string rather than LuaTeX's zoo of \

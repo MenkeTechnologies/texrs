@@ -583,7 +583,10 @@ impl Type1 {
     /// take apart -- the caller then embeds it whole, which is what every font
     /// did before there was a subset at all.
     pub fn subset(&self, keep: &std::collections::BTreeSet<String>, tag: &str) -> Option<Type1> {
-        let kept: Vec<&Glyph> = keep.iter().filter_map(|name| self.glyphs.get(name)).collect();
+        let kept: Vec<&Glyph> = keep
+            .iter()
+            .filter_map(|name| self.glyphs.get(name))
+            .collect();
         if kept.is_empty() || self.private.is_empty() {
             return None;
         }

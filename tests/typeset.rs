@@ -2776,8 +2776,13 @@ fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
             .fold(f64::INFINITY, |a, (x, _)| a.min(*x))
     };
     let flush = left_edge(&doc(picture));
-    let centred = left_edge(&doc(&format!("\\begin{{center}}\n{picture}\\end{{center}}\n")));
-    assert!((flush - 72.2).abs() < 0.01, "flush left at the margin: {flush}");
+    let centred = left_edge(&doc(&format!(
+        "\\begin{{center}}\n{picture}\\end{{center}}\n"
+    )));
+    assert!(
+        (flush - 72.2).abs() < 0.01,
+        "flush left at the margin: {flush}"
+    );
     // A 3cm picture on the default 469.75pt measure: half the room left over,
     // in from the margin, plus the bounding box's own 0.2pt of half line
     // width at TikZ's default `line width=0.4pt`.

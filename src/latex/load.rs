@@ -671,7 +671,10 @@ mod tests {
         // A name built by expansion cannot be matched by the `\csname` the
         // table feeds, so it is passed over and keeps taking the not-found arm.
         assert_eq!(
-            braced_names("\\InputIfFileExists{textcomp.cfg}{}{}\n", "\\InputIfFileExists"),
+            braced_names(
+                "\\InputIfFileExists{textcomp.cfg}{}{}\n",
+                "\\InputIfFileExists"
+            ),
             ["textcomp.cfg"]
         );
         assert!(braced_names(
@@ -700,7 +703,11 @@ mod tests {
         .into_iter()
         .map(|(r, _)| r.name)
         .collect();
-        assert_eq!(names.last().map(String::as_str), Some("graphicx"), "{names:?}");
+        assert_eq!(
+            names.last().map(String::as_str),
+            Some("graphicx"),
+            "{names:?}"
+        );
         assert!(names.contains(&"keyval".to_string()), "{names:?}");
         assert!(
             names.iter().position(|n| n == "keyval") < names.iter().position(|n| n == "graphicx"),

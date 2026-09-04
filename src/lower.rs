@@ -997,9 +997,7 @@ impl Lowerer {
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
                 "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "muskipdef"
-                | "toksdef" => {
-                    self.eng.compile_time_numeric_def(lx, name.name())?
-                }
+                | "toksdef" => self.eng.compile_time_numeric_def(lx, name.name())?,
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
                     self.eng.compile_time_newcommand(lx, name.name())?
                 }

@@ -117,10 +117,7 @@ fn page(program: Vec<u8>, names: &[(u8, String, f64)], text: &str) -> Vec<u8> {
         ),
         (
             "Resources",
-            Object::dict([(
-                "Font",
-                Object::Dict(Dict::from([("F1".to_string(), font)])),
-            )]),
+            Object::dict([("Font", Object::Dict(Dict::from([("F1".to_string(), font)])))]),
         ),
         ("Contents", content),
     ]));

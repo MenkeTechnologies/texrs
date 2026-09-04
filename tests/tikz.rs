@@ -577,7 +577,10 @@ fn what_it_still_cannot_read_it_still_leaves_out() {
     // the fill colour, because a solid black box where the document asked for
     // hatching is a picture that is drawn and drawn wrong.
     let ops = emitted(r"\fill[pattern=north east lines] (0,0) rectangle (1,1);");
-    assert!(!ops.contains("\nf\n"), "no solid fill was guessed at: {ops}");
+    assert!(
+        !ops.contains("\nf\n"),
+        "no solid fill was guessed at: {ops}"
+    );
     // `matrix` and `\graph` are not read: their contents are not paths, and
     // half of one of them is not a picture.
     let matrix = parse("", r"\matrix { \node {a}; & \node {b}; \\ };");
@@ -695,7 +698,10 @@ fn a_coordinates_anchors_are_the_coordinate() {
     // centre and nothing else, so `(a.north)` is the point itself. This is
     // the one case where the centre is the right answer, and it has to keep
     // working now that a node's is not.
-    let pic = parse("", r"\coordinate (a) at (2,3); \draw (a.north) -- (a.east);");
+    let pic = parse(
+        "",
+        r"\coordinate (a) at (2,3); \draw (a.north) -- (a.east);",
+    );
     assert_eq!(pic.paths[0].points, vec![(2.0, 3.0), (2.0, 3.0)]);
 }
 
@@ -734,7 +740,10 @@ fn a_diamond_node_is_the_four_points_pgf_writes() {
     let half_height = 10.2 - 1.414_213 * 0.2;
     assert!(ops.contains(&format!("{half_width:.2} 0.00 m\n")), "{ops}");
     assert!(ops.contains(&format!("0.00 {half_height:.2} l\n")), "{ops}");
-    assert!(ops.contains(&format!("{:.2} 0.00 l\n", -half_width)), "{ops}");
+    assert!(
+        ops.contains(&format!("{:.2} 0.00 l\n", -half_width)),
+        "{ops}"
+    );
     assert!(ops.contains("h\n"), "closed: {ops}");
     // And its east anchor is the full half-width, outer separation included:
     // lualatex draws to 219.38016, which is 199.25537 plus 20.12479.
@@ -768,7 +777,8 @@ fn rounded_corners_cut_the_corner_back_and_arc_across_it() {
     );
     assert!(ops.contains("40.00 20.00 l\n"), "{ops}");
     // `sharp corners` puts it back, and the corner is a plain `l` again.
-    let sharp = emitted(r"\draw[rounded corners=4pt,sharp corners] (0,0) -- (0,20pt) -- (40pt,20pt);");
+    let sharp =
+        emitted(r"\draw[rounded corners=4pt,sharp corners] (0,0) -- (0,20pt) -- (40pt,20pt);");
     assert!(sharp.contains("0.00 20.00 l\n40.00 20.00 l\n"), "{sharp}");
     assert!(!sharp.contains(" c\n"), "no arc: {sharp}");
 }
@@ -810,16 +820,28 @@ fn a_zigzag_and_a_brace_land_where_pgf_puts_them() {
     // 7.47208, 12.45346 ... in big points, which is a quarter of a segment in
     // and then every half segment.
     let zigzag = emitted(r"\draw[decorate,decoration={zigzag}] (0,0) -- (30,0);");
-    assert!(zigzag.contains("2.50 2.50 l\n7.50 -2.50 l\n12.50 2.50 l\n"), "{zigzag}");
+    assert!(
+        zigzag.contains("2.50 2.50 l\n7.50 -2.50 l\n12.50 2.50 l\n"),
+        "{zigzag}"
+    );
     assert!(!zigzag.contains(" c\n"), "straight limbs: {zigzag}");
     // and `decoration={brace}` on a 100pt line, whose shoulder curve lualatex
     // writes as `0.37358 0.74721 1.24535 1.24535 2.49069 1.24535 c` and whose
     // spike is at the aspect, `49.81384 2.49069`.
     let brace = emitted(r"\draw[decorate,decoration={brace}] (0,0) -- (100,0);");
-    assert!(brace.contains("0.38 0.75 1.25 1.25 2.50 1.25 c\n"), "{brace}");
+    assert!(
+        brace.contains("0.38 0.75 1.25 1.25 2.50 1.25 c\n"),
+        "{brace}"
+    );
     assert!(brace.contains("47.50 1.25 l\n"), "the shoulder: {brace}");
-    assert!(brace.contains("48.75 1.25 49.62 1.75 50.00 2.50 c\n"), "the spike: {brace}");
-    assert!(brace.contains("98.75 1.25 99.62 0.75 100.00 0.00 c\n"), "{brace}");
+    assert!(
+        brace.contains("48.75 1.25 49.62 1.75 50.00 2.50 c\n"),
+        "the spike: {brace}"
+    );
+    assert!(
+        brace.contains("98.75 1.25 99.62 0.75 100.00 0.00 c\n"),
+        "{brace}"
+    );
 }
 
 #[test]
@@ -836,7 +858,10 @@ fn a_shading_is_a_clip_a_matrix_and_the_sh_operator() {
     assert!(ops.contains("\nW\nn\n"), "clipped to the path: {ops}");
     assert!(ops.contains("1 0 0 1 50 25 cm\n"), "the centre: {ops}");
     assert!(ops.contains("0 1 -1 0 0 0 cm\n"), "turned by 90: {ops}");
-    assert!(ops.contains("1 0 0 2 0 0 cm\n"), "50 over 50 and 100 over 50: {ops}");
+    assert!(
+        ops.contains("1 0 0 2 0 0 cm\n"),
+        "50 over 50 and 100 over 50: {ops}"
+    );
     assert!(ops.contains("/pgfsh0 sh\n"), "{ops}");
     // A `\shade` paints nothing else: no fill colour was guessed at.
     assert!(!ops.contains("\nf\n"), "{ops}");
@@ -849,17 +874,29 @@ fn a_shading_says_which_dictionary_the_page_has_to_carry() {
     // carry the dictionary too -- the same contract `/ExtGState` has for
     // opacity. The ramp is TikZ's own, tikz.code.tex lines 628-633: flat for
     // the first quarter, flat for the last, and changing over the middle.
-    let pic = parse("", r"\shade[left color=red,right color=blue] (0,0) rectangle (2,1);");
+    let pic = parse(
+        "",
+        r"\shade[left color=red,right color=blue] (0,0) rectangle (2,1);",
+    );
     let shadings = pic.shadings();
     assert_eq!(shadings.len(), 1);
     assert_eq!(shadings[0].name, "pgfsh0");
     let dictionary = shadings[0].dictionary();
     assert!(dictionary.contains("/ShadingType 2"), "{dictionary}");
     assert!(dictionary.contains("/Coords [0 -50 0 50]"), "{dictionary}");
-    assert!(dictionary.contains("/Bounds [ 0.25 0.5 0.75]"), "{dictionary}");
+    assert!(
+        dictionary.contains("/Bounds [ 0.25 0.5 0.75]"),
+        "{dictionary}"
+    );
     // The two ends of the ramp, as lualatex's own four functions have them.
-    assert!(dictionary.contains("/C0 [0 0 1] /C1 [0 0 1]"), "{dictionary}");
-    assert!(dictionary.contains("/C0 [1 0 0] /C1 [1 0 0]"), "{dictionary}");
+    assert!(
+        dictionary.contains("/C0 [0 0 1] /C1 [0 0 1]"),
+        "{dictionary}"
+    );
+    assert!(
+        dictionary.contains("/C0 [1 0 0] /C1 [1 0 0]"),
+        "{dictionary}"
+    );
     // A picture that shades nothing needs no dictionaries at all.
     assert!(parse("", r"\draw (0,0) -- (1,1);").shadings().is_empty());
     // `inner color`/`outer color` is the other type, and it extends inward so
@@ -887,14 +924,21 @@ fn a_coordinate_may_be_arithmetic() {
     // centimetres: `170.08086 85.04042 m  14.17339 28.3468 l  56.69362 0.0 l`,
     // which is (6,3), (0.5,1) and (2cm,0). PGF hands every component to
     // `\pgfmathparse`, and reading only the literal numbers draws none of it.
-    let pic = parse("", r"\draw (2*3,{sqrt(9)}) -- ({sin(30)},1) -- ({2*1cm},0);");
+    let pic = parse(
+        "",
+        r"\draw (2*3,{sqrt(9)}) -- ({sin(30)},1) -- ({2*1cm},0);",
+    );
     let points = &pic.paths[0].points;
     assert_eq!(points[0], (6.0, 3.0));
     assert!((points[1].0 - 0.5).abs() < 1e-12, "{:?}", points[1]);
     assert_eq!(points[1].1, 1.0);
     // A unit multiplies through: `2*1cm` is two centimetres and not two of
     // the picture's own units.
-    assert!((points[2].0 - 2.0 * 72.27 / 2.54).abs() < 1e-9, "{:?}", points[2]);
+    assert!(
+        (points[2].0 - 2.0 * 72.27 / 2.54).abs() < 1e-9,
+        "{:?}",
+        points[2]
+    );
     // An angle may be arithmetic too, which is what a `\foreach` writes.
     let polar = parse("", r"\draw (0,0) -- (2*15:2);");
     let (x, y) = polar.paths[0].points[1];
@@ -910,19 +954,41 @@ fn a_coordinate_may_be_arithmetic() {
 fn a_label_is_a_second_node_outside_the_border() {
     // `label=above:L` puts a node of its own on the labelled node's north
     // anchor, anchored by its own south, so the two do not overlap (S17.10.1).
-    let pic = parse("", r"\node[draw,label=above:L,minimum size=20pt,inner sep=0pt] at (0,0) {};");
+    let pic = parse(
+        "",
+        r"\node[draw,label=above:L,minimum size=20pt,inner sep=0pt] at (0,0) {};",
+    );
     assert_eq!(pic.nodes.len(), 2, "the node and its label");
-    let label = pic.nodes.iter().find(|node| node.text == "L").expect("a label");
-    let node = pic.nodes.iter().find(|node| node.text.is_empty()).expect("the node");
+    let label = pic
+        .nodes
+        .iter()
+        .find(|node| node.text == "L")
+        .expect("a label");
+    let node = pic
+        .nodes
+        .iter()
+        .find(|node| node.text.is_empty())
+        .expect("the node");
     // The label sits entirely above the labelled node's own north anchor.
     let (_, half_height) = label.border().half;
     let (_, node_half) = node.border().half;
-    assert!(label.at.1 - half_height >= node_half - 1e-9, "{:?}", label.at);
+    assert!(
+        label.at.1 - half_height >= node_half - 1e-9,
+        "{:?}",
+        label.at
+    );
     // and it is not drawn: a label has no border of its own.
     assert!(!label.draw && !label.filled);
     // `label=below:` puts it on the other side.
-    let below = parse("", r"\node[draw,label=below:L,minimum size=20pt,inner sep=0pt] at (0,0) {};");
-    let under = below.nodes.iter().find(|node| node.text == "L").expect("a label");
+    let below = parse(
+        "",
+        r"\node[draw,label=below:L,minimum size=20pt,inner sep=0pt] at (0,0) {};",
+    );
+    let under = below
+        .nodes
+        .iter()
+        .find(|node| node.text == "L")
+        .expect("a label");
     assert!(under.at.1 < 0.0, "{:?}", under.at);
 }
 
@@ -967,7 +1033,10 @@ fn an_anchor_does_not_shrink_with_the_pictures_scale() {
     assert_eq!(half.paths[0].points[0], (1.0 + 40.4, 0.0));
     // and both land at the same distance from the node on the page.
     let ops = to_pdf_ops(&half, 0.0, 0.0);
-    assert!(ops.contains(&format!("{:.2} 0.00 m\n", 0.5 + 20.2)), "{ops}");
+    assert!(
+        ops.contains(&format!("{:.2} 0.00 m\n", 0.5 + 20.2)),
+        "{ops}"
+    );
 }
 
 // ---- the bounding box, which is what a page reserves ---------------------
@@ -1006,7 +1075,11 @@ fn a_curves_control_points_are_inside_the_bounding_box() {
     // y=-1, and the page would draw it through the line above.
     let pic = parse("", r"\draw (0,0) .. controls (1,1) and (2,-1) .. (3,0);");
     let (_, min_y, _, max_y) = pic.bounds();
-    assert_eq!((min_y, max_y), (-1.2, 1.2), "the controls, and half of 0.4pt");
+    assert_eq!(
+        (min_y, max_y),
+        (-1.2, 1.2),
+        "the controls, and half of 0.4pt"
+    );
 }
 
 #[test]
@@ -1055,8 +1128,14 @@ fn a_draw_that_names_a_fill_colour_fills_as_well_as_strokes() {
     // where the document drew a solid.
     let ops = emitted(r"\draw[fill=orange] (0,0) rectangle (1,1);");
     assert!(ops.contains("1 0.5 0 rg\n"), "the fill colour: {ops}");
-    assert!(ops.contains("\nb\n") || ops.contains("\nB\n"), "filled and stroked: {ops}");
-    assert!(!ops.contains("\nS\n") && !ops.contains("\ns\n"), "not stroked alone: {ops}");
+    assert!(
+        ops.contains("\nb\n") || ops.contains("\nB\n"),
+        "filled and stroked: {ops}"
+    );
+    assert!(
+        !ops.contains("\nS\n") && !ops.contains("\ns\n"),
+        "not stroked alone: {ops}"
+    );
     // `fill=none` turns it off again, and the path is stroked and not filled.
     let none = emitted(r"\draw[fill=none] (0,0) rectangle (1,1);");
     assert!(none.contains("\ns\n") || none.contains("\nS\n"), "{none}");
