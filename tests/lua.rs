@@ -515,14 +515,21 @@ fn the_node_half_of_the_register_interface_refuses_rather_than_inventing_a_value
     // A chunk that got a number where LuaTeX gave it a `glue_spec` userdata
     // would go wrong LATER, in the output. It stops here instead, and the
     // message names the spelling that does work.
-    let e = fails("\\directlua{local s = tex.skip[0]}");
-    assert!(e.contains("tex.getglue"), "{e}");
-    let e = fails("\\directlua{tex.getskip(0)}");
-    assert!(e.contains("tex.getglue"), "{e}");
-    // `node` is absent rather than stubbed, so a chunk reaching for it stops
-    // with Lua's own nil-index error.
-    let e = fails("\\directlua{node.new(\"glyph\")}");
-    assert!(e.contains("node"), "{e}");
+    // `tex.skip`, `tex.getskip` and the `\muskip` three were on this list while
+    // there was no node interface, and are not any more: they hand over the
+    // `glue_spec` node the manual describes, pinned differentially by
+    // `the_skip_registers_reach_lua_as_the_glue_spec_node_luatex_hands_over`
+    // and `the_muskip_registers_reach_lua_the_same_way_the_skips_do`.
+    //
+    // What still refuses is the BOX half, and the reason is not the shape of
+    // the node list: a box register holds a list nothing here can produce,
+    // because texrs sets a page from runs of strings. That is the boundary the
+    // whole node library is drawn at -- see
+    // `everything_that_would_reach_the_documents_own_list_refuses_by_name`.
+    let e = fails("\\directlua{local b = tex.getbox(0)}");
+    assert!(e.contains("node lists"), "{e}");
+    let e = fails("\\directlua{tex.setbox(0, node.new(\"hlist\"))}");
+    assert!(e.contains("node lists"), "{e}");
 }
 
 #[test]
@@ -810,5 +817,488 @@ fn a_fallback_chain_the_chunk_builds_reaches_the_backend() {
         lowerer.fonts.fallbacks,
         vec!["Arial Unicode MS".to_string(), "Noto Emoji".to_string()],
         "the families the CALL named, in order, with luaotfload's options cut at the colon"
+    );
+}
+
+/// A chunk whose local `out` becomes the document's one bracketed message.
+///
+/// The same file is fed to both engines, so the chunk has to be written in the
+/// subset both read the same way: one line, no comments, and `string.char(92)`
+/// rather than a literal backslash (see [`lua_message`]).
+fn shows(chunk: &str) -> String {
+    format!(
+        "\\directlua{{{chunk} tex.sprint(string.char(92) .. \"message{{[\" .. tostring(out) .. \"]}}\")}}"
+    )
+}
+
+/// Three rules and two glues, as one line of Lua both engines read the same.
+///
+/// Rules rather than glyphs on purpose: a rule's width is a number the node
+/// carries in BOTH engines, where a glyph's comes from the font, so a rule list
+/// is the shape whose packaging can be compared against luatex at all.
+const RULES: &str = "local function r(w) local n=node.new(\"rule\") n.width=w n.height=0 n.depth=0 return n end \
+                     local function list() local a=r(655360) local g=node.new(\"glue\") \
+                     g.width=327680 g.stretch=327680 g.shrink=131072 local b=r(655360) \
+                     a.next=g g.next=b return a end ";
+
+#[test]
+fn a_list_the_chunk_built_is_packaged_by_tex_webs_own_hpack() {
+    // The point of the node library here. Every number in these messages comes
+    // out of `crate::pack`'s port of tex.web §649-§667 -- the natural width,
+    // the badness §108 computes from the glue ratio, the glue_set, the sign and
+    // the order -- and luatex is the oracle for all five at once.
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let show = "local out = h.width .. \" \" .. h.height .. \" \" .. h.depth .. \" \" .. bd \
+                .. \" \" .. h.glue_set .. \" \" .. h.glue_sign .. \" \" .. h.glue_order ";
+    for body in [
+        // Natural: 10pt + 5pt + 10pt, nothing set.
+        shows(&format!("{RULES} local h,bd = node.hpack(list()) {show}")),
+        // Stretched to 30pt: 5pt wanted from 5pt of stretch, so the ratio is 1
+        // and §108's badness is 100*1^3.
+        shows(&format!(
+            "{RULES} local h,bd = node.hpack(list(), 1966080, \"exactly\") {show}"
+        )),
+        // Spread 10pt: ratio 2, badness 100*2^3 = 800.
+        shows(&format!(
+            "{RULES} local h,bd = node.hpack(list(), 655360, \"additional\") {show}"
+        )),
+        // Shrunk to 23pt: 2pt wanted from 2pt of shrink.
+        shows(&format!(
+            "{RULES} local h,bd = node.hpack(list(), 1507328, \"exactly\") {show}"
+        )),
+        // Shrunk PAST the shrink available: §664 sets the ratio to 1 and
+        // reports an overfull box rather than shrinking further.
+        shows(&format!(
+            "{RULES} local h,bd = node.hpack(list(), 1048576, \"exactly\") {show}"
+        )),
+        // A vertical list: §668's vpack charges height plus depth and takes the
+        // width as the widest item.
+        shows(&format!(
+            "{RULES} local a = r(655360) a.height=327680 local h,bd = node.vpack(a) {show}"
+        )),
+        // The natural dimensions of the same list, without a box.
+        shows(&format!(
+            "{RULES} local out = table.concat({{node.dimensions(list())}}, \" \")"
+        )),
+    ] {
+        let (want, got) = both(&lua, &body);
+        assert!(!want.is_empty(), "the oracle said nothing for {body}");
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn the_node_ids_are_luatexs_own_numbering_and_not_tex_webs() {
+    // These two numberings agree up to 5 and then diverge, so an engine that
+    // handed Lua its own would be wrong in a way a chunk branching on `n.id`
+    // could not see until the output. `crate::node::Node::type_code` is
+    // tex.web's (§135-§159) because §148 and §653 are stated as arithmetic on
+    // it; what Lua is told is LuaTeX's.
+    assert_eq!(
+        texrs::node::Node::Math(0).type_code(),
+        9,
+        "tex.web numbers the math node 9"
+    );
+    assert_eq!(
+        texrs::node::Node::Glue(texrs::node::GlueNode::default()).type_code(),
+        10,
+        "tex.web numbers the glue node 10"
+    );
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let body = shows(
+        "local t = {} for _, n in ipairs({\"hlist\",\"vlist\",\"rule\",\"ins\",\"mark\",\
+         \"adjust\",\"boundary\",\"disc\",\"whatsit\",\"local_par\",\"dir\",\"math\",\"glue\",\
+         \"kern\",\"penalty\",\"unset\",\"glyph\",\"glue_spec\"}) do \
+         t[#t+1] = n .. \"=\" .. node.id(n) end \
+         t[#t+1] = \"12=\" .. node.type(12) t[#t+1] = \"29=\" .. node.type(29) \
+         local out = table.concat(t, \" \") ",
+    );
+    let (want, got) = both(&lua, &body);
+    assert!(!want.is_empty(), "the oracle said nothing");
+    assert_eq!(got, want);
+}
+
+#[test]
+fn a_nodes_glue_order_is_luatexs_fi_based_numbering() {
+    // LuaTeX has a fourth, finer infinity called `fi` and numbers from it, so
+    // `fil` is 2 where TeX82's is 1. Measured at the node level rather than
+    // guessed from the register interface: in luatex 1.24.0 `\hbox to 20pt{\hskip
+    // 0pt plus 1fil}` gives the glue `stretch_order == 2` and the box
+    // `glue_order == 2`. A translation the wrong way round would put a `fil`
+    // where a `fill` was asked for and set the box by the wrong infinity.
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    for body in [
+        shows(
+            "local a = node.new(\"rule\") a.width=655360 a.height=0 a.depth=0 \
+             local g = node.new(\"glue\") g.stretch=65536 g.stretch_order=2 a.next=g \
+             local h = node.hpack(a, 1310720, \"exactly\") \
+             local out = g.stretch_order .. \" \" .. h.glue_order .. \" \" .. h.glue_set ",
+        ),
+        shows(
+            "local a = node.new(\"rule\") a.width=655360 a.height=0 a.depth=0 \
+             local g = node.new(\"glue\") g.stretch=65536 g.stretch_order=3 a.next=g \
+             local h = node.hpack(a, 1310720, \"exactly\") \
+             local out = g.stretch_order .. \" \" .. h.glue_order .. \" \" .. h.glue_set ",
+        ),
+    ] {
+        let (want, got) = both(&lua, &body);
+        assert!(!want.is_empty(), "the oracle said nothing for {body}");
+        assert_eq!(got, want, "{body}");
+    }
+    // Order 1 is `fi`, which texrs's glue has no unit for. luatex accepts it,
+    // so this half cannot be differential: refusing is the divergence, and it
+    // is the same refusal `tex.setglue` already makes.
+    let e = fails("\\directlua{local g = node.new(\"glue\") g.stretch_order = 1}");
+    assert!(e.contains("fi"), "{e}");
+}
+
+#[test]
+fn walking_and_editing_a_list_answers_what_luatex_answers() {
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    for body in [
+        // `for n, id, subtype in node.traverse(head)` -- three values a step,
+        // measured rather than assumed.
+        shows(&format!(
+            "{RULES} local t = {{}} for n, id, st in node.traverse(list()) do \
+             t[#t+1] = id .. \":\" .. st end local out = table.concat(t, \" \") "
+        )),
+        shows(&format!(
+            "{RULES} local a = list() local out = node.length(a) .. \" \" \
+             .. node.count(node.id(\"rule\"), a) .. \" \" .. node.count(node.id(\"glue\"), a) "
+        )),
+        // insert_after answers head and the new node; the list is one longer
+        // and the new node is where it was put.
+        shows(&format!(
+            "{RULES} local a = list() local h, n = node.insert_after(a, a, node.new(\"penalty\")) \
+             local out = node.length(a) .. \" \" .. tostring(h == a) .. \" \" \
+             .. node.type(a.next.id) .. \" \" .. tostring(n == a.next) "
+        )),
+        // insert_before at the head moves the head.
+        shows(&format!(
+            "{RULES} local a = list() local h, n = node.insert_before(a, a, node.new(\"penalty\")) \
+             local out = node.length(h) .. \" \" .. tostring(h == n) .. \" \" .. node.type(h.id) "
+        )),
+        // remove answers the new head and what followed what was removed.
+        shows(&format!(
+            "{RULES} local a = list() local h, c = node.remove(a, a.next) \
+             local out = node.length(h) .. \" \" .. tostring(h == a) .. \" \" \
+             .. node.type(c.id) .. \" \" .. node.type(a.next.id) "
+        )),
+        shows(&format!(
+            "{RULES} local a = list() local out = tostring(node.tail(a) == a.next.next) .. \" \" \
+             .. tostring(node.slide(a) == a.next.next) .. \" \" \
+             .. tostring(node.next(a) == a.next) .. \" \" .. tostring(node.prev(a.next) == a) "
+        )),
+        // A copy is a copy: a deep one, and `next` is not part of it. An empty
+        // range copies to nil rather than to an empty something.
+        shows(&format!(
+            "{RULES} local a = list() local c = node.copy(a) \
+             local out = tostring(c == a) .. \" \" .. c.width .. \" \" .. tostring(c.next) .. \" \" \
+             .. node.length(node.copy_list(a)) .. \" \" .. tostring(node.copy_list(a, a)) \
+             .. \" \" .. node.length(a, a.next) "
+        )),
+        // The field-name interface, which is what a chunk written for speed
+        // uses instead of the metatable.
+        shows(&format!(
+            "{RULES} local a = list() local out = node.getfield(a, \"width\") .. \" \" \
+             .. node.getid(a) .. \" \" .. node.getsubtype(a) .. \" \" \
+             .. tostring(node.has_field(a, \"width\")) .. \" \" \
+             .. tostring(node.has_field(a, \"penalty\")) .. \" \" \
+             .. table.concat({{node.getwhd(a)}}, \",\") "
+        )),
+        shows(&format!(
+            "{RULES} local a = list() local g = a.next \
+             local out = table.concat({{node.getglue(g)}}, \" \") .. \" \" \
+             .. tostring(node.is_zero_glue(g)) .. \" \" \
+             .. tostring(node.is_zero_glue(node.new(\"glue\"))) .. \" \" \
+             .. tostring(node.is_char(g)) .. \" \" .. tostring(node.is_glyph(g)) "
+        )),
+    ] {
+        let (want, got) = both(&lua, &body);
+        assert!(!want.is_empty(), "the oracle said nothing for {body}");
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn the_skip_registers_reach_lua_as_the_glue_spec_node_luatex_hands_over() {
+    // `tex.skip` refused for want of a `glue_spec`, which is a node the arena
+    // can carry faithfully: five integers, no subtype and no `prev`, exactly as
+    // `node.fields(39)` reports. Both directions -- the register Lua reads and
+    // the register TeX reads back after Lua wrote it.
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    for body in [
+        format!(
+            "\\skip0=1pt plus 2fil minus 3pt \\relax {}",
+            shows(
+                "local s = tex.skip[0] local out = s.id .. \" \" .. node.type(s.id) .. \" \" \
+                 .. s.width .. \" \" .. s.stretch .. \" \" .. s.stretch_order .. \" \" \
+                 .. s.shrink .. \" \" .. s.shrink_order .. \" \" .. tostring(s.subtype) .. \" \" \
+                 .. tostring(node.has_field(s, \"subtype\")) "
+            )
+        ),
+        format!(
+            "\\skip0=4pt plus 1fill \\relax {}",
+            shows("local s = tex.getskip(0) local out = s.width .. \" \" .. s.stretch_order ")
+        ),
+        // The write, read back by TeX rather than by Lua.
+        "\\directlua{local n = node.new(\"glue_spec\") n.width = 196608 n.stretch = 65536 \
+         n.stretch_order = 2 tex.skip[3] = n}\\message{[\\the\\skip3]}"
+            .to_string(),
+        "\\directlua{local n = node.new(\"glue_spec\") n.width = 131072 n.shrink = 65536 \
+         tex.setskip(4, n)}\\message{[\\the\\skip4]}"
+            .to_string(),
+    ] {
+        let (want, got) = both(&lua, &body);
+        assert!(!want.is_empty(), "the oracle said nothing for {body}");
+        assert_eq!(got, want, "{body}");
+    }
+}
+
+#[test]
+fn a_glyph_carries_the_only_font_there_is_and_measures_what_luatex_measures() {
+    // texrs has no `font` library, so 0 -- LuaTeX's "no font" -- is the only
+    // font id a chunk here could hold. Measured in luatex 1.24.0: a glyph with
+    // font 0 has width 0 whatever `char` is, and a write to `.width` returns
+    // without error and has no effect, because the dimension comes from the
+    // font. So agreeing with luatex here is agreeing exactly, not approximately.
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    let body = shows(
+        "local g = node.new(\"glyph\") g.char = 65 g.width = 12345 \
+         local out = g.id .. \" \" .. g.char .. \" \" .. g.font .. \" \" .. g.width .. \" \" \
+         .. g.height .. \" \" .. g.depth .. \" \" .. tostring(node.is_char(g)) .. \" \" \
+         .. table.concat({node.getwhd(g)}, \",\") .. \" \" .. node.hpack(g).width ",
+    );
+    let (want, got) = both(&lua, &body);
+    assert!(!want.is_empty(), "the oracle said nothing");
+    assert_eq!(got, want);
+}
+
+#[test]
+fn everything_that_would_reach_the_documents_own_list_refuses_by_name() {
+    // The boundary the whole design turns on. texrs sets a page from runs of
+    // strings, so there is no current node list: a document that walks one is
+    // still refused rather than quietly wrong, because it cannot obtain one.
+    // Each of these names what is missing rather than being absent, so the
+    // failure says which of the two engines' worlds the chunk walked into.
+    for (chunk, want) in [
+        ("node.write(node.new(\"penalty\"))", "no current node list"),
+        ("node.last_node()", "no current node list"),
+        ("node.usedlist()", "arena"),
+        ("tex.getbox(0)", "node lists"),
+        ("tex.getlist(\"page_head\")", "node lists"),
+        ("node.mlist_to_hlist(node.new(\"penalty\"))", "noad"),
+        ("node.ligaturing(node.new(\"penalty\"))", "lig/kern"),
+        ("node.kerning(node.new(\"penalty\"))", "lig/kern"),
+        ("node.hyphenating(node.new(\"penalty\"))", "Liang"),
+        ("node.set_attribute(node.new(\"penalty\"), 1, 1)", "attribute"),
+        ("local d = node.direct.getfield", "node.direct"),
+        ("node.rangedimensions(1, 2)", "parent"),
+    ] {
+        let e = fails(&format!("\\directlua{{{chunk}}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for {chunk}");
+    }
+}
+
+#[test]
+fn a_node_type_texrs_cannot_carry_is_refused_at_node_new_and_still_named_by_node_id() {
+    // The id is a documented constant a chunk may compare against long before
+    // it tries to make one, so `node.id` and `node.type` answer for every
+    // LuaTeX type. It is `node.new` that refuses, with the specific thing that
+    // is missing rather than one blanket sentence.
+    for (name, want) in [
+        ("ins", "glue_spec"),
+        ("mark", "token list"),
+        ("whatsit", "subtype"),
+        ("unset", "tex.web"),
+        ("local_par", "tex.web"),
+        ("noad", "noad"),
+        ("attribute", "attribute list"),
+    ] {
+        let e = fails(&format!("\\directlua{{node.new(\"{name}\")}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for {name}");
+        assert!(e.contains(name), "the message names the type: {e:?}");
+    }
+    assert_eq!(
+        text(
+            "\\directlua{tex.print(node.id(\"ins\") .. \" \" .. node.id(\"noad\") .. \" \" \
+             .. node.type(15) .. \" \" .. node.type(39))}"
+        ),
+        "3 18 unset glue_spec",
+        "the ids and names answer for a type node.new will not make"
+    );
+}
+
+#[test]
+fn a_field_luatex_has_and_texrs_has_not_is_an_error_rather_than_nil() {
+    // `nil` is what luatex itself answers for a name that is not a field at
+    // all, so answering `nil` for a field luatex DOES have would say "there is
+    // no such field" when the truth is "texrs has not got it" -- which is the
+    // quiet wrongness the whole module exists to avoid.
+    for (chunk, want) in [
+        ("local h = node.new(\"hlist\") local d = h.dir", "direction"),
+        ("local k = node.new(\"kern\") local e = k.expansion_factor", "expansion"),
+        ("local d = node.new(\"disc\") local r = d.replace", "replace_count"),
+        ("local d = node.new(\"disc\") local p = d.penalty", "hyphenpenalty"),
+        ("local m = node.new(\"math\") local w = m.width", "mathskip"),
+        ("local g = node.new(\"glyph\") local c = g.components", "component"),
+        ("local p = node.new(\"penalty\") p.attr = 1", "attribute list"),
+    ] {
+        let e = fails(&format!("\\directlua{{{chunk}}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for {chunk}");
+    }
+    // A name that is a field in neither engine is `nil` on a read and luatex's
+    // own wording on a write.
+    let e = fails("\\directlua{local p = node.new(\"penalty\") p.width = 1}");
+    assert!(
+        e.contains("You cannot set field width in a node of type penalty"),
+        "{e}"
+    );
+    assert_eq!(
+        text("\\directlua{local p = node.new(\"penalty\") tex.print(tostring(p.nosuchfield))}"),
+        "nil"
+    );
+}
+
+#[test]
+fn a_list_that_points_back_into_itself_is_refused_rather_than_hung() {
+    // One Lua assignment away, and luatex hangs on it. An engine a test suite
+    // drives cannot, so a walk that goes a million nodes without reaching nil
+    // stops and says why.
+    let e = fails("\\directlua{local p = node.new(\"penalty\") p.next = p node.length(p)}");
+    assert!(e.contains("no end"), "{e}");
+    let e = fails(
+        "\\directlua{local p = node.new(\"penalty\") p.next = p node.hpack(p)}",
+    );
+    assert!(e.contains("no end"), "{e}");
+}
+
+#[test]
+fn what_the_chunk_packed_is_what_the_document_then_sets() {
+    // The whole point, in the form the rest of this file takes: a number that
+    // exists only because Lua asked tex.web's own packer for it, typeset into
+    // the document's text. 10pt + 5pt + 10pt at natural size is 1638400sp, and
+    // `tex.sp` reads the string form back to the same integer.
+    assert_eq!(
+        text(&format!(
+            "{RULES_TEX}A\\directlua{{local h = node.hpack(list()) tex.print(h.width)}}B"
+        )),
+        "A1638400B"
+    );
+    // And the badness of the same list stretched to 30pt, which is §108's
+    // 100*ratio^3 rather than anything this module computed.
+    assert_eq!(
+        text(&format!(
+            "{RULES_TEX}A\\directlua{{local _, bd = node.hpack(list(), 1966080, \"exactly\") tex.print(bd)}}B"
+        )),
+        "A100B"
+    );
+}
+
+/// [`RULES`] as it goes into a plain `\directlua`, where the braces are the
+/// document's own rather than a `format!` escape.
+const RULES_TEX: &str = "\\directlua{function r(w) local n=node.new(\"rule\") n.width=w n.height=0 n.depth=0 return n end \
+                         function list() local a=r(655360) local g=node.new(\"glue\") \
+                         g.width=327680 g.stretch=327680 g.shrink=131072 local b=r(655360) \
+                         a.next=g g.next=b return a end}";
+
+#[test]
+fn the_muskip_registers_reach_lua_the_same_way_the_skips_do() {
+    // `\muskip` is a register file of its own now (`crate::compiler::MUSKIP_BASE`,
+    // scanned in math units), so the LuaTeX interface over it is the skip
+    // interface at another base: a `glue_spec` node for `tex.muskip` and
+    // `tex.getmuskip`, five bare numbers for `tex.getmuglue`, the width alone
+    // for `tex.muglue`, and the register number for `tex.ismuskip`.
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: no `luatex` on PATH");
+        return;
+    };
+    for body in [
+        format!(
+            "\\muskip0=3mu plus 1mu minus 2mu \\relax {}",
+            shows(
+                "local s = tex.muskip[0] local out = s.id .. \" \" .. s.width .. \" \" \
+                 .. s.stretch .. \" \" .. s.shrink .. \" \" \
+                 .. table.concat({tex.getmuglue(0)}, \",\") .. \" \" .. tex.muglue[0] .. \" \" \
+                 .. tex.ismuskip(0) "
+            )
+        ),
+        format!(
+            "\\muskip2=1mu plus 2fil \\relax {}",
+            shows(
+                "local s = tex.getmuskip(2) local out = s.width .. \" \" .. s.stretch .. \" \" \
+                 .. s.stretch_order "
+            )
+        ),
+        // Both writes, read back by TeX rather than by Lua.
+        "\\directlua{local n = node.new(\"glue_spec\") n.width = 131072 n.stretch = 65536 \
+         tex.setmuskip(1, n)}\\message{[\\the\\muskip1]}"
+            .to_string(),
+        "\\directlua{tex.setmuglue(4, 196608, 65536, 0, 0, 0)}\\message{[\\the\\muskip4]}"
+            .to_string(),
+        "\\directlua{tex.muskip[5] = node.new(\"glue_spec\")}\\message{[\\the\\muskip5]}".to_string(),
+    ] {
+        let (want, got) = both(&lua, &body);
+        assert!(!want.is_empty(), "the oracle said nothing for {body}");
+        assert_eq!(got, want, "{body}");
+    }
+    // The bound is texrs's 256 registers, not LuaTeX's 65,536, and the muskip
+    // file sits above the skip file in one slot range -- so an unchecked index
+    // would land in a neighbour exactly as `tex.count[300]` would.
+    let e = fails("\\directlua{tex.muskip[300] = node.new(\"glue_spec\")}");
+    assert!(e.contains("out of range") && e.contains("muskip"), "{e}");
+}
+
+#[test]
+fn an_internal_parameter_refuses_and_names_where_the_value_really_lives() {
+    // These answered `nil` -- Lua's answer for a key a table has not got --
+    // which is exactly the wrong answer: it says "LuaTeX has no such parameter"
+    // where the truth is "texrs has not got it", and a chunk guarding with
+    // `tex.hsize or 0` would set its page to a measure the engine never used.
+    for (name, want) in [
+        ("hsize", "crate::typeset::Layout"),
+        ("parindent", "crate::typeset::Layout"),
+        ("baselineskip", "crate::typeset::Layout"),
+        ("parskip", "crate::typeset::Layout"),
+        ("tolerance", "crate::linebreak"),
+        ("pretolerance", "crate::linebreak"),
+        ("hbadness", "crate::linebreak"),
+        ("outputpenalty", "output routine"),
+        ("prevdepth", "output routine"),
+        ("everypar", "output routine"),
+    ] {
+        let e = fails(&format!("\\directlua{{local v = tex.{name}}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.{name}");
+        // The write refuses too, or a chunk would set a parameter that reaches
+        // nothing and read its own value back as though TeX had taken it.
+        let e = fails(&format!("\\directlua{{tex.{name} = 1}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.{name}");
+        // And through the function spelling, which is the same parameters.
+        let e = fails(&format!("\\directlua{{tex.get(\"{name}\")}}"));
+        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.get");
+    }
+    // The manual is explicit that `tex.foo = 123` is valid on this table, so a
+    // name that is not a parameter has to keep behaving like a Lua field.
+    assert_eq!(
+        text("\\directlua{tex.foo = 123 tex.print(tex.foo .. \" \" .. tostring(tex.bar))}"),
+        "123 nil"
     );
 }

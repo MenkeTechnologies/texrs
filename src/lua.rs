@@ -53,32 +53,49 @@
 //! way; `\toks` is a token list rather than a slot, and comes from
 //! `Engine::toks`.
 //!
+//! ## The node library, and where it stops
+//!
+//! `node` is here, over `crate::node`, and `crate::lua::node` states the whole
+//! case for what it can and cannot carry. In one sentence: LuaTeX's node
+//! library is a VOCABULARY (numbered types, named fields, `node.hpack`) and a
+//! HANDLE ON THE DOCUMENT (`tex.box[0].head`, `node.write`, the callbacks that
+//! pass Lua the list TeX is building), and only the first can be spoken here —
+//! not because `crate::node` is the wrong shape, but because texrs sets a page
+//! from runs of strings and there IS no current node list to hand over.
+//!
+//! So a chunk that builds a list and measures it gets `crate::pack`'s port of
+//! tex.web §649-§667, pinned against luatex in `tests/lua.rs`, and a chunk that
+//! asks for the document's own list is refused by name at the boundary.
+//!
 //! ## What is NOT here, and why it is absent rather than stubbed
 //!
-//! - **`node.*`.** Not implemented, at all, and not planned in this module. A
-//!   node list is the typesetter's own data structure and texrs's is not
-//!   LuaTeX's: there is no `glyph` node with a `char` and a `font` field for
-//!   Lua to walk, so `node.new`, `node.traverse` and the callbacks that hand a
-//!   list to Lua have nothing to hand it. The global is ABSENT, so a chunk that
-//!   reaches for it stops with `attempt to index a nil value (global 'node')`
-//!   rather than quietly doing half of what it asked.
-//! - **`tex.skip` and the `glue_spec` half of the register interface.** Same
-//!   reason: the manual says those "accept and return `glue_spec` userdata node
-//!   objects". `tex.glue`, `tex.getglue` and `tex.setglue` are the SAME
-//!   registers as plain numbers, they are implemented, and `tex.skip` refuses
-//!   with a message saying so.
+//! - **Box registers.** `tex.box`, `tex.getbox`, `tex.setbox`, `tex.getlist`,
+//!   `tex.getnest`: each holds a node list, and there is none. These say so
+//!   rather than being absent, because "attempt to call a nil value" would not
+//!   tell a document's author which of the two engines' worlds it had walked
+//!   into. The same goes for `node.write` and the rest of the list in
+//!   `crate::lua::node`'s `REFUSED`.
 //! - **The internal parameters** — `tex.hsize`, `tex.parindent`,
 //!   `tex.baselineskip` and the rest of the manual's "Internal parameter
-//!   values" list. `\hsize` is not a register in texrs and not an assignable
-//!   primitive either; the page geometry is `crate::typeset::Families` and its
-//!   neighbours, decided elsewhere. Reading `tex.hsize` gives nil.
+//!   values" list. Not one is a register in texrs: the page geometry is
+//!   `crate::typeset::Layout`, decided from the class and geometry options
+//!   rather than assigned by the document, and the breaker's parameters are
+//!   constants in `crate::linebreak`. They REFUSE, naming which of the two it
+//!   is; they answered `nil` until that was seen for what it is, which is a
+//!   claim that LuaTeX has no such parameter.
 //! - **`token`'s userdata half** — `token.create`, `token.get_next`,
 //!   `token.scan_token`, `token.scan_glue`, `token.scan_toks`,
 //!   `token.scan_list`. See `crate::lua::token`; the SCANNERS are implemented
 //!   and reach the real input.
 //! - **Callbacks.** `luatexbase.add_to_callback` accepts a registration and
 //!   never fires it, because every callback LuaTeX defines is about a node list
-//!   or a file being opened.
+//!   TeX is building or a file being opened, and neither reaches here.
+//!
+//! What came OFF this list when the node library landed: `tex.skip`,
+//! `tex.getskip`, `tex.setskip` and the whole `\muskip` family. Those refused
+//! for want of a `glue_spec` userdata, and a `glue_spec` is a node the arena
+//! carries faithfully — five integers, no subtype and no `prev`, exactly as
+//! `node.fields(39)` reports in luatex 1.24.0.
 
 use crate::catcode::Cat;
 use crate::expand::{Engine, Meaning, TexError};
@@ -90,6 +107,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+mod node;
 mod token;
 
 type R<T> = Result<T, TexError>;
@@ -865,9 +883,14 @@ fn functions_table(lua: &Lua) -> mlua::Result<Table> {
 fn build(owner: usize) -> mlua::Result<Runtime> {
     let lua = Lua::new();
     let bridge = Rc::new(RefCell::new(Bridge::default()));
+    // One arena per document, alongside the bridge and for the same reason: a
+    // node a chunk made must still be there for the next chunk, and must be
+    // gone by the next document.
+    let arena = Rc::new(RefCell::new(node::Arena::default()));
     let globals = lua.globals();
     globals.set(FUNCTIONS_KEY, lua.create_table()?)?;
-    globals.set("tex", tex_table(&lua, &bridge)?)?;
+    globals.set("tex", tex_table(&lua, &bridge, &arena)?)?;
+    globals.set("node", node::table(&lua, &arena)?)?;
     globals.set("lua", lua_table(&lua)?)?;
     globals.set("texio", texio_table(&lua, &bridge)?)?;
     globals.set("status", status_table(&lua)?)?;
@@ -960,7 +983,11 @@ fn regime_of(selector: Option<i64>) -> Regime {
 }
 
 /// The `tex` table: the print functions, the registers, the helpers.
-fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
+fn tex_table(
+    lua: &Lua,
+    bridge: &Rc<RefCell<Bridge>>,
+    arena: &Rc<RefCell<node::Arena>>,
+) -> mlua::Result<Table> {
     let tex = lua.create_table()?;
 
     for (name, line) in [("print", LineMode::Line), ("sprint", LineMode::Partial)] {
@@ -1138,22 +1165,137 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
         })?,
     )?;
     // "The skip registers accept and return glue_spec userdata node objects."
-    // There are no nodes here (see the module docs), so `tex.skip` refuses
-    // rather than answering with something that is not a node: a chunk that
-    // indexed a number where LuaTeX gave it a node would go wrong later, in the
-    // output, instead of here. `tex.getglue` is the same register in numbers,
-    // and the message says so.
-    for name in ["getskip", "setskip", "getmuskip", "setmuskip", "getmuglue"] {
-        tex.set(
-            name,
-            lua.create_function(move |_, _: Variadic<Value>| {
-                Err::<(), _>(mlua::Error::runtime(format!(
-                    "tex.{name} needs a glue_spec node, which texrs has no node interface for; \
-                     use tex.getglue/tex.setglue, which are the same registers as numbers"
-                )))
-            })?,
-        )?;
-    }
+    // That is the whole difference between `tex.skip` and `tex.getglue`, which
+    // is the same registers as bare numbers. It refused while there was no node
+    // interface; `crate::lua::node` carries a `glue_spec` faithfully -- five
+    // integers, no subtype and no `prev`, exactly as `node.fields(39)` reports
+    // in luatex 1.24.0 -- so the register half of it answers now.
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    tex.set(
+        "getskip",
+        lua.create_function(move |lua, key: Value| {
+            let base = {
+                let b = b.borrow();
+                resolve(&b, Kind::Glue, &key)?
+            };
+            let glue = glue_get(&b.borrow(), base);
+            node::spec_node(lua, &a, glue)
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    tex.set(
+        "setskip",
+        lua.create_function(move |_, args: Variadic<Value>| {
+            let args = drop_global(&args);
+            let [key, value] = &args[..] else {
+                return Err(mlua::Error::runtime(
+                    "tex.setskip wants a register and a glue_spec node",
+                ));
+            };
+            let glue = node::spec_values(&a, value)?;
+            let mut b = b.borrow_mut();
+            let base = resolve(&b, Kind::Glue, key)?;
+            glue_set(&mut b, base, glue)
+        })?,
+    )?;
+    // The `\muskip` half of the same interface. `\muskip` is a register file of
+    // its own now (`crate::compiler::MUSKIP_BASE`, scanned in math units by
+    // `Engine::scan_muglue`), so these read and write it exactly as the `\skip`
+    // pair above do -- a `glue_spec` node for `tex.muskip`/`getmuskip`, five
+    // bare numbers for `tex.getmuglue`.
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    tex.set(
+        "getmuskip",
+        lua.create_function(move |lua, key: Value| {
+            let base = {
+                let b = b.borrow();
+                resolve(&b, Kind::MuGlue, &key)?
+            };
+            let glue = glue_get(&b.borrow(), base);
+            node::spec_node(lua, &a, glue)
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    tex.set(
+        "setmuskip",
+        lua.create_function(move |_, args: Variadic<Value>| {
+            let args = drop_global(&args);
+            let [key, value] = &args[..] else {
+                return Err(mlua::Error::runtime(
+                    "tex.setmuskip wants a register and a glue_spec node",
+                ));
+            };
+            let glue = node::spec_values(&a, value)?;
+            let mut b = b.borrow_mut();
+            let base = resolve(&b, Kind::MuGlue, key)?;
+            glue_set(&mut b, base, glue)
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    tex.set(
+        "getmuglue",
+        lua.create_function(move |_, args: Variadic<Value>| {
+            let key = args.first().cloned().unwrap_or(Value::Nil);
+            let b = b.borrow();
+            let base = resolve(&b, Kind::MuGlue, &key)?;
+            let (w, st, sh, sto, sho) = glue_get(&b, base);
+            match args.get(1) {
+                Some(Value::Boolean(false)) => Ok(Variadic::from_iter([Value::Integer(w)])),
+                _ => Ok(Variadic::from_iter(
+                    [w, st, sh, sto, sho].map(Value::Integer),
+                )),
+            }
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    tex.set(
+        "setmuglue",
+        lua.create_function(move |_, args: Variadic<Value>| {
+            let args = drop_global(&args);
+            let Some(key) = args.first() else {
+                return Err(mlua::Error::runtime("tex.setmuglue wants a register"));
+            };
+            let n = |i: usize| args.get(i).and_then(|v| v.as_integer()).unwrap_or(0);
+            let mut b = b.borrow_mut();
+            let base = resolve(&b, Kind::MuGlue, key)?;
+            glue_set(&mut b, base, (n(1), n(2), n(3), n(4), n(5)))?;
+            Ok(())
+        })?,
+    )?;
+    tex.set("muglue", register_table(lua, bridge, Kind::MuGlue)?)?;
+    // `tex.muskip[n]`, the table spelling of the pair above.
+    let muskip = lua.create_table()?;
+    let mt = lua.create_table()?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    mt.set(
+        "__index",
+        lua.create_function(move |lua, (_, key): (Table, Value)| {
+            let base = {
+                let b = b.borrow();
+                resolve(&b, Kind::MuGlue, &key)?
+            };
+            let glue = glue_get(&b.borrow(), base);
+            node::spec_node(lua, &a, glue)
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    mt.set(
+        "__newindex",
+        lua.create_function(move |_, (_, key, value): (Table, Value, Value)| {
+            let glue = node::spec_values(&a, &value)?;
+            let mut b = b.borrow_mut();
+            let base = resolve(&b, Kind::MuGlue, &key)?;
+            glue_set(&mut b, base, glue)
+        })?,
+    )?;
+    muskip.set_metatable(Some(mt))?;
+    tex.set("muskip", muskip)?;
     // A box register holds a NODE LIST, and there is nothing here that could
     // stand in for one: `\box0` is a `crate::box_` built by the packer, not a
     // number and not a string. These say so instead of being absent, because
@@ -1171,16 +1313,34 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
             })?,
         )?;
     }
+    // `tex.skip[n]` is `tex.getskip(n)` through a table, as every register
+    // family in the manual is offered both ways.
     let skip = lua.create_table()?;
     let mt = lua.create_table()?;
-    let refuse = lua.create_function(|_, _: Variadic<Value>| {
-        Err::<(), _>(mlua::Error::runtime(
-            "tex.skip is a glue_spec node, which texrs has no node interface for; \
-             use tex.glue (the width) or tex.getglue (all five numbers)",
-        ))
-    })?;
-    mt.set("__index", refuse.clone())?;
-    mt.set("__newindex", refuse)?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    mt.set(
+        "__index",
+        lua.create_function(move |lua, (_, key): (Table, Value)| {
+            let base = {
+                let b = b.borrow();
+                resolve(&b, Kind::Glue, &key)?
+            };
+            let glue = glue_get(&b.borrow(), base);
+            node::spec_node(lua, &a, glue)
+        })?,
+    )?;
+    let b = Rc::clone(bridge);
+    let a = Rc::clone(arena);
+    mt.set(
+        "__newindex",
+        lua.create_function(move |_, (_, key, value): (Table, Value, Value)| {
+            let glue = node::spec_values(&a, &value)?;
+            let mut b = b.borrow_mut();
+            let base = resolve(&b, Kind::Glue, &key)?;
+            glue_set(&mut b, base, glue)
+        })?,
+    )?;
     skip.set_metatable(Some(mt))?;
     tex.set("skip", skip)?;
 
@@ -1195,6 +1355,8 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
         ("isdimen", Kind::Dimen),
         ("isskip", Kind::Glue),
         ("isglue", Kind::Glue),
+        ("ismuskip", Kind::MuGlue),
+        ("ismuglue", Kind::MuGlue),
         ("istoks", Kind::Toks),
         ("isattribute", Kind::Attribute),
     ] {
@@ -1210,10 +1372,11 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
                     Kind::Count | Kind::Toks => 0,
                     Kind::Dimen => crate::compiler::DIMEN_BASE,
                     Kind::Glue => crate::compiler::SKIP_BASE,
+                    Kind::MuGlue => crate::compiler::MUSKIP_BASE,
                     Kind::Attribute => ATTRIBUTE_BASE,
                 };
                 let stride = match kind {
-                    Kind::Glue => crate::compiler::SKIP_STRIDE,
+                    Kind::Glue | Kind::MuGlue => crate::compiler::SKIP_STRIDE,
                     _ => 1,
                 };
                 Ok(Value::Integer((slot - base) / stride))
@@ -1299,7 +1462,145 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
         "extraprimitives",
         lua.create_function(|lua, _: Variadic<Value>| lua.create_table())?,
     )?;
+
+    // The manual's "Internal parameter values": `tex.hsize`, `tex.parindent`,
+    // `tex.baselineskip` and the hundred names beside them, reachable both as
+    // `tex.<name>` and through `tex.get`/`tex.set`.
+    //
+    // Not one of them is a register in texrs. They answered `nil` -- Lua's
+    // answer for a key a table has not got -- and `nil` is exactly the wrong
+    // answer: it says "LuaTeX has no such parameter" where the truth is "texrs
+    // has not got it", and a chunk guarding with `tex.hsize or 0` would set its
+    // page to a measure the engine never used. They refuse now, and the message
+    // says where the value actually lives.
+    //
+    // A metatable rather than entries, because the manual is explicit that
+    // `tex.foo = 123` is valid on this table: a name that is not a parameter has
+    // to keep behaving like an ordinary Lua field, so only the listed names are
+    // intercepted and everything else falls through to the raw table.
+    let mt = lua.create_table()?;
+    mt.set(
+        "__index",
+        lua.create_function(|_, (_, key): (Table, Value)| match parameter_reason(&key)? {
+            Some(why) => Err(mlua::Error::runtime(why)),
+            None => Ok(Value::Nil),
+        })?,
+    )?;
+    mt.set(
+        "__newindex",
+        lua.create_function(|lua, (t, key, value): (Table, Value, Value)| {
+            match parameter_reason(&key)? {
+                Some(why) => Err(mlua::Error::runtime(why)),
+                None => {
+                    lua.load("local t, k, v = ... rawset(t, k, v)")
+                        .call::<()>((t, key, value))?;
+                    Ok(())
+                }
+            }
+        })?,
+    )?;
+    tex.set_metatable(Some(mt))?;
+    for name in ["get", "set"] {
+        tex.set(
+            name,
+            lua.create_function(move |_, args: Variadic<Value>| {
+                let args = drop_global(&args);
+                let key = args.first().cloned().unwrap_or(Value::Nil);
+                Err::<(), _>(match parameter_reason(&key)? {
+                    Some(why) => mlua::Error::runtime(why),
+                    None => mlua::Error::runtime(format!(
+                        "tex.{name} names one of the manual's internal parameters, \
+                         and that is not one of them"
+                    )),
+                })
+            })?,
+        )?;
+    }
     Ok(tex)
+}
+
+/// Why an internal parameter cannot be answered, or `None` if the name is not
+/// one of the manual's parameters at all.
+///
+/// The lists are the manual's own (1.24.0, "Internal parameter values"), split
+/// by where the value really lives in texrs. Being specific is the point: "not
+/// implemented" would leave a chunk's author guessing whether the parameter is
+/// coming, and each of these three answers is a different fact about the engine.
+fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
+    let Value::String(s) = key else {
+        return Ok(None);
+    };
+    let name = s.to_str()?.to_string();
+    // The page geometry. `\hsize` is not a primitive in texrs and not a
+    // register: `crate::typeset::Layout` holds the measure, the leading, the
+    // indent and the paragraph spacing, decided from the class options and
+    // `geometry`'s. A chunk cannot read it because it is not decided where the
+    // chunk stands -- lowering runs before the page is laid out at all.
+    const GEOMETRY: &[&str] = &[
+        "hsize", "vsize", "parindent", "hoffset", "voffset", "pagewidth", "pageheight",
+        "pagetopoffset", "pagebottomoffset", "pageleftoffset", "pagerightoffset", "baselineskip",
+        "lineskip", "lineskiplimit", "parskip", "leftskip", "rightskip", "parfillskip", "topskip",
+        "splittopskip", "spaceskip", "xspaceskip", "hangindent", "hangafter",
+    ];
+    // The line breaker's. `\tolerance`, `\pretolerance` and the demerit weights
+    // are constants in `crate::linebreak` rather than registers a document can
+    // set -- written down in BUGS.md, and this is the same fact seen from Lua.
+    const BREAKER: &[&str] = &[
+        "tolerance", "pretolerance", "hbadness", "vbadness", "hfuzz", "vfuzz", "adjdemerits",
+        "linepenalty", "doublehyphendemerits", "finalhyphendemerits", "exhyphenpenalty",
+        "hyphenpenalty", "interlinepenalty", "clubpenalty", "widowpenalty",
+        "displaywidowpenalty", "brokenpenalty", "looseness", "emergencystretch", "lefthyphenmin",
+        "righthyphenmin", "uchyph", "lastlinefit", "language", "overfullrule",
+    ];
+    // Everything else on the manual's list: the stomach's state, the output
+    // routine's, the token-list parameters, the maths parameters, the tracing
+    // switches and the date. texrs holds none of them anywhere.
+    const REST: &[&str] = &[
+        "abovedisplayshortskip", "abovedisplayskip", "belowdisplayshortskip", "belowdisplayskip",
+        "binoppenalty", "bodydir", "boxmaxdepth", "catcodetable", "clubpenalties", "day",
+        "deadcycles", "defaulthyphenchar", "defaultskewchar", "delimiterfactor",
+        "delimitershortfall", "displayindent", "displaywidowpenalties", "displaywidth",
+        "endlinechar", "errhelp", "errorcontextlines", "escapechar", "everycr", "everydisplay",
+        "everyeof", "everyhbox", "everyjob", "everymath", "everypar", "everyvbox", "fam",
+        "floatingpenalty", "globaldefs", "holdinginserts", "insertpenalties",
+        "interlinepenalties", "localbrokenpenalty", "localinterlinepenalty", "mag", "mathdir",
+        "mathsurround", "maxdeadcycles", "maxdepth", "medmuskip", "month", "nest", "newlinechar",
+        "nulldelimiterspace", "output", "outputpenalty", "pagebottomoffset", "pagedepth",
+        "pagedir", "pagefilllstretch", "pagefillstretch", "pagefilstretch", "pagegoal",
+        "pageshrink", "pagestretch", "pagetotal", "pardir", "parshape", "pausing",
+        "postdisplaypenalty", "predisplaydirection", "predisplaypenalty", "predisplaysize",
+        "prevdepth", "prevgraf", "relpenalty", "savinghyphcodes", "savingvdiscards",
+        "scriptspace", "showboxbreadth", "showboxdepth", "spacefactor", "splitmaxdepth",
+        "tabskip", "textdir", "thickmuskip", "thinmuskip", "time", "tracingassigns",
+        "tracingcommands", "tracinggroups", "tracingifs", "tracinglostchars", "tracingmacros",
+        "tracingnesting", "tracingonline", "tracingoutput", "tracingpages",
+        "tracingparagraphs", "tracingrestores", "tracingscantokens", "tracingstats",
+        "widowpenalties", "year",
+    ];
+    let name = name.as_str();
+    if GEOMETRY.contains(&name) {
+        return Ok(Some(format!(
+            "tex.{name} is one of LuaTeX's internal parameters, and texrs has no \
+             register for it: the page geometry lives in crate::typeset::Layout, \
+             decided from the class and geometry options rather than assigned by \
+             the document, and it is not decided yet where a chunk stands"
+        )));
+    }
+    if BREAKER.contains(&name) {
+        return Ok(Some(format!(
+            "tex.{name} is one of LuaTeX's internal parameters, and texrs holds it \
+             as a constant in crate::linebreak rather than as a register a \
+             document can set"
+        )));
+    }
+    if REST.contains(&name) {
+        return Ok(Some(format!(
+            "tex.{name} is one of LuaTeX's internal parameters, and texrs does not \
+             hold it at all: it belongs to the stomach, the output routine or the \
+             maths, none of which is on the path a run takes"
+        )));
+    }
+    Ok(None)
 }
 
 /// Which register file a name or number is an index into.
@@ -1307,11 +1608,14 @@ fn tex_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
 enum Kind {
     Count,
     Dimen,
-    /// `\skip`, read and written as five numbers rather than as a node — the
-    /// manual's `tex.glue`/`tex.getglue`/`tex.setglue` family. `tex.skip` and
-    /// `tex.getskip` are the same registers through a `glue_spec` NODE, and
-    /// there are no nodes here, so those refuse rather than answer.
+    /// `\skip`. Two spellings reach it: `tex.glue`/`tex.getglue`/`tex.setglue`
+    /// as five bare numbers, and `tex.skip`/`tex.getskip`/`tex.setskip` through
+    /// the `glue_spec` NODE the manual describes — the same registers either
+    /// way, and both are implemented.
     Glue,
+    /// `\muskip`, which is a glue register in the second glue file: the same
+    /// four slots, scanned in MATH units (`tex.web` §455, and `Engine::scan_muglue`).
+    MuGlue,
     Toks,
     Attribute,
 }
@@ -1323,6 +1627,7 @@ impl Kind {
             Kind::Count => "count",
             Kind::Dimen => "dimen",
             Kind::Glue => "skip",
+            Kind::MuGlue => "muskip",
             Kind::Toks => "toks",
             Kind::Attribute => "attribute",
         }
@@ -1350,19 +1655,20 @@ fn resolve(b: &Bridge, kind: Kind, key: &Value) -> mlua::Result<i64> {
         Kind::Count | Kind::Toks => 0,
         Kind::Dimen => crate::compiler::DIMEN_BASE,
         Kind::Glue => crate::compiler::SKIP_BASE,
+        Kind::MuGlue => crate::compiler::MUSKIP_BASE,
         Kind::Attribute => ATTRIBUTE_BASE,
     };
     // A glue is four slots — natural, stretch, shrink, and the packed orders —
     // so register n starts at four times n. `crate::lower`'s own arithmetic.
     let stride = match kind {
-        Kind::Glue => crate::compiler::SKIP_STRIDE,
+        Kind::Glue | Kind::MuGlue => crate::compiler::SKIP_STRIDE,
         _ => 1,
     };
     if let Some(n) = key.as_integer() {
         // An attribute is storage this module keeps for the chunk and a token
         // register is a map rather than a slot range, so neither can collide
         // with a neighbour and neither is bounded by the slot file.
-        let bounded = matches!(kind, Kind::Count | Kind::Dimen | Kind::Glue);
+        let bounded = matches!(kind, Kind::Count | Kind::Dimen | Kind::Glue | Kind::MuGlue);
         if bounded && !(0..REGISTERS).contains(&n) {
             return Err(mlua::Error::runtime(format!(
                 "\\{}{n} is out of range: texrs has {REGISTERS} {} registers",
@@ -1583,7 +1889,7 @@ fn register_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>, kind: Kind) -> mlua::
                 // Lua whatever the register holds, and `luatex` answers the
                 // WIDTH: `\skip0=1pt plus 2fil minus 3pt` then `tex.glue[0]` is
                 // `65536`. The other four are `tex.getglue`'s.
-                Kind::Glue => Ok(Value::Integer(glue_get(&b, reg).0)),
+                Kind::Glue | Kind::MuGlue => Ok(Value::Integer(glue_get(&b, reg).0)),
                 _ => Ok(Value::Integer(b.counts.get(&reg).copied().unwrap_or(0))),
             }
         })?,
@@ -1605,7 +1911,7 @@ fn register_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>, kind: Kind) -> mlua::
                 // `luatex` refuses both spellings — `tex.glue[2] = 65536` is
                 // "argument of 'setglue' must be a string or a number" there —
                 // so nothing that works in LuaTeX changes meaning here.
-                Kind::Glue => {
+                Kind::Glue | Kind::MuGlue => {
                     let g = match &value {
                         Value::Table(t) => {
                             let n = |i| t.raw_get::<Option<i64>>(i).unwrap_or(None).unwrap_or(0);
