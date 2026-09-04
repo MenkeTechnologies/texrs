@@ -572,8 +572,7 @@ impl<'a> Converter<'a> {
         // §741: walk the charlist for the widest accent that still fits over
         // the nucleus. The chain stops at the first variant WIDER than the
         // accentee, so the accent never overhangs what it accents.
-        loop {
-            let Some(y) = f.next_larger(c) else { break };
+        while let Some(y) = f.next_larger(c) {
             let Some(m) = f.metrics(y) else { break };
             if m.width > w {
                 break;
@@ -589,20 +588,20 @@ impl<'a> Converter<'a> {
         // §743: a script on an accented noad belongs to the WHOLE accented
         // thing, so the nucleus and its two scripts are boxed together first
         // and the accent then goes over that box.
-        if !acc.atom.supscr.is_empty() || !acc.atom.subscr.is_empty() {
-            if matches!(acc.atom.nucleus, Field::Char(_)) {
-                let inner = Noad::Atom(Atom {
-                    class: ClassOrOrd(Class::Ord),
-                    nucleus: std::mem::take(&mut acc.atom.nucleus),
-                    supscr: std::mem::take(&mut acc.atom.supscr),
-                    subscr: std::mem::take(&mut acc.atom.subscr),
-                    limits: acc.atom.limits,
-                });
-                acc.atom.nucleus = Field::List(vec![inner]);
-                x = self.clean_box(&acc.atom.nucleus, self.style);
-                delta += x.height - h;
-                h = x.height;
-            }
+        if (!acc.atom.supscr.is_empty() || !acc.atom.subscr.is_empty())
+            && matches!(acc.atom.nucleus, Field::Char(_))
+        {
+            let inner = Noad::Atom(Atom {
+                class: ClassOrOrd(Class::Ord),
+                nucleus: std::mem::take(&mut acc.atom.nucleus),
+                supscr: std::mem::take(&mut acc.atom.supscr),
+                subscr: std::mem::take(&mut acc.atom.subscr),
+                limits: acc.atom.limits,
+            });
+            acc.atom.nucleus = Field::List(vec![inner]);
+            x = self.clean_box(&acc.atom.nucleus, self.style);
+            delta += x.height - h;
+            h = x.height;
         }
         // §739: the accent box, centred over the accentee and skewed, with a
         // width of zero so that it costs the final box nothing.

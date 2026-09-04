@@ -187,14 +187,26 @@ impl Border {
 
 /// PGF's own constant for root two, `pgflibraryshapes.geometric.code.tex`
 /// lines 39-40.
+///
+/// `clippy::approx_constant` wants `std::f64::consts::SQRT_2` here and that
+/// would be WRONG. These are not approximations of root two that happen to be
+/// short: they are the numbers PGF itself divides by, written to the digits its
+/// own source writes them to, and the point of this module is to land where PGF
+/// lands rather than where the mathematics does. The same distinction is why a
+/// `circle` node's radius is computed the long way -- PGF's TeX-dimension
+/// arithmetic comes out 0.4% under the true hypotenuse, and matching the
+/// hypotenuse drew a visibly bigger circle than PGF draws.
+#[allow(clippy::approx_constant)]
 const ROOT_TWO: f64 = 1.414_213_6;
 
 /// And the one its diamond's background path is written with, line 334, which
 /// is the same number to one digit fewer.
+#[allow(clippy::approx_constant)]
 const ROOT_TWO_PGF: f64 = 1.414_213;
 
 /// Cosine of 45 degrees as the shape code writes it -- `pgfmoduleshapes`
 /// line 1277.
+#[allow(clippy::approx_constant)]
 const COS45: f64 = 0.707_107;
 
 /// The circle shape's radius, by the arithmetic `pgfmoduleshapes.code.tex`

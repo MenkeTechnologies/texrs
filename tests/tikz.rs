@@ -705,6 +705,9 @@ fn a_coordinates_anchors_are_the_coordinate() {
     assert_eq!(pic.paths[0].points, vec![(2.0, 3.0), (2.0, 3.0)]);
 }
 
+// PGF's own truncated root two, not an approximation of the constant: the
+// point is to land where PGF lands. See src/tikz/shapes.rs's ROOT_TWO.
+#[allow(clippy::approx_constant)]
 #[test]
 fn an_ellipse_node_is_root_two_bigger_than_its_text_box() {
     // `pgflibraryshapes.geometric.code.tex` lines 39-40 multiply both radii by
@@ -724,6 +727,9 @@ fn an_ellipse_node_is_root_two_bigger_than_its_text_box() {
     assert!((rx - 1.414_213_6 * half_width).abs() < 1e-9, "{rx}");
 }
 
+// PGF's own truncated root two, not an approximation of the constant: the
+// point is to land where PGF lands. See src/tikz/shapes.rs's ROOT_TWO.
+#[allow(clippy::approx_constant)]
 #[test]
 fn a_diamond_node_is_the_four_points_pgf_writes() {
     // lualatex, for `minimum width=40pt,minimum height=20pt,inner sep=0pt`:
