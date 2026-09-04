@@ -464,3 +464,149 @@ fn a_kernel_switch_has_both_of_its_setters() {
                \\makeatother\n\\end\n";
     assert_eq!(out(src), "on off");
 }
+
+/// `\newcount` and its relatives hand out a REGISTER, not just a name.
+///
+/// The allocator itself cannot be written in this engine -- `src/latex/allocate.rs`
+/// says why -- so the register numbers are decided before the run and the
+/// declaration consumes the name it was already given. What that has to mean is
+/// that the name behaves like the register it stands for: assignable, readable,
+/// and its own rather than shared with the next declaration.
+#[test]
+fn the_newcount_family_gives_each_name_a_register_of_its_own() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\newcount\\testa\\newcount\\testb\\newdimen\\testd\\newskip\\tests\n\
+               \\testa=7 \\testb=9 \\advance\\testa by 1 \\testd=3pt \\tests=4pt\n\
+               \\message{[\\the\\testa][\\the\\testb][\\the\\testd][\\the\\tests]}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(out(src), "[8][9][3.0pt][4.0pt]");
+}
+
+/// `\newtoks` reaches the token registers, and `\newbox` is a number the way
+/// plain TeX's `\chardef` allocator makes it.
+#[test]
+fn a_new_token_register_holds_a_list() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\newtoks\\testt \\testt={A B}\n\\message{[\\the\\testt]}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(out(src), "[A B]");
+}
+
+/// `\IfFileExists` answers the file system rather than always saying no.
+///
+/// Both arms matter and for different reasons: the false one is what a preamble
+/// takes when it means "use this only if it is here", and the true one is what
+/// `\InputIfFileExists` reads a file through. A name the scan could not resolve
+/// -- one built by expansion -- has to keep taking the false arm, because the
+/// dispatch is a comparison against a sentinel and there is nothing else it
+/// could match.
+#[test]
+fn if_file_exists_answers_the_file_system() {
+    // In the working directory rather than in a temp one, and under a name
+    // nothing else uses: `\IfFileExists` searches where `\input` searches, which
+    // begins at `.`, and changing the process's directory would race every other
+    // test in this binary.
+    let there = std::path::Path::new("texrs-iffileexists-probe.tex");
+    std::fs::write(there, "\\message{[read]}\n").expect("write");
+    let src = "\\documentclass{article}\n\
+               \\IfFileExists{texrs-iffileexists-probe.tex}{\\message{[yes]}}{\\message{[no]}}\n\
+               \\IfFileExists{texrs-iffileexists-absent.tex}{\\message{[yes]}}{\\message{[no]}}\n\
+               \\InputIfFileExists{texrs-iffileexists-probe.tex}{}{\\message{[missing]}}\n\
+               \\end\n";
+    let got = texrs::run_messages(src);
+    let _ = std::fs::remove_file(there);
+    let got = got.expect("run");
+    assert!(got.contains("[yes]"), "the file that is there: {got}");
+    assert!(got.contains("[no]"), "the file that is not: {got}");
+    assert!(!got.contains("[missing]"), "the found arm inputs it: {got}");
+    assert!(got.contains("[read]"), "and what it read ran: {got}");
+}
+
+/// A class that loads all the way through reports nothing.
+///
+/// `minimal.cls` is the shortest real class there is -- `\ProvidesClass`, two
+/// `\setlength`, `\renewcommand\normalsize`, `\pagenumbering` and `\pagestyle`
+/// -- and it is the first one this layer reads end to end. The claim under test
+/// is the ABSENCE of the report: `src/latex/load.rs` names every package that
+/// would not go through, so a silent load is the only evidence that one did.
+#[test]
+fn the_minimal_class_loads_end_to_end() {
+    let request = texrs::latex::load::Request {
+        name: "minimal".into(),
+        extension: "cls",
+        options: String::new(),
+    };
+    if texrs::latex::load::resolve("minimal", "cls").is_none() {
+        eprintln!("skipping: kpsewhich cannot find minimal.cls");
+        return;
+    }
+    assert!(
+        matches!(
+            texrs::latex::load::attempt(&request),
+            texrs::latex::load::Outcome::Loaded(_)
+        ),
+        "minimal.cls must load all the way through"
+    );
+}
+
+/// `\@ifundefined` answers the question rather than assuming an answer.
+///
+/// It used to be `\@secondoftwo` -- every name treated as DEFINED -- because
+/// nothing could ask. `\ifcsname` can, so the port is the real one now, and
+/// what rests on it is everything a package uses to decide whether to supply
+/// something: `\@ifpackageloaded` is `\@ifundefined{ver@NAME.sty}`.
+#[test]
+fn ifundefined_answers_both_ways_and_a_loaded_package_is_known() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\def\\@known{}\n\
+               \\@ifundefined{@known}{\\message{[wrong]}}{\\message{[known]}}\n\
+               \\@ifundefined{@nothingdefinesthis}{\\message{[absent]}}{\\message{[wrong]}}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(out(src), "[known] [absent]");
+}
+
+/// `\AtBeginDocument` defers its argument to `\begin{document}` and runs it
+/// there, which needs the append `\g@addto@macro` performs.
+///
+/// Both halves are under test: that the body does not run where it is
+/// registered, and that TWO registrations both survive -- the append is where
+/// every earlier shape of this lost the first one.
+#[test]
+fn at_begin_document_defers_its_body_and_keeps_every_one() {
+    let src = "\\documentclass{article}\n\
+               \\AtBeginDocument{\\message{[first]}}\n\
+               \\AtBeginDocument{\\message{[second]}}\n\
+               \\message{[preamble]}\n\
+               \\begin{document}\\message{[body]}\\end{document}\n\\end\n";
+    assert_eq!(out(src), "[preamble] [first] [second] [body]");
+}
+
+/// The path commands the prelude answers outside a picture.
+///
+/// A `tikzpicture` body is read raw and never expands, so these are reached
+/// only where a document writes a path command somewhere else -- and there
+/// `\shade`, `\shadedraw`, `\filldraw` and `\coordinate` were undefined
+/// control sequences that stopped the document dead, while `\draw`, `\fill`,
+/// `\node`, `\path` and `\clip` were answered. Each is delimited by its
+/// semicolon, so it consumes the whole command and nothing after it.
+#[test]
+fn every_tikz_path_command_is_answered_and_stops_at_its_semicolon() {
+    let commands = [
+        r"\draw[thick] (0,0) -- (1,1);",
+        r"\fill[red] (0,0) circle (1);",
+        r"\filldraw[fill=blue] (0,0) rectangle (1,1);",
+        r"\shade[left color=red,right color=blue] (0,0) rectangle (2,1);",
+        r"\shadedraw[ball color=green] (0,0) circle (1);",
+        r"\node[draw] at (0,0) {text};",
+        r"\coordinate (a) at (1,2);",
+        r"\path (0,0) -- (1,1);",
+        r"\clip (0,0) rectangle (1,1);",
+    ];
+    for command in commands {
+        let src = format!(
+            "\\documentclass{{article}}\n\\begin{{document}}\n\
+             {command}\\message{{[after]}}\n\\end{{document}}\n\\end\n"
+        );
+        assert_eq!(out(&src), "[after]", "{command}");
+    }
+}

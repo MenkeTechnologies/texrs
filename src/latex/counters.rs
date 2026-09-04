@@ -2,8 +2,10 @@
 //!
 //! A LaTeX counter is a `\count` register, and `latex.ltx` allocates one per
 //! counter with plain TeX's `\newcount`. That allocator cannot be written in
-//! texrs: it reads a register, adds one and FREEZES the result into a name, and
-//! freezing is exactly what this engine's `\edef` will not do --
+//! texrs -- `src/latex/allocate.rs` handles `\newcount` and its eleven
+//! relatives the same way, and for the same reason: it reads a register, adds
+//! one and FREEZES the result into a name, and freezing is exactly what this
+//! engine's `\edef` will not do --
 //! `\count255=5 \edef\x{\the\count255}\count255=9` leaves `\x` saying 9.
 //! `src/latex/kernel.tex` says the same thing at more length, with the other
 //! three refusals that rule out the alternatives.

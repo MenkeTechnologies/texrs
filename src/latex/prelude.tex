@@ -541,9 +541,24 @@
 % ---- tikz: a path command runs to its semicolon -------------------------
 % \draw[...] ... ; is one command however many lines it spans, so a delimited
 % parameter to `;' consumes exactly it and nothing after.
+%
+% These answer a path command written OUTSIDE any picture, which is the only
+% place they are still reached: a `tikzpicture' body is read raw by
+% `lower::picture_environment' and drawn by `crate::tikz', so nothing inside
+% one ever expands. Left here because a stray \draw is otherwise `! Undefined
+% control sequence', which stops the document.
+%
+% The list was \draw, \fill, \node, \path and \clip. \shade, \shadedraw,
+% \filldraw and \coordinate are path commands of exactly the same shape --
+% \shade[left color=red,right color=blue] (0,0) rectangle (2,1); -- and each
+% one of them stopped a document dead.
 \def\draw#1;{}
 \def\fill#1;{}
+\def\filldraw#1;{}
+\def\shade#1;{}
+\def\shadedraw#1;{}
 \def\node#1;{}
+\def\coordinate#1;{}
 \def\path#1;{}
 \def\clip#1;{}
 %

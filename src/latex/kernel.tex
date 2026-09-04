@@ -774,22 +774,49 @@
 %     \def\@ifundefined#1{\expandafter\ifx\csname #1\endcsname\relax
 %       \expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi}
 %
-% SUBSTITUTION, and the one that costs the most. texrs answers that \ifx FALSE
+% PORTED now, and this was the substitution that cost the most. The reading it
+% replaces treated every name as DEFINED, because texrs answers that \ifx FALSE
 % for a name nothing has defined -- an undefined control sequence is not
-% \ifx-equal to \relax here, and neither is a \let alias of a primitive equal to
-% the primitive -- and \ifcsname is refused outright. With no way to ask the
-% question, the answer given is the one that keeps a document running: the name
-% is treated as DEFINED, which is the arm that does not go on to define it a
-% second time. A .sty that branches on \@ifundefined to SUPPLY a missing macro
-% therefore does not supply it. That is a real divergence, and it is why
-% `src/latex/load.rs' will not quietly accept a package: a load is attempted and
-% either goes all the way through or is reported by name.
-\def\@ifundefined#1{\@secondoftwo}
+% \ifx-equal to \relax here -- so a .sty that branched on \@ifundefined to
+% SUPPLY a missing macro did not supply it.
+%
+% \ifcsname is what asks the question, and the engine has it now
+% (`src/expand.rs'). One shape change from latex.ltx's: the arms are chosen with
+% \let inside the conditional and called after the \fi rather than reached
+% through \expandafter, for the reason `prelude.tex' gives at \@ifnch -- an arm
+% expanded while the conditional is still open leaves the \fi to whatever the
+% arm reads next, and answers `! Extra \else.'
+%
+% The senses are latex.ltx's: the FIRST argument is what runs when nothing is
+% defined under the name, so \ifcsname being true takes the second.
+\def\@ifundefined#1{\ifcsname #1\endcsname
+  \let\@ifu@arm\@secondoftwo\else\let\@ifu@arm\@firstoftwo\fi\@ifu@arm}
 % latex.ltx (ltfiles). \IfFileExists asks the file system, which is Rust's job.
-% Answered `no' until it is wired to `src/latex/load.rs': the false arm is the
-% one a preamble takes when it means "use this only if it is here", and taking
-% it loads nothing that is not there.
-\def\IfFileExists#1#2#3{#3}
+%
+%     \DeclareRobustCommand\InputIfFileExists[2]{\IfFileExists{#1}{...\@@input}}
+%
+% WIRED, to `src/latex/load.rs': it writes one \let per file that really
+% exists, out of the names this document and its packages name literally, and
+% the sentinel below is what those \lets point at. The dispatch has to be a
+% comparison rather than \@ifundefined because nothing here can ask whether a
+% built name is defined -- see the note on \@ifundefined -- and measured, an
+% \ifx against a sentinel IS decided while lowering and is false for a name
+% nothing defined. So an unknown name, including one built by expansion, takes
+% the not-found arm, which is the arm this macro took for every name before it
+% was wired.
+%
+% The arms are chosen with \let inside the conditional and called after the
+% \fi, for the reason `prelude.tex' gives at \@ifnch: an arm expanded while the
+% conditional is still open leaves the \fi to whatever the arm reads next.
+\def\@fe@yes{}
+\def\IfFileExists#1#2#3{%
+  \expandafter\ifx\csname @fe@#1\endcsname\@fe@yes
+    \let\@fe@arm\@firstoftwo\else\let\@fe@arm\@secondoftwo\fi
+  \@fe@arm{#2}{#3}}
+% latex.ltx:9870. The found arm runs #2 and then reads the file, which is what
+% \@@input does there; here it is the engine's own \input, whose braced form
+% and TeX-tree search are what make a name like `textcomp.cfg' reachable at all.
+\def\InputIfFileExists#1#2#3{\IfFileExists{#1}{#2\input{#1}}{#3}}
 % latex.ltx (ltclass): the hooks.
 %
 % NOT PORTED, and this is the one place in this file where a stand-in is kept on
@@ -800,17 +827,25 @@
 % the append cannot be written: every shape of it either loses the earlier
 % entries or builds a macro that reads itself.
 %
-% The two remaining readings are to RUN the body where it is registered, or to
-% drop it. Running it is nearer to LaTeX and is what an earlier revision of this
-% file did; the corpus says what that costs. scifi2/docs/book.tex registers
+% PORTED now, and both halves of what blocked it have arrived. The append is
+% \g@addto@macro, which this file writes with \expandafter rather than with
+% \xdef (see its own note), and the thing the hooks in the corpus actually DO is
+% ask \ifcsname -- scifi2/docs/book.tex registers
 %
 %     \AtBeginDocument{\ifcsname Shaded\endcsname\else...\fi ...}
 %
-% and \ifcsname is refused outright by this engine, so running the hook stopped
-% a 16,000-line book that had been reading to the end. The body is dropped, as
-% the prelude dropped it, until either the append or \ifcsname exists.
-\def\AtBeginDocument#1{}
-\def\AtEndDocument#1{}
+% which refused outright until `src/expand.rs' had \ifcsname. Running the hook
+% is what LaTeX does and is now what happens: \AtBeginDocument appends to
+% \@begindocumenthook and \document, which is what \begin{document} expands,
+% runs it.
+%
+% \AtEndDocument's hook is collected and NOT run, because nothing here reaches
+% the end of the document as an event: \end{document} is the last thing read and
+% there is no output routine after it to fire.
+\def\@begindocumenthook{}
+\def\@enddocumenthook{}
+\def\AtBeginDocument#1{\g@addto@macro\@begindocumenthook{#1}}
+\def\AtEndDocument#1{\g@addto@macro\@enddocumenthook{#1}}
 \def\AtEndOfPackage#1{#1}
 \def\AtEndOfClass#1{#1}
 \def\@onlypreamble#1{}
@@ -846,7 +881,7 @@
 % routine to start here, so what it does is nothing -- but it has to BE defined,
 % because \begin{document} expands \document and an undefined one is where a
 % document with no \documentclass line would stop.
-\def\document{}
+\def\document{\@begindocumenthook}
 \def\enddocument{}
 %
 % ---- the format's own switches -------------------------------------------
@@ -936,3 +971,391 @@
 % is written here: it is what tex answers for this use, and the only use this
 % layer has for \maxdimen is this one.
 \def\maxdimen{1073741823}
+%
+% ---- plain.tex's allocators ----------------------------------------------
+% plain.tex:
+%
+%     \def\alloc@#1#2#3#4#5{\global\advance\count1#1by\@ne
+%       \ch@ck#1#4#2\allocationnumber=\count1#1
+%       \global#3#5=\allocationnumber ...}
+%     \def\newcount{\alloc@0\count\countdef\insc@unt}
+%     \def\newdimen{\alloc@1\dimen\dimendef\insc@unt}
+%     \def\newskip {\alloc@2\skip \skipdef \insc@unt}
+%     \def\newtoks {\alloc@5\toks \toksdef \@cclvi}
+%     \def\newbox  {\alloc@4\box  \chardef \insc@unt}
+%
+% The middle line is the one that cannot be carried: `\global#3#5=\allocationnumber'
+% freezes the value of a count register into a NAME, and nothing freezes in this
+% engine -- the four measurements in the counters section above say so at
+% length, and this is the fifth thing they rule out.
+%
+% So the arithmetic is done before the run, in `src/latex/allocate.rs', which
+% reads this file and the document's own for the twelve allocating commands and
+% writes the \countdef, \dimendef, \skipdef, \toksdef and \chardef each name
+% needs. By the time the mouth reaches the \newcount itself the name is already
+% defined, so what is left for these to do is to CONSUME the name that follows
+% -- which is what they do here. This is the same division as \newif and
+% \newcounter: name arithmetic the expander cannot perform is performed ahead
+% of the run and handed to it as definitions.
+%
+% A name allocate.rs could not resolve -- `\expandafter\newcount\csname c@#1\endcsname'
+% -- is consumed here and stays undefined, which is loud at its first use rather
+% than quietly sharing another allocation's register.
+\def\newcount#1{}
+\def\newdimen#1{}
+\def\newskip#1{}
+\def\newmuskip#1{}
+\def\newtoks#1{}
+\def\newbox#1{}
+\def\newinsert#1{}
+\def\newread#1{}
+\def\newwrite#1{}
+\def\newlanguage#1{}
+\def\newfam#1{}
+% latex.ltx (ltlength): \newcommand*\newlength[1]{\@ifdefinable#1{\newskip#1}}
+% A LaTeX length is a SKIP, not a dimension. Written with a plain parameter so
+% that both spellings a document uses -- \newlength\foo and \newlength{\foo} --
+% consume exactly the name.
+\def\newlength#1{}
+%
+% ---- plain.tex's category-code names -------------------------------------
+% plain.tex:  \chardef\active=13
+% A number with a name, and the one ifthen.sty stops on: `\catcode`\+\active'
+% is `! Missing number, found \active.' without it. \chardef is what plain uses
+% and what texrs has, so this is the definition rather than a stand-in for it.
+\chardef\active=13
+% latex.ltx:132.  \def\@makeother#1{\catcode`#1=12\relax}
+\def\@makeother#1{\catcode`#1=12\relax}
+% latex.ltx:1786-1787. Every character a file name or a \write argument might
+% carry, made harmless. Carried whole.
+\def\@sanitize{\@makeother\ \@makeother\\\@makeother\$\@makeother\&%
+\@makeother\#\@makeother\^\@makeother\_\@makeother\%\@makeother\~}
+%
+% ---- what a package says when something is wrong -------------------------
+% latex.ltx:8913 and its neighbours:
+%
+%     \gdef\PackageError#1#2#3{\GenericError{(#1)\@spaces...}{Package #1 Error: #2}...}
+%
+% SUBSTITUTION. \GenericError's body is \errmessage inside a group that makes
+% `~' expand to a \typeout, and texrs has neither \errmessage nor \typeout --
+% there is no error recovery for one to return from. What these are needed for
+% is that they be DEFINED: calc.sty, and most packages, name them only inside a
+% macro body that a correct document never reaches, and the load stopped on the
+% name rather than on anything the document did. So each consumes exactly the
+% arguments latex.ltx gives it and produces nothing.
+%
+% The cost is written down rather than hidden: a package that really does raise
+% an error during its own load is now silent about it, where before it stopped
+% the load and was reported by name. That is the wrong direction for a report
+% whose whole point is to name what is missing, and it is why these are here
+% rather than in `prelude.tex' -- the substitution is deliberate and this file
+% is where the deliberate ones are recorded.
+\def\GenericError#1#2#3#4{}
+\def\GenericWarning#1#2{}
+\def\GenericInfo#1#2{}
+\def\PackageError#1#2#3{}
+\def\PackageWarning#1#2{}
+\def\PackageWarningNoLine#1#2{}
+\def\PackageInfo#1#2{}
+\def\PackageInfoNoLine#1#2{}
+\def\ClassError#1#2#3{}
+\def\ClassWarning#1#2{}
+\def\ClassWarningNoLine#1#2{}
+\def\ClassInfo#1#2{}
+\def\@latex@error#1#2{}
+\def\@latex@warning#1{}
+\def\@latex@warning@no@line#1{}
+\def\@latex@info#1{}
+\def\@latex@info@no@line#1{}
+\def\@font@warning#1{}
+\def\@font@info#1{}
+\def\typeout#1{}
+\def\wlog#1{}
+\def\MessageBreak{}
+\def\@spaces{    }
+%
+% ---- \endinput -----------------------------------------------------------
+% NOT DEFINED, on purpose, and the reason is worth recording because defining
+% it as nothing was TRIED and cost thirteen books. \endinput is a PRIMITIVE: it
+% ends the current file after the line it appears on. A macro that does nothing
+% leaves the rest of the file to be read, and a .sty that reaches \endinput from
+% inside a conditional -- to stop before code meant for a newer format -- then
+% reads exactly the part it meant to skip. Measured: with `\def\endinput{}' the
+% sweep fell from 228 documents to 215.
+%
+% What IS handled is the only shape where the two readings agree, and it is
+% handled where a file is opened rather than here: `Lowerer::open_input' drops a
+% trailing \endinput when nothing but comments follows it, which is what
+% docstrip writes at the end of every generated .sty -- keyval.sty:87 and
+% inputenc.sty:164 are both `\endinput' followed by the two `%% End of file'
+% lines. There, ending the file and reading on to the end of it are the same
+% thing. Everywhere else \endinput is still undefined, so a file that needs the
+% real primitive is REPORTED rather than misread.
+%
+% ---- \@setfontsize -------------------------------------------------------
+% latex.ltx:14295:
+%
+%     \def\@setfontsize#1#2#3{\@nomath#1%
+%       \ifx\protect\@typeset@protect \let\@currsize#1\fi
+%       \fontsize{#2}{#3}\selectfont}
+%
+% SUBSTITUTION, over the whole of NFSS. \fontsize and \selectfont are already
+% stand-ins in `prelude.tex' -- BUGS.md records that Layout::size is one
+% document-wide number, so every heading is set at body size and giving these a
+% body would change nothing -- and \@nomath is a math-mode warning this engine
+% has no \ifmmode to test. What is left of the definition is the three
+% arguments, consumed.
+%
+% It is the last thing between article.cls and a load: the class's own final
+% line reads size10.clo, and size10.clo's first definition is
+% `\renewcommand\normalsize{\@setfontsize\normalsize\@xpt\@xiipt ...}'.
+\def\@setfontsize#1#2#3{}
+\def\@setsize#1#2#3#4{}
+%
+% ---- \pagenumbering -------------------------------------------------------
+% latex.ltx (ltpage):
+%
+%     \def\pagenumbering#1{\global\c@page \@ne
+%       \gdef\thepage{\csname @#1\endcsname\c@page}}
+%
+% Two substitutions, both forced by how a counter is reached here. \c@page is
+% the register, and this layer reaches a counter by NAME through \cr@page (see
+% the counters section above), so the reset is \setcounter. And `\@arabic\c@page'
+% takes the register where `\arabic{page}' takes the name, so what \thepage is
+% redefined to is the name-taking form -- \csname arabic\endcsname{page} builds
+% exactly the \arabic this file defines, for whichever of the five styles the
+% argument names.
+%
+% It is minimal.cls's only unmet name, and minimal.cls is the shortest real
+% class there is: \ProvidesClass, two \setlength, \renewcommand\normalsize,
+% this, and \pagestyle.
+\def\pagenumbering#1{\setcounter{page}{1}%
+  \@namedef{thepage}{\csname #1\endcsname{page}}}
+%
+% ---- appending to a macro -------------------------------------------------
+% latex.ltx (ltdefns):
+%
+%     \long\def\g@addto@macro#1#2{\begingroup
+%       \toks@\expandafter{#1#2}\xdef#1{\the\toks@}\endgroup}
+%
+% SUBSTITUTION, in the ONE step latex.ltx takes that this engine cannot: the
+% \xdef. Nothing freezes into a macro body here -- the counters section above
+% measures that four ways -- so `\xdef#1{\the\toks@}' writes the three tokens
+% \the \toks@ rather than the list.
+%
+% What is written instead is the \expandafter form the same append has been
+% written in since before \toks registers were cheap, and which etoolbox's
+% \g@addto@macro-alikes still use:
+%
+%     \expandafter\def\expandafter#1\expandafter{#1#2}
+%
+% Three \expandafters, one per token between the \def and the macro that has to
+% be expanded before the brace closes. Measured here: \def\hook{A} followed by
+% two appends says ABC, where every shape built on \xdef says \the\toks@.
+%
+% The one difference from latex.ltx's, and it is worth stating because the name
+% carries a `g': this append is LOCAL where latex.ltx's is global. Everything
+% that appends here does it in a preamble, which is one group, so the two agree
+% wherever this layer is actually used -- but an append inside a group is undone
+% by the group, and latex.ltx's is not.
+\long\def\g@addto@macro#1#2{\expandafter\def\expandafter#1\expandafter{#1#2}}
+\long\def\@addto@macro#1#2{\expandafter\def\expandafter#1\expandafter{#1#2}}
+% latex.ltx (ltfiles): \addto@hook appends to a TOKEN REGISTER rather than to a
+% macro -- `\def\addto@hook#1#2{#1\expandafter{\the#1#2}}'. That form is refused
+% here: `\toks3=\expandafter{\the\toks3 Y}' answers `! Missing { inserted.',
+% because a toks assignment does not expand what follows the `='. amsmath opens
+% with one. The macro append above is the nearest thing that works, and a hook
+% this layer never runs is a hook whose contents cost nothing either way.
+\def\addto@hook#1#2{}
+%
+% ---- names every file assumes ---------------------------------------------
+% latex.ltx: \def\space{ }
+\def\space{ }
+% latex.ltx:16033 and its neighbours declare the list parameters with \newskip
+% and \newdimen; `src/latex/allocate.rs' reads these lines and hands each one a
+% register. \@listI is the top-level list's settings and \@listi is \let to it,
+% which is the pair size10.clo's \normalsize restores and natbib reads.
+\newskip\topsep
+\newskip\partopsep
+\newskip\itemsep
+\newskip\parsep
+\newskip\@topsep
+\newskip\@topsepadd
+\newdimen\leftmargin
+\newdimen\rightmargin
+\newdimen\listparindent
+\newdimen\itemindent
+\newdimen\labelwidth
+\newdimen\labelsep
+\newdimen\linewidth
+\newdimen\leftmargini
+\newdimen\leftmarginii
+\newdimen\leftmarginiii
+\newdimen\leftmarginiv
+\newdimen\leftmarginv
+\newdimen\leftmarginvi
+\newcount\@listdepth
+\newcount\@itempenalty
+\newcount\@beginparpenalty
+\newcount\@endparpenalty
+\def\@listI{}
+\let\@listi\@listI
+\def\@listii{}
+\def\@listiii{}
+\def\@listiv{}
+\def\@listv{}
+\def\@listvi{}
+% latex.ltx:9138, 10758-10759. In tex.web these three are token PARAMETERS of
+% the engine (§230); latex.ltx declares them with \newtoks because LaTeX takes
+% them over, and that is the declaration this layer can carry -- a token
+% register is a store texrs has.
+\newtoks\everypar
+\newtoks\everymath
+\newtoks\everydisplay
+% latex.ltx:8790-8800. The scratch registers every package helps itself to.
+\newcount\@tempcnta
+\newcount\@tempcntb
+\newdimen\@tempdima
+\newdimen\@tempdimb
+\newdimen\@tempdimc
+\newskip\@tempskipa
+\newskip\@tempskipb
+\newtoks\@temptokena
+\newbox\@tempboxa
+\newif\if@tempswa
+%
+% ---- plain.tex's named registers and constants ----------------------------
+% plain.tex allocates these by hand rather than through \newcount, and writes
+% the numbers out:
+%
+%     \countdef\count@=255   \dimendef\dimen@=0   \skipdef\skip@=0
+%     \toksdef\toks@=0       \chardef\@ne=1       \mathchardef\@m=1000
+%     \newdimen\p@ \p@=1pt   \newdimen\z@ \z@=0pt
+%
+% Carried as written, register numbers and all, because the numbers ARE the
+% definition -- plain reserves 0..9 in each file for exactly this, and
+% `src/latex/allocate.rs' hands out from 10 upward so the two cannot collide.
+\countdef\count@=255
+\dimendef\dimen@=0
+\dimendef\dimen@i=1
+\dimendef\dimen@ii=2
+\skipdef\skip@=0
+\toksdef\toks@=0
+\dimendef\p@=3
+\p@=1pt
+\dimendef\z@=4
+\z@=0pt
+\skipdef\z@skip=1
+\z@skip=0pt plus0pt minus0pt
+\chardef\@ne=1
+\chardef\tw@=2
+\chardef\thr@@=3
+\chardef\sixt@@n=16
+\chardef\@cclv=255
+\mathchardef\@cclvi=256
+\mathchardef\@m=1000
+\mathchardef\@M=10000
+\mathchardef\@MM=20000
+% plain.tex: \newcount\m@ne \m@ne=-1.
+%
+% SUBSTITUTION, and a small one: a \chardef cannot hold a negative, and a
+% \newcount here would be a register `src/latex/allocate.rs' hands out -- which
+% would make THIS FILE depend on the allocation block being in front of it, and
+% `texrs::latex::PRELUDE' is preloaded on its own by callers that want only the
+% definitions. So the value is carried as a macro. Everything plain uses \m@ne
+% for reads it as a number -- `\advance\count@\m@ne' -- and none of it assigns
+% to it, which is the only thing a register would add.
+\def\m@ne{-1}
+% latex.ltx:1202-1203. The two keywords, as macros, which is what lets
+% `\@plus2\p@' read as `plus 2pt' when the glue is really scanned.
+\def\@minus{minus}
+\def\@plus{plus}
+%
+% ---- expl3's syntax switch ------------------------------------------------
+% l3names: \ExplSyntaxOn makes space and tab IGNORED, `~' a space, and `_' and
+% `:' letters, so that expl3's own names read as control words; \ExplSyntaxOff
+% puts all five back. Both are catcode changes and nothing else, which is
+% exactly what this engine can do.
+%
+% The one line of the real pair not carried is `\endlinechar 32', which texrs
+% has no \endlinechar parameter for. It matters only to code that relies on an
+% end of line producing a space where a space is ignored, and the packages this
+% reaches -- array.sty wraps one \def in the pair, xcolor.sty wraps two lines --
+% do not.
+%
+% It is NOT expl3. A file that uses expl3's own functions still stops on the
+% first `\tl_new:N', by name, as it should.
+%
+% l3names writes the pair as bare CHARACTER CODES -- `\catcode 9 = 9 \scan_stop:'
+% and so on -- and that is how they are carried here, because ``\^^I' is not a
+% number this engine's scanner reads: `\catcode`\^^I=9' answers `! Missing
+% number, treated as zero.' and `\catcode9=9' works. Nine is the tab either way.
+\def\ExplSyntaxOn{\catcode9=9\relax\catcode32=9\relax\catcode34=12\relax
+  \catcode58=11\relax\catcode94=7\relax\catcode95=11\relax
+  \catcode124=12\relax\catcode126=10\relax}
+\def\ExplSyntaxOff{\catcode9=10\relax\catcode32=10\relax\catcode34=12\relax
+  \catcode58=12\relax\catcode94=7\relax\catcode95=8\relax
+  \catcode124=12\relax\catcode126=13\relax}
+%
+% ---- NFSS, which this engine has no fonts for ----------------------------
+% latex.ltx (ltfssbas, ltfssdcl, ltoutenc). Every one of these DECLARES a font,
+% an encoding or a math symbol, and the whole of what they declare is read by a
+% stomach choosing a face -- which `src/typeset.rs' does from the document's own
+% \setmainfont rather than from NFSS's tables. So each consumes the arguments
+% latex.ltx gives it and produces nothing, and the note BUGS.md already carries
+% about one type size covers what that costs.
+%
+% They are here rather than in `prelude.tex' because the arities are
+% latex.ltx's and getting one wrong is worse than leaving the name undefined:
+% a stand-in that eats one argument too few leaves the rest in the text.
+\def\DeclareFontFamily#1#2#3{}
+\def\DeclareFontShape#1#2#3#4#5#6{}
+\def\DeclareFontEncoding#1#2#3{}
+\def\DeclareFontSubstitution#1#2#3#4{}
+\def\DeclareFontEncodingDefaults#1#2{}
+\def\DeclareErrorFont#1#2#3#4#5{}
+\def\DeclarePreloadSizes#1#2#3#4#5{}
+\def\DeclareSymbolFont#1#2#3#4#5{}
+\def\SetSymbolFont#1#2#3#4#5#6{}
+\def\DeclareSymbolFontAlphabet#1#2{}
+\def\DeclareMathAlphabet#1#2#3#4#5{}
+\def\SetMathAlphabet#1#2#3#4#5#6{}
+\def\DeclareMathVersion#1{}
+\def\DeclareMathSymbol#1#2#3#4{}
+\def\DeclareMathDelimiter#1#2#3#4#5#6{}
+\def\DeclareMathRadical#1#2#3#4#5{}
+\def\DeclareMathAccent#1#2#3#4{}
+\def\DeclareTextCommand#1#2{\@ifnextchar[\@dtc@opt\@dtc@plain}
+\def\@dtc@opt[#1]{\@ifnextchar[\@dtc@opt@dflt\@dtc@opt@body}
+\def\@dtc@opt@dflt[#1]#2{}
+\def\@dtc@opt@body#1{}
+\def\@dtc@plain#1{}
+\let\ProvideTextCommand\DeclareTextCommand
+\let\DeclareTextCommandDefault\@gobbletwo
+\let\ProvideTextCommandDefault\@gobbletwo
+\def\DeclareTextSymbol#1#2#3{}
+\def\DeclareTextSymbolDefault#1#2{}
+\def\DeclareTextAccent#1#2#3{}
+\def\DeclareTextAccentDefault#1#2{}
+\def\DeclareTextComposite#1#2#3#4{}
+\def\DeclareTextCompositeCommand#1#2#3#4{}
+\def\DeclareTextFontCommand#1#2{}
+\def\usefont#1#2#3#4{}
+\def\fontencoding#1{}
+\def\fontfamily#1{}
+\def\fontseries#1{}
+\def\fontshape#1{}
+\def\linespread#1{}
+\def\DeclareOldFontCommand#1#2#3{}
+%
+% ---- file writing --------------------------------------------------------
+% tex.web §1350: \write is a whatsit the SHIPPER expands, and \immediate makes
+% it happen now instead. There is no shipper here and no \openout, so both are
+% consumed. \write's argument is a stream number and a group, which is what the
+% two parameters take; the stream number is always a name `\newwrite' made,
+% so it arrives as one token.
+\def\immediate{}
+\def\write#1#2{}
+\def\openout#1{}
+\def\closeout#1{}
+\def\@gobbletwo#1#2{}

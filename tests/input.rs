@@ -178,3 +178,45 @@ fn a_missing_file_is_named_in_the_error() {
         "the missing file must be named, got {err:?}"
     );
 }
+
+#[test]
+fn the_braced_form_names_a_file_and_the_name_may_be_built() {
+    let Some(tex) = common::tex() else {
+        eprintln!("skipping: no pinned `tex` on PATH");
+        return;
+    };
+    // `\input{NAME}` is what LaTeX writes, and the name inside the braces is
+    // read with `get_x_token` (tex.web §537) -- so a macro in it is EXPANDED
+    // before the file is looked for. `article.cls` ends on
+    // `\input{size1\@ptsize.clo}`, which is exactly this shape, and until the
+    // braced form was read the class stopped with ``I can't find file `{size1'``.
+    let dir = documents(
+        &format!("{CATS}\\def\\part{{ner}}\\input{{in\\part}}\n\\end\n"),
+        &[("inner.tex", "\\message{[built name]}\n")],
+    );
+    let (want, got) = both(&tex, dir.path());
+    assert_eq!(got, want, "the braced name is expanded before it is opened");
+}
+
+#[test]
+fn a_file_in_the_tex_tree_is_found_when_nothing_beside_the_document_is() {
+    // The last place `\input` looks is the TeX tree, through the same
+    // `kpsewhich` `\usepackage` uses -- which is what lets `article.cls` reach
+    // `size10.clo` in texmf-dist. Nothing here is beside the document, so a
+    // find can only have come from there.
+    if texrs::latex::load::locate("size10.clo").is_none() {
+        eprintln!("skipping: kpsewhich cannot find size10.clo");
+        return;
+    }
+    let dir = documents(&format!("{CATS}\\input size10.clo\n\\message{{[after]}}\n\\end\n"), &[]);
+    let out = Command::new(env!("CARGO_BIN_EXE_texrs"))
+        .arg("case.tex")
+        .current_dir(dir.path())
+        .output()
+        .expect("run texrs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !err.contains("I can't find file"),
+        "size10.clo must be found in the tree, got {err:?}"
+    );
+}

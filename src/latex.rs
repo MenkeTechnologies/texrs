@@ -18,7 +18,7 @@
 //! ported definition and the stand-in stays for the names the port has not
 //! reached.
 //!
-//! Three things are decided in Rust because the engine has no primitive for
+//! Four things are decided in Rust because the engine has no primitive for
 //! them, each in its own module:
 //!
 //!  * [`load`] finds the real `.sty` and `.cls` with `kpsewhich` and reads them
@@ -27,9 +27,13 @@
 //!  * [`counters`] allocates a `\count` register per counter the document
 //!    declares, because `\newcount`'s allocator needs to freeze a number into a
 //!    name and this engine's `\edef` freezes nothing.
+//!  * [`allocate`] does the same for `\newcount` itself and its eleven
+//!    relatives, for the same reason: the allocator's whole job is to freeze
+//!    the next free register number into a name.
 //!  * [`aux`] is the `.aux` round trip `\ref` rests on, because there is no
 //!    `\write`, no `\openin` and no `\read`.
 
+pub mod allocate;
 pub mod aux;
 pub mod counters;
 pub mod include;
@@ -84,6 +88,16 @@ pub fn preamble_text(src: &str) -> String {
 /// its behalf -- the counter registers and the `\newif` switches.
 pub fn support(about: &str) -> String {
     let mut out = String::with_capacity(PRELUDE.len() + 8192);
+    // The `\newcount` family's registers go in FIRST, ahead of the prelude, so
+    // that a file allocating a name the kernel has its own answer for --
+    // `\newdimen\maxdimen` is plain TeX's opening line -- ends up with the
+    // kernel's. See `allocate`.
+    //
+    // The kernel's own declarations and `about`'s are allocated in ONE pass
+    // over both, and in that order: two passes would each start at the first
+    // free register and hand the same one to two different names, which is the
+    // fault `counters.rs` records for the counters.
+    out.push_str(&allocate::definitions(&format!("{PRELUDE}\n{about}")));
     out.push_str(PRELUDE);
     out.push_str("\\catcode`\\@=11\n");
     out.push_str(&counters::allocations(about));
@@ -92,6 +106,8 @@ pub fn support(about: &str) -> String {
     // from.
     out.push_str(&switches::definitions(PRELUDE));
     out.push_str(&switches::definitions(about));
+    // Which of the files `about` asks \IfFileExists about are really there.
+    out.push_str(&load::existence(about));
     out
 }
 
@@ -117,7 +133,25 @@ fn preamble_in(src: &str, mode: Mode) -> String {
         // they carried before the kernel was ported, so nothing regresses; the
         // counters are still stepped and are still right everywhere they are
         // TESTED or written into the `.aux`.
+        // `@' has to be made a letter again first. `support' left it one, and
+        // every package `load::preamble' put in front of this ends on
+        // `\makeatother' -- so by the line below it is `other' again, and
+        // `\def\@ctrtotext' without this reads as `\def\@' followed by the
+        // characters `ctrtotext'. It defined the wrong thing, silently, for as
+        // long as any package loaded at all.
+        out.push_str("\\catcode`\\@=11\n");
         out.push_str("\\def\\@ctrtotext#1{}\n");
+        // \@ctrtotext is the door the KERNEL reads a counter through, and a
+        // package reads one through `\thefootnote' instead -- which is
+        // `\arabic{footnote}', which is `\@arabic{\count110}', which is
+        // `\number'. footnote.sty does exactly that inside \@makefnmark, so
+        // `\usepackage{footnote}' plus one \footnote stopped a --text run with
+        // `! Undefined control sequence \number.' while the same document ran
+        // before the package could load. Shutting the door and leaving the
+        // window open is not shutting the door: the one definition that can
+        // reach \number is stopped here too, and the digits it would have
+        // produced are the digits this path already cannot carry.
+        out.push_str("\\def\\@arabic#1{}\n");
     }
     // `??` for every label the document REFERENCES, before anything says what a
     // label resolves to. LaTeX decides this with `\ifx\r@x\relax' inside
@@ -153,34 +187,43 @@ pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String 
 /// `4`, and the difference is visible the moment a document says `\ref` -- an
 /// article's first section came back as `0.1`.
 ///
-/// Which one a document gets is decided by the CLASS FILE, not by a list of
-/// class names: `report.cls` and `book.cls` say `\newcounter {chapter}` and
-/// `article.cls` does not, and neither do the classes built on article that a
-/// name-matching rule would have to be told about one at a time. The space
-/// before the brace is the class file's own -- `report.cls:264` -- so what is
-/// looked for is the counter NAME after the command, through the same scan
-/// `counters.rs` uses. A class `kpsewhich` cannot find is read as report's,
-/// which is what this layer carried before there was a choice to make.
+/// Which one a document gets is decided by the CLASS FILE rather than by a list
+/// of class names -- [`class_declares_chapters`] is the question, and it says
+/// how it is asked. A class `kpsewhich` cannot find is read as report's, which
+/// is what this layer carried before there was a choice to make.
 fn numbering(src: &str) -> &'static str {
     const ARTICLE: &str = "\
 \\def\\thesection{\\arabic{section}}\n\
 \\def\\thefigure{\\arabic{figure}}\n\
 \\def\\thetable{\\arabic{table}}\n\
 \\def\\theequation{\\arabic{equation}}\n";
-    let Some(class) = load::requests(src)
-        .into_iter()
-        .find(|r| r.extension == "cls")
-    else {
-        return "";
-    };
-    let Some(path) = load::resolve(&class.name, "cls") else {
-        return "";
-    };
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    match counters::declared(&text).iter().any(|c| c == "chapter") {
-        true => "",
-        false => ARTICLE,
+    match class_declares_chapters(src) {
+        Some(true) | None => "",
+        Some(false) => ARTICLE,
     }
+}
+
+/// Whether the class `src` names declares a `chapter` counter.
+///
+/// `report.cls` and `book.cls` say `\newcounter {chapter}` and `article.cls`
+/// does not, and neither do the classes built on article that a name-matching
+/// rule would have to be told about one at a time -- so the CLASS FILE is what
+/// is read, through the same scan `counters.rs` uses. `None` is a class
+/// `kpsewhich` cannot find, or a source with no `\documentclass` at all.
+///
+/// Public because it answers a question outside this module as well.
+/// `typeset::unit_numbers` counts chapter, section and subsection and joins
+/// EVERY level down to the one being asked for, so an article's first section
+/// comes back as `0.1` where LaTeX writes `1` -- BUGS.md records it. The join
+/// has to start at the shallowest level the CLASS declares, and this is the
+/// fact that says which that is.
+pub fn class_declares_chapters(src: &str) -> Option<bool> {
+    let class = load::requests(src)
+        .into_iter()
+        .find(|r| r.extension == "cls")?;
+    let path = load::resolve(&class.name, "cls")?;
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(counters::declared(&text).iter().any(|c| c == "chapter"))
 }
 
 /// Say, once each, what would not load.
