@@ -33,6 +33,24 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
+    /// Every register the program has ASSIGNED so far, in any way.
+    ///
+    /// `tex.web` §366 expands an `\edef` body while READING it, so a
+    /// conditional in the body is decided at DEFINITION time and `\the`
+    /// freezes to characters. An interpreter can do that because it holds the
+    /// registers; a compiler cannot, because they are VM slots -- except for
+    /// one case it can prove outright, and that case is the common one. A
+    /// register nothing has written is at INITEX's zero, which is exactly what
+    /// `Compiler::compile` writes into every slot before the first command
+    /// runs. So this records what has been written, and an `\edef` whose body
+    /// reads only registers ABSENT from it is frozen the way tex freezes it.
+    ///
+    /// Conservative in the one direction that matters: a register is entered
+    /// on the first assignment of any kind, whether or not that assignment is
+    /// reached at run time. An `\edef` over a register some branch might have
+    /// written therefore falls back to carrying the conditional, which is
+    /// wrong in the way BUGS.md records rather than wrong in a new way.
+    assigned: std::collections::HashSet<i64>,
     /// Every register a `\global` assignment has written, in the order they
     /// were lowered.
     ///
@@ -99,11 +117,6 @@ pub struct Lowerer {
     /// turns it on for a caller who wants what the document SAYS rather than
     /// what it announced.
     text_output: bool,
-    /// Whether an `\unless` is waiting for the conditional it negates.
-    ///
-    /// A negated conditional is the same conditional with its arms swapped,
-    /// which is why this is a flag rather than a second set of commands.
-    unless: bool,
     /// How many `\input` files are open above this one, so a file that inputs
     /// itself stops with a diagnostic instead of exhausting the host stack.
     input_depth: usize,
@@ -188,7 +201,7 @@ const MAX_LOWER_DEPTH: usize = 64;
 impl Lowerer {
     pub fn new() -> Self {
         Self {
-            unless: false,
+            assigned: std::collections::HashSet::new(),
             input_depth: 0,
             eng: Engine::new(),
             ended: false,
@@ -296,6 +309,20 @@ impl Lowerer {
     fn close_reports(&mut self, cmds: &mut Vec<Cmd>) {
         let held = self.take_reports();
         if !self.reported {
+            // Nothing was reported while LOWERING, which does not settle it:
+            // §1236's checked arithmetic reports on the VM, and only the VM
+            // knows whether it did. The notice becomes a command the run
+            // decides, and writes nothing for a run that stayed clean.
+            //
+            // Not onto an EMPTY chunk, though. A source that lowered to no
+            // commands ran no arithmetic, so there is nothing for the VM to
+            // have reported and the notice could only ever write nothing --
+            // and a preamble of pure definitions has to stay empty, because
+            // that is how `src/format.rs` knows a format has lost nothing by
+            // dumping it.
+            if !cmds.is_empty() {
+                cmds.push(Cmd::TranscriptNotice);
+            }
             return;
         }
         if !held.is_empty() {
@@ -420,7 +447,11 @@ impl Lowerer {
             // gone. See `crate::math`, which holds all of it.
             if self.text_output {
                 let size = self.layout.size;
-                if crate::math::lower_math(&mut self.eng, size, lx, &tok, &mut out)? {
+                // `\displaywidth` (§1204): a display is centred on the measure
+                // and an equation number sits at the far edge of it, so the
+                // measure has to travel with the type size.
+                let measure = self.layout.measure;
+                if crate::math::lower_math(&mut self.eng, size, measure, lx, &tok, &mut out)? {
                     continue;
                 }
             }
@@ -514,6 +545,17 @@ impl Lowerer {
             // sequences is why a book of code samples could not be read.
             if name.name() == "begin" {
                 if let Some(env) = self.peek_environment_name(lx) {
+                    // A picture, caught in the same place and for the same
+                    // reason a verbatim environment is: its body is TikZ, not
+                    // TeX. `(0,0) -- (3,0)` is a path, `;` ends a command,
+                    // `\draw` is a picture operator rather than a macro -- and
+                    // the prelude's `\def\draw#1;{}` consumed every one of them
+                    // and drew nothing, so a document's diagrams reached the
+                    // page as blank space. See `picture_environment`.
+                    if PICTURE_ENVIRONMENTS.contains(&env.as_str()) {
+                        self.picture_environment(lx, &env, &mut out)?;
+                        continue;
+                    }
                     // A listing is read raw for a DIFFERENT reason: its body is
                     // TeX and must expand, but the LINES in it are the author's
                     // and only the raw body still has them. See `lower_listing`.
@@ -685,10 +727,17 @@ impl Lowerer {
                 }
                 // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
                 // together, so the whole glue is one assignment.
-                "skip" => {
+                // `\muskip0=3mu plus 1mu`. The same four slots in the second
+                // glue file: what differs is the unit the right-hand side is
+                // read in, and `glue_assign` reads that off the base.
+                "skip" | "muskip" => {
+                    let file = match name.name() {
+                        "muskip" => crate::compiler::MUSKIP_BASE,
+                        _ => crate::compiler::SKIP_BASE,
+                    };
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
-                    let base = crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE;
+                    let base = file + reg * crate::compiler::SKIP_STRIDE;
                     self.note_global(&[base, base + 1, base + 2, base + 3]);
                     out.extend(self.glue_assign(lx, base)?);
                 }
@@ -768,6 +817,10 @@ impl Lowerer {
                                 crate::compiler::SKIP_BASE
                                     + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE
                             }
+                            "muskip" => {
+                                crate::compiler::MUSKIP_BASE
+                                    + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE
+                            }
                             other => {
                                 return Err(TexError(format!("Unsupported register \\{other}")))
                             }
@@ -789,7 +842,11 @@ impl Lowerer {
                     }
                     match (glue, matches!(op, Arith::Add)) {
                         (true, true) => {
-                            let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+                            let (nat, st, sto, sh, sho) = match reg >= crate::compiler::MUSKIP_BASE
+                            {
+                                true => self.eng.scan_muglue(lx)?,
+                                false => self.eng.scan_glue(lx)?,
+                            };
                             out.extend(advance_glue(
                                 reg,
                                 crate::glue::Glue {
@@ -805,6 +862,7 @@ impl Lowerer {
                         // component and keeps both orders (§1240).
                         (true, false) => {
                             let v = self.number(lx)?;
+                            self.note_error_site(&mut out, lx, op);
                             for part in 0..3 {
                                 out.push(Cmd::Arith(op, reg + part, v.clone()));
                             }
@@ -814,6 +872,7 @@ impl Lowerer {
                                 true => self.dimen_number(lx, false)?,
                                 false => self.number(lx)?,
                             };
+                            self.note_error_site(&mut out, lx, op);
                             out.push(Cmd::Arith(op, reg, v));
                         }
                     }
@@ -911,24 +970,34 @@ impl Lowerer {
                         else_branch,
                     });
                 }
-                // Decidable while lowering: the truth depends on the macro
-                // table, which is a frontend fact. Emitting a branch for it
-                // would be dishonest bytecode -- there is nothing to test.
-                "iftrue" | "iffalse" => {
-                    let taken = name.name() == "iftrue";
-                    let cmds = self.decided_arms(lx, taken)?;
-                    out.extend(cmds);
-                }
-                "ifx" => {
-                    let same = self.eng.ifx_equal(lx)?;
-                    let cmds = self.decided_arms(lx, same)?;
-                    out.extend(cmds);
-                }
+                // `\iftrue`, `\iffalse`, `\ifx`, `\ifdefined`, `\ifcsname` and
+                // the box conditionals have NO arm here, deliberately. Their
+                // truth is a frontend fact -- the macro table, or the fact that
+                // no box register has been filled -- so the EXPANDER decides
+                // them, in `do_conditional`, and §494's `pass_text` skips the
+                // arm that lost without lowering it. That is what keeps a
+                // `\let` in the losing arm from running: lowering a branch
+                // EXECUTES the compile-time assignments in it, and
+                // `\ifx\a\b\let\x\y\else\let\x\z\fi` used to run both.
+                //
+                // They were decided HERE once, by a `decided_arms` that read
+                // each arm as a bounded token region ending at its own `\fi`.
+                // That boundary is what LaTeX's `\@ifundefined` breaks: it is
+                // `\ifcsname` around `\expandafter\expandafter\expandafter
+                // \firstoftwo`, three `\expandafter`s whose whole purpose is to
+                // EXPAND the `\fi` and the `\else` away so the two-argument
+                // macro lands outside the conditional and eats the arguments
+                // that follow it. A `\fi` expanded like that popped §489's
+                // condition stack, which `decided_arms` had never pushed to, so
+                // the outer conditional's `\else` found the stack empty and the
+                // run stopped with `! Extra \else.` One stack, kept by the
+                // expander for every conditional, is what tex has.
                 "let" => self.eng.compile_time_let(lx)?,
                 // Both define a control sequence that stands for a number, and
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
-                "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "toksdef" => {
+                "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "muskipdef"
+                | "toksdef" => {
                     self.eng.compile_time_numeric_def(lx, name.name())?
                 }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
@@ -1085,7 +1154,7 @@ impl Lowerer {
                 "outer" => self.eng.set_outer_prefix(true),
                 "protected" => self.eng.set_protected_prefix(true),
                 // `\unless\ifnum ...` runs the ELSE arm when the test holds.
-                "unless" => self.unless = true,
+                "unless" => self.eng.set_unless(true),
                 "relax" => {}
                 // A blank line IS a `\par` -- the mouth synthesises one per
                 // blank line, §304 -- and dropping it is why a whole book came
@@ -1173,6 +1242,71 @@ impl Lowerer {
         Ok(Self::drop_empty_line_directives(out))
     }
 
+    /// Carry §311's context display to the run, for a command that can report
+    /// there.
+    ///
+    /// Only `\multiply` and `\divide` can: §1236 checks them and `\advance`
+    /// wraps silently. The display is taken AFTER the operand has been scanned,
+    /// because that is where tex's mouth stands when the check fails -- for
+    /// `\multiply\count1 by 2` the whole line has been read, so the display is
+    /// the line and an empty second half.
+    fn note_error_site(&mut self, out: &mut Vec<Cmd>, lx: &Lexer, op: Arith) {
+        if matches!(op, Arith::Add) {
+            return;
+        }
+        if let Some(site) = lx.context() {
+            out.push(Cmd::ErrorSite(site));
+        }
+    }
+
+    /// Whether every register `body` READS is one nothing has assigned, so its
+    /// value is provably INITEX's zero.
+    ///
+    /// The scan is over the body AFTER macro expansion, so a register a macro
+    /// reads is visible here as `\count<n>`. Anything it cannot prove -- a
+    /// register number that is not a constant, a name it cannot resolve, a
+    /// scan that fails -- answers NO, which costs only the older behaviour.
+    fn reads_only_untouched_registers(&mut self, body: &[Token]) -> bool {
+        let mut work = Lexer::new("");
+        work.push_back(body);
+        while let Some(t) = work.pending.pop() {
+            let Token::Cs(n) = &t else { continue };
+            let n = *n;
+            // A name `\countdef` and friends gave a register IS that register.
+            if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(n) {
+                if self.assigned.contains(&r) {
+                    return false;
+                }
+                continue;
+            }
+            let file = match n.name() {
+                "count" => 0,
+                "dimen" => crate::compiler::DIMEN_BASE,
+                "skip" => crate::compiler::SKIP_BASE,
+                "muskip" => crate::compiler::MUSKIP_BASE,
+                _ => continue,
+            };
+            let stride = match n.name() {
+                "skip" | "muskip" => crate::compiler::SKIP_STRIDE,
+                _ => 1,
+            };
+            // Only a CONSTANT register number can be proved: `\count\count0`
+            // names a register the run picks.
+            let next = work.pending.iter().rev().find(|t| !t.is_space());
+            if !matches!(next, Some(Token::Char(c, _)) if c.is_ascii_digit()) {
+                return false;
+            }
+            let Ok(reg) = self.eng.scan_number_pending(&mut work) else {
+                return false;
+            };
+            let base = file + reg * stride;
+            if (0..stride).any(|i| self.assigned.contains(&(base + i))) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// `\edef\x{...\the\count<n>...}` freezes the register's CURRENT value.
     ///
     /// The value lives in a VM slot, so "now" is run time. The snapshot is
@@ -1197,11 +1331,28 @@ impl Lowerer {
             }
             params.push(t);
         }
-        let body = self.eng.read_balanced_pub(lx)?;
+        let raw = self.eng.read_balanced_pub(lx)?;
         // `\edef` expands its body NOW, which is the whole difference from
         // `\def`. Only the macro calls: `\the\count<n>` has to reach the walk
         // below as tokens so it can be snapshotted into a scratch register.
-        let body = self.eng.expand_macros_only(&body)?;
+        let body = self.eng.expand_macros_only(&raw)?;
+        // `tex.web` §366 expands the body the WHOLE way while reading it, so a
+        // conditional in it is decided now and `\the` becomes §478's
+        // characters. That needs the registers, and the lowerer has them for
+        // exactly one case: a register nothing has assigned is still at
+        // INITEX's zero. When the body reads only those, freeze it as tex does.
+        //
+        // On any error the older path runs instead, so this can only ever
+        // freeze MORE bodies correctly -- never refuse one that used to work.
+        // The PROOF is read off the macro-expanded body, where a register a
+        // macro reads is visible; the freezing runs on the body as written, so
+        // that `\unexpanded` still stops it.
+        if self.reads_only_untouched_registers(&body) {
+            if let Ok(frozen) = self.eng.expand_edef_body(&raw) {
+                self.eng.define_macro_with_params(name, params, frozen)?;
+                return Ok(None);
+            }
+        }
         // Find `\the\count<n>` in the body; anything else stays literal.
         let mut work = Lexer::new("");
         work.push_back(&body);
@@ -1217,6 +1368,7 @@ impl Lowerer {
                     let reg = self.eng.scan_number_pending(&mut work)?;
                     let scratch = self.next_scratch;
                     self.next_scratch -= 1;
+                    self.assigned.insert(scratch);
                     cmd = Some(Cmd::SetCount(scratch, Num::Count(reg)));
                     new_body.push(Token::cs("the"));
                     new_body.push(Token::cs("count"));
@@ -1906,6 +2058,40 @@ impl Lowerer {
     /// Read as raw characters rather than tokens: the name is needed BEFORE
     /// deciding whether the body is TeX at all, so tokenising it would be
     /// deciding the question by answering it.
+    /// Read a `tikzpicture` body raw and emit it as a picture marker.
+    ///
+    /// The body is NOT expanded, for the reason a verbatim body is not: it is
+    /// a different language. Reading it as TeX turns `\draw` into a macro call,
+    /// `(0,0)` into three characters of prose and `;` into the delimiter of an
+    /// argument that runs to it -- which is precisely what the prelude's
+    /// `\def\draw#1;{}` did, and why every picture in every document reached
+    /// the page as nothing at all.
+    ///
+    /// What comes out is one `typeset::PICTURE` span holding the option list
+    /// and the body, bracketed by paragraph breaks so the picture owns its own
+    /// lines. `typeset::to_pdf` parses it and draws it; `--text` drops it,
+    /// because a picture has no words.
+    fn picture_environment(&mut self, lx: &mut Lexer, env: &str, out: &mut Vec<Cmd>) -> R<()> {
+        // Consume the `{name}` that was only peeked at, or it lands in the
+        // output ahead of the picture.
+        while let Some(t) = lx.next_token(&self.eng.cats) {
+            if matches!(t, Token::Char(_, Cat::EndGroup)) {
+                break;
+            }
+        }
+        let end = format!("\\end{{{env}}}");
+        let Some(body) = lx.read_raw_until(&end) else {
+            return Err(TexError(format!(
+                "Runaway argument: \\begin{{{env}}} never ends"
+            )));
+        };
+        if self.text_output {
+            let (options, body) = environment_option(&body);
+            self.push_text(out, &crate::typeset::picture_mark(options, body));
+        }
+        Ok(())
+    }
+
     fn peek_environment_name(&self, lx: &Lexer) -> Option<String> {
         let chars = lx.chars();
         let mut i = lx.pos();
@@ -2022,48 +2208,8 @@ impl Lowerer {
         })
     }
 
-    /// The one arm a DECIDED conditional keeps, with the other skipped rather
-    /// than lowered.
-    ///
-    /// [`Lowerer::arms`] lowers both and throws one away, which is what
-    /// `\ifnum` needs: its test is a register read, so both arms have to reach
-    /// the bytecode. For a conditional the frontend has already decided,
-    /// lowering the losing arm is not merely wasted work -- lowering EXECUTES
-    /// the compile-time assignments in it. `\ifx\a\b\let\x\y\else\let\x\z\fi`
-    /// ran both `\let`s and the second one won, whichever way the test went.
-    /// That is what stopped LaTeX's own `\@ifnextchar` from working here, and
-    /// with it every optional argument and every starred form in the language.
-    fn decided_arms(&mut self, lx: &mut Lexer, taken: bool) -> R<Vec<Cmd>> {
-        if !taken {
-            // Nothing of the true arm is read; if it ends at `\else` the false
-            // arm is the one that lowers.
-            return match self.eng.compile_time_skip_arm(lx, true)? {
-                false => Ok(Vec::new()),
-                true => {
-                    let out = self.block(lx, Some(&["fi"]))?;
-                    let _ = lx.next_token(&self.eng.cats);
-                    Ok(out)
-                }
-            };
-        }
-        let out = self.block(lx, Some(&["fi", "else"]))?;
-        match lx.next_token(&self.eng.cats) {
-            Some(Token::Cs(n)) if n.name() == "else" => {
-                self.eng.compile_time_skip_arm(lx, false)?;
-            }
-            Some(Token::Cs(n)) if n.name() == "fi" => {}
-            other => {
-                if let Some(t) = other {
-                    lx.push_back(&[t]);
-                }
-                return Err(TexError("Incomplete \\ifx; missing \\fi".into()));
-            }
-        }
-        Ok(out)
-    }
-
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
-        let negated = std::mem::take(&mut self.unless);
+        let negated = self.eng.take_unless();
         let then_branch = self.block(lx, Some(&["else", "fi"]))?;
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
@@ -2213,12 +2359,19 @@ impl Lowerer {
     /// so the four writes are slot READS rather than constants; anything else
     /// is a glue the scanner reads now (`tex.web` §461's `scan_glue`).
     fn glue_assign(&mut self, lx: &mut Lexer, base: i64) -> R<Vec<Cmd>> {
-        if let Some(from) = self.peek_glue_register(lx)? {
+        // Which glue file the destination is in decides the units the source is
+        // read in: `tex.web` §1228 assigns a `mu_val` from a `mu_val` and a
+        // `glue_val` from a `glue_val`, and never mixes them.
+        let mu = base >= crate::compiler::MUSKIP_BASE;
+        if let Some(from) = self.peek_glue_register(lx, mu)? {
             return Ok((0..crate::compiler::SKIP_STRIDE)
                 .map(|i| Cmd::SetCount(base + i, Num::Count(from + i)))
                 .collect());
         }
-        let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+        let (nat, st, sto, sh, sho) = match mu {
+            true => self.eng.scan_muglue(lx)?,
+            false => self.eng.scan_glue(lx)?,
+        };
         Ok([nat, st, sh, sto * 4 + sho]
             .into_iter()
             .enumerate()
@@ -2228,7 +2381,11 @@ impl Lowerer {
 
     /// The base slot of a glue register standing where a glue is wanted, if
     /// that is what comes next; nothing is consumed otherwise.
-    fn peek_glue_register(&mut self, lx: &mut Lexer) -> R<Option<i64>> {
+    fn peek_glue_register(&mut self, lx: &mut Lexer, mu: bool) -> R<Option<i64>> {
+        let (want, file) = match mu {
+            true => ("muskip", crate::compiler::MUSKIP_BASE),
+            false => ("skip", crate::compiler::SKIP_BASE),
+        };
         let mut eaten = Vec::new();
         loop {
             let Some(t) = self.eng.take_file(lx) else {
@@ -2240,14 +2397,17 @@ impl Lowerer {
                 continue;
             }
             if let Token::Cs(n) = &t {
-                if n.name() == "skip" {
+                if n.name() == want {
                     return Ok(Some(
-                        crate::compiler::SKIP_BASE
-                            + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE,
+                        file + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE,
                     ));
                 }
                 if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
-                    if r >= crate::compiler::SKIP_BASE {
+                    // A `\skipdef` name is a glue register and a `\muskipdef`
+                    // name is a math one; each stands only where its own kind
+                    // does.
+                    let is_mu = r >= crate::compiler::MUSKIP_BASE;
+                    if r >= crate::compiler::SKIP_BASE && is_mu == mu {
                         return Ok(Some(r));
                     }
                 }
@@ -2373,16 +2533,24 @@ impl Lowerer {
                                 text.push_str(&self.eng.toks_text(reg));
                                 continue;
                             }
-                            Some(Token::Cs(w)) if w.name() == "skip" => {
+                            Some(Token::Cs(w)) if w.name() == "skip" || w.name() == "muskip" => {
+                                let mu = w.name() == "muskip";
+                                let file = match mu {
+                                    true => crate::compiler::MUSKIP_BASE,
+                                    false => crate::compiler::SKIP_BASE,
+                                };
                                 let reg = self.eng.scan_number_pending(work)?;
-                                let base =
-                                    crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE;
-                                out.push(MsgOp::Glue([
+                                let base = file + reg * crate::compiler::SKIP_STRIDE;
+                                let slots = [
                                     Num::Count(base),
                                     Num::Count(base + 1),
                                     Num::Count(base + 2),
                                     Num::Count(base + 3),
-                                ]));
+                                ];
+                                out.push(match mu {
+                                    true => MsgOp::MuGlue(slots),
+                                    false => MsgOp::Glue(slots),
+                                });
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "dimen" => {
@@ -2412,13 +2580,16 @@ impl Lowerer {
                                 Some(crate::expand::NumericCs::Register(r)) => {
                                     // A `\dimendef` name is a dimension
                                     // register, so `\the` writes it as one.
-                                    out.push(if r >= crate::compiler::SKIP_BASE {
-                                        MsgOp::Glue([
-                                            Num::Count(r),
-                                            Num::Count(r + 1),
-                                            Num::Count(r + 2),
-                                            Num::Count(r + 3),
-                                        ])
+                                    let slots = [
+                                        Num::Count(r),
+                                        Num::Count(r + 1),
+                                        Num::Count(r + 2),
+                                        Num::Count(r + 3),
+                                    ];
+                                    out.push(if r >= crate::compiler::MUSKIP_BASE {
+                                        MsgOp::MuGlue(slots)
+                                    } else if r >= crate::compiler::SKIP_BASE {
+                                        MsgOp::Glue(slots)
                                     } else if r >= crate::compiler::DIMEN_BASE {
                                         MsgOp::Dimen(Num::Count(r))
                                     } else {
@@ -2445,6 +2616,14 @@ impl Lowerer {
                         let reg = self.eng.scan_number_pending(work)?;
                         out.push(MsgOp::Number(Num::Count(
                             crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
+                        )));
+                        continue;
+                    }
+                    if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "muskip") {
+                        let _ = work.pending.pop();
+                        let reg = self.eng.scan_number_pending(work)?;
+                        out.push(MsgOp::Number(Num::Count(
+                            crate::compiler::MUSKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
                         )));
                         continue;
                     }
@@ -2476,7 +2655,7 @@ impl Lowerer {
                     out.push(MsgOp::Number(call));
                 }
                 // `\unless` negates the conditional that follows it here too.
-                "unless" => self.unless = true,
+                "unless" => self.eng.set_unless(true),
                 // `\csstring\f` is `\string\f` without the escape character.
                 "csstring" => {
                     if let Some(next) = work.pending.pop() {
@@ -2595,6 +2774,43 @@ impl Lowerer {
                     flush!();
                     out.extend(if same { t_ops } else { e_ops });
                 }
+                // Both ask the macro table a question, which is a FRONTEND
+                // fact -- so they are decided here, exactly as `\iftrue` and
+                // `\ifx` above are, rather than lowered to a branch over a
+                // register the VM holds.
+                //
+                // `\ifdefined` takes the next token unexpanded (etex.ch's
+                // `if_def_code` uses `get_next`, not `get_x_token`);
+                // `\ifcsname` reads the characters up to `\endcsname` and looks
+                // the name up WITHOUT entering it. Neither reached this loop
+                // before: a message body is read as a token list and anything
+                // this match did not name was printed as itself, so
+                // `\message{[\ifdefined\foo YES\else NO\fi]}` printed
+                // `[\ifdefined xYES\else NO\fi]` -- the test, the macro's
+                // expansion and BOTH arms.
+                // The box conditionals are here for the same reason, one step
+                // further on: every box register is void (see `do_conditional`),
+                // so what they answer is known while lowering too.
+                "ifdefined" | "ifcsname" | "ifvoid" | "ifhbox" | "ifvbox" => {
+                    let truth = match n.name() {
+                        "ifcsname" => {
+                            let built = self.eng.read_csname_pending(work)?;
+                            let id = crate::token::CsId::intern(&built);
+                            self.eng.meanings.contains_key(&id)
+                        }
+                        "ifdefined" => match work.pending.pop() {
+                            Some(Token::Cs(cs)) => self.eng.meanings.contains_key(&cs),
+                            _ => false,
+                        },
+                        other => {
+                            let _reg = self.eng.scan_number_pending(work)?;
+                            other == "ifvoid"
+                        }
+                    };
+                    let (t_ops, e_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.extend(if truth { t_ops } else { e_ops });
+                }
                 "ifnum" => {
                     let left = self.msg_number(work)?;
                     let rel = match self.eng.read_relation_pending(work)? {
@@ -2709,7 +2925,7 @@ impl Lowerer {
 
     /// The two arms of a conditional inside a message.
     fn msg_arms(&mut self, work: &mut Lexer) -> R<(Vec<MsgOp>, Vec<MsgOp>)> {
-        let negated = std::mem::take(&mut self.unless);
+        let negated = self.eng.take_unless();
         let then_ops = self.msg_ops(work, &["else", "fi"])?;
         let mut else_ops = Vec::new();
         match work.pending.pop() {
@@ -2795,6 +3011,17 @@ const VERBATIM_ENVIRONMENTS: &[&str] = &[
 /// `\end` as two blank code lines around every listing in the book.
 const LISTING_ENVIRONMENTS: &[&str] = &["Highlighting"];
 
+/// The environments whose body is a PICTURE rather than either.
+///
+/// `tikzpicture` is what a document writes; `pgfpicture` is the basic layer
+/// underneath it, which `\tikzpicture` itself opens and which the same path
+/// operators are stated in. Both are read raw and handed to `crate::tikz`.
+///
+/// `scope` is deliberately not here: it is a picture's own grouping construct
+/// and lives INSIDE a body this list already takes whole, so naming it would
+/// mean reading the same characters twice.
+const PICTURE_ENVIRONMENTS: &[&str] = &["tikzpicture", "pgfpicture"];
+
 /// Drop the `[...]` an environment's `\begin` carries, if it has one.
 ///
 /// `\begin{Highlighting}[]` is how pandoc opens every code block. The stub in
@@ -2802,13 +3029,22 @@ const LISTING_ENVIRONMENTS: &[&str] = &["Highlighting"];
 /// raw before any of that runs, so without this the brackets are the first
 /// code line of every listing.
 fn without_environment_option(body: &str) -> &str {
+    environment_option(body).1
+}
+
+/// The `[...]` an environment's `\begin` carries, and the body after it.
+///
+/// A picture needs both halves, not just the second: `\begin{tikzpicture}[x=
+/// 0.38pt,y=0.38pt]` states the scale every coordinate in the body is read
+/// against, so a body taken without its options is drawn at the wrong size.
+fn environment_option(body: &str) -> (&str, &str) {
     let rest = body.trim_start_matches([' ', '\t']);
     let Some(rest) = rest.strip_prefix('[') else {
-        return body;
+        return ("", body);
     };
     match rest.find(']') {
-        Some(at) => &rest[at + 1..],
-        None => body,
+        Some(at) => (&rest[..at], &rest[at + 1..]),
+        None => ("", body),
     }
 }
 
@@ -2828,6 +3064,26 @@ impl Lowerer {
                     }
                     break;
                 }
+                // LaTeX writes `\input{NAME}`, and the name inside the braces
+                // may be BUILT: `article.cls` ends on
+                // `\input{size1\@ptsize.clo}`, where `\@ptsize` is the macro
+                // the class options set to `0`, `1` or `2`. §537 reads a file
+                // name with `get_x_token`, so expansion is not an extra here --
+                // it is what tex does. The group is read whole and its macros
+                // expanded; `\the`, the conditionals and the primitives are
+                // left alone by `expand_macros_only`, and none of them belongs
+                // in a file name.
+                Token::Char(_, Cat::BeginGroup) if name.is_empty() => {
+                    lx.push_back(std::slice::from_ref(&t));
+                    let body = self.eng.read_balanced_group(lx)?;
+                    let body = self.eng.expand_macros_only(&body)?;
+                    let escape = self.eng.escape;
+                    name = body.iter().map(|t| t.to_text(escape)).collect();
+                    // A control word's `to_text` writes the space that ends its
+                    // name, and a file name has no spaces in it.
+                    name.retain(|c| !c.is_whitespace());
+                    break;
+                }
                 Token::Char(c, _) => name.push(*c),
                 Token::Cs(_) => {
                     lx.push_back(std::slice::from_ref(&t));
@@ -2843,11 +3099,15 @@ impl Lowerer {
 
     /// Find `name`, read it, and say what to print for it.
     ///
-    /// TeX resolves a file name through kpathsea; texrs searches the working
-    /// directory and then `TEXINPUTS`, and deliberately does NOT shell out to
-    /// `kpsewhich` — that would make running a document depend on a TeX Live
-    /// installation. `.tex` is supplied when the name carries no extension, as
-    /// tex does.
+    /// TeX resolves a file name through kpathsea. texrs searches the working
+    /// directory and then `TEXINPUTS` first, so a document that reads a file
+    /// beside itself runs on a machine with no TeX installed at all; only when
+    /// both miss does it ask `kpsewhich`, which is already how `\usepackage`
+    /// finds a `.sty` (`src/latex/load.rs`). That last step is what makes
+    /// `article.cls`'s own last line — `\input{size1\@ptsize.clo}` — reach the
+    /// `.clo` in `texmf-dist`, and it costs nothing when the file was found
+    /// beside the document. `.tex` is supplied when the name carries no
+    /// extension, as tex does.
     fn open_input(&self, name: &str) -> R<(String, String)> {
         // tex's own bound, measured: a file that inputs itself opens 14 more
         // levels above the document's own and refuses the 15th with
@@ -2880,7 +3140,20 @@ impl Lowerer {
                         Ok(rest) => format!("./{}", rest.display()),
                         Err(_) => full.display().to_string(),
                     };
-                    return Ok((shown, src));
+                    return Ok((shown, crate::latex::load::without_trailing_endinput(src)));
+                }
+            }
+        }
+        // The TeX tree, last. `kpsewhich` is asked once per name per process and
+        // the misses are remembered too, so a document that names a file nobody
+        // has does not start a process per mention of it.
+        for cand in &candidates {
+            if let Some(path) = crate::latex::load::locate(cand) {
+                if let Ok(src) = std::fs::read_to_string(&path) {
+                    return Ok((
+                        path.display().to_string(),
+                        crate::latex::load::without_trailing_endinput(src),
+                    ));
                 }
             }
         }
@@ -2929,6 +3202,10 @@ impl Lowerer {
     /// wrote inside it, and the only place that can be known is here, where the
     /// prefix and the register number are both in hand.
     fn note_global(&mut self, regs: &[i64]) {
+        // Every register assignment the lowerer makes passes through here,
+        // which is what makes it the one place to record that the register has
+        // left INITEX's zero. See `assigned` for who reads it.
+        self.assigned.extend(regs.iter().copied());
         if !self.eng.take_global_prefix() {
             return;
         }
@@ -3008,9 +3285,14 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
         for c in cmds {
             match c {
                 // A line directive, a run of the document's text, a
-                // `\rust{ … }` compile and a file's closing paren all write no
-                // register.
-                Cmd::Line(_) | Cmd::Text(_) | Cmd::RustCompile(_) | Cmd::FileClose => {}
+                // `\rust{ … }` compile, a file's closing paren, an error site
+                // and the transcript notice all write no register.
+                Cmd::Line(_)
+                | Cmd::Text(_)
+                | Cmd::RustCompile(_)
+                | Cmd::FileClose
+                | Cmd::ErrorSite(_)
+                | Cmd::TranscriptNotice => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

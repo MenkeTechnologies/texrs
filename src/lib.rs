@@ -65,6 +65,7 @@ pub mod runtime;
 pub mod rust_ffi;
 pub mod script_cache;
 pub mod sfnt;
+pub mod shipout;
 pub mod special;
 pub mod status;
 pub mod tfm;
@@ -128,6 +129,9 @@ fn without_marks(text: &str) -> String {
     // the code character saying which of the three it is -- NUL until that
     // character has been read, which is the one straight after the marker.
     let mut in_ref: Option<char> = None;
+    // Whether the walk stands inside a picture span, which is the same shape:
+    // one marker opens it and the next one closes it.
+    let mut in_picture = false;
     for ch in text.chars() {
         match ch {
             // A cross-reference span: the marker, that code, the label key,
@@ -144,6 +148,13 @@ fn without_marks(text: &str) -> String {
             _ if in_ref == Some('\u{0}') => in_ref = Some(ch),
             // The key, which is not text either.
             _ if in_ref.is_some() => {}
+            // A picture span: the marker, the room it takes, the encoded
+            // picture, and the marker again. A picture has no words -- it is
+            // paths and node borders -- so a reader asking for the document's
+            // TEXT gets nothing from it, and certainly not several hundred
+            // characters of base64 where the diagram was.
+            crate::typeset::PICTURE => in_picture = !in_picture,
+            _ if in_picture => {}
             '\u{1}' => in_spec = true,
             '\u{2}' => in_spec = false,
             '\u{3}' => {}

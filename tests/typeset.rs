@@ -5,10 +5,12 @@
 //! outside its own tests, so a book "ran" and produced no page.
 //!
 //! What is asserted here is that a real DVI comes out and that the arithmetic
-//! is the font's rather than invented. What is NOT claimed is `tex.web`'s
-//! typesetting: lines are broken first-fit, where tex minimises total badness
-//! over a whole paragraph (§813), and there is no hyphenation, no glue, one
-//! font and no maths.
+//! is the font's rather than invented. Lines are broken the way §813 breaks
+//! them -- least total demerits over the whole paragraph, hyphenated with
+//! Knuth's patterns -- and shipped as a box tree through `hlist_out` and
+//! `vlist_out` (§619-§640), so a full line is set TO the measure. What is
+//! still NOT claimed is the rest of `tex.web`'s typesetting: one font, no
+//! maths, and pages stacked by count rather than broken by penalty.
 
 use texrs::tfm::Tfm;
 use texrs::typeset::{
@@ -135,6 +137,85 @@ fn a_long_document_becomes_more_than_one_page() {
     let dvi = to_dvi(&text, &f, "cmr10", &Layout::default());
     let parsed = texrs::dvi::Dvi::parse(&dvi).expect("parse");
     assert!(parsed.pages() > 1, "got {} pages", parsed.pages());
+}
+
+/// Every full line reaches the right margin, in the file rather than in a box.
+///
+/// This is what the node-list shipper bought. The DVI path used to write runs
+/// of characters at their natural widths, so a breaker that priced glue had
+/// nowhere to put an answer of the form "this line should be SHRUNK" and the
+/// path took the first break that fitted instead. It ships a `\vbox` of
+/// `\hbox`es now: `hpack` distributes the slack over the interword glue
+/// (`tex.web` §658) and `hlist_out` writes each piece at the width it was set
+/// to (§625), so the right edge is straight.
+///
+/// Measured off the file: each line is one `push`…`pop`, and its width is the
+/// characters' own widths plus the movements between them.
+#[test]
+fn every_full_line_is_set_to_the_measure_in_the_file() {
+    use texrs::dvi::Op;
+    let f = font_or_skip!();
+    let layout = Layout::default();
+    let text = "the quick brown fox jumps over the lazy dog ".repeat(12);
+    let dvi = to_dvi(&text, &f, "cmr10", &layout);
+    let ops = texrs::dvi::Dvi::parse(&dvi).expect("parse").ops;
+
+    let mut widths: Vec<f64> = Vec::new();
+    let mut depth = 0usize;
+    let mut at = 0.0f64;
+    // The first movement inside a box is `synch_h` catching up to the box's
+    // own left edge (§616), not part of the line. These lines all begin with a
+    // character, so everything after the first one is the line itself.
+    let mut started = false;
+    for op in ops {
+        match op {
+            Op::Push => {
+                depth += 1;
+                if depth == 1 {
+                    at = 0.0;
+                    started = false;
+                }
+            }
+            Op::Pop => {
+                depth -= 1;
+                if depth == 0 {
+                    widths.push(at);
+                }
+            }
+            Op::SetChar(c) if depth > 0 => {
+                started = true;
+                at += u8::try_from(c)
+                    .ok()
+                    .and_then(|c| f.char(c))
+                    .map(|m| m.width)
+                    .unwrap_or(0.0)
+                    * layout.size;
+            }
+            Op::Right(x) if depth > 0 && started => at += x as f64 / 65536.0,
+            _ => {}
+        }
+    }
+
+    // The boxes are the text lines and then the folio, which begins with an
+    // `\hss` and so is not measured the same way. The paragraph's last line is
+    // ragged -- that is `\parfillskip` (§816) -- so it is the other exception.
+    assert!(widths.len() > 3, "got {widths:?}");
+    let last_text = widths.len() - 2;
+    for (i, w) in widths.iter().take(widths.len() - 1).enumerate() {
+        if i == last_text {
+            assert!(
+                *w < layout.measure,
+                "the last line of the paragraph is not stretched: {w}"
+            );
+            continue;
+        }
+        assert!(
+            (w - layout.measure).abs() < 0.02,
+            "line {i} of {} ends at {w}pt, not at the {}pt measure",
+            widths.len(),
+            layout.measure
+        );
+    }
 }
 
 #[test]
@@ -1512,9 +1593,17 @@ fn a_character_the_face_lacks_is_drawn_rather_than_written_out_as_its_utf8() {
         !all.contains('\u{2192}') && !all.contains('\u{2014}'),
         "a character reached the content stream as itself: {runs:?}"
     );
-    // The em dash IS in WinAnsi, at 0x97, and Helvetica has it -- so it stays
-    // in the document's own face rather than being fetched from anywhere.
-    assert_eq!(face_of(&runs, "\\227"), "Helvetica");
+    // The em dash IS in WinAnsi, at 0x97, and the document's own face has it --
+    // so it stays there rather than being fetched from anywhere. That face is
+    // Computer Modern, which a document naming no family is set in; CMR10 puts
+    // `emdash` at 124 rather than at 151, and the `/Differences` array
+    // `add_font` writes points the code the driver used at the glyph the font
+    // calls it, so the dash is drawn rather than left as an empty slot. The
+    // name carries a subset tag -- `JEJYZB+CMR10` -- because the font goes in
+    // cut to the glyphs the page drew, and §9.6.4 names a cut for itself; the
+    // tag is a digest of the cut, so the face is what is compared.
+    let dash = face_of(&runs, "\\227");
+    assert_eq!(dash.split_once('+').map(|(_, face)| face), Some("CMR10"));
     // The arrow is in no text encoding at all and comes from the fallback.
     assert_eq!(face_of(&runs, "\\256"), "Symbol");
     // Box drawing is in neither, and Computer Modern has none of it either, so
@@ -2491,4 +2580,216 @@ fn a_label_is_set_as_nothing_and_pays_for_no_space() {
         !format!("{:?}", lines(true)).contains("ch:alpha"),
         "and the key itself is drawn nowhere"
     );
+}
+
+// ---- pictures -----------------------------------------------------------
+//
+// A `tikzpicture` used to reach the page as nothing at all: the prelude
+// answered `\draw#1;` by consuming the command and emitting nothing, so a
+// document's diagrams were read and discarded and the PDF carried no path
+// operator of any kind. `src/tikz` had the whole path model and no caller.
+// These assert the document end of it -- that the operators are in the
+// stream, that they are where the picture stands, and that the room the
+// picture takes is its bounding box.
+
+/// Every point a path operator named on any page, as `(x, y)`.
+///
+/// `m` and `l` are the two the tests below draw with, and both take the point
+/// as the two numbers in front of the operator. Read straight off the content
+/// stream so the assertion is about what a reader will draw and not about what
+/// `tikz::to_pdf_ops` returned.
+fn drawn_points(pdf: &[u8]) -> Vec<(f64, f64)> {
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(pdf)).into_owned();
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut word = line.split_ascii_whitespace();
+        let (Some(x), Some(y), Some(op), None) =
+            (word.next(), word.next(), word.next(), word.next())
+        else {
+            continue;
+        };
+        if op != "m" && op != "l" {
+            continue;
+        }
+        if let (Ok(x), Ok(y)) = (x.parse(), y.parse()) {
+            out.push((x, y));
+        }
+    }
+    out
+}
+
+/// The lowest and highest y any path operator reached.
+fn drawn_span(pdf: &[u8]) -> (f64, f64) {
+    let points = drawn_points(pdf);
+    assert!(!points.is_empty(), "no path operator was written at all");
+    let low = points.iter().fold(f64::INFINITY, |a, (_, y)| a.min(*y));
+    let high = points.iter().fold(f64::NEG_INFINITY, |a, (_, y)| a.max(*y));
+    (low, high)
+}
+
+/// `\documentclass{article}` with `body` drawn between two paragraphs.
+fn around_a_picture(options: &str, body: &str) -> String {
+    format!(
+        "\\documentclass{{article}}\n\\usepackage{{tikz}}\n\\begin{{document}}\n\
+         Before.\n\\begin{{tikzpicture}}{options}\n{body}\n\\end{{tikzpicture}}\n\
+         After.\n\\end{{document}}\n"
+    )
+}
+
+#[test]
+fn a_picture_reaches_the_page_as_the_path_operators_that_draw_it() {
+    // The whole of the gap this closes: the document below produced a PDF with
+    // no `m`, no `l` and no `S` in it, and the two words welded into one line.
+    let pdf = texrs::run_pdf(&around_a_picture(
+        "",
+        r"\draw[thick] (0,0) -- (3,0) -- (3,2) -- cycle;",
+    ))
+    .expect("pdf");
+    let stream = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).into_owned();
+    let points = drawn_points(&pdf);
+    assert_eq!(points.len(), 3, "three corners: {points:?}");
+    // `s` closes and strokes in one operator, which is what a `-- cycle` on a
+    // stroked path comes to (PDF 32000-1 Table 60).
+    assert!(stream.contains("\ns\n"), "closed and stroked: {stream}");
+    // A bare coordinate is a CENTIMETRE, not a point: PGF's own unit vectors
+    // are `\pgfsetxvec{\pgfpoint{1cm}{0cm}}` (pgfcorepoints.code.tex:922-925),
+    // so `(3,0)` is 85.36pt across. Read at a point to the unit the whole
+    // triangle came out a twenty-eighth of its size.
+    let width = points[1].0 - points[0].0;
+    assert!(
+        (width - 3.0 * 72.27 / 2.54).abs() < 0.05,
+        "three centimetres across, got {width}"
+    );
+}
+
+#[test]
+fn the_text_around_a_picture_does_not_run_over_it() {
+    // The picture is a block on its own lines: the paragraph before it ends
+    // above its box and the one after starts below. Both used to be set on the
+    // same line, because a picture that draws nothing takes no room.
+    let pdf = texrs::run_pdf(&around_a_picture(
+        "",
+        r"\draw[thick] (0,0) -- (3,0) -- (3,2) -- cycle;",
+    ))
+    .expect("pdf");
+    let runs = placed(&pdf);
+    let (before_x, before_y) = at(&runs, "Before.");
+    let (after_x, after_y) = at(&runs, "After.");
+    assert_eq!((before_x, after_x), (72.0, 72.0), "both at the margin");
+    let (low, high) = drawn_span(&pdf);
+    assert!(
+        before_y > high,
+        "the paragraph above the picture is above its box: baseline {before_y} \
+         against a box reaching {high}"
+    );
+    assert!(
+        after_y < low,
+        "and the one below it is below: baseline {after_y} against {low}"
+    );
+}
+
+#[test]
+fn a_taller_picture_pushes_the_text_under_it_further_down() {
+    // The room a picture takes is its BOUNDING BOX and not a line: two pictures
+    // differing only in height must move the paragraph under them by exactly
+    // the difference. A picture that took one line whatever it drew would put
+    // this at zero, and one that took a guessed number would put it anywhere.
+    let baseline_under = |height: &str| {
+        let body = format!(r"\draw[thick] (0,0) -- (3,0) -- (3,{height}) -- cycle;");
+        let pdf = texrs::run_pdf(&around_a_picture("", &body)).expect("pdf");
+        at(&placed(&pdf), "After.").1
+    };
+    let short = baseline_under("2");
+    let tall = baseline_under("5");
+    let grown = short - tall;
+    // Three of the picture's own units, and a unit is a centimetre.
+    let expected = 3.0 * 72.27 / 2.54;
+    assert!(
+        (grown - expected).abs() < 0.05,
+        "three centimetres taller moves the next paragraph three centimetres \
+         down: got {grown} against {expected}"
+    );
+}
+
+#[test]
+fn a_picture_is_drawn_with_its_bounding_box_at_the_margin() {
+    // A picture's own coordinates are its own and regularly negative, so the
+    // origin the page draws it at is chosen from its BOUNDS rather than from
+    // its (0,0): a picture drawn from -2cm would otherwise hang two
+    // centimetres out into the margin.
+    let pdf = texrs::run_pdf(&around_a_picture(
+        "",
+        r"\draw (-2,0) -- (-1,0) -- (-1,1) -- cycle;",
+    ))
+    .expect("pdf");
+    let points = drawn_points(&pdf);
+    let left = points.iter().fold(f64::INFINITY, |a, (x, _)| a.min(*x));
+    // The margin, plus the half line width the bounding box is grown by around
+    // a stroked path (pgfcorepathusage.code.tex:116-131) -- 0.4pt at TikZ's
+    // default `line width=0.4pt`.
+    assert!(
+        (left - 72.2).abs() < 0.01,
+        "the box's left edge is at the margin: leftmost point {left}"
+    );
+}
+
+#[test]
+fn a_picture_between_two_paragraphs_does_not_leak_its_source_onto_the_page() {
+    // The picture travels the text stream as an encoded marker span, and every
+    // character of it is an instruction. One that reached the drawing loop as
+    // text would set several hundred characters of base64 where the diagram is.
+    let pdf = texrs::run_pdf(&around_a_picture(
+        "",
+        r"\draw (0,0) -- (1,1); \node at (2,0) {Label};",
+    ))
+    .expect("pdf");
+    let runs = placed(&pdf);
+    let set: String = runs.iter().map(|(_, _, t)| t.as_str()).collect();
+    assert!(
+        set.contains("Before.") && set.contains("After.") && set.contains("Label"),
+        "the words either side and the node's own are set: {runs:?}"
+    );
+    assert!(
+        !set.contains("draw") && !set.contains("XGRhdw"),
+        "and nothing of the picture's source is: {runs:?}"
+    );
+}
+
+#[test]
+fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
+    // `\begin{center}\begin{tikzpicture}` is how most documents put a drawing
+    // on a page, and centring is a REGION that outlives the paragraph its
+    // marker landed in -- the picture is a paragraph of its own, so the flag
+    // has to be carried to it. Drawn at the margin instead, every centred
+    // figure in every document sat flush left.
+    let picture = "\\begin{tikzpicture}\n\\draw (0,0) rectangle (3,1);\n\\end{tikzpicture}\n";
+    let doc = |body: &str| {
+        format!(
+            "\\documentclass{{article}}\n\\usepackage{{tikz}}\n\\begin{{document}}\n\
+             Above.\n\n{body}\nBelow.\n\\end{{document}}\n"
+        )
+    };
+    let left_edge = |src: &str| {
+        let pdf = texrs::run_pdf(src).expect("pdf");
+        drawn_points(&pdf)
+            .iter()
+            .fold(f64::INFINITY, |a, (x, _)| a.min(*x))
+    };
+    let flush = left_edge(&doc(picture));
+    let centred = left_edge(&doc(&format!("\\begin{{center}}\n{picture}\\end{{center}}\n")));
+    assert!((flush - 72.2).abs() < 0.01, "flush left at the margin: {flush}");
+    // A 3cm picture on the default 469.75pt measure: half the room left over,
+    // in from the margin, plus the bounding box's own 0.2pt of half line
+    // width at TikZ's default `line width=0.4pt`.
+    let width = 3.0 * 72.27 / 2.54 + 0.4;
+    let expected = 72.0 + (469.75 - width) / 2.0 + 0.2;
+    assert!(
+        (centred - expected).abs() < 0.5,
+        "centred on the measure: got {centred} against {expected}"
+    );
+    // And the region ends with it: the picture after `\end{center}` is flush.
+    let after = left_edge(&doc(&format!(
+        "\\begin{{center}}\ntext\n\\end{{center}}\n\n{picture}"
+    )));
+    assert!((after - 72.2).abs() < 0.01, "the region ended: {after}");
 }

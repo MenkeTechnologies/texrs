@@ -711,7 +711,7 @@ impl State<'_> {
         let (text, rest) = braced(rest);
         let at = at.unwrap_or(self.frame.current);
         if let Some(name) = name.clone() {
-            self.frame.named.insert(name, at);
+            self.frame.named.insert(name, coord::Placed::point(at));
         }
         self.built.nodes.push(Pending {
             name,
@@ -733,7 +733,7 @@ impl State<'_> {
             None => (Some(self.frame.current), rest),
         };
         if let (Some(name), Some(at)) = (name, at) {
-            self.frame.named.insert(name, at);
+            self.frame.named.insert(name, coord::Placed::point(at));
         }
         rest
     }

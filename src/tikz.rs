@@ -7,19 +7,26 @@
 //!
 //! - **Path operators** (§14): `--`, `-|` and `|-`, `..controls..`, `rectangle`,
 //!   `circle`, `ellipse`, `arc`, `grid`, `parabola`, `to` and `cycle`.
-//! - **Actions** (§15): `\draw`, `\fill`, `\filldraw`, `\path`, `\clip`, and
-//!   `\shade` as a path that paints nothing.
+//! - **Actions** (§15): `\draw`, `\fill`, `\filldraw`, `\path`, `\clip`,
+//!   `\shade` and `\shadedraw`.
+//! - **Shadings** (§15.5): `axis`, `radial` and `ball`, out of `left color=`,
+//!   `right color=`, `top color=`, `bottom color=`, `middle color=`, `inner
+//!   color=`, `outer color=` and `ball color=`, painted by PDF's `sh` through
+//!   the path as a clip -- which is what `\pgfshadepath` does.
+//! - **Decorations** (§24): `snake`, `zigzag`, `saw` and `brace`, each the
+//!   state machine its `\pgfdeclaredecoration` is, on a straight segment.
 //! - **Options**: colour by name or by `draw=`/`fill=`, `line width=` and the
 //!   seven named widths, the dash patterns, caps and joins, opacity, the
 //!   even-odd rule, and the canvas transformations `rotate`, `scale`, `shift`,
 //!   `xshift` and `yshift`.
 //! - **Arrows** (§16): `->`, `<-`, `<->`, `-stealth` and `-latex`, drawn as the
 //!   paths PGF draws them as, on a line shortened to make room for them.
-//! - **Nodes** (§17): `\node`, a `node` on a path, the nine anchors, the
-//!   `rectangle` and `circle` shapes, and text set through the engine's own
-//!   typesetter.
-//! - **Coordinates** (§13): cartesian, polar, named, `+`/`++` relative, and
-//!   enough of `calc` for `($(a)+(1,0)$)` and `($(a)!.5!(b)$)`.
+//! - **Nodes** (§17): `\node`, a `node` on a path, the nine anchors AND the
+//!   border at any angle, the `rectangle`, `circle`, `ellipse` and `diamond`
+//!   shapes, `label=`, and text set through the engine's own typesetter.
+//! - **Coordinates** (§13): cartesian, polar, named, a named node's anchors,
+//!   `+`/`++` relative, `\pgfmath` arithmetic (§89), and enough of `calc` for
+//!   `($(a)+(1,0)$)` and `($(a)!.5!(b)$)`.
 //! - **Loops and scopes** (§12.3.1, §88): `\foreach` including `1,...,5`
 //!   ranges, and `scope` environments whose options are inherited.
 //!
@@ -30,23 +37,46 @@
 //! remembered wrong is not a missing feature -- it is a picture that is drawn
 //! and drawn incorrectly, which is worse.
 //!
-//! What is NOT here: shadings and patterns, decorations, the `matrix` and
-//! `graph` libraries, `pic`s, node shapes beyond rectangle and circle, edges
-//! with `bend`, and PGF's mathematical engine. A path built out of those comes
-//! out with whatever else it also had, and no more.
+//! What is NOT here: patterns, the `matrix` and `graph` libraries, `pic`s,
+//! node shapes beyond rectangle, circle, ellipse and diamond, and the
+//! decorations outside `snake`, `zigzag`, `saw` and `brace`. A path built out
+//! of those comes out with whatever else it also had, and no more -- and a
+//! `pattern=` turns the fill OFF rather than painting a solid block where the
+//! document asked for hatching.
+//!
+//! **How a document reaches this.** `\begin{tikzpicture}` is read RAW by
+//! `lower::picture_environment` -- a picture body is TikZ and not TeX, and
+//! expanding it is exactly what must not happen -- and travels the text stream
+//! as one `typeset::PICTURE` marker. `typeset::to_pdf` decodes it, parses it
+//! here against the document's own font metrics, and calls [`draw_on`] with
+//! the origin that puts the picture's bounding box where the line it is on
+//! sits. [`Picture::bounds`] is what decides how much of the page that is.
+//!
+//! A shading is painted by `sh`, which names an entry in the page's
+//! `/Shading` resource the way `gs` names one in its `/ExtGState`; `draw_on`
+//! registers both through `pdf::Page`, so a `\shade` reaches the page with its
+//! ramp. `to_pdf_ops` writes the operators alone, for a caller that carries
+//! the resources itself -- `Picture::shadings` and `Picture::ext_gstates` are
+//! the lists of what such a caller has to carry.
 
 pub mod arrows;
 pub mod coord;
+pub mod decorate;
+pub mod math;
 pub mod options;
 pub mod path;
 pub mod render;
 pub mod scan;
+pub mod shading;
+pub mod shapes;
 pub mod units;
 
 use crate::colour::{Colours, Rgb};
 
-pub use options::{Anchor, Cap, Join, Shape, Style, Tip, Transform};
+pub use options::{Anchor, Cap, Decoration, Join, Shade, Shading, Shape, Style, Tip, Transform};
 pub use scan::Action;
+pub use shading::Ramp;
+pub use shapes::Border;
 
 /// A point in the picture's own units.
 pub type Point = (f64, f64);
@@ -99,6 +129,11 @@ pub struct Path {
     pub fill_opacity: f64,
     pub arrow_start: Option<Tip>,
     pub arrow_end: Option<Tip>,
+    /// `rounded corners=` -- the radius each corner is cut back and arced by,
+    /// in points, or zero for a corner drawn sharp.
+    pub rounded: f64,
+    /// What a `\shade` paints over this path, if it asked for one.
+    pub shade: Option<Shade>,
 }
 
 impl Path {
@@ -125,10 +160,14 @@ pub struct Node {
     /// The text's width, height above the baseline and depth below it, in
     /// points, as the metrics passed to `parse_with` measured it.
     pub measured: (f64, f64, f64),
-    /// The space between the text and the border (§17.2.2).
-    pub inner_sep: f64,
+    /// The space between the text and the border, on each axis (§17.2.2).
+    pub inner_sep: (f64, f64),
+    /// How far the node's ANCHORS stand outside its drawn border.
+    pub outer_sep: f64,
     /// `minimum width` and `minimum height`, in points.
     pub minimum: (f64, f64),
+    /// `\pgfshapeaspect`, which only the diamond's proportions use.
+    pub aspect: f64,
     pub font_size: f64,
     pub stroke: Rgb,
     pub fill: Rgb,
@@ -139,13 +178,40 @@ pub struct Node {
 }
 
 impl Node {
-    /// Half the node's border box, in points.
-    pub fn half_size(&self) -> (f64, f64) {
+    /// The text with its inner separation, half either side of the centre --
+    /// which is what every shape's saved anchors are computed from.
+    pub fn text_half(&self) -> (f64, f64) {
         let (width, height, depth) = self.measured;
         (
-            (width / 2.0 + self.inner_sep).max(self.minimum.0 / 2.0),
-            ((height + depth) / 2.0 + self.inner_sep).max(self.minimum.1 / 2.0),
+            width / 2.0 + self.inner_sep.0,
+            (height + depth) / 2.0 + self.inner_sep.1,
         )
+    }
+
+    /// The node's border, as its anchors see it.
+    pub fn border(&self) -> Border {
+        Border::of(
+            self.shape,
+            self.text_half(),
+            self.minimum,
+            self.outer_sep,
+            self.aspect,
+        )
+    }
+
+    /// Half the node's border box, in points, outer separation included.
+    pub fn half_size(&self) -> (f64, f64) {
+        self.border().half
+    }
+
+    /// Where the node's centre is, given that its `anchor` sits on `at`.
+    ///
+    /// Both are in POINTS: a node is sized by its text and its anchors are
+    /// where the text put them, so this is not in the picture's own units and
+    /// a caller working in those has to divide by `x=`/`y=` first.
+    pub fn centre(&self, at: Point) -> Point {
+        let (dx, dy) = self.border().anchor(self.anchor);
+        (at.0 - dx, at.1 - dy)
     }
 
     /// How far the text's baseline sits below the node's centre.
@@ -194,6 +260,78 @@ impl Picture {
         (w, h)
     }
 
+    /// The picture's bounding box in points, as PGF protocols it.
+    ///
+    /// `(min_x, min_y, max_x, max_y)`, and it is what decides how much of a
+    /// page a picture takes: a `tikzpicture` is a box the height of this box,
+    /// set with the box's BOTTOM on the baseline -- which is what
+    /// `\endpgfpicture` makes of a picture that gave no `baseline=` option.
+    ///
+    /// Three things go into it, and each is what PGF's own does:
+    ///
+    ///   * every point of every path, INCLUDING a curve's two control points
+    ///     -- `\pgf@lt@curveto` protocols all three of its points
+    ///     (`pgfcorepathconstruct.code.tex` lines 92-97), so a curve reserves
+    ///     the hull it is drawn inside rather than the endpoints it passes
+    ///     through;
+    ///   * half the line width around a path that is STROKED, added once to
+    ///     the path's extent rather than to each of its points
+    ///     (`pgfcorepathusage.code.tex` lines 116-131) -- a `thick` line
+    ///     drawn along y=0 reaches 0.39851pt below it, and lualatex places
+    ///     the picture that much above the baseline to make room for it;
+    ///   * a node's border box, which is where its anchors are.
+    ///
+    /// A picture that draws nothing has no box at all, and answers with the
+    /// empty one at the origin.
+    pub fn bounds(&self) -> (f64, f64, f64, f64) {
+        let mut min = (f64::INFINITY, f64::INFINITY);
+        let mut max = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut seen = false;
+        let mut widen = |(x, y): Point, pad: f64| {
+            seen = true;
+            min = (min.0.min(x - pad), min.1.min(y - pad));
+            max = (max.0.max(x + pad), max.1.max(y + pad));
+        };
+        for path in &self.paths {
+            let place = |(x, y): Point| (x * self.x_scale, y * self.y_scale);
+            // The stroke's own width, or nothing at all for a path that is
+            // only filled: a fill reaches exactly as far as its outline.
+            let half = match path.draw {
+                true => path.width / 2.0,
+                false => 0.0,
+            };
+            widen(place(path.start), half);
+            for segment in &path.segments {
+                match segment {
+                    Segment::Line(to) => widen(place(*to), half),
+                    Segment::Curve(a, b, to) => {
+                        widen(place(*a), half);
+                        widen(place(*b), half);
+                        widen(place(*to), half);
+                    }
+                }
+            }
+        }
+        for node in &self.nodes {
+            let at = (node.at.0 * self.x_scale, node.at.1 * self.y_scale);
+            let (cx, cy) = node.centre(at);
+            let (hx, hy) = node.half_size();
+            widen((cx - hx, cy - hy), 0.0);
+            widen((cx + hx, cy + hy), 0.0);
+        }
+        match seen {
+            true => (min.0, min.1, max.0, max.1),
+            false => (0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    /// What the picture comes to on the page: the width and height of
+    /// [`bounds`](Self::bounds).
+    pub fn extent(&self) -> (f64, f64) {
+        let (min_x, min_y, max_x, max_y) = self.bounds();
+        (max_x - min_x, max_y - min_y)
+    }
+
     /// The `/ExtGState` entries the emitted operators name.
     ///
     /// Constant alpha is not an operator: it is a graphics-state dictionary
@@ -218,6 +356,35 @@ impl Picture {
             }
         }
         out
+    }
+
+    /// The distinct shadings the picture's paths ask for, in the order they
+    /// are met -- which is what fixes the name each one is called by.
+    pub fn shades(&self) -> Vec<Shade> {
+        let mut out: Vec<Shade> = Vec::new();
+        for path in &self.paths {
+            if let Some(shade) = path.shade {
+                if !out.contains(&shade) {
+                    out.push(shade);
+                }
+            }
+        }
+        out
+    }
+
+    /// The `/Shading` entries the emitted operators name.
+    ///
+    /// `sh` (PDF 32000-1 §8.7.4.5) paints a shading looked up BY NAME out of
+    /// the page's `/Shading` resource, the way `gs` looks up a graphics state:
+    /// there is no operator that carries a ramp. So a page carrying a shaded
+    /// picture has to carry the dictionaries too, and this is the list of
+    /// them. `Ramp::dictionary` is each one as PDF source.
+    pub fn shadings(&self) -> Vec<Ramp> {
+        self.shades()
+            .iter()
+            .enumerate()
+            .map(|(at, shade)| Ramp::of(shade, &format!("pgfsh{at}")))
+            .collect()
     }
 }
 
@@ -267,11 +434,50 @@ pub fn parse(options: &str, body: &str) -> Picture {
     parse_with(options, body, &Colours::new(), &Estimate)
 }
 
+/// PGF's own unit vectors, in points.
+///
+/// `\pgfsetxvec{\pgfpoint{1cm}{0cm}}` and `\pgfsetyvec{\pgfpoint{0cm}{1cm}}`
+/// (`pgfcorepoints.code.tex` lines 922-925): one of a picture's own units is
+/// one centimetre unless the picture's `x=`/`y=` says otherwise.
+pub const UNIT: f64 = 72.27 / 2.54;
+
 /// The same, against a document's own palette and font metrics.
+///
+/// A bare number is ONE POINT here. That is not what TikZ means by it -- see
+/// [`UNIT`] -- and it is what this answers in, because a picture is read in
+/// its own units and multiplied by `x=`/`y=` where it is drawn: a caller that
+/// scales the result itself would otherwise scale it twice. A caller drawing a
+/// DOCUMENT's picture wants [`parse_document`], which is this at PGF's unit.
 pub fn parse_with(options: &str, body: &str, colours: &Colours, metrics: &dyn Metrics) -> Picture {
+    parse_units(options, body, colours, metrics, 1.0)
+}
+
+/// A document's picture, at PGF's own unit vectors.
+///
+/// This is the entry the typesetting path takes, and the difference is one
+/// number: a `\draw (0,0) -- (3,0)` in a real document is three CENTIMETRES
+/// long, and read at a point to the unit it comes out a twenty-eighth of the
+/// size the document drew it.
+pub fn parse_document(
+    options: &str,
+    body: &str,
+    colours: &Colours,
+    metrics: &dyn Metrics,
+) -> Picture {
+    parse_units(options, body, colours, metrics, UNIT)
+}
+
+/// The same again, saying what a bare number means where the picture does not.
+fn parse_units(
+    options: &str,
+    body: &str,
+    colours: &Colours,
+    metrics: &dyn Metrics,
+    unit: f64,
+) -> Picture {
     let mut pic = Picture {
-        x_scale: option_length(options, "x").unwrap_or(1.0),
-        y_scale: option_length(options, "y").unwrap_or(1.0),
+        x_scale: option_length(options, "x").unwrap_or(unit),
+        y_scale: option_length(options, "y").unwrap_or(unit),
         ..Picture::default()
     };
     let base = Style::default().with(options, colours);
@@ -338,7 +544,7 @@ fn walk(
                 frame.relative = (0.0, 0.0);
                 frame.last_move = (0.0, 0.0);
                 let built = path::build(body, frame);
-                emit(&built, *action, &style, metrics, pic, group);
+                emit(&built, *action, &style, metrics, frame, pic, group);
             }
         }
     }
@@ -350,6 +556,7 @@ fn emit(
     action: Action,
     style: &Style,
     metrics: &dyn Metrics,
+    frame: &mut coord::Frame,
     pic: &mut Picture,
     group: &mut usize,
 ) {
@@ -357,18 +564,51 @@ fn emit(
         Action::Draw => (true, style.filled),
         Action::Fill => (style.draw, true),
         Action::FillDraw => (true, true),
+        // `\shadedraw` is `\shade` with the border on: `\tikz@mode@drawtrue`
+        // as well as `\tikz@mode@shadetrue`.
+        Action::ShadeDraw => (true, style.filled),
         // `\path[draw]` and `\path[fill]` are what `\draw` and `\fill` stand
         // for, so a bare `\path` paints exactly what its options asked for.
         Action::None | Action::Shade | Action::Clip | Action::Node => (style.draw, style.filled),
     };
+    // A `pattern=` is a tiling pattern in the page's `/Pattern` resource, and
+    // nothing here writes one. The area is left blank rather than filled with
+    // a colour the document never named -- a solid block where the picture
+    // asked for hatching is drawn, and drawn wrong.
+    let filled = filled && !style.pattern;
     let action = match (action, draw, filled) {
         (Action::None, true, true) => Action::FillDraw,
         (Action::None, true, false) => Action::Draw,
         (Action::None, false, true) => Action::Fill,
+        // `\draw[fill=orange]` fills as well as strokes: `\tikzoption{fill}`
+        // ends in `\tikz@addmode{\tikz@mode@filltrue}` whatever else it does
+        // (tikz.code.tex lines 507-519), so naming a fill colour turns filling
+        // on. The pair above computed that correctly and the painting operator
+        // was still chosen off the COMMAND, so the fill colour was written and
+        // the path stroked with `S`: an outline where lualatex draws a solid.
+        (Action::Draw, true, true) => Action::FillDraw,
+        // A `\fill` with nothing to fill it with paints nothing at all.
+        (Action::Fill | Action::FillDraw, true, false) => Action::Draw,
+        (Action::Fill | Action::FillDraw, false, false) => Action::None,
         (other, _, _) => other,
     };
     let point = |p: Point| style.transform.apply(p);
     for sub in &built.subpaths {
+        // A decoration REPLACES the path it is put on: `decorate` hands the
+        // segments to the decoration's own state machine and what comes back
+        // is what is drawn (§24). The path's own points are kept as its
+        // extent, because that is what the picture is measured by.
+        let sub = match (style.decorate, style.decoration) {
+            (true, Some(decoration)) => decorate::apply(
+                sub,
+                decoration,
+                style.segment_length,
+                style.amplitude,
+                style.decoration_aspect,
+            ),
+            _ => sub.clone(),
+        };
+        let sub = &sub;
         pic.paths.push(Path {
             points: sub.anchors().into_iter().map(point).collect(),
             start: point(sub.start),
@@ -396,6 +636,15 @@ fn emit(
             fill_opacity: style.fill_opacity,
             arrow_start: style.arrow_start,
             arrow_end: style.arrow_end,
+            rounded: style.rounded,
+            // A `\shade` with no shading key still shades: `\tikz@shading`
+            // starts as `axis` and the colours have defaults
+            // (`tikz.code.tex` lines 625, 635-637).
+            shade: match (action, style.shade) {
+                (_, Some(shade)) => Some(shade),
+                (Action::Shade | Action::ShadeDraw, None) => Some(Shade::default()),
+                _ => None,
+            },
         });
     }
     for pending in &built.nodes {
@@ -406,30 +655,87 @@ fn emit(
             true => style.clone(),
             false => node_style,
         };
-        let (height, depth) = metrics.height_of(&pending.text, node_style.font_size);
-        pic.nodes.push(Node {
-            name: pending.name.clone(),
-            at: point(pending.at),
-            text: pending.text.clone(),
-            anchor: node_style.anchor,
-            shape: node_style.shape,
-            measured: (
-                metrics.width_of(&pending.text, node_style.font_size),
-                height,
-                depth,
-            ),
-            inner_sep: node_style.inner_sep,
-            minimum: node_style.minimum,
-            font_size: node_style.font_size,
-            stroke: node_style.stroke,
-            fill: node_style.fill,
-            text_colour: node_style.text,
-            draw: node_style.draw,
-            filled: node_style.filled,
-            width: node_style.width,
-        });
+        let node = measure(
+            &pending.text,
+            pending.name.clone(),
+            point(pending.at),
+            &node_style,
+            metrics,
+        );
+        // A node's size is in points and its place is in the picture's own
+        // units, so every offset between the two is divided by the scale on
+        // its way across -- the same trip a `1cm` in a coordinate makes.
+        let (x_scale, y_scale) = (frame.x_scale, frame.y_scale);
+        let unscale = |value: f64, scale: f64| match scale != 0.0 {
+            true => value / scale,
+            false => value,
+        };
+        let across = |(dx, dy): Point| (unscale(dx, x_scale), unscale(dy, y_scale));
+        let (adx, ady) = across(node.border().anchor(node.anchor));
+        let centre = (node.at.0 - adx, node.at.1 - ady);
+        // The node's own name now stands for a SHAPE and not just a point, so
+        // `(a.north)` in the next command has a border to land on.
+        if let Some(name) = &node.name {
+            frame.named.insert(
+                name.clone(),
+                coord::Placed {
+                    at: centre,
+                    border: node.border(),
+                },
+            );
+        }
+        // `label=` is a node of its own, put on the labelled node's border in
+        // the direction the label names and anchored by the point 180 degrees
+        // round from that -- which is what keeps it outside (§17.10.1).
+        if let Some((degrees, text)) = &node_style.label {
+            let mut label = measure(text, None, (0.0, 0.0), &node_style, metrics);
+            // A label is a plain unpainted node: `every label` sets neither
+            // `draw` nor `fill`, and it is not the labelled node's shape.
+            label.draw = false;
+            label.filled = false;
+            label.shape = Shape::Rectangle;
+            label.anchor = Anchor::Center;
+            let (dx, dy) = node.border().border_at(*degrees);
+            let reach = dx.hypot(dy) + node_style.label_distance;
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let (ox, oy) = label.border().border_at(degrees + 180.0);
+            let (lx, ly) = across((reach * cos - ox, reach * sin - oy));
+            label.at = (centre.0 + lx, centre.1 + ly);
+            pic.nodes.push(label);
+        }
+        pic.nodes.push(node);
     }
     *group += 1;
+}
+
+/// One node, with its text measured and its geometry settled.
+fn measure(
+    text: &str,
+    name: Option<String>,
+    at: Point,
+    style: &Style,
+    metrics: &dyn Metrics,
+) -> Node {
+    let (height, depth) = metrics.height_of(text, style.font_size);
+    Node {
+        name,
+        at,
+        text: text.to_string(),
+        anchor: style.anchor,
+        shape: style.shape,
+        measured: (metrics.width_of(text, style.font_size), height, depth),
+        inner_sep: style.inner_sep,
+        outer_sep: style.outer(),
+        minimum: style.minimum,
+        aspect: style.aspect,
+        font_size: style.font_size,
+        stroke: style.stroke,
+        fill: style.fill,
+        text_colour: style.text,
+        draw: style.draw,
+        filled: style.filled,
+        width: style.width,
+    }
 }
 
 /// The PDF operators that draw a picture, offset to `(ox, oy)`.
@@ -453,7 +759,17 @@ pub fn draw_on(
     oy: f64,
     font: crate::pdf::Font,
 ) {
-    page.content.push_str(&to_pdf_ops(pic, ox, oy));
+    // A shading is painted by `sh`, which names a dictionary out of the
+    // page's `/Shading` (§8.7.4.5) exactly as `gs` names one out of its
+    // `/ExtGState`. Both are registered here, because a name that resolves to
+    // nothing is worse than no operator: a reader answers a missing
+    // `/ExtGState` by drawing the path opaque and a missing `/Shading` by
+    // painting nothing at all.
+    page.content
+        .push_str(&render::to_pdf_ops_where(pic, ox, oy, true));
+    for ramp in pic.shadings() {
+        page.shading(&ramp.name, &ramp.dictionary());
+    }
     // The operators just written may name a graphics state -- `/pgf@CA0.5 gs`
     // for `opacity=0.5` -- and a name resolves through the PAGE's `/ExtGState`
     // (§8.4.4). Emitting the operator without registering the dictionary is a
@@ -467,9 +783,8 @@ pub fn draw_on(
             continue;
         }
         let (ax, ay) = (ox + node.at.0 * pic.x_scale, oy + node.at.1 * pic.y_scale);
-        let (half_width, half_height) = node.half_size();
-        let (dx, dy) = node.anchor.offset();
-        let (cx, cy) = (ax - dx * half_width, ay - dy * half_height);
+        let (dx, dy) = node.border().anchor(node.anchor);
+        let (cx, cy) = (ax - dx, ay - dy);
         page.text_in(
             font.clone(),
             node.font_size,

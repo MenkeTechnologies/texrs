@@ -189,11 +189,76 @@ impl Anchor {
 }
 
 /// The shape a node is drawn as (§17.2).
+///
+/// `rectangle` and `circle` are PGF's own (`pgfmoduleshapes.code.tex`);
+/// `ellipse` and `diamond` come from `shapes.geometric`. A `\coordinate` is a
+/// shape too -- one with no extent, whose every anchor is the point itself,
+/// which is what makes `(a.north)` on a coordinate the coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shape {
     #[default]
     Rectangle,
     Circle,
+    Ellipse,
+    Diamond,
+    Coordinate,
+}
+
+impl Shape {
+    /// The shape a name asks for, if this knows it.
+    pub fn named(name: &str) -> Option<Shape> {
+        match name.trim() {
+            "rectangle" => Some(Shape::Rectangle),
+            "circle" => Some(Shape::Circle),
+            "ellipse" => Some(Shape::Ellipse),
+            "diamond" => Some(Shape::Diamond),
+            "coordinate" => Some(Shape::Coordinate),
+            _ => None,
+        }
+    }
+}
+
+/// Which of PGF's shadings a `\shade` paints (§15.5).
+///
+/// The three come out of `tikz.code.tex` lines 628-654, colour stop by colour
+/// stop; `shading::Ramp` is where those numbers are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shading {
+    /// `axis` -- a band of colour along one direction. `top color` and
+    /// `bottom color` set it at angle 0, `left color` and `right color` at 90.
+    #[default]
+    Axis,
+    /// `radial` -- rings out from the middle, `inner color` to `outer color`.
+    Radial,
+    /// `ball` -- the radial shading `ball color` lights from the upper left.
+    Ball,
+}
+
+/// A decoration, by the name `decoration={...}` gave it (§24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decoration {
+    /// `snake` -- a wave along the path
+    /// (`pgflibrarydecorations.pathmorphing.code.tex` line 162).
+    Snake,
+    /// `zigzag` -- straight lines up and down (line 31).
+    Zigzag,
+    /// `saw` -- a rising edge and a vertical drop (line 64).
+    Saw,
+    /// `brace` -- the curly brace `pathreplacing` draws (line 140).
+    Brace,
+}
+
+impl Decoration {
+    /// The decoration a name asks for.
+    pub fn named(name: &str) -> Option<Decoration> {
+        match name.trim() {
+            "snake" => Some(Decoration::Snake),
+            "zigzag" => Some(Decoration::Zigzag),
+            "saw" => Some(Decoration::Saw),
+            "brace" => Some(Decoration::Brace),
+            _ => None,
+        }
+    }
 }
 
 /// Everything an option list can say about how a path is painted.
@@ -223,12 +288,102 @@ pub struct Style {
     pub text: Rgb,
     pub anchor: Anchor,
     pub shape: Shape,
-    /// The space between a node's text and its border, in points (§17.2.2).
-    pub inner_sep: f64,
+    /// The space between a node's text and its border, in points, on each
+    /// axis -- `inner xsep` and `inner ysep` (§17.2.2).
+    pub inner_sep: (f64, f64),
+    /// `outer sep`, in points, or `None` for PGF's `.5\pgflinewidth`
+    /// (`pgfmoduleshapes.code.tex` lines 891-892), which depends on the line
+    /// width in force and so cannot be a number here.
+    pub outer_sep: Option<f64>,
     /// `minimum width` and `minimum height`, in points.
     pub minimum: (f64, f64),
+    /// `\pgfshapeaspect`, which the diamond's proportions come from
+    /// (`pgflibraryshapes.geometric.code.tex` line 213: initially 1).
+    pub aspect: f64,
     /// The size a node's text is set at, in points.
     pub font_size: f64,
+    /// `rounded corners=` -- the radius the corners of a path are cut back
+    /// and arced by, or zero for `sharp corners` (`tikz.code.tex` lines
+    /// 282-283, where the default is 4pt).
+    pub rounded: f64,
+    /// What a `\shade` paints, if any option asked for one.
+    pub shade: Option<Shade>,
+    /// `decorate` with a `decoration=`, and the two lengths every decoration
+    /// in `pathmorphing` is written in terms of.
+    pub decoration: Option<Decoration>,
+    /// `decorate`, which is the key that actually applies it -- a
+    /// `decoration=` on its own only names one.
+    pub decorate: bool,
+    pub segment_length: f64,
+    pub amplitude: f64,
+    /// `aspect`, which the brace's shoulder sits at.
+    pub decoration_aspect: f64,
+    /// `label=` -- the direction a second node goes in, in degrees, and what
+    /// it says.
+    pub label: Option<(f64, String)>,
+    /// How far a label stands off the border it labels (`label distance`,
+    /// initially 0pt).
+    pub label_distance: f64,
+    /// `pattern=` -- a tiling pattern nothing here writes, which turns the
+    /// fill OFF rather than filling the area with the fill colour.
+    pub pattern: bool,
+}
+
+/// What a `\shade` paints: which shading, turned how far, in what colours.
+///
+/// The colours are the ones `tikz.code.tex` lines 602-623 set, and the
+/// defaults on lines 635-654 -- a picture that writes `\shade` and no colour
+/// at all gets a grey-to-white axis shading, not nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shade {
+    pub kind: Shading,
+    /// `shading angle`, in degrees.
+    pub angle: f64,
+    /// `top color` and `bottom color`, which `left`/`right` set as well --
+    /// `left color` is the top of a shading turned through 90 degrees.
+    pub top: Rgb,
+    pub bottom: Rgb,
+    /// `middle color`, which every other axis key recomputes as the even mix
+    /// of the two ends (lines 604, 608, 615, 619) until one sets it outright.
+    pub middle: Rgb,
+    pub middle_set: bool,
+    pub inner: Rgb,
+    pub outer: Rgb,
+    pub ball: Rgb,
+}
+
+impl Default for Shade {
+    fn default() -> Shade {
+        // `tikz.code.tex` lines 635-637, 646, 653-654: gray, half gray, white
+        // for the axis; blue for a ball; gray to white for the radial.
+        let gray = (0.5, 0.5, 0.5);
+        let white = (1.0, 1.0, 1.0);
+        Shade {
+            kind: Shading::Axis,
+            angle: 0.0,
+            top: gray,
+            bottom: white,
+            middle: (0.75, 0.75, 0.75),
+            middle_set: false,
+            inner: gray,
+            outer: white,
+            ball: (0.0, 0.0, 1.0),
+        }
+    }
+}
+
+impl Shade {
+    /// Put the middle colour back half way between the ends, which is what
+    /// every one of the four axis keys does after setting its own end.
+    fn remix(&mut self) {
+        if !self.middle_set {
+            self.middle = (
+                (self.top.0 + self.bottom.0) / 2.0,
+                (self.top.1 + self.bottom.1) / 2.0,
+                (self.top.2 + self.bottom.2) / 2.0,
+            );
+        }
+    }
 }
 
 impl Default for Style {
@@ -254,9 +409,23 @@ impl Default for Style {
             shape: Shape::Rectangle,
             // `inner xsep/.initial = .3333em` -- pgfmoduleshapes line 888, at
             // the 10pt a picture in body text is set in.
-            inner_sep: 3.333,
+            inner_sep: (3.333, 3.333),
+            outer_sep: None,
             minimum: (0.0, 0.0),
+            // `pgflibraryshapes.geometric.code.tex` line 232.
+            aspect: 1.0,
             font_size: 10.0,
+            rounded: 0.0,
+            shade: None,
+            decoration: None,
+            decorate: false,
+            // `pgfmoduledecorations.code.tex` lines 41-44.
+            segment_length: 10.0,
+            amplitude: 2.5,
+            decoration_aspect: 0.5,
+            label: None,
+            label_distance: 0.0,
+            pattern: false,
         }
     }
 }
@@ -282,18 +451,30 @@ impl Style {
             None => (option, ""),
         };
         match key {
-            "draw" => {
-                self.draw = true;
-                if let Some(rgb) = colour(value, colours) {
-                    self.stroke = rgb;
+            // `\tikzoption{draw}` and `\tikzoption{fill}` (tikz.code.tex lines
+            // 507-532) each test their argument against `none` FIRST: `none`
+            // turns the mode off, and anything else -- a colour or nothing at
+            // all -- turns it on and sets the colour if one was named. So
+            // `\draw[fill=none]` is a path that is stroked and not filled, and
+            // reading `none` as "a colour I do not know" left it filled black.
+            "draw" => match value == "none" {
+                true => self.draw = false,
+                false => {
+                    self.draw = true;
+                    if let Some(rgb) = colour(value, colours) {
+                        self.stroke = rgb;
+                    }
                 }
-            }
-            "fill" => {
-                self.filled = true;
-                if let Some(rgb) = colour(value, colours) {
-                    self.fill = rgb;
+            },
+            "fill" => match value == "none" {
+                true => self.filled = false,
+                false => {
+                    self.filled = true;
+                    if let Some(rgb) = colour(value, colours) {
+                        self.fill = rgb;
+                    }
                 }
-            }
+            },
             "color" | "text" => {
                 if let Some(rgb) = colour(value, colours) {
                     self.stroke = rgb;
@@ -428,17 +609,119 @@ impl Style {
             "above right" => self.anchor = Anchor::SouthWest,
             "below left" => self.anchor = Anchor::NorthEast,
             "below right" => self.anchor = Anchor::NorthWest,
-            "rectangle" => self.shape = Shape::Rectangle,
-            "circle" => self.shape = Shape::Circle,
+            "rectangle" | "circle" | "ellipse" | "diamond" => {
+                if let Some(shape) = Shape::named(key) {
+                    self.shape = shape;
+                }
+            }
             "shape" => {
-                self.shape = match value {
-                    "circle" => Shape::Circle,
-                    _ => Shape::Rectangle,
+                if let Some(shape) = Shape::named(value) {
+                    self.shape = shape;
+                }
+            }
+            "aspect" => {
+                if let Some(ratio) = units::number(value) {
+                    self.aspect = ratio;
                 }
             }
             "inner sep" => {
                 if let Some(sep) = units::dimension(value) {
-                    self.inner_sep = sep;
+                    self.inner_sep = (sep, sep);
+                }
+            }
+            "inner xsep" => {
+                if let Some(sep) = units::dimension(value) {
+                    self.inner_sep.0 = sep;
+                }
+            }
+            "inner ysep" => {
+                if let Some(sep) = units::dimension(value) {
+                    self.inner_sep.1 = sep;
+                }
+            }
+            "outer sep" => self.outer_sep = units::dimension(value),
+            // `tikz.code.tex` lines 282-283: the radius defaults to 4pt, and
+            // `sharp corners` is the same key set back to nothing.
+            "rounded corners" => {
+                self.rounded = units::dimension(value).unwrap_or(4.0);
+            }
+            "sharp corners" => self.rounded = 0.0,
+            // The shading keys, `tikz.code.tex` lines 600-623. Each of them
+            // turns shading ON as well as setting its colour, which is what
+            // makes `\shade[left color=red]` a complete instruction.
+            "shading" => {
+                let shade = self.shade.get_or_insert_with(Shade::default);
+                shade.kind = match value {
+                    "radial" => Shading::Radial,
+                    "ball" => Shading::Ball,
+                    _ => Shading::Axis,
+                };
+            }
+            "shading angle" => {
+                if let Some(angle) = units::number(value) {
+                    self.shade.get_or_insert_with(Shade::default).angle = angle;
+                }
+            }
+            "top color" | "bottom color" | "left color" | "right color" | "middle color" => {
+                if let Some(rgb) = colour(value, colours) {
+                    let shade = self.shade.get_or_insert_with(Shade::default);
+                    shade.kind = Shading::Axis;
+                    match key {
+                        "top color" => shade.top = rgb,
+                        "bottom color" => shade.bottom = rgb,
+                        // `left color` sets the shading's TOP and turns the
+                        // whole thing through a right angle -- line 616.
+                        "left color" => {
+                            shade.top = rgb;
+                            shade.angle = 90.0;
+                        }
+                        "right color" => {
+                            shade.bottom = rgb;
+                            shade.angle = 90.0;
+                        }
+                        _ => {
+                            shade.middle = rgb;
+                            shade.middle_set = true;
+                        }
+                    }
+                    if matches!(key, "top color" | "bottom color") {
+                        shade.angle = 0.0;
+                    }
+                    shade.remix();
+                }
+            }
+            "inner color" | "outer color" => {
+                if let Some(rgb) = colour(value, colours) {
+                    let shade = self.shade.get_or_insert_with(Shade::default);
+                    shade.kind = Shading::Radial;
+                    match key {
+                        "inner color" => shade.inner = rgb,
+                        _ => shade.outer = rgb,
+                    }
+                }
+            }
+            "ball color" => {
+                if let Some(rgb) = colour(value, colours) {
+                    let shade = self.shade.get_or_insert_with(Shade::default);
+                    shade.kind = Shading::Ball;
+                    shade.ball = rgb;
+                }
+            }
+            // `decorate` says to apply one; `decoration=` says which, and
+            // carries the lengths it is drawn with.
+            "decorate" => self.decorate = true,
+            // A pattern is a tiling pattern in the page's `/Pattern`
+            // resource, painted through the `/Pattern` colour space (PDF
+            // 32000-1 S8.7.3), and nothing here writes one. Filling the path
+            // with the fill colour instead would put a solid block where the
+            // document asked for hatching, so the fill is turned OFF: the
+            // area comes out empty rather than black.
+            "pattern" | "pattern color" => self.pattern = true,
+            "decoration" => self.decoration(value),
+            "label" => self.label = label(value),
+            "label distance" => {
+                if let Some(distance) = units::dimension(value) {
+                    self.label_distance = distance;
                 }
             }
             "minimum size" => {
@@ -465,6 +748,46 @@ impl Style {
         }
     }
 
+    /// `decoration={snake, amplitude=2mm, segment length=3mm}` (§24.1).
+    ///
+    /// The keys are `pgfmoduledecorations.code.tex` lines 48-62; the name may
+    /// be written bare or as `name=`, which is what `\pgfdeclaredecoration`
+    /// registers it under either way.
+    fn decoration(&mut self, value: &str) {
+        for option in split(value) {
+            let (key, inner) = match option.split_once('=') {
+                Some((key, inner)) => (key.trim(), strip_braces(inner.trim())),
+                None => (option.trim(), ""),
+            };
+            match key {
+                "name" => self.decoration = Decoration::named(inner),
+                "amplitude" => {
+                    if let Some(length) = units::dimension(inner) {
+                        self.amplitude = length;
+                    }
+                }
+                "segment length" => {
+                    if let Some(length) = units::dimension(inner) {
+                        self.segment_length = length;
+                    }
+                }
+                "aspect" => {
+                    if let Some(ratio) = units::number(inner) {
+                        self.decoration_aspect = ratio;
+                    }
+                }
+                // A bare word is the decoration's name. One this does not
+                // know leaves the path undecorated rather than decorated with
+                // something else.
+                other => {
+                    if let Some(decoration) = Decoration::named(other) {
+                        self.decoration = Some(decoration);
+                    }
+                }
+            }
+        }
+    }
+
     /// A key with no `=`: an arrow spec, or a colour named on its own.
     fn bare(&mut self, key: &str, colours: &Colours) {
         if let Some((start, end)) = arrow_spec(key) {
@@ -480,6 +803,13 @@ impl Style {
             self.fill = rgb;
             self.text = rgb;
         }
+    }
+
+    /// The outer separation in force: what `outer sep=` said, or half the
+    /// line width, which is what `pgfmoduleshapes.code.tex` lines 891-892
+    /// make it when nothing says otherwise.
+    pub fn outer(&self) -> f64 {
+        self.outer_sep.unwrap_or(self.width / 2.0)
     }
 
     fn compose(&mut self, inner: Transform) {
@@ -509,6 +839,42 @@ pub fn arrow_spec(key: &str) -> Option<(Option<Tip>, Option<Tip>)> {
         false => Tip::named(name).map(Some),
     };
     Some((tip(start)?, tip(end)?))
+}
+
+/// `label=above:text`, `label=45:text` or `label=text` (§17.10.1).
+///
+/// The direction comes back in degrees, because that is what it is: PGF puts
+/// the label at the border in that direction and anchors it by the border
+/// point 180 degrees round from it, so `label=30:x` is a real placement and
+/// not one of eight. A placement this cannot read gives no label at all --
+/// putting the text in the middle of the node it was meant to sit outside is
+/// a picture that is drawn wrong rather than drawn short.
+fn label(value: &str) -> Option<(f64, String)> {
+    // `label={[red]above:text}` -- an option list of the label's own, which
+    // changes how it is painted and not where it goes.
+    let value = value.trim();
+    let value = match value.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map(|(_, tail)| tail).unwrap_or(rest),
+        None => value,
+    };
+    let (where_, text) = match value.split_once(':') {
+        Some((placement, text)) => (placement.trim(), text.trim()),
+        // `label=text` is `label=above:text` -- `\tikz@label@angle` starts at
+        // 90 (`tikz.code.tex`'s `label position` default).
+        None => ("above", value.trim()),
+    };
+    let degrees = match where_ {
+        "above" | "north" => 90.0,
+        "below" | "south" => 270.0,
+        "left" | "west" => 180.0,
+        "right" | "east" => 0.0,
+        "above left" | "north west" => 135.0,
+        "above right" | "north east" => 45.0,
+        "below left" | "south west" => 225.0,
+        "below right" | "south east" => 315.0,
+        other => units::number(other)?,
+    };
+    Some((degrees, strip_braces(text).to_string()))
 }
 
 /// `on 3pt off 3pt` as the alternating lengths PDF's `d` operator wants.

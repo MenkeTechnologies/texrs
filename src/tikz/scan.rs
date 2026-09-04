@@ -24,8 +24,10 @@ pub enum Action {
     FillDraw,
     /// `\clip`, which is `\path[clip]`.
     Clip,
-    /// `\shade` and `\shadedraw`. The path is read; no shading is painted.
+    /// `\shade`: the path is a clip and the shading is painted through it.
     Shade,
+    /// `\shadedraw`: the same, and the path is stroked over the top.
+    ShadeDraw,
     /// A standalone `\node` or `\coordinate`, which builds no path at all.
     Node,
 }
@@ -39,7 +41,8 @@ impl Action {
             "fill" => Some(Action::Fill),
             "filldraw" => Some(Action::FillDraw),
             "clip" => Some(Action::Clip),
-            "shade" | "shadedraw" => Some(Action::Shade),
+            "shade" => Some(Action::Shade),
+            "shadedraw" => Some(Action::ShadeDraw),
             "node" | "coordinate" => Some(Action::Node),
             _ => None,
         }

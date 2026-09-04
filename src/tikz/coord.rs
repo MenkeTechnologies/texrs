@@ -12,18 +12,70 @@
 //! twice, so it is divided by the picture's scale here and multiplied back
 //! there, which lands it where the paper says however the picture is scaled.
 
+use super::options::Anchor;
+use super::shapes::Border;
 use super::units::{self, Length};
 use std::collections::BTreeMap;
 
 /// A point in the picture's own units.
 pub type Point = (f64, f64);
 
+/// A name and what it stands for: where the node is and what shape it is.
+///
+/// A name is not a point. `(a)` is the node's centre, but `(a.north)` is a
+/// point on its BORDER, and the border is only known once the node's text has
+/// been measured -- which is why this carries the shape and not just the
+/// centre. Answering `(a.north)` with the centre draws a line from the middle
+/// of the box, under the text, which is a picture drawn wrongly rather than
+/// drawn short.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Placed {
+    /// The node's centre, in the picture's own units.
+    pub at: Point,
+    /// Its border, in POINTS -- a node is sized by its text and does not
+    /// shrink with `x=`/`y=`, so the two are in different units and the
+    /// division happens where they are added.
+    pub border: Border,
+}
+
+impl Placed {
+    /// A name for a point with no extent, which is what `\coordinate` makes.
+    pub fn point(at: Point) -> Placed {
+        Placed {
+            at,
+            border: Border::default(),
+        }
+    }
+
+    /// How far the anchor `spec` is from this node's centre, in points.
+    ///
+    /// The nine names, `mid` and `base`, and an angle -- `(a.30)` is the point
+    /// on the border 30 degrees round from the centre, which PGF answers with
+    /// `\anchorborder`.
+    pub fn offset(&self, spec: &str) -> Point {
+        let spec = spec.trim();
+        match Anchor::named(spec) {
+            Some(anchor) => self.border.anchor(anchor),
+            // `mid` and `base` are on the TEXT's baseline rather than the
+            // border, and this does not carry the baseline: the centre is the
+            // nearest point it can name for either.
+            None if matches!(spec, "mid" | "base" | "text") => (0.0, 0.0),
+            None => match units::number(spec) {
+                Some(degrees) => self.border.border_at(degrees),
+                // A name nothing here knows -- `mid west`, a shape's own extra
+                // anchor -- is the centre, which is where the bare name points.
+                None => (0.0, 0.0),
+            },
+        }
+    }
+}
+
 /// What a coordinate is read against: the points a name has been given, the
 /// picture's scale, and where the path currently is.
 #[derive(Debug, Clone, Default)]
 pub struct Frame {
     /// `\coordinate (a) at ...` and `\node (a)`, in picture units.
-    pub named: BTreeMap<String, Point>,
+    pub named: BTreeMap<String, Placed>,
     /// The point the path last reached.
     pub current: Point,
     /// What `+(...)` and `++(...)` are measured from (§13.4).
@@ -50,9 +102,16 @@ impl Frame {
         match length.points {
             // A degenerate scale would divide by zero and put the point at
             // infinity; the number itself is the least wrong answer.
-            Some(points) if scale != 0.0 => points / scale,
-            Some(points) => points,
+            Some(points) => self.unscale(points, scale),
             None => length.value,
+        }
+    }
+
+    /// A length in points, as many of the picture's own units.
+    pub fn unscale(&self, points: f64, scale: f64) -> f64 {
+        match scale != 0.0 {
+            true => points / scale,
+            false => points,
         }
     }
 }
@@ -99,11 +158,20 @@ impl Coord {
                 )
             }
             Coord::Named(name, anchor) => {
-                let at = frame.named.get(name).copied().unwrap_or((0.0, 0.0));
+                let placed = frame.named.get(name).copied().unwrap_or_default();
                 match anchor {
-                    // An anchor on a name whose node this frame does not carry
-                    // is the node's centre, which is where the name points.
-                    Some(_) | None => at,
+                    // The offset is in points and the centre is in picture
+                    // units, so the offset is divided by the picture's scale
+                    // on the way in -- the same trip a `1cm` in a coordinate
+                    // makes, and for the same reason.
+                    Some(anchor) => {
+                        let (dx, dy) = placed.offset(anchor);
+                        (
+                            placed.at.0 + frame.unscale(dx, frame.x_scale),
+                            placed.at.1 + frame.unscale(dy, frame.y_scale),
+                        )
+                    }
+                    None => placed.at,
                 }
             }
             Coord::Sum(terms) => terms.iter().fold((0.0, 0.0), |(x, y), (factor, term)| {
@@ -130,24 +198,24 @@ pub fn parse(inside: &str) -> Option<Coord> {
     }
     // A colon that is not inside parentheses separates an angle from a radius.
     if let Some(at) = top_level(text, ':') {
-        let angle = units::number(&text[..at])?;
+        let angle = component(&text[..at])?.value;
         let (rx, ry) = radii(&text[at + 1..])?;
         return Some(Coord::Polar(angle, rx, ry));
     }
     if let Some(at) = top_level(text, ',') {
-        let (x, rest) = units::scan(&text[..at])?;
-        let (y, tail) = units::scan(&text[at + 1..])?;
-        if !rest.trim().is_empty() || !tail.trim().is_empty() {
-            return None;
-        }
+        let x = component(&text[..at])?;
+        let y = component(&text[at + 1..])?;
         return Some(Coord::Cartesian(x, y));
     }
     if text.is_empty() {
         return None;
     }
     // Anything left that is not a number is a name, with an optional anchor.
+    // The anchor may be a number -- `(a.30)` is the border 30 degrees round --
+    // so what tells a name from a decimal is the part BEFORE the dot: `0.5` is
+    // a number and `a.30` is a node with an angle on it.
     match text.split_once('.') {
-        Some((name, anchor)) if !anchor.chars().next().is_some_and(|c| c.is_ascii_digit()) => Some(
+        Some((name, anchor)) if !name.trim().is_empty() && units::number(name).is_none() => Some(
             Coord::Named(name.trim().to_string(), Some(anchor.trim().to_string())),
         ),
         _ => Some(Coord::Named(text.to_string(), None)),
@@ -156,18 +224,27 @@ pub fn parse(inside: &str) -> Option<Coord> {
 
 /// `2cm` on its own, or `2cm and 1cm` for an ellipse's two radii.
 fn radii(text: &str) -> Option<(Length, Length)> {
-    let (first, rest) = units::scan(text)?;
-    match rest.trim().strip_prefix("and") {
-        Some(second) => {
-            let (second, tail) = units::scan(second)?;
-            match tail.trim().is_empty() {
-                true => Some((first, second)),
-                false => None,
-            }
+    match text.split_once("and") {
+        Some((first, second)) => Some((component(first)?, component(second)?)),
+        None => {
+            let both = component(text)?;
+            Some((both, both))
         }
-        None if rest.trim().is_empty() => Some((first, first)),
-        None => None,
     }
+}
+
+/// One component of a coordinate: a number, a length, or the arithmetic PGF
+/// would have handed to `\pgfmathparse` (§89).
+///
+/// `(2*3, sqrt(9))` is a coordinate TikZ draws at (6,3); reading only its
+/// literal numbers leaves it unreadable and drops the path it was on.
+fn component(text: &str) -> Option<Length> {
+    if let Some((length, rest)) = units::scan(text) {
+        if rest.trim().is_empty() {
+            return Some(length);
+        }
+    }
+    super::math::length(text)
 }
 
 /// The `calc` library's arithmetic, as far as a picture uses it (§13.5).
@@ -247,8 +324,31 @@ mod tests {
 
     fn frame() -> Frame {
         let mut frame = Frame::new(1.0, 1.0);
-        frame.named.insert("a".to_string(), (1.0, 1.0));
-        frame.named.insert("b".to_string(), (3.0, 5.0));
+        frame
+            .named
+            .insert("a".to_string(), Placed::point((1.0, 1.0)));
+        frame
+            .named
+            .insert("b".to_string(), Placed::point((3.0, 5.0)));
+        frame
+    }
+
+    /// A frame with a node in it that has a border to speak of.
+    fn boxed() -> Frame {
+        let mut frame = frame();
+        frame.named.insert(
+            "n".to_string(),
+            Placed {
+                at: (0.0, 0.0),
+                border: Border::of(
+                    super::super::options::Shape::Rectangle,
+                    (4.0, 2.0),
+                    (0.0, 0.0),
+                    0.0,
+                    1.0,
+                ),
+            },
+        );
         frame
     }
 
@@ -266,9 +366,24 @@ mod tests {
     #[test]
     fn a_name_is_the_point_it_was_given() {
         assert_eq!(parse("a").unwrap().resolve(&frame()), (1.0, 1.0));
-        // `(a.north)` is the node's own anchor; without the node it is the
-        // point the name stands for, which is where the name is.
+        // A `\coordinate` has no extent, so every one of its anchors IS the
+        // point -- which is the one case where the centre is the right answer.
         assert_eq!(parse("a.north").unwrap().resolve(&frame()), (1.0, 1.0));
+    }
+
+    #[test]
+    fn an_anchor_is_on_the_border_and_not_in_the_middle() {
+        // A node four wide and two high either side of its centre: `north` is
+        // two up, `east` four across, and 45 degrees leaves by the top,
+        // because the box is wider than it is tall.
+        let frame = boxed();
+        assert_eq!(parse("n.north").unwrap().resolve(&frame), (0.0, 2.0));
+        assert_eq!(parse("n.east").unwrap().resolve(&frame), (4.0, 0.0));
+        assert_eq!(parse("n.south west").unwrap().resolve(&frame), (-4.0, -2.0));
+        let (x, y) = parse("n.45").unwrap().resolve(&frame);
+        assert!((x - 2.0).abs() < 1e-9 && (y - 2.0).abs() < 1e-9, "{x} {y}");
+        // And the bare name is still the centre.
+        assert_eq!(parse("n").unwrap().resolve(&frame), (0.0, 0.0));
     }
 
     #[test]

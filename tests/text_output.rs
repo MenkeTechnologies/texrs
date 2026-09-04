@@ -408,3 +408,40 @@ fn a_label_leaves_neither_its_key_nor_its_marker_in_the_words() {
         "control characters reached the reader: {leaked:?}"
     );
 }
+
+/// A picture has no words, and none of its source is any.
+///
+/// The picture travels the text stream as an encoded marker span so the PDF
+/// path can draw it; a reader asking for the document's TEXT must get the
+/// prose either side and nothing from between them. Read as text before the
+/// span was recognised, a single picture put several hundred characters of
+/// base64 -- or, before that, the picture's own TikZ source -- into the middle
+/// of the paragraph.
+#[test]
+fn a_picture_contributes_no_words_and_leaves_no_marker() {
+    let src = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n\
+               Before.\n\\begin{tikzpicture}\n\
+               \\draw[thick] (0,0) -- (3,0) -- (3,2) -- cycle;\n\
+               \\node at (1,1) {Inside};\n\
+               \\end{tikzpicture}\n\
+               After.\n\\end{document}\n";
+    let got = text(src);
+    assert!(
+        got.contains("Before.") && got.contains("After."),
+        "the prose either side survives: {got:?}"
+    );
+    for absent in ["draw", "cycle", "Inside", "tikzpicture"] {
+        assert!(
+            !got.contains(absent),
+            "{absent:?} is picture source, not text: {got:?}"
+        );
+    }
+    let leaked: Vec<char> = got
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n')
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "control characters reached the reader: {leaked:?}"
+    );
+}

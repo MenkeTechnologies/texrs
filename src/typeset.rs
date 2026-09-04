@@ -6,20 +6,27 @@
 //! This is the join: measure each character in a real font, break the text into
 //! lines at a measure, stack the lines down a page, and ship the result.
 //!
-//! The PDF path breaks a paragraph the way TeX does: `linebreak::break_paragraph`
+//! Both paths break a paragraph the way TeX does: `linebreak::break_paragraph`
 //! minimises total badness over every feasible sequence of breakpoints
-//! (§813-§890) and hyphenates with Knuth's own patterns. The DVI path still
-//! takes the first break that fits, because its driver cannot set a line to a
-//! width and a breaker that prices glue has nothing to hand its answer to.
+//! (§813-§890) and hyphenates with Knuth's own patterns. The DVI path took the
+//! first break that fits until it could SHIP a box tree, because a breaker
+//! that prices glue asks for some lines to be shrunk and a writer that set
+//! runs of characters at their natural widths had nowhere to put that answer.
+//! It builds a `\vbox` of `\hbox`es now and hands it to `shipout::ship_out`
+//! (§619-§640): `hpack` distributes the slack (§658) and `hlist_out` writes
+//! each piece of glue at the width it was set to (§625), so a full line
+//! reaches the measure in the file.
 //!
-//! What is still NOT `tex.web`'s stomach, on either path: no page-breaking by
-//! penalties, no maths, no boxes a document can nest. A paragraph set here and
-//! the same paragraph set by tex will not agree line for line.
+//! What is still NOT `tex.web`'s stomach here: pages are stacked by line count
+//! rather than broken by penalty on the DVI path, there is one type size, and
+//! a document's own boxes are not nested. A paragraph set here and the same
+//! paragraph set by tex will not agree line for line.
 //!
 //! It is a page you can open, which is the difference between a document that
 //! produces nothing and one that produces something imperfect.
 
 use crate::dvi::Writer;
+use crate::node::{BoxNode, CharNode, GlueNode, Node, Scaled};
 use crate::tfm::Tfm;
 
 /// DVI's unit: 1 sp, of which there are 65536 to the printer's point.
@@ -191,30 +198,32 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
     // this path can answer it, though it has neither a contents nor a page
     // numbering to answer a `\pageref` with. See `REF`.
     let text = refs_numbered(text);
-    let lines = break_lines_chain(&text, chain, layout);
+    let lines = broken_lines(&text, chain, layout);
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
     for (page, chunk) in lines.chunks(per_page).enumerate() {
         let counts = [page as i32 + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        w.begin_page(counts);
-        let mut current = usize::MAX;
-        let mut baseline = layout.margin + layout.leading;
-        for line in chunk {
-            // Each line starts at the left margin, on its own baseline. DVI is
-            // relative, so the position is pushed and popped rather than
-            // tracked: a driver reading it never has to know where the last
-            // line ended.
-            w.push();
-            w.down((baseline * SP) as i32);
-            w.right((layout.margin * SP) as i32);
-            set_line(&mut w, line, chain, layout, &mut current);
-            w.pop();
-            baseline += layout.leading;
-        }
-        set_footline(&mut w, page + 1, chain, layout, &mut current);
-        w.end_page();
+        // The page is a BOX now, and `shipout` draws it: every position in the
+        // file below comes out of `hpack`/`vpack`'s arithmetic rather than
+        // being computed here. That is what lets a full line be set to the
+        // measure -- its glue is written at the width `hpack` set it to
+        // (`tex.web` §625) -- which is the reason this path could not use a
+        // breaker that prices glue before.
+        let page_box = page_box(chunk, page + 1, chain, layout);
+        crate::shipout::ship_out(
+            &mut w,
+            &page_box,
+            counts,
+            sp(layout.margin),
+            sp(layout.margin),
+        );
     }
     w.finish()
+}
+
+/// Points to scaled points, which is the unit every node carries (§101).
+fn sp(points: f64) -> Scaled {
+    (points * SP) as Scaled
 }
 
 /// `\baselineskip` for `plain.tex`'s footline: 24pt below the page body.
@@ -234,47 +243,116 @@ const FOOTLINE_SKIP: f64 = 24.0;
 /// between the two `\hss` glues (`tex.web` §658, §625), which is what puts the
 /// odd scaled point on one side rather than losing it. The same code sets
 /// every other box, so the folio is centred the way `\centerline` is.
-fn set_footline(
-    w: &mut Writer,
-    folio: usize,
-    chain: &FontChain,
-    layout: &Layout,
-    current: &mut usize,
-) {
-    use crate::node::{CharNode, GlueNode, Node};
-    let folio = folio.to_string();
-    let sp = |points: f64| (points * SP) as i64;
+fn footline_box(folio: usize, chain: &FontChain, layout: &Layout) -> BoxNode {
     let mut list = vec![Node::Glue(GlueNode::new(crate::box_::fill::ss()))];
-    for ch in folio.chars() {
-        list.push(Node::Char(CharNode {
-            font: 0,
-            character: ch,
-            width: sp(chain.width(ch, layout.size)),
-            height: 0,
-            depth: 0,
-        }));
-    }
+    list.extend(line_hlist(&folio.to_string(), chain, layout));
     list.push(Node::Glue(GlueNode::new(crate::box_::fill::ss())));
-    let line = crate::pack::hpack(
+    crate::pack::hpack(
         list,
         crate::pack::Spec::Exactly(sp(layout.measure)),
         crate::pack::Tolerances::plain(),
         None,
-    );
-    let lead = crate::pack::glue_widths(&line.node)
-        .first()
-        .copied()
-        .unwrap_or(0) as f64
-        / SP;
-    w.push();
-    w.down(((layout.margin + layout.height + FOOTLINE_SKIP) * SP) as i32);
-    w.right(((layout.margin + lead) * SP) as i32);
-    set_line(w, &folio, chain, layout, current);
-    w.pop();
+    )
+    .node
 }
 
-/// Put one line's characters down, switching fonts as the chain requires.
-fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, current: &mut usize) {
+/// One page as a `\vbox`: the lines, the glue between their baselines, and the
+/// folio at the foot.
+///
+/// `plain.tex`'s output routine ships `\vbox{\makeheadline\pagebody
+/// \makefootline}`, and this is that box with no headline. Everything about
+/// where the ink lands is in the box's own dimensions from here on -- nothing
+/// downstream computes a position.
+fn page_box(lines: &[BrokenLine], folio: usize, chain: &FontChain, layout: &Layout) -> BoxNode {
+    let mut list: Vec<Node> = Vec::with_capacity(lines.len() * 2 + 2);
+    // §679: `prev_depth` is `ignore_depth` before the first box on a list.
+    let mut prev_depth = crate::node::IGNORE_DEPTH;
+    // Where `vlist_out` will be, measured from the top of the text.
+    let mut at: Scaled = 0;
+    for line in lines {
+        let b = line_box(line, chain, layout);
+        let skip = interline(prev_depth, b.height, layout);
+        at += skip + b.height + b.depth;
+        prev_depth = b.depth;
+        list.push(Node::Kern {
+            width: skip,
+            explicit: false,
+        });
+        list.push(Node::Box(b));
+    }
+    let foot = footline_box(folio, chain, layout);
+    // `\makefootline` is `\baselineskip24pt\line{\the\footline}`, so the folio's
+    // baseline is 24pt below the bottom of the text.
+    let drop = sp(layout.height + FOOTLINE_SKIP) - at - foot.height;
+    list.push(Node::Kern {
+        width: drop,
+        explicit: false,
+    });
+    list.push(Node::Box(foot));
+    crate::pack::vpack(
+        list,
+        crate::pack::NATURAL,
+        crate::pack::Tolerances::plain(),
+    )
+    .node
+}
+
+/// §679: the glue that separates two baselines.
+///
+/// `\baselineskip` less the depth of what is above and the height of what is
+/// below, so consecutive baselines are one `\baselineskip` apart however tall
+/// the lines are -- and `\lineskip` instead when two lines would otherwise
+/// touch.
+fn interline(prev_depth: Scaled, height: Scaled, layout: &Layout) -> Scaled {
+    // plain.tex: `\lineskiplimit=0pt`, `\lineskip=1pt`.
+    const LINE_SKIP_LIMIT: Scaled = 0;
+    // Before the first box, `prev_depth` is `ignore_depth` and TeX puts
+    // `\topskip` in rather than interline glue. This path sets `\topskip` to
+    // `\baselineskip`, which is what puts the first baseline one leading below
+    // the top margin.
+    let above = match prev_depth <= crate::node::IGNORE_DEPTH {
+        true => 0,
+        false => prev_depth,
+    };
+    let d = sp(layout.leading) - above - height;
+    match d < LINE_SKIP_LIMIT {
+        true => sp(1.0),
+        false => d,
+    }
+}
+
+/// One line as an `\hbox`.
+///
+/// A full line is set TO the measure, so `hpack` distributes the slack over its
+/// interword glue and `hlist_out` writes each piece at the width it was set to
+/// (§625). The line that ends a paragraph is left at its natural width, which
+/// is what `\parfillskip` amounts to here (§816).
+fn line_box(line: &BrokenLine, chain: &FontChain, layout: &Layout) -> BoxNode {
+    let spec = match line.justify {
+        true => crate::pack::Spec::Exactly(sp(layout.measure)),
+        false => crate::pack::NATURAL,
+    };
+    crate::pack::hpack(
+        line_hlist(&line.text, chain, layout),
+        spec,
+        crate::pack::Tolerances::plain(),
+        None,
+    )
+    .node
+}
+
+/// One line's horizontal list: `tex.web` §1030-§1041's main loop, over text
+/// that has already been broken.
+///
+/// Ordinary characters are gathered rather than turned into nodes one at a
+/// time: a ligature is a fact about two NEIGHBOURING characters, so the run has
+/// to be whole before any of it becomes a node. Everything below that is not an
+/// ordinary character ends the run before it does its own work, which is also
+/// what §545 requires -- a ligature never reaches across a `\special`, a font
+/// change or a piece of glue.
+fn line_hlist(line: &str, chain: &FontChain, layout: &Layout) -> Vec<Node> {
+    let mut out: Vec<Node> = Vec::new();
+    let mut pending = String::new();
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         // Colour arrives in the text stream as U+0001 r,g,b U+0002 ... U+0003,
@@ -282,6 +360,7 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         // its own; a driver is told through a `\special`, and this pair is the
         // one dvipdfmx and dvips both read.
         if ch == '\u{1}' {
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
             let mut spec = String::new();
             for c in chars.by_ref() {
                 if c == '\u{2}' {
@@ -291,15 +370,16 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
             }
             let parts: Vec<&str> = spec.split(',').collect();
             if parts.len() == 3 {
-                w.special(&format!(
+                out.push(Node::Whatsit(format!(
                     "color push rgb {} {} {}",
                     parts[0], parts[1], parts[2]
-                ));
+                )));
             }
             continue;
         }
         if ch == '\u{3}' {
-            w.special("color pop");
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
+            out.push(Node::Whatsit("color pop".to_string()));
             continue;
         }
         // A face marker names a font this path does not have: the chain is
@@ -307,12 +387,16 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         // not by what the document asked for. Skipping it is not just a
         // refusal to honour it -- the code character after U+000E is a LETTER,
         // so leaving the pair in the stream sets an `m` in the middle of every
-        // \texttt in the book.
+        // \texttt in the book. It ends the run as well, because `tex` sets the
+        // two sides of a face change in different fonts and §545's implicit
+        // boundary stands between them.
         if ch == FACE_PUSH {
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
             let _ = chars.next();
             continue;
         }
         if ch == FACE_POP {
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
             continue;
         }
         // The list indent names a position this path does not honour -- it sets
@@ -320,6 +404,7 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         // ordinary character, so leaving the pair in would put a `1` in front
         // of every list item.
         if ch == LIST_INDENT {
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
             let _ = chars.next();
             continue;
         }
@@ -329,6 +414,7 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
         // SET it: a pandoc label is a sentence of hyphenated words, and every
         // heading in every book carries one.
         if ch == REF {
+            append_carried(&mut out, &std::mem::take(&mut pending), chain, layout);
             for c in chars.by_ref() {
                 if c == REF {
                     break;
@@ -336,59 +422,93 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
             }
             continue;
         }
-        // An interword space is glue (`tex.web` §1041), and glue in a set hlist
-        // is a MOVEMENT rather than a glyph (§625: `cur_h:=cur_h+rule_wd`).
-        // `tex` writes no character for a space, so a DVI that sets one differs
-        // from tex's in the very first word of every document -- and the glyph
-        // it sets is cmr10's code 32, which in OT1 is a Polish suppressed-l.
-        if ch == ' ' {
-            let space = chain.fonts[0].tfm.params.space;
-            w.right((space * layout.size * SP) as i32);
-            continue;
-        }
-        if let Some((f, slot)) = chain.resolve(ch) {
-            // A font switch is an op in the file, so it is emitted only when the
-            // font actually changes -- one per run of characters, not one per
-            // character.
-            if *current != f {
-                w.font(f as u32);
-                *current = f;
+        pending.push(ch);
+    }
+    append_carried(&mut out, &pending, chain, layout);
+    out
+}
+
+/// Turn a stretch of ordinary text into nodes: the characters its fonts
+/// actually set, the kerns between them, and glue for each interword space.
+///
+/// The translation from what the document holds to what the page carries is
+/// `FontChain::carried` -- §1034-§1040's main loop -- so this builds what
+/// `FontChain::width_of` measured rather than a second reading of the string.
+fn append_carried(out: &mut Vec<Node>, text: &str, chain: &FontChain, layout: &Layout) {
+    for item in chain.carried(text.chars()) {
+        match item {
+            // An interword space is GLUE (§1041), so what reaches the file is a
+            // movement rather than a glyph (§625). `tex` writes no character
+            // for a space, and the glyph cmr10 has at code 32 is a Polish
+            // suppressed-l, so a DVI that set one differed from tex's in the
+            // very first word of every document.
+            Carried::Space => out.push(Node::Glue(GlueNode::new(interword_glue(chain, layout)))),
+            Carried::Set { font, sets } => {
+                for set in sets {
+                    match set {
+                        crate::tfm::Set::Char(code) => {
+                            let m = chain.fonts[font].tfm.char(code).unwrap_or_default();
+                            out.push(Node::Char(CharNode {
+                                font,
+                                // The DVI file names a font SLOT, and this is
+                                // the slot the chain resolved.
+                                character: char::from(code),
+                                width: sp(m.width * layout.size),
+                                height: sp(m.height * layout.size),
+                                depth: sp(m.depth * layout.size),
+                            }));
+                        }
+                        // §625 again: a kern is a movement, not a glyph.
+                        crate::tfm::Set::Kern(by) => out.push(Node::Kern {
+                            width: sp(by * layout.size),
+                            explicit: false,
+                        }),
+                    }
+                }
             }
-            let width = chain.fonts[f]
-                .tfm
-                .char(slot)
-                .map(|m| m.width)
-                .unwrap_or(0.0);
-            w.set_char(u32::from(slot), (width * layout.size * SP) as i32);
-            continue;
-        }
-        // No font in the chain has it. The stand-in is set in the primary font
-        // rather than dropped: a glyph that vanishes takes the meaning of the
-        // line with it.
-        let Some(text) = FontChain::approximate(ch) else {
-            continue;
-        };
-        if *current != 0 {
-            w.font(0);
-            *current = 0;
-        }
-        for b in text.bytes() {
-            let width = chain.fonts[0].tfm.char(b).map(|m| m.width).unwrap_or(0.0);
-            w.set_char(u32::from(b), (width * layout.size * SP) as i32);
         }
     }
 }
 
+/// §1042: an interword space is the font's own `\fontdimen2`, stretching by
+/// `\fontdimen3` and shrinking by `\fontdimen4`.
+///
+/// Each font's own, not cmr10's fractions applied to everything: those three
+/// numbers are why a monospaced face does not stretch and a text face does.
+fn interword_glue(chain: &FontChain, layout: &Layout) -> crate::glue::Glue {
+    let p = chain.fonts[0].tfm.params;
+    crate::glue::Glue {
+        natural: sp(p.space * layout.size),
+        stretch: sp(p.stretch * layout.size),
+        stretch_order: 0,
+        shrink: sp(p.shrink * layout.size),
+        shrink_order: 0,
+    }
+}
+
+/// One line of the DVI path, and what is to be done with it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BrokenLine {
+    pub text: String,
+    /// Whether the line is set TO the measure. A FULL line is: `hpack`
+    /// distributes the slack over its interword glue and the shipper writes
+    /// each piece at the width it was set to (`tex.web` §625). The line that
+    /// ends a paragraph is not -- that is what `\parfillskip` amounts to
+    /// (§816) -- and neither is a line the author broke.
+    pub justify: bool,
+}
+
 /// Break `text` into lines that fit the measure, for the DVI path.
 ///
-/// First fit, not best fit: a word is added while it still fits and starts a new
-/// line when it does not. `tex.web` §813 does far better -- it considers every
-/// feasible set of breakpoints for the whole paragraph at once -- and the PDF
-/// path takes that route through `linebreak::break_paragraph`. This one cannot:
-/// a breaker that prices lines over glue asks for some of them to be SHRUNK,
-/// and the DVI writer here has no way to set a run to a width, so its answer
-/// would be drawn past the measure. The difference is visible as a raggeder
-/// right edge in a `.dvi` than in a `.pdf` of the same document.
+/// The same breaker the PDF path uses: `linebreak::break_paragraph` minimises
+/// the total demerits of the WHOLE paragraph over every feasible set of
+/// breakpoints (§813-§890) and hyphenates with Knuth's patterns (§891). This
+/// path took the first break that fitted until there was a node-list shipper,
+/// because a breaker that prices glue asks for some lines to be SHRUNK and
+/// there was nowhere to put that answer: the writer set a run of characters at
+/// their natural widths and a shrunk line drew out past the measure. `hpack`
+/// sets the glue now and `hlist_out` writes it at the width it was set to, so
+/// the answer has somewhere to go.
 pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
     let chain = FontChain {
         fonts: vec![Loaded {
@@ -402,6 +522,14 @@ pub fn break_lines(text: &str, font: &Tfm, layout: &Layout) -> Vec<String> {
 
 /// The same, measuring through a font chain.
 pub fn break_lines_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<String> {
+    broken_lines(text, chain, layout)
+        .into_iter()
+        .map(|line| line.text)
+        .collect()
+}
+
+/// The same again, keeping what the shipper needs to know about each line.
+pub fn broken_lines(text: &str, chain: &FontChain, layout: &Layout) -> Vec<BrokenLine> {
     use rayon::prelude::*;
     // Paragraph-parallel. A paragraph is broken independently of its
     // neighbours: the measure is the same for all of them, and no state crosses
@@ -418,51 +546,101 @@ pub fn break_lines_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<
         })
 }
 
-/// One paragraph, first-fit.
-fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<String> {
+/// One paragraph, by total demerits (§813).
+fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<BrokenLine> {
+    // A line the author broke is set as it stands: a code listing is what the
+    // program is, and a table's rows are rows. Neither is stretched to the
+    // measure, and neither is offered to the breaker.
+    let fixed = |lines: Vec<String>| -> Vec<BrokenLine> {
+        lines
+            .into_iter()
+            .map(|text| BrokenLine {
+                text,
+                justify: false,
+            })
+            .collect()
+    };
+    // A picture sets nothing on this path, and says so by setting nothing.
+    //
+    // DVI has no path model: a drawing reaches a driver as a `\special`, which
+    // every driver reads differently and which dvipdfmx answers by running
+    // PostScript. Emitting the picture's source as characters would set several
+    // hundred glyphs of TikZ where the document asked for a diagram, and
+    // emitting a rule in its place would draw something the document does not
+    // contain. So `--dvi` leaves the room empty and draws nothing: what a
+    // picture comes to there is the PDF path, and this refuses rather than
+    // guesses. See `PICTURE`.
+    if is_picture_para(para) {
+        return Vec::new();
+    }
     // A code listing is already broken, by the author. Its lines are what the
     // program is; the measure has no say in where they end.
     if let Some(code) = listing_lines(para) {
-        return code.map(str::to_string).collect();
+        return fixed(code.map(str::to_string).collect());
     }
     // A table's rows are lines too. This path has no column measure of its own
     // and no way to draw a rule, so the cells are spaced and the rules left
     // out -- but the rows stop running into one another, and no table mark
-    // reaches `set_line` to be drawn as whatever glyph the font has in that
+    // reaches the shipper to be drawn as whatever glyph the font has in that
     // slot.
     if para.contains(TABLE_ROW) {
-        return table_entries(para)
-            .into_iter()
-            .filter_map(|entry| match entry {
-                Entry::Row(cells) => Some(cells.join("  ")),
-                Entry::Rule(_) => None,
-            })
-            .collect();
+        return fixed(
+            table_entries(para)
+                .into_iter()
+                .filter_map(|entry| match entry {
+                    Entry::Row(cells) => Some(cells.join("  ")),
+                    Entry::Rule(_) => None,
+                })
+                .collect(),
+        );
     }
-    let space = chain.width(' ', layout.size);
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    let mut width = 0.0f64;
+
+    // Everything else goes through §813's breaker. The pieces are the same
+    // ones the PDF path measures -- a word, or the fragments a hyphenation
+    // point cuts it into -- measured through this chain rather than through a
+    // face, because this path has one face.
+    let width_of = |text: &str, _face: Face| chain.width_of(text, layout.size);
+    let mut colours: Vec<Spec> = Vec::new();
+    let mut faces: Vec<Face> = Vec::new();
+    let mut pieces: Vec<crate::linebreak::Piece> = Vec::new();
     for word in words_carrying_refs(para) {
-        let ww = chain.width_of(&word, layout.size);
-        let need = match line.is_empty() {
-            true => ww,
-            false => width + space + ww,
-        };
-        if !line.is_empty() && need > layout.measure {
-            lines.push(std::mem::take(&mut line));
-            width = ww;
-            line.push_str(&word);
-            continue;
+        if let Some(previous) = pieces.last_mut() {
+            previous.after = crate::linebreak::After::Glue(chain.width(' ', layout.size));
         }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(&word);
-        width = need;
+        measure_word(&word, &mut colours, &mut faces, &width_of, &mut pieces);
     }
-    if !line.is_empty() {
-        lines.push(line);
+    let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure);
+
+    let mut lines = Vec::with_capacity(breaks.len());
+    let mut from = 0usize;
+    for (number, end) in breaks.iter().enumerate() {
+        let mut text = String::new();
+        for (offset, piece) in pieces[from..*end].iter().enumerate() {
+            // The pieces of one word run together; two words are joined by the
+            // space that stood between them.
+            if offset > 0
+                && matches!(
+                    pieces[from + offset - 1].after,
+                    crate::linebreak::After::Glue(_)
+                )
+            {
+                text.push(' ');
+            }
+            text.push_str(&piece.text);
+        }
+        // A line ending inside a word carries the hyphen the word did not
+        // write. One ending after a hyphen the AUTHOR wrote already has it.
+        if matches!(
+            pieces[*end - 1].after,
+            crate::linebreak::After::Discretionary(_)
+        ) {
+            text.push('-');
+        }
+        from = *end;
+        lines.push(BrokenLine {
+            justify: number + 1 != breaks.len(),
+            text,
+        });
     }
     lines
 }
@@ -923,6 +1101,7 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut in_spec = false;
     let mut face_code = false;
     let mut in_ref = false;
+    let mut in_picture = false;
     text.chars().filter(move |&ch| match ch {
         // A cross-reference span -- the marker, its code, the label key, and
         // the marker again -- is a question the typesetter answers by
@@ -934,6 +1113,16 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
             false
         }
         _ if in_ref => false,
+        // A picture span is the same shape and is measured the same way: it is
+        // a block DRAWN on the page, not a run of characters set into a line,
+        // so nothing in it -- neither the marker nor the base64 between the two
+        // -- has a width. Charging the font for it would push a line off the
+        // measure by several hundred characters of picture source.
+        PICTURE => {
+            in_picture = !in_picture;
+            false
+        }
+        _ if in_picture => false,
         '\u{1}' => {
             in_spec = true;
             false
@@ -1066,9 +1255,114 @@ impl FontChain {
     ///
     /// The colour markers and their spec are not measured -- see
     /// `printing_chars`, which the PDF path measures through as well.
+    ///
+    /// This measures what will be DRAWN, not what the string holds: `carried`
+    /// runs each font's ligature and kern program first, so `fi` is measured
+    /// as the one character cmr10 sets it as and `AV` carries its kern. A
+    /// measure that skipped that would break lines at widths the shipper then
+    /// contradicts.
     pub fn width_of(&self, text: &str, size: f64) -> f64 {
-        printing_chars(text).map(|c| self.width(c, size)).sum()
+        self.carried(printing_chars(text))
+            .iter()
+            .map(|item| match item {
+                Carried::Space => self.fonts[0].tfm.params.space * size,
+                Carried::Set { font, sets } => self.run_width(*font, sets) * size,
+            })
+            .sum()
     }
+
+    /// The design-size width of one resolved run.
+    fn run_width(&self, font: usize, sets: &[crate::tfm::Set]) -> f64 {
+        sets.iter()
+            .map(|set| match set {
+                crate::tfm::Set::Char(c) => {
+                    self.fonts[font].tfm.char(*c).map(|m| m.width).unwrap_or(0.0)
+                }
+                crate::tfm::Set::Kern(by) => *by,
+            })
+            .sum()
+    }
+
+    /// Resolve `chars` into the runs a page is actually made of.
+    ///
+    /// `tex.web` §1034-§1040's main loop builds a list of characters ONE FONT
+    /// at a time and lets that font's ligature and kern program rewrite it
+    /// before anything is drawn. §545 says how far a run reaches: "TeX puts
+    /// implicit boundary characters before and after each consecutive string
+    /// of characters from the same font", so a space -- which is glue, not a
+    /// character (§1041) -- and a change of font each end one, and no ligature
+    /// or kern is looked for across either.
+    pub fn carried(&self, chars: impl Iterator<Item = char>) -> Vec<Carried> {
+        let mut out = Vec::new();
+        let mut run: Vec<u8> = Vec::new();
+        let mut run_font = 0usize;
+        for ch in chars {
+            if ch == ' ' {
+                self.push_run(&mut out, &mut run, run_font);
+                out.push(Carried::Space);
+                continue;
+            }
+            // Every marker this path understands has been taken out by the
+            // caller; a control character that is left is not a glyph.
+            if ch.is_control() {
+                continue;
+            }
+            match self.resolve(ch) {
+                Some((f, slot)) => {
+                    if f != run_font {
+                        self.push_run(&mut out, &mut run, run_font);
+                        run_font = f;
+                    }
+                    run.push(slot);
+                }
+                // No font in the chain has it. The stand-in is set in the
+                // primary font rather than dropped: a glyph that vanishes
+                // takes the meaning of the line with it.
+                None => {
+                    let Some(text) = Self::approximate(ch) else {
+                        continue;
+                    };
+                    if run_font != 0 {
+                        self.push_run(&mut out, &mut run, run_font);
+                        run_font = 0;
+                    }
+                    run.extend(text.bytes());
+                }
+            }
+        }
+        self.push_run(&mut out, &mut run, run_font);
+        out
+    }
+
+    /// Close the run being gathered, putting it through its font's own
+    /// ligature and kern program on the way out.
+    fn push_run(&self, out: &mut Vec<Carried>, run: &mut Vec<u8>, font: usize) {
+        if run.is_empty() {
+            return;
+        }
+        let sets = self.fonts[font].tfm.set_run(run);
+        run.clear();
+        out.push(Carried::Set { font, sets });
+    }
+}
+
+/// What a page actually carries for a stretch of text.
+///
+/// The characters a document holds are not the characters TeX draws: cmr10
+/// sets `f` then `i` as the single character 0o14, and puts a negative
+/// movement between `A` and `V`. `FontChain::carried` is where that
+/// translation happens, and both the measure and the shipper go through it so
+/// they cannot disagree.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Carried {
+    /// Characters of one font of the chain, and the kerns between them.
+    Set {
+        font: usize,
+        sets: Vec<crate::tfm::Set>,
+    },
+    /// An interword space. Glue (§1041), so the file carries a movement
+    /// rather than a glyph (§625).
+    Space,
 }
 
 /// The name every PDF reader knows the fallback font by.
@@ -1980,8 +2274,15 @@ pub fn to_pdf(
         .resolve(near)
         .and_then(|file| embed_file(&file))
         .or_else(|| requested.and_then(embed_family));
-    let main = embedded.clone().unwrap_or_else(|| {
-        Font::Base14(requested.map(base14_for).unwrap_or("Helvetica").to_string())
+    let main = embedded.clone().unwrap_or_else(|| match requested {
+        // A document that asked for a family and did not get it falls to the
+        // member of the fourteen with that family's metrics.
+        Some(family) => Font::Base14(base14_for(family).to_string()),
+        // A document that asked for NO family is a TeX document, and TeX's text
+        // font is cmr10 -- which is the face luatex embeds. Naming Helvetica
+        // here set every plain document in a typeface no TeX engine uses.
+        None => crate::pdf::Font::computer_modern()
+            .unwrap_or_else(|| Font::Base14("Helvetica".to_string())),
     });
 
     // The other three faces, in the order `Face::index` puts them: main, mono,
@@ -2152,7 +2453,21 @@ pub fn to_pdf(
     // A `\pageref` is the page its label fell on, which the contents moves:
     // resolved after it, off the pages the contents itself is part of.
     let text = refs_paged(&contented, layout, &width_of);
-    let lines = break_lines_measured(&text, layout, &width_of);
+    // A picture's node text is sized by the face the page is set in, through
+    // the same widths every word on it is measured by -- `tikz::Estimate`,
+    // which is all the lowerer had, charges half an em a character and sizes
+    // every node box wrong.
+    let picture_metrics = FaceMetrics {
+        measure: &width_of,
+        size: layout.size,
+    };
+    // Each picture's reserved height is restated against those metrics before
+    // anything is fitted, so the room the page keeps for a drawing and the room
+    // the drawing is given below are the same number. See `PICTURE`.
+    let lines: Vec<String> = break_lines_measured(&text, layout, &width_of)
+        .into_iter()
+        .map(|line| picture_remeasured(line, &picture_metrics))
+        .collect();
 
     // The colour stack, seeded with what the document is set in where it has
     // not said otherwise. Seeding it means a run with nothing pushed still
@@ -2200,6 +2515,48 @@ pub fn to_pdf(
             // marker itself as a character.
             if is_space_line(line) {
                 y -= line_height(line, layout);
+                continue;
+            }
+            // A picture is DRAWN where the line it stands on is, in the
+            // operators `tikz::draw_on` writes: paths, arrow tips, node borders
+            // and node text, with the `/ExtGState` and `/Shading` entries any
+            // of them name registered on this page.
+            //
+            // It hangs BELOW the baseline the line above it left -- its box top
+            // is at `y` and its bottom a bounding box lower -- because a
+            // picture is a block and not a word, and drawing it up from `y`
+            // would put it through the descenders of the line before. The
+            // origin is chosen so the box's bottom left corner lands at the
+            // margin: a picture's coordinates are its own and regularly
+            // negative, and `bounds` is where they actually reach.
+            if let Some((height, options, body)) = picture_parts(line) {
+                let picture = crate::tikz::parse_document(
+                    &options,
+                    &body,
+                    &crate::colour::Colours::new(),
+                    &picture_metrics,
+                );
+                let (min_x, min_y, max_x, _) = picture.bounds();
+                // A centred picture is placed by its own width, exactly as a
+                // centred line of text is -- `\begin{center}` around a
+                // `tikzpicture` is how most documents put a drawing on a page.
+                let left = match is_centred(line) {
+                    true => {
+                        layout.margin + (layout.measure - (max_x - min_x)).max(0.0) / 2.0
+                    }
+                    false => layout.margin,
+                };
+                let bottom = y - height;
+                crate::tikz::draw_on(
+                    &picture,
+                    &mut page,
+                    left - min_x,
+                    bottom - min_y,
+                    main.clone(),
+                );
+                // Exactly what `line_height` reserved for it, or the line after
+                // the picture is set somewhere the fitter did not put it.
+                y -= height + layout.leading;
                 continue;
             }
             // A booktabs rule is DRAWN, not set: the breaker's line carries the
@@ -2414,6 +2771,28 @@ pub fn to_pdf(
     document(&pages)
 }
 
+/// The document's own face, as the metrics a picture's nodes are sized by.
+///
+/// A node's border is drawn around its text, so its size is not in the source:
+/// it has to be measured, and measuring it is a question about the fonts this
+/// page is being set in. `to_pdf` answers exactly that question for every word
+/// it sets, so a node's text is measured the same way rather than by a second
+/// idea of what the document's font is.
+struct FaceMetrics<'a> {
+    /// `to_pdf`'s own `width_of`, which measures at `size`.
+    measure: &'a dyn Fn(&str, Face) -> f64,
+    /// The size those widths are stated at: the document's type size.
+    size: f64,
+}
+
+impl crate::tikz::Metrics for FaceMetrics<'_> {
+    /// A node is set in the body face -- `\node[font=\ttfamily]` is a font
+    /// option this does not read -- and a font's widths scale with its size.
+    fn width_of(&self, text: &str, size: f64) -> f64 {
+        (self.measure)(text, Face::Main) * size / self.size
+    }
+}
+
 /// One stretch of a run that a single font draws.
 struct Piece {
     /// What goes in the content stream: one byte a glyph, in that font's own
@@ -2550,6 +2929,22 @@ fn break_lines_measured(
             .is_some_and(|line: &String| !is_space_line(line) && !is_break_line(line));
         if after_text && sets_text(para) {
             lines.push(VERTICAL_SPACE.to_string());
+        }
+        // A picture is one line of its own, whatever it measures: it is drawn
+        // rather than set, so there is nothing in it to fill to a measure and
+        // nothing a break may fall inside. `line_height` reads the room it
+        // takes off the marker, and the drawing loop below draws it there.
+        if is_picture_para(para) {
+            // `\begin{center}\begin{tikzpicture}` is how most documents put a
+            // drawing on a page, and the centring is a REGION that outlives the
+            // paragraph its marker landed in -- so the flag `fill` is carrying
+            // is what says whether this picture is centred, and it goes on the
+            // line the way it goes on a line of text.
+            lines.push(match centred {
+                true => format!("{CENTRE}{}", para.trim()),
+                false => para.trim().to_string(),
+            });
+            continue;
         }
         // A code listing is already broken, by the author -- see
         // `listing_lines`, which the DVI breaker reads the same way.
@@ -2882,6 +3277,14 @@ fn is_break_line(line: &str) -> bool {
 /// spends, so it is the unit the rest are counted in -- a heading asks for its
 /// space as that many of them (`lower::push_heading`).
 fn line_height(line: &str, layout: &Layout) -> f64 {
+    // A picture takes its bounding box, and a leading under it before the next
+    // line's baseline -- so its slot is the height of the drawing plus one
+    // ordinary line. The number is read off the marker rather than measured
+    // here, because measuring means parsing the picture and this is asked once
+    // per line per page the fitter considers. See `PICTURE`.
+    if let Some((height, _, _)) = picture_parts(line) {
+        return height + layout.leading;
+    }
     match is_space_line(line) {
         true => layout.leading * PARAGRAPH_SPACE,
         false => layout.leading,
@@ -2897,7 +3300,11 @@ fn line_height(line: &str, layout: &Layout) -> f64 {
 /// whitespace -- the vertical tab a listing breaks its lines on, the form feed
 /// a forced break travels as -- answers false here.
 fn sets_text(para: &str) -> bool {
-    printing_chars(para).any(|c| !c.is_whitespace())
+    // A picture sets no CHARACTERS and is still something on the page, so the
+    // space between two paragraphs goes in either side of it: without this a
+    // drawing was welded to the prose above it, since every character of a
+    // picture span is an instruction and none of them prints.
+    is_picture_para(para) || printing_chars(para).any(|c| !c.is_whitespace())
 }
 
 /// Split broken lines into pages: at a forced break, and otherwise wherever
@@ -4146,6 +4553,154 @@ pub const LIST_INDENT: char = '\u{14}';
 /// words are, since Rust counts it as whitespace and would otherwise drop it.
 pub const PAGE_BREAK: char = '\u{c}';
 
+/// A `tikzpicture`, carried whole through the text the way a page break is.
+///
+/// A picture is not text and cannot be expanded into any: its body is TikZ,
+/// full of backslashes that are not control sequences and semicolons that end
+/// commands, and the prelude used to answer `\draw#1;` with nothing -- so
+/// every picture in every document was read, discarded, and drawn nowhere.
+/// The body reaches the page instead, as ONE marker span holding the whole
+/// picture, because a line is all that survives breaking and pagination.
+///
+/// The span is `PICTURE`, the height the picture reserves, `;`, the option
+/// list and the body base64-encoded with a `:` between them, and `PICTURE`
+/// again. Encoded because a picture body holds newlines, spaces and every
+/// punctuation mark there is, and a paragraph splitter would tear it apart;
+/// base64 is one word of `A-Za-z0-9+/=`, which nothing in the pipeline splits.
+///
+/// The height is carried rather than recomputed because `line_height` -- which
+/// every page-fitting decision goes through -- has no fonts and no palette to
+/// parse a picture with, and because parsing one per fitting decision would be
+/// paid for over and over. `to_pdf` restates it once, against the document's
+/// own metrics, so the room reserved is the room the picture is drawn in.
+///
+/// U+0018 is the next free control character after U+0017 (REF); the `MARKERS`
+/// registry below says what the rest are spent on.
+pub const PICTURE: char = '\u{18}';
+
+/// The marker span for a picture, as its own paragraph.
+///
+/// The paragraph breaks are part of it: a picture is a block on the page and
+/// not a word in a line, so it owns its own lines rather than running into the
+/// prose either side of it -- exactly as a heading does (`lower::push_heading`).
+///
+/// The height is measured here with [`crate::tikz::parse_document`] against no
+/// font at all, because the lowerer has none to size node text by. `to_pdf`
+/// measures it again through the document's own face and rewrites this
+/// number; nothing between the two reads it.
+pub fn picture_mark(options: &str, body: &str) -> String {
+    let picture = crate::tikz::parse_document(
+        options,
+        body,
+        &crate::colour::Colours::new(),
+        &crate::tikz::Estimate,
+    );
+    let (_, height) = picture.extent();
+    format!("\n\n{}\n\n", picture_span(height, options, body))
+}
+
+/// One picture span: the height it reserves and the source it was read from.
+fn picture_span(height: f64, options: &str, body: &str) -> String {
+    format!(
+        "{PICTURE}{height};{}:{}{PICTURE}",
+        base64(options.as_bytes()),
+        base64(body.as_bytes())
+    )
+}
+
+/// What a picture line says: the height it reserves, its options and its body.
+///
+/// `None` for every line that is not one, which is all but a handful of them.
+fn picture_parts(line: &str) -> Option<(f64, String, String)> {
+    let inner = line.trim();
+    // A centred picture carries the same prefix a centred line of text does,
+    // and it is a prefix rather than part of the span so that everything which
+    // reads one -- `line_height`, the page fitter, the drawing loop -- reads it
+    // the same way whether the picture is centred or not.
+    let inner = inner.strip_prefix(CENTRE).unwrap_or(inner);
+    let inner = inner.strip_prefix(PICTURE)?.strip_suffix(PICTURE)?;
+    let (height, source) = inner.split_once(';')?;
+    let (options, body) = source.split_once(':')?;
+    Some((
+        height.parse().ok()?,
+        String::from_utf8(unbase64(options)?).ok()?,
+        String::from_utf8(unbase64(body)?).ok()?,
+    ))
+}
+
+/// Whether a paragraph of the text stream is a picture and nothing else.
+fn is_picture_para(para: &str) -> bool {
+    picture_parts(para).is_some()
+}
+
+/// Whether a line -- of text or of picture -- is set by its own width.
+fn is_centred(line: &str) -> bool {
+    line.trim_start().starts_with(CENTRE)
+}
+
+/// The picture line with the height it really reserves, measured through the
+/// document's own font.
+///
+/// The number `picture_mark` wrote was measured with no font at all, because
+/// the lowerer has none: a node's text was charged half an em a character.
+/// This is the same picture read again through the face the page is set in,
+/// and it is what every fitting decision below then uses -- so the room a page
+/// keeps for a picture is the room the picture is drawn in.
+fn picture_remeasured(line: String, metrics: &dyn crate::tikz::Metrics) -> String {
+    let Some((_, options, body)) = picture_parts(&line) else {
+        return line;
+    };
+    let picture =
+        crate::tikz::parse_document(&options, &body, &crate::colour::Colours::new(), metrics);
+    let (_, height) = picture.extent();
+    let span = picture_span(height, &options, &body);
+    match is_centred(&line) {
+        true => format!("{CENTRE}{span}"),
+        false => span,
+    }
+}
+
+/// The base64 alphabet, RFC 4648 §4.
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `bytes` as base64: one word, with nothing in it a text pipeline splits on.
+fn base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for group in bytes.chunks(3) {
+        let packed = group
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (at, b)| acc | (*b as u32) << (16 - 8 * at));
+        for at in 0..4 {
+            out.push(match at <= group.len() {
+                true => BASE64[(packed >> (18 - 6 * at)) as usize & 0x3f] as char,
+                false => '=',
+            });
+        }
+    }
+    out
+}
+
+/// The bytes back, or `None` for anything that is not base64.
+fn unbase64(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let mut packed = 0u32;
+    let mut held = 0u32;
+    for ch in text.chars() {
+        if ch == '=' {
+            break;
+        }
+        let six = BASE64.iter().position(|b| *b as char == ch)? as u32;
+        packed = packed << 6 | six;
+        held += 6;
+        if held >= 8 {
+            held -= 8;
+            out.push((packed >> held) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// Every character the typesetting path reads as an INSTRUCTION rather than as
 /// text, and whether one character of argument follows it.
 ///
@@ -4192,6 +4747,10 @@ pub const MARKERS: &[(char, bool)] = &[
     // -- a label, a `\ref` or a `\pageref` -- and the label key follows, up to
     // a second marker that closes the span.
     (REF, true),
+    // The picture marker, span-shaped like the cross-reference one: everything
+    // from it to the second one is the encoded picture, and a reader asking for
+    // the document's TEXT gets none of it -- a picture has no words.
+    (PICTURE, true),
 ];
 
 /// The end of a line INSIDE a code listing, carried through the text the way a
