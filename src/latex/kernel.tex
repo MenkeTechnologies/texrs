@@ -367,8 +367,12 @@
 % `{??}{??}' for the ones referenced and not defined. \@setref then never meets
 % an undefined name, and `??' -- LaTeX's own answer for an unresolved reference
 % -- comes out of the same place it comes out of under LaTeX.
-\def\ref#1{\expandafter\@setref\csname r@#1\endcsname\@firstoftwo{#1}}
-\def\pageref#1{\expandafter\@setref\csname r@#1\endcsname\@secondoftwo{#1}}
+% \ref, \pageref and \label are NOT defined here: the lowerer claims them by
+% name (lower_cross_ref) and marks the place, and the pass that lays out the
+% pages answers them -- in ONE run, where this two-pass form answers `??' until
+% a second. \@setref stays for a class that builds its own.
+
+
 \def\@setref#1#2#3{\expandafter#2#1}
 % amsmath: \eqref{...} is \ref in parentheses, through \tagform@.
 \def\eqref#1{\textup{\tagform@{\ref{#1}}}}
@@ -382,7 +386,7 @@
 % \@auxlabel, which puts the entry in the \message stream, and writes the .aux
 % from what came back. In an ordinary run \label produces nothing, exactly as it
 % does under LaTeX: a label is a target, not text.
-\def\label#1{}
+
 \def\@auxlabel#1{\message{\string\newlabel{#1}{{\@currentlabel}{\thepage}}}}
 %
 % ---- sectioning: ltsect.dtx ----------------------------------------------

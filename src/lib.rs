@@ -244,7 +244,14 @@ pub fn run_text_at(path: &std::path::Path, src: &str) -> Result<String, TexError
     let cmds = lowerer.lower(&src_d)?;
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     let _ = crate::runtime::run(chunk).map_err(TexError)?;
-    Ok(without_marks(&crate::runtime::take_text()))
+    // Through `refs_numbered` first, exactly as `run_text` goes: a `\ref` is a
+    // MARKER in this text, and `without_marks` answers a marker still standing
+    // with `??`. Reading the `.aux` does not fill one in -- the number comes
+    // from the document's own structure -- so a run that skipped this step
+    // reported every reference unresolved however good its `.aux` was, and the
+    // rerun warning beside it was true only because of the omission.
+    let marked = crate::runtime::take_text();
+    Ok(without_marks(&crate::typeset::refs_numbered(&marked)))
 }
 
 /// The bytecode [`run_text`] runs: the same pipeline, with the document's own
@@ -274,7 +281,14 @@ pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
 /// an unedited file. Reading the chunk back instead of rebuilding it is the
 /// difference between setting a book in a second and setting it in a tenth.
 pub fn run_text_cached(path: &std::path::Path, src: &str) -> Result<String, TexError> {
-    Ok(without_marks(&run_text_marked_cached(path, src)?))
+    // Through `refs_numbered` first, exactly as `run_text` and `run_text_at`
+    // go. `without_marks` answers a `\ref` marker still standing with `??`, so
+    // a path that skips the numbering renders every cross reference unresolved
+    // -- and this is the path the CLI takes by DEFAULT, `--no-cache` being what
+    // reached the other one. `texrs --text` said `See ??.` where the same file
+    // under `--no-cache` said `See 0.1.`
+    let marked = run_text_marked_cached(path, src)?;
+    Ok(without_marks(&crate::typeset::refs_numbered(&marked)))
 }
 
 /// The same, keeping the colour markers, for the typesetter.

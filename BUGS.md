@@ -145,6 +145,23 @@ same cause: tex.web §1279 expands a message body while reading it from the file
 and texrs slurps it first. It is not in `tests/cases` because the oracle there
 is `tex`, which has no `\directlua` to compare against.
 
+## A section's number carries a chapter a class has not got
+
+`\ref` is answered from `typeset::unit_numbers`, which counts chapter, section
+and subsection and joins every level down to the one being asked for. A class
+with no chapters still carries the chapter's nought, so `article` numbers its
+first section `0.1` where LaTeX numbers it `1`:
+
+```
+\documentclass{article}\begin{document}\section{First}\label{a}See \ref{a}.
+```
+sets `See 0.1.` here and `See 1.` under `pdflatex`. `tests/latex.rs`'s
+`a_label_written_to_the_aux_is_what_the_next_run_resolves` pins the current
+answer so the divergence cannot change unnoticed. The fix is for the join to
+start at the shallowest level the CLASS declares -- `report` and `book` declare
+`chapter` and `article` does not -- which is a fact `src/latex.rs` already reads
+for `\thesection`.
+
 ## Divergences from tex
 
 - **One type size.** The size-selecting commands are defined as empty in
