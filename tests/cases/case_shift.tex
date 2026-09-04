@@ -1,0 +1,14 @@
+% \uppercase and \lowercase read their group WITHOUT expanding it and put
+% every character through \uccode or \lccode (tex.web §1288). A zero code
+% means the character has no case and stands, so digits and punctuation come
+% through untouched -- and setting \uccode makes a character that is not a
+% letter shift too, which is the whole reason the table is separate from the
+% catcodes. The catcode travels with the character unchanged.
+\catcode`\{=1 \catcode`\}=2
+\uppercase{\message{abc dEf 123}}
+\lowercase{\message{ABC dEf 123}}
+\uccode`\-=`\+
+\uppercase{\message{a-b}}
+\lccode`\?=`\!
+\lowercase{\message{X?Y}}
+\end

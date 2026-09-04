@@ -1,0 +1,15 @@
+% A register on the right of an assignment is a READ, not a constant: the
+% value is only known when the program runs. \dimen1=\skip0 takes the glue's
+% natural width, which is tex.web §430's coercion.
+\catcode`\{=1 \catcode`\}=2
+\skip0=4pt plus 1fil minus 2pt
+\skip1=\skip0
+\dimen5=\skip0
+\dimen6=\dimen5
+\advance\dimen6 by \dimen5
+\dimendef\dimenZ=7 \dimenZ=\dimen5
+\skipdef\skipZ=2 \skipZ=\skip0
+\message{[\the\skip0][\the\skip1]}
+\message{[\the\dimen5][\the\dimen6][\the\dimenZ]}
+\message{[\the\skipZ]}
+\end

@@ -1,0 +1,12 @@
+\catcode`\{=1 \catcode`\}=2
+% \let copies a MEANING (tex.web 1221), so an alias to a primitive IS that
+% primitive. The lowerer dispatches a primitive by NAME, and resolved the alias
+% only where a name had no arm of its own -- so \g worked and \ifdim did not:
+% the `ifdim' arm ran and scanned a dimension where tex takes the false branch.
+\let\ifdim=\iffalse
+\ifdim 1pt>0pt \message{YES}\else\message{NO}\fi
+\let\g=\message
+\g{THROUGH}
+\let\notnum=\ifnum
+\notnum 1<2 \message{LESS}\else\message{MORE}\fi
+\end

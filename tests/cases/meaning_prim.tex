@@ -1,0 +1,28 @@
+% \meaning writes what tex.web §296's print_meaning would print: a macro as
+% its parameter text, `->', and its body, with the definition prefixes run
+% together in front; a \chardef constant as \char"NN; a register name as the
+% register it stands for; and a character as the NAME of its category.
+% An undefined control sequence is `undefined', which is what makes \meaning
+% the way a document asks whether something exists without defining it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\catcode`\$=3 \catcode`\&=4 \catcode`\^=7 \catcode`\_=8
+\def\plain#1{[#1]}
+\long\def\lng#1{(#1)}
+\outer\def\outr{o}
+\def\delim#1,#2\stop{<#1;#2>}
+\def\empty{}
+\chardef\letterA=65
+\countdef\ctr=3
+\dimendef\len=4
+\skipdef\gap=5
+\toksdef\list=6
+\let\lettered=A
+\let\opener={
+\message{[\meaning\plain][\meaning\lng][\meaning\outr][\meaning\delim]}
+\message{[\meaning\empty][\meaning\letterA][\meaning\ctr][\meaning\len]}
+\message{[\meaning\gap][\meaning\list][\meaning\lettered][\meaning\opener]}
+\message{[\meaning\relax][\meaning\nowheredefined]}
+\message{[\meaning A][\meaning 1][\meaning $][\meaning &]}
+\message{[\meaning #][\meaning ^][\meaning _][\meaning {][\meaning }]}
+\message{[\meaning\count][\meaning\def][\meaning\message]}
+\end

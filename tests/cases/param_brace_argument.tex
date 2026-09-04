@@ -1,0 +1,12 @@
+% `#{' ends a parameter text with the left brace, which then delimits the
+% last argument AND is appended to the body (tex.web §473, §476). With no
+% parameter in front of it the macro takes no argument at all: the brace is
+% matched and given straight back, so \a{Y} is the body then `{Y}'.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\bare#{[X]}
+\def\one#1#{(#1)}
+\message{\bare{Y}}
+\message{\one ab{Z}}
+\def\twice#1#2{<#1|#2>}
+\message{\twice pq}
+\end

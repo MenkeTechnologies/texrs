@@ -1,0 +1,15 @@
+% tex.web §509 is `while n<>0', not `while n>0', and only an \or counts a
+% case down: reaching \else goes straight to common_ending, which runs the
+% else text, and reaching \fi ends the conditional with nothing run. That is
+% why a selector past the last \or takes the \else branch -- and why a
+% NEGATIVE one does too, since it never reaches zero and every \or is
+% skipped until the \else stops it.
+\catcode`\{=1 \catcode`\}=2
+\ifcase 0 \message{A}\or\message{B}\else\message{C}\fi
+\ifcase 1 \message{A}\or\message{B}\else\message{C}\fi
+\ifcase 2 \message{A}\or\message{B}\else\message{C}\fi
+\ifcase 3 \message{A}\or\message{B}\else\message{C}\fi
+\ifcase -3 \message{A}\or\message{B}\else\message{C}\fi
+\ifcase 2 \message{A}\or\message{B}\fi
+\message{[done]}
+\end

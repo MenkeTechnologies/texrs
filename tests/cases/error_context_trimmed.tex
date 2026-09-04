@@ -1,0 +1,20 @@
+% An error tex RECOVERS from prints three lines: the message, the line the
+% mouth had reached, and a second line aligned to where in it the scanner
+% stopped (tex.web §82's error, §311's show_context). The two lines are
+% trimmed to fit -- line one keeps its TAIL, because the interesting end is
+% where the scan stopped, and line two keeps its HEAD, each marking a cut with
+% `...' (§317, half_error_line=50 and error_line=79). Both trims are here.
+%
+% The position is per DIGIT, not per constant: §445 tests before folding a
+% digit in, so the split falls after the ten nines that fit and before the
+% eleventh, which is the one that overflowed. A radix constant overflows by
+% the same rule with no slack at all.
+%
+% Recovery is `error' and carry on: the register keeps 2147483647, the rest of
+% the line is read normally, and the run ends with the line tex writes when
+% something was reported.
+\catcode`\{=1 \catcode`\}=2
+\count1=1 \count2=2 \count3=3 \count4=4 \count5=5 \count6=99999999999 \count7=7 \count8=8 \count9=9 \count10=10 \count11=11 \count12=12 \count13=13
+\count14="FFFFFFFF
+\message{[\the\count6][\the\count13][\the\count14]}
+\end

@@ -33,6 +33,35 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
+    /// Every register a `\global` assignment has written, in the order they
+    /// were lowered.
+    ///
+    /// A group must not restore one. `tex.web` §283's `geq_word_define` sets
+    /// `xeq_level` to `level_one`, and §282's `unsave` DESTROYS a saved value
+    /// whose level no longer matches -- so a register assigned globally inside
+    /// a group keeps its new value at the `}`. A `Cmd::Group` expresses
+    /// save-and-restore as one pair around the whole body, so "do not restore"
+    /// has to mean "do not save", and the enclosing group finds out which
+    /// registers those are by the slice of this list its body added.
+    ///
+    /// The one shape this does not reproduce is a register assigned BOTH ways
+    /// in the same group with the local assignment last: tex restores the
+    /// globally-set value there and this keeps the local one. A per-assignment
+    /// save stack is what that would take.
+    globals: Vec<i64>,
+    /// Errors the expander REPORTED rather than raised, waiting to be written
+    /// into the message stream in front of whatever is printed next.
+    ///
+    /// tex prints an error on the terminal where it happens, and `print_ln`
+    /// ends that display with no character of its own — so the `\message` that
+    /// follows begins at column zero and gets none of the separating space
+    /// §1279 would otherwise put in front of it. Prepending the report to that
+    /// message's pieces is that arrangement: the report and the message are one
+    /// terminal line, not two.
+    reports: Vec<String>,
+    /// Whether anything was reported at all, for the line tex writes at the end
+    /// of a run that had errors.
+    reported: bool,
     /// The typefaces the document asked for, by `\setmainfont` and its
     /// siblings.
     ///
@@ -164,6 +193,9 @@ impl Lowerer {
             eng: Engine::new(),
             ended: false,
             next_scratch: 255,
+            globals: Vec::new(),
+            reports: Vec::new(),
+            reported: false,
             fonts: crate::typeset::Families::default(),
             colours: crate::colour::Colours::new(),
             page_colour: None,
@@ -226,7 +258,13 @@ impl Lowerer {
     /// matters is the macro table it leaves behind on `self.eng`, which the
     /// document is then lowered against.
     pub fn preload(&mut self, src: &str) -> R<()> {
-        self.lower_located(src).map(|_| ()).map_err(|(e, _)| e)
+        let out = self.lower_located(src).map(|_| ()).map_err(|(e, _)| e);
+        // The prelude's own diagnostics belong to the prelude, and the document
+        // is what tex is reporting on: an error the prelude recovered from must
+        // not put `(see the transcript file …)` on the end of a clean run.
+        self.reports.clear();
+        self.reported = false;
+        out
     }
 
     /// The same, reporting the line the mouth had reached when it stopped.
@@ -239,9 +277,48 @@ impl Lowerer {
     pub fn lower_located(&mut self, src: &str) -> Result<Vec<Cmd>, (TexError, u32)> {
         let mut lx = Lexer::new(src);
         match self.block(&mut lx, None) {
-            Ok(cmds) => Ok(cmds),
+            Ok(mut cmds) => {
+                self.close_reports(&mut cmds);
+                Ok(cmds)
+            }
             Err(e) => Err((e, lx.line())),
         }
+    }
+
+    /// Whatever was reported but never printed, and the line tex writes at the
+    /// end of a run that had errors.
+    ///
+    /// `tex.web` §1335's `close_files_and_terminate` prints `(see the transcript
+    /// file for additional information)` when `log_opened` and the run was not
+    /// clean. The `)` in front of it is the document's own closing paren, which
+    /// tex writes when the file ends and which is otherwise the last character
+    /// of the run -- so it is only visible at all once something follows it.
+    fn close_reports(&mut self, cmds: &mut Vec<Cmd>) {
+        let held = self.take_reports();
+        if !self.reported {
+            return;
+        }
+        if !held.is_empty() {
+            cmds.push(Cmd::Message(held));
+        }
+        cmds.push(Cmd::Message(vec![MsgOp::Text(
+            ")(see the transcript file for additional information".into(),
+        )]));
+    }
+
+    /// The reports waiting to be printed, as message pieces.
+    ///
+    /// Draining the expander's own list here is what puts a report in the right
+    /// place: everything reported since the last message goes in front of the
+    /// next one.
+    fn take_reports(&mut self) -> Vec<MsgOp> {
+        let fresh = self.eng.take_errors();
+        self.reported = self.reported || !fresh.is_empty() || !self.reports.is_empty();
+        self.reports.extend(fresh);
+        std::mem::take(&mut self.reports)
+            .into_iter()
+            .map(MsgOp::Text)
+            .collect()
     }
 
     /// Lower commands until the input ends, `\end` is seen, or one of `stop` is
@@ -335,6 +412,18 @@ impl Lowerer {
                 },
                 _ => tok,
             };
+            // Mathematics: `$…$`, `$$…$$`, LaTeX's `\(` and `\[`, and the
+            // display environments. Caught HERE, before the macro table is
+            // consulted, for the reason colour and the faces are: the prelude
+            // defines `\(`, `\)`, `\[` and `\]` to expand to nothing, so by
+            // the time a name reached the table the formula's delimiters had
+            // gone. See `crate::math`, which holds all of it.
+            if self.text_output {
+                let size = self.layout.size;
+                if crate::math::lower_math(&mut self.eng, size, lx, &tok, &mut out)? {
+                    continue;
+                }
+            }
             let Token::Cs(name) = &tok else {
                 // Braces group the macro table while lowering, so a `\def`
                 // inside them is undone at the `}` exactly as TeX undoes it.
@@ -344,9 +433,14 @@ impl Lowerer {
                         // writes; the latter is run-time state, so the body is
                         // lowered and wrapped in save/restore.
                         self.eng.compile_time_begin_group();
+                        let mark = self.globals.len();
                         let body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
-                        let saves = assigned_counts(&body);
+                        // Whatever `\aftergroup` held for this group is read
+                        // next, which is what "after the group" means.
+                        let after = self.eng.take_after_group();
+                        lx.push_back(&after);
+                        let saves = self.saved_by_group(&body, mark);
                         // A group exists to save registers and to scope the
                         // macro table. The macro table is a compile-time fact
                         // and is already handled above, so a group that assigns
@@ -498,19 +592,22 @@ impl Lowerer {
             if self.text_output && self.lower_list(lx, name, &mut out)? {
                 continue;
             }
-            // `\directlua` has no Lua behind it here and the prelude answers it
-            // with nothing, so its chunk was read and thrown away. One thing a
-            // corpus book puts inside it is the only statement anywhere of
-            // WHICH faces a glyph its own face lacks comes from -- the box
-            // drawing, the arrows and the Greek that made these books need
-            // LuaTeX. The chunk is still not run; it is read for that list and
-            // then dropped, which is what it was before.
-            if name.name() == "directlua" {
-                let chunk = self.eng.read_group_text_pub(lx)?;
-                let chain = crate::typeset::fallback_chain(&chunk);
-                if !chain.is_empty() {
-                    self.fonts.fallbacks = chain;
-                }
+            // `\directlua` and its relatives, which RUN their chunk: a real
+            // Lua 5.3 (the version LuaTeX embeds), with what the chunk printed
+            // pushed back in front of the mouth to be read next. See
+            // `crate::lua`. The one thing that was read out of a chunk before
+            // anything could run it -- `luaotfload.add_fallback`, the only
+            // statement a corpus book makes of WHICH faces a glyph its own face
+            // lacks comes from -- is still read there, from the same text.
+            //
+            // `directlua` is named here as well as in `crate::lua`'s own table
+            // because it is the one of these the corpus documents, and
+            // `tests/corpus_coverage.rs` reads THIS file's string literals to
+            // check that everything documented is still reachable. A name that
+            // moved out of here would be reported as no longer dispatched while
+            // it demonstrably runs.
+            if name.name() == "directlua" || crate::lua::claims(name.name()) {
+                crate::lua::lower(&mut self.eng, lx, name.name(), &mut out, &mut self.fonts)?;
                 continue;
             }
             // A control sequence MEANS what it was last defined as. The
@@ -528,6 +625,27 @@ impl Lowerer {
                 }
                 self.eng.expand_macro_file(lx, name)?;
                 continue;
+            }
+            // The other half of that: `\let\x=\iffalse` makes `\x` BE
+            // `\iffalse` -- tex.web 1221 copies the MEANING, so the two are
+            // indistinguishable afterwards. The dispatch below is by name, and
+            // the alias was resolved only in its default arm, which a primitive
+            // with an arm of its own never reaches. `\let\ifdim=\iffalse` then
+            // took the `ifdim' arm and scanned a dimension where tex takes the
+            // false branch; `\let\g=\message` worked only because `message` has
+            // no arm. Asked AFTER the text-mode handlers above, which dispatch
+            // on the name the prelude let: resolving first turned every
+            // `\item` into its primitive and unmade the lists.
+            //
+            // A chain cannot loop: `\let` copies the meaning at definition
+            // time, so a `Meaning::Primitive` always names a real primitive
+            // rather than another alias.
+            if let Some(Meaning::Primitive(p)) = self.eng.meanings.get(&name) {
+                let p = *p;
+                if p != name {
+                    lx.push_back(&[Token::Cs(p)]);
+                    continue;
+                }
             }
             match name.name() {
                 "end" => {
@@ -551,6 +669,7 @@ impl Lowerer {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
                     let v = self.number(lx)?;
+                    self.note_global(&[reg]);
                     out.push(Cmd::SetCount(reg, v));
                 }
                 // `\dimen0=1pt`. A dimension register is a register in the same
@@ -569,20 +688,21 @@ impl Lowerer {
                 "skip" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
-                    let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
                     let base = crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE;
-                    for (i, v) in [nat, st, sh, sto * 4 + sho].into_iter().enumerate() {
-                        out.push(Cmd::SetCount(base + i as i64, Num::Literal(v)));
-                    }
+                    self.note_global(&[base, base + 1, base + 2, base + 3]);
+                    out.extend(self.glue_assign(lx, base)?);
                 }
                 "dimen" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
-                    let sp = self.eng.scan_dimen_file(lx)?;
-                    out.push(Cmd::SetCount(
-                        crate::compiler::DIMEN_BASE + reg,
-                        Num::Literal(sp),
-                    ));
+                    // `\dimen1=\dimen0` copies a register whose value is only
+                    // known at run time, and `\dimen1=\skip0` takes a glue's
+                    // natural width (§430's coercion); reading a constant here
+                    // refused both.
+                    let v = self.dimen_number(lx, false)?;
+                    let slot = crate::compiler::DIMEN_BASE + reg;
+                    self.note_global(&[slot]);
+                    out.push(Cmd::SetCount(slot, v));
                 }
                 // `\pageno=7`, where `\pageno` was `\countdef`'d: the name is
                 // the register, so this is the `\count0=7` arm reached by
@@ -612,15 +732,15 @@ impl Lowerer {
                     // wrong one stores a prefix of the value and leaves the
                     // rest in the document.
                     if reg >= crate::compiler::SKIP_BASE {
-                        let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
-                        for (i, v) in [nat, st, sh, sto * 4 + sho].into_iter().enumerate() {
-                            out.push(Cmd::SetCount(reg + i as i64, Num::Literal(v)));
-                        }
+                        self.note_global(&[reg, reg + 1, reg + 2, reg + 3]);
+                        let cmds = self.glue_assign(lx, reg)?;
+                        out.extend(cmds);
                     } else {
                         let v = match reg >= crate::compiler::DIMEN_BASE {
-                            true => Num::Literal(self.eng.scan_dimen_file(lx)?),
+                            true => self.dimen_number(lx, false)?,
                             false => self.number(lx)?,
                         };
+                        self.note_global(&[reg]);
                         out.push(Cmd::SetCount(reg, v));
                     }
                 }
@@ -634,26 +754,77 @@ impl Lowerer {
                         return Err(TexError("You can't use this after \\advance".into()));
                     };
                     // `\advance\pageno by 1` names the register the same way
-                    // `\advance\count0 by 1` does.
+                    // `\advance\count0 by 1` does, and `\advance\dimen0 by 1pt`
+                    // names a dimension register the same way again -- the base
+                    // the slot falls in is what says which kind it is.
                     let reg = match self.eng.numeric_cs(what) {
                         Some(crate::expand::NumericCs::Register(r)) => r,
-                        _ => {
-                            if what.name() != "count" {
-                                return Err(TexError(format!(
-                                    "Unsupported register \\{}",
-                                    what.name()
-                                )));
+                        _ => match what.name() {
+                            "count" => self.eng.scan_number_file(lx)?,
+                            "dimen" => {
+                                crate::compiler::DIMEN_BASE + self.eng.scan_number_file(lx)?
                             }
-                            self.eng.scan_number_file(lx)?
-                        }
+                            "skip" => {
+                                crate::compiler::SKIP_BASE
+                                    + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE
+                            }
+                            other => {
+                                return Err(TexError(format!("Unsupported register \\{other}")))
+                            }
+                        },
                     };
                     self.eng.skip_by_file(lx)?;
-                    let v = self.number(lx)?;
-                    out.push(Cmd::Arith(op, reg, v));
+                    // `tex.web` §1240: what follows `by` is read in the units
+                    // of the register being changed for `\advance`, and as a
+                    // plain integer for `\multiply` and `\divide` whatever the
+                    // register is -- glue times a length is not a thing TeX
+                    // has. Reading the wrong one stores a prefix of the value
+                    // and leaves the rest in the document.
+                    let glue = reg >= crate::compiler::SKIP_BASE;
+                    let dimen = !glue && reg >= crate::compiler::DIMEN_BASE;
+                    if glue {
+                        self.note_global(&[reg, reg + 1, reg + 2, reg + 3]);
+                    } else {
+                        self.note_global(&[reg]);
+                    }
+                    match (glue, matches!(op, Arith::Add)) {
+                        (true, true) => {
+                            let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+                            out.extend(advance_glue(
+                                reg,
+                                crate::glue::Glue {
+                                    natural: nat,
+                                    stretch: st,
+                                    stretch_order: sto,
+                                    shrink: sh,
+                                    shrink_order: sho,
+                                },
+                            ));
+                        }
+                        // A glue scaled by an integer scales in every
+                        // component and keeps both orders (§1240).
+                        (true, false) => {
+                            let v = self.number(lx)?;
+                            for part in 0..3 {
+                                out.push(Cmd::Arith(op, reg + part, v.clone()));
+                            }
+                        }
+                        (false, _) => {
+                            let v = match dimen && matches!(op, Arith::Add) {
+                                true => self.dimen_number(lx, false)?,
+                                false => self.number(lx)?,
+                            };
+                            out.push(Cmd::Arith(op, reg, v));
+                        }
+                    }
                 }
                 "message" => {
                     let parts = self.message_parts(lx)?;
-                    out.push(Cmd::Message(parts));
+                    // Anything reported so far is printed HERE, in front of the
+                    // message and with nothing between them: see `reports`.
+                    let mut ops = self.take_reports();
+                    ops.extend(parts);
+                    out.push(Cmd::Message(ops));
                 }
                 // `\input FILE` reads another file HERE, sharing every piece of
                 // state: a macro it defines is defined afterwards, a `\catcode`
@@ -701,6 +872,27 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.number(lx)?;
+                    let (then_branch, else_branch) = self.arms(lx)?;
+                    out.push(Cmd::IfNum {
+                        left,
+                        rel,
+                        right,
+                        then_branch,
+                        else_branch,
+                    });
+                }
+                // `\ifdim` is `\ifnum` over dimensions (`tex.web` §503 shares
+                // the comparison and differs only in the scanner), and a
+                // dimension is an integer in a slot -- so it lowers to the same
+                // real branch rather than being recognised and skipped.
+                "ifdim" => {
+                    let left = self.dimen_number(lx, false)?;
+                    let rel = match self.eng.read_relation_file(lx)? {
+                        '<' => Rel::Less,
+                        '>' => Rel::Greater,
+                        _ => Rel::Equal,
+                    };
+                    let right = self.dimen_number(lx, false)?;
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
                         left,
@@ -813,8 +1005,79 @@ impl Lowerer {
                         out.push(cmd);
                     }
                 }
-                "begingroup" => self.eng.compile_time_begin_group(),
+                // `\begingroup` is a group in tex.web's sense (§1063's
+                // `simple_group` reached by `new_save_level`), so it scopes the
+                // REGISTERS as well as the macro table. Only the macro table
+                // was scoped here, which is compile-time state; a register
+                // lives in a VM slot, so saving it means lowering the body and
+                // wrapping it the way a `{...}` body is wrapped. Without that
+                // the two group forms disagreed: `{\count0=2}` restored and
+                // `\begingroup\count0=2\endgroup` did not.
+                "begingroup" => {
+                    self.eng.compile_time_begin_group();
+                    let mark = self.globals.len();
+                    let body = self.block(lx, Some(&["endgroup"]))?;
+                    // The `\endgroup` that stopped the block was pushed back
+                    // for this arm to consume; at end of input there is none.
+                    if !self.ended {
+                        let _ = lx.next_token(&self.eng.cats);
+                    }
+                    self.eng.compile_time_end_group()?;
+                    let after = self.eng.take_after_group();
+                    lx.push_back(&after);
+                    let saves = self.saved_by_group(&body, mark);
+                    // No register written means nothing is left for run time --
+                    // the macro table was already scoped above -- so the body
+                    // is spliced in rather than wrapped, which also keeps a
+                    // stretch of text one constant instead of two.
+                    if saves.is_empty() {
+                        for cmd in body {
+                            match (&cmd, out.last_mut()) {
+                                (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
+                                _ => out.push(cmd),
+                            }
+                        }
+                    } else {
+                        out.push(Cmd::Group { saves, body });
+                    }
+                    // `\end` inside the group stops the whole run, as it does
+                    // inside an `\input` file.
+                    if self.ended {
+                        break;
+                    }
+                }
                 "endgroup" => self.eng.compile_time_end_group()?,
+                // `tex.web` §1288: read the group unexpanded, put every
+                // character through `\uccode`/`\lccode`, and push the result
+                // back to be read again. The catcodes travel unchanged, which
+                // is what LaTeX's `\MakeUppercase` is built on.
+                "uppercase" | "lowercase" => {
+                    let table = match name.name() {
+                        "uppercase" => crate::charcodes::Table::Upper,
+                        _ => crate::charcodes::Table::Lower,
+                    };
+                    self.eng.do_case_shift(lx, table)?;
+                }
+                // §326: hold the next token and insert it after the enclosing
+                // group's `}`.
+                "aftergroup" => {
+                    let Some(t) = self.eng.take_file(lx) else {
+                        return Err(TexError("Missing token for \\aftergroup".into()));
+                    };
+                    self.eng.after_group(lx, t);
+                }
+                // §1269: hold the next token and insert it once the assignment
+                // that follows has finished.
+                "afterassignment" => {
+                    let Some(t) = self.eng.take_file(lx) else {
+                        return Err(TexError("Missing token for \\afterassignment".into()));
+                    };
+                    self.eng.set_after_assignment(t);
+                }
+                // §1060: skip the spaces that follow. Nothing here is in
+                // horizontal mode, so it has only its mouth-level effect --
+                // which is the whole of it for a `\message` stream.
+                "ignorespaces" => self.skip_spaces_in_text(lx),
                 "global" => self.eng.set_global_prefix(true),
                 // The other two definition prefixes. Like `\global` they set a
                 // flag the definition that follows reads and spends.
@@ -889,6 +1152,19 @@ impl Lowerer {
                     }
                     return Err(TexError(format!("Undefined control sequence \\{other}")));
                 }
+            }
+            // `tex.web` §1269: a token `\afterassignment` held is put back once
+            // the ASSIGNMENT that followed has finished -- at the end of
+            // `prefixed_command` and nowhere else, which is why this is here
+            // rather than at the top of the loop.
+            let assigned = crate::expand::Engine::is_assignment(name.name())
+                || matches!(
+                    self.eng.numeric_cs(name),
+                    Some(crate::expand::NumericCs::Register(_))
+                )
+                || self.eng.toks_cs(name).is_some();
+            if let Some(t) = self.eng.take_after_assignment(assigned) {
+                lx.push_back(&[t]);
             }
         }
         self.close_colour(&mut out, &mut colour_open);
@@ -1930,6 +2206,111 @@ impl Lowerer {
         }
     }
 
+    /// The right-hand side of a glue-register assignment, written into the four
+    /// slots at `base`.
+    ///
+    /// `\skip1=\skip0` copies a register whose value is only known at run time,
+    /// so the four writes are slot READS rather than constants; anything else
+    /// is a glue the scanner reads now (`tex.web` §461's `scan_glue`).
+    fn glue_assign(&mut self, lx: &mut Lexer, base: i64) -> R<Vec<Cmd>> {
+        if let Some(from) = self.peek_glue_register(lx)? {
+            return Ok((0..crate::compiler::SKIP_STRIDE)
+                .map(|i| Cmd::SetCount(base + i, Num::Count(from + i)))
+                .collect());
+        }
+        let (nat, st, sto, sh, sho) = self.eng.scan_glue(lx)?;
+        Ok([nat, st, sh, sto * 4 + sho]
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| Cmd::SetCount(base + i as i64, Num::Literal(v)))
+            .collect())
+    }
+
+    /// The base slot of a glue register standing where a glue is wanted, if
+    /// that is what comes next; nothing is consumed otherwise.
+    fn peek_glue_register(&mut self, lx: &mut Lexer) -> R<Option<i64>> {
+        let mut eaten = Vec::new();
+        loop {
+            let Some(t) = self.eng.take_file(lx) else {
+                lx.push_back(&eaten);
+                return Ok(None);
+            };
+            if t.is_space() {
+                eaten.push(t);
+                continue;
+            }
+            if let Token::Cs(n) = &t {
+                if n.name() == "skip" {
+                    return Ok(Some(
+                        crate::compiler::SKIP_BASE
+                            + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE,
+                    ));
+                }
+                if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
+                    if r >= crate::compiler::SKIP_BASE {
+                        return Ok(Some(r));
+                    }
+                }
+            }
+            // Not a glue register: everything read goes back in the order it
+            // was read, so the scanner that follows sees an untouched stream.
+            eaten.push(t);
+            lx.push_back(&eaten);
+            return Ok(None);
+        }
+    }
+
+    /// A DIMENSION operand as the VM will see it: a register read, or a
+    /// constant in scaled points.
+    ///
+    /// A dimension is an integer count of scaled points living in a slot, so
+    /// the same `Num` a count register uses carries it and only the scanner
+    /// differs — `tex.web` §448's `scan_dimen` rather than §440's `scan_int`.
+    /// That is what lets `\ifdim` lower to the same real branch `\ifnum` does.
+    ///
+    /// Written once for both reading contexts: `\ifdim` occurs in running text
+    /// and inside a `\message` body, and the two differ only in where the
+    /// tokens come from.
+    fn dimen_number(&mut self, lx: &mut Lexer, pending: bool) -> R<Num> {
+        loop {
+            let Some(t) = self.eng.take_any(lx, pending) else {
+                return Err(TexError("Missing number, treated as zero".into()));
+            };
+            if t.is_space() {
+                continue;
+            }
+            let Token::Cs(n) = &t else {
+                lx.push_back(&[t]);
+                return Ok(Num::Literal(self.eng.scan_dimen_any(lx, pending)?));
+            };
+            let n = *n;
+            match n.name() {
+                "dimen" => {
+                    let reg = self.eng.scan_number_any(lx, pending)?;
+                    return Ok(Num::Count(crate::compiler::DIMEN_BASE + reg));
+                }
+                // A glue where a dimension is wanted is its NATURAL width
+                // (`tex.web` §430's coercion), which is the first of its slots.
+                "skip" => {
+                    let reg = self.eng.scan_number_any(lx, pending)?;
+                    return Ok(Num::Count(
+                        crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
+                    ));
+                }
+                _ => {}
+            }
+            // A `\dimendef` or `\skipdef` name is that register, in every
+            // position the spelt-out form works.
+            if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(n) {
+                if r >= crate::compiler::DIMEN_BASE {
+                    return Ok(Num::Count(r));
+                }
+            }
+            lx.push_back(&[t]);
+            return Ok(Num::Literal(self.eng.scan_dimen_any(lx, pending)?));
+        }
+    }
+
     /// `\message{...}` lowered to the steps that build it at run time.
     ///
     /// The body is walked as a token list. Macros and `\csname` resolve here --
@@ -2127,6 +2508,14 @@ impl Lowerer {
                         });
                     }
                 }
+                // `\meaning` is expandable, so it reaches a message body as
+                // readily as running text: what §296 would print for the next
+                // token, as characters.
+                "meaning" => {
+                    if let Some(next) = work.pending.pop() {
+                        text.push_str(&self.eng.meaning_text(&next));
+                    }
+                }
                 // `\expanded{...}` puts the group back to be expanded, which
                 // is what this loop does to everything it meets anyway -- so
                 // the primitive is the wrapper coming off.
@@ -2169,6 +2558,25 @@ impl Lowerer {
                             let m = *m;
                             self.eng.expand_macro_pending(work, m)?;
                         }
+                        // `tex.web` §366: `\expandafter\A\B` expands `\B` ONE
+                        // step whatever `\B` is, and only a macro was being
+                        // expanded here. `\expandafter\wrap\expandafter{\inner}`
+                        // is the idiom that breaks without it -- the inner
+                        // `\expandafter` was put back unexpanded, so `\wrap`
+                        // took the empty brace group as its argument and
+                        // `\inner` was left standing outside it.
+                        //
+                        // The conditionals are the exception, and deliberately:
+                        // inside a message body they lower to run-time branches
+                        // over registers the VM holds, so letting the expander
+                        // decide one now would answer from the frontend's stale
+                        // copy of a register instead.
+                        Token::Cs(m) if !crate::expand::Engine::is_conditional(*m) => {
+                            let m = *m;
+                            if !self.eng.expand_pending(work, m)? {
+                                work.push_back(&[next]);
+                            }
+                        }
                         _ => work.push_back(&[next]),
                     }
                     work.push_back(&[held]);
@@ -2195,6 +2603,26 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.msg_number(work)?;
+                    let (then_ops, else_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.push(MsgOp::If {
+                        left,
+                        rel,
+                        right,
+                        then_ops,
+                        else_ops,
+                    });
+                }
+                // The same comparison over dimensions; see the `\ifdim` arm in
+                // the file-level dispatch.
+                "ifdim" => {
+                    let left = self.dimen_number(work, true)?;
+                    let rel = match self.eng.read_relation_pending(work)? {
+                        '<' => Rel::Less,
+                        '>' => Rel::Greater,
+                        _ => Rel::Equal,
+                    };
+                    let right = self.dimen_number(work, true)?;
                     let (then_ops, else_ops) = self.msg_arms(work)?;
                     flush!();
                     out.push(MsgOp::If {
@@ -2468,6 +2896,109 @@ impl Lowerer {
         let mut lx = Lexer::new(src);
         self.block(&mut lx, None)
     }
+
+    /// Drop the spaces that follow, for `\ignorespaces` (`tex.web` §1060).
+    fn skip_spaces_in_text(&mut self, lx: &mut Lexer) {
+        while let Some(t) = self.eng.take_file(lx) {
+            if !t.is_space() {
+                lx.push_back(&[t]);
+                return;
+            }
+        }
+    }
+
+    /// The registers a group closing here must save, given where its body
+    /// started adding to `globals`.
+    ///
+    /// Everything the body assigns, less everything it assigned GLOBALLY: a
+    /// global write is not undone by the group it sits in, and a `Cmd::Group`
+    /// has one save/restore pair for the whole body, so not restoring means not
+    /// saving.
+    fn saved_by_group(&self, body: &[Cmd], mark: usize) -> Vec<i64> {
+        let global = &self.globals[mark.min(self.globals.len())..];
+        assigned_counts(body)
+            .into_iter()
+            .filter(|r| !global.contains(r))
+            .collect()
+    }
+
+    /// Record `regs` as globally assigned when the assignment about to be
+    /// emitted carried `\global`, spending the prefix either way.
+    ///
+    /// See the `globals` field: a group must not restore a register a `\global`
+    /// wrote inside it, and the only place that can be known is here, where the
+    /// prefix and the register number are both in hand.
+    fn note_global(&mut self, regs: &[i64]) {
+        if !self.eng.take_global_prefix() {
+            return;
+        }
+        for reg in regs {
+            if !self.globals.contains(reg) {
+                self.globals.push(*reg);
+            }
+        }
+    }
+}
+
+/// `\advance\skip<n> by <glue>`, as commands (`tex.web` §1240 through §1239's
+/// `glue_add`).
+///
+/// Adding glue adds the natural widths and combines each infinity ORDER
+/// separately: an infinite component beats any finite one however large, a
+/// higher infinity beats a lower, and only equal orders add. The operand is
+/// known while lowering and the register is not, so the rule becomes a branch
+/// on the register's own order.
+///
+/// The two orders live packed in one slot as `stretch*4 + shrink`, sixteen
+/// possible values, and the result is a function of that value alone -- so the
+/// chain enumerates all sixteen rather than trying to take the packed slot
+/// apart with arithmetic the VM has no remainder op for. It is the same shape
+/// `\ifcase` lowers to, and for the same reason.
+fn advance_glue(base: i64, op: crate::glue::Glue) -> Vec<Cmd> {
+    let packed = base + 3;
+    let mut out = vec![Cmd::Arith(Arith::Add, base, Num::Literal(op.natural))];
+    // Built from the last state backwards, so each arm's `else` is the chain
+    // for every state after it.
+    let mut chain: Vec<Cmd> = Vec::new();
+    for state in (0..16i64).rev() {
+        let (was_stretch, was_shrink) = (state / 4, state % 4);
+        let mut arm = Vec::new();
+        for (slot, was, add, order) in [
+            (base + 1, was_stretch, op.stretch, op.stretch_order),
+            (base + 2, was_shrink, op.shrink, op.shrink_order),
+        ] {
+            match was.cmp(&order) {
+                // The register's component is the more infinite: it stands.
+                std::cmp::Ordering::Greater => {}
+                std::cmp::Ordering::Equal => {
+                    arm.push(Cmd::Arith(Arith::Add, slot, Num::Literal(add)))
+                }
+                std::cmp::Ordering::Less => arm.push(Cmd::SetCount(slot, Num::Literal(add))),
+            }
+        }
+        let after = (
+            was_stretch.max(op.stretch_order),
+            was_shrink.max(op.shrink_order),
+        );
+        let repacked = after.0 * 4 + after.1;
+        if repacked != state {
+            arm.push(Cmd::SetCount(packed, Num::Literal(repacked)));
+        }
+        // A state that changes nothing needs no arm of its own; the chain's
+        // tail already does nothing.
+        if arm.is_empty() && chain.is_empty() {
+            continue;
+        }
+        chain = vec![Cmd::IfNum {
+            left: Num::Count(packed),
+            rel: Rel::Equal,
+            right: Num::Literal(state),
+            then_branch: arm,
+            else_branch: chain,
+        }];
+    }
+    out.extend(chain);
+    out
 }
 
 /// Every count register a command block assigns, so a group knows what to save.

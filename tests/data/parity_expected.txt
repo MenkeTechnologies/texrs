@@ -6,12 +6,16 @@
 [tie] [A] [a][b]
 #==# advance_wraps_at_32_bits.tex
 [-2147483648] [2147483647]
+#==# after_tokens.tex
+A IN MARK B X MARK [5]
 #==# backtick_codes.tex
 65-66
 #==# caret_hex_notation.tex
 [A][J][tA]
 #==# caret_in_control_sequence_name.tex
 [11]
+#==# case_shift.tex
+ABC DEF 123 abc def 123 A+B x!y
 #==# catcode_midfile.tex
 AT
 #==# charcode_tables.tex
@@ -52,6 +56,8 @@ VALUE
 [alpha|beta]
 #==# dimendef_alias.tex
 [2.0pt][2.0pt]
+#==# dimension_conditional.tex
+[BIG] [GE] [EQ] [LT] [RATIO] [NATURAL] [INCH]
 #==# dimension_units.tex
 [1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
 #==# edef_expands_now.tex
@@ -62,6 +68,8 @@ VALUE
 ZERO
 #==# edef_with_parameters.tex
 [A|B|7]
+#==# error_context_trimmed.tex
+! Number too big.l.17 ...3=3 \count4=4 \count5=5 \count6=9999999999                                                  9 \count7=7 \count8=8 \cou...! Number too big.l.18 \count14="FFFFFFFF                       [2147483647][13][2147483647] )(see the transcript file for additional information
 #==# expandafter.tex
 \b
 #==# expandafter_brace_arg.tex
@@ -80,14 +88,20 @@ OUT IN OUT
 inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 #==# hash_hash.tex
 [A|B]
+#==# ifcase_selector.tex
+A B C C C [done]
 #==# ifx_after_edef_conditional.tex
 SAME
 #==# let_alias.tex
 [q]
 #==# let_char_token.tex
 <\bgroup >INSIDE\egroup
+#==# let_primitive_alias.tex
+NO THROUGH LESS
 #==# macro_basic.tex
 HELLO-WORLD
+#==# meaning_prim.tex
+[macro:#1->[#1]][\long macro:#1->(#1)][\outer macro:->o][macro:#1,#2\stop -><#1;#2>] [macro:->][\char"41][\count3][\dimen4] [\skip5][\toks6][the letter A][begin-group character {] [\relax][undefined] [the letter A][the character 1][math shift character $][alignment tab character &] [macro parameter character #][superscript character ^][subscript character _][begin-group character {][end-group character }] [\count][\def][\message]
 #==# multi_message.tex
 one two
 #==# multiply_overflow.tex
@@ -102,12 +116,20 @@ one two
 ! Number too big.l.6 \count1=9999999999                      9[2147483647] )(see the transcript file for additional information
 #==# outer_forbidden_use.tex
 Runaway text?[! Forbidden control sequence found while scanning text of \message.<inserted text>                 }<to be read again>                    \x l.7 \message{[\x                ]}[ ! Too many }'s.l.7 \message{[\x]}                  [1] )(see the transcript file for additional information)Output written on case.dvi (1 page, 208 bytes
+#==# param_brace_argument.tex
+[X]{Y} (ab){Z} <p|q>
 #==# param_brace_delim.tex
 [X]{Y}
+#==# param_brace_illegal_number.tex
+! Illegal parameter number in definition of \greet.<to be read again>                    1l.2 \def\greet#{1HELLO-#1                         }1HELLO-##1{WORLD} )(see the transcript file for additional information
 #==# plain_count0.tex
 [1]
 #==# radix_constants.tex
 [255][511][8705] [8705]
+#==# register_arithmetic.tex
+[5.0pt][6.0pt][3.5pt] [3.0pt plus 5.0pt minus 5.0pt] [3.0pt plus 4.0fil minus 1.0pt] [3.0pt plus 3.0fil] [3.0pt plus 1.0fill minus 1.0fil] [3.0pt plus 6.0pt minus 9.0pt] [1.5pt plus 3.0pt minus 4.5pt]
+#==# register_copy.tex
+[4.0pt plus 1.0fil minus 2.0pt][4.0pt plus 1.0fil minus 2.0pt] [4.0pt][8.0pt][4.0pt] [4.0pt plus 1.0fil minus 2.0pt]
 #==# skipdef_alias.tex
 [1.0pt plus 2.0pt][1.0pt plus 2.0pt]
 #==# space_after_cs.tex
@@ -118,5 +140,7 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 [abc][a\b c][\.] [\x ][] [abc]
 #==# toks_scoping.tex
 [b] [a][a]
+#==# true_units.tex
+[1.0pt][72.26999pt][71.13188pt] [1.0pt plus 2.0pt minus 3.0pt]
 #==# undefined_cs.tex
 ! Undefined control sequence.l.2 \message{A\undefinedxx                           B}AB )(see the transcript file for additional information

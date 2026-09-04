@@ -1,0 +1,26 @@
+% \advance, \multiply and \divide over the registers that are not counts
+% (tex.web §1240). What follows `by' is read in the units of the register
+% being changed for \advance, and as a plain integer for the other two --
+% glue times a length is not something TeX has.
+%
+% Adding glue is the part that is not componentwise addition: an infinite
+% component beats a finite one however large, a higher infinity beats a
+% lower, and only equal orders add.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=2pt \advance\dimen0 by 3pt
+\dimen1=2pt \multiply\dimen1 by 3
+\dimen2=7pt \divide\dimen2 by 2
+\message{[\the\dimen0][\the\dimen1][\the\dimen2]}
+\skip0=1pt plus 2pt minus 1pt \advance\skip0 by 2pt plus 3pt minus 4pt
+\message{[\the\skip0]}
+\skip1=1pt plus 1fil \advance\skip1 by 2pt plus 3fil minus 1pt
+\message{[\the\skip1]}
+\skip2=1pt plus 1pt \advance\skip2 by 2pt plus 3fil
+\message{[\the\skip2]}
+\skip3=1pt plus 1fill minus 2pt \advance\skip3 by 2pt plus 3fil minus 1fil
+\message{[\the\skip3]}
+\skip4=1pt plus 2pt minus 3pt \multiply\skip4 by 3
+\message{[\the\skip4]}
+\divide\skip4 by 2
+\message{[\the\skip4]}
+\end

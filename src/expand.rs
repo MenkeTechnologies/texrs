@@ -94,6 +94,12 @@ enum Save {
     /// and registrations are rare, so the undo record is the whole list rather
     /// than a per-entry diff.
     Intercepts(crate::intercepts::Registry),
+    /// A token `\aftergroup` is holding for this group's `}`.
+    ///
+    /// `tex.web` §326 puts it on the SAVE STACK rather than in a list of its
+    /// own, which is what makes a nested group's tokens come out at its own
+    /// closing brace and several in one group come out in order.
+    AfterGroup(Token),
 }
 
 pub struct Engine {
@@ -137,7 +143,23 @@ pub struct Engine {
     /// The depth is carried in the token stream by the two markers below rather
     /// than by a counter around the weave, because the handler's tokens are
     /// pushed back and expanded later, long after the weave returned.
+    /// Tokens the group that just closed held for `\aftergroup`, waiting for
+    /// a caller with a mouth to put them back.
+    after_group_tokens: Vec<Token>,
+    /// The token `\afterassignment` is holding for the next assignment
+    /// (`tex.web` §1269's `after_token`). One only: a second `\afterassignment`
+    /// before the assignment replaces the first, as it does there.
+    after_assignment: Option<Token>,
     advice_depth: u32,
+    /// Errors REPORTED rather than raised, in the order they happened.
+    ///
+    /// `tex.web` §82's `error` prints the message and carries on; only a few
+    /// conditions (§93's `fatal_error`, running out of memory) stop the run.
+    /// A `TexError` here is the stopping kind, so a condition tex recovers from
+    /// cannot be one -- it goes here instead, and the lowerer writes it into the
+    /// message stream in front of whatever is printed next, which is where tex
+    /// prints it.
+    errors: Vec<String>,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -156,6 +178,15 @@ fn wrapped(body: &[Token]) -> Vec<Token> {
 pub const ADVICE_IN: &str = "\u{0}advice-in";
 pub const ADVICE_OUT: &str = "\u{0}advice-out";
 
+/// Which of the three conditional boundaries a skip stopped at
+/// (`tex.web` §489's `or_code`, `else_code`, `fi_code`).
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum Stop {
+    Or,
+    Else,
+    Fi,
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum CondState {
     /// The true branch is running; an `\else` here starts skipping.
@@ -172,6 +203,41 @@ type R<T> = Result<T, TexError>;
 /// Every conditional primitive, so the skipper can count nesting correctly.
 /// Missing one here would make a skipped `\ifnum` eat its own `\fi` and unbalance
 /// everything after it.
+/// Every command `tex.web` §1211 routes through `prefixed_command` — the
+/// ASSIGNMENTS, which are exactly what `\afterassignment` waits for. A `\the`
+/// or a `\message` is not one, and neither is a group.
+const ASSIGNMENTS: &[&str] = &[
+    "def",
+    "gdef",
+    "edef",
+    "xdef",
+    "let",
+    "futurelet",
+    "chardef",
+    "mathchardef",
+    "countdef",
+    "dimendef",
+    "skipdef",
+    "toksdef",
+    "count",
+    "dimen",
+    "skip",
+    "toks",
+    "advance",
+    "multiply",
+    "divide",
+    "catcode",
+    "mathcode",
+    "lccode",
+    "uccode",
+    "sfcode",
+    "delcode",
+    "newcommand",
+    "renewcommand",
+    "providecommand",
+    "DeclareRobustCommand",
+];
+
 const CONDITIONALS: &[&str] = &[
     "if",
     "ifcat",
@@ -213,6 +279,9 @@ impl Engine {
             protected: false,
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
+            errors: Vec::new(),
+            after_group_tokens: Vec::new(),
+            after_assignment: None,
         }
     }
 
@@ -232,11 +301,37 @@ impl Engine {
         self.groups.push(Vec::new());
     }
 
+    /// `\aftergroup<token>` — hold the token and insert it after the `}`.
+    ///
+    /// `tex.web` §326 saves it on the save stack as an `insert_token`, so
+    /// several `\aftergroup`s in one group come back in the order they were
+    /// given and a nested group's tokens come out at ITS `}`. Keeping them in
+    /// the group frame is the same arrangement.
+    ///
+    /// Outside every group there is nothing to wait for and tex inserts the
+    /// token at once, which is what the empty-stack case does.
+    pub fn after_group(&mut self, lx: &mut Lexer, tok: Token) {
+        match self.groups.last_mut() {
+            Some(frame) => frame.push(Save::AfterGroup(tok)),
+            None => lx.push_back(&[tok]),
+        }
+    }
+
     /// Undo this group's assignments, newest first.
     fn end_group(&mut self) -> R<()> {
         let Some(frame) = self.groups.pop() else {
             return Err(TexError("Too many }'s".into()));
         };
+        // §282: the tokens `\aftergroup` held come out in the order they were
+        // given, AFTER the group's own restores. Collected before the undo pass
+        // so the reverse walk below does not reverse them too, and buffered
+        // rather than pushed because a group can close in a context that has no
+        // mouth in hand -- `take_after_group` is where they reach one.
+        self.after_group_tokens
+            .extend(frame.iter().filter_map(|s| match s {
+                Save::AfterGroup(t) => Some(*t),
+                _ => None,
+            }));
         for save in frame.into_iter().rev() {
             match save {
                 Save::Cat(c, cat) => self.cats.set(c, cat),
@@ -266,9 +361,71 @@ impl Engine {
                     }
                 },
                 Save::Intercepts(old) => self.intercepts = old,
+                // Already collected above; it is a token to insert, not a
+                // value to put back.
+                Save::AfterGroup(_) => {}
             }
         }
         Ok(())
+    }
+
+    /// Hold `tok` until the next assignment finishes (`\afterassignment`).
+    pub fn set_after_assignment(&mut self, tok: Token) {
+        self.after_assignment = Some(tok);
+    }
+
+    /// The token `\afterassignment` is holding, if the command just executed
+    /// was an ASSIGNMENT (`tex.web` §1269 inserts it at the end of
+    /// `prefixed_command` and nowhere else).
+    pub fn take_after_assignment(&mut self, was_assignment: bool) -> Option<Token> {
+        match was_assignment {
+            true => self.after_assignment.take(),
+            false => None,
+        }
+    }
+
+    /// Whether `name` is one of the assignment commands `\afterassignment`
+    /// waits for -- `tex.web` §1211's `prefixed_command` set.
+    ///
+    /// A register named through `\countdef` and friends is an assignment too,
+    /// and is not spelt here because it is not spelt: the caller asks the
+    /// meaning table for that one.
+    pub fn is_assignment(name: &str) -> bool {
+        ASSIGNMENTS.contains(&name)
+    }
+
+    /// The tokens the group that just closed held for `\aftergroup`, in the
+    /// order they were given, clearing the buffer.
+    ///
+    /// Every caller of a group end has a mouth; `end_group` does not, so this
+    /// is where the two meet. Empty whenever no `\aftergroup` ran, which is
+    /// almost always.
+    pub fn take_after_group(&mut self) -> Vec<Token> {
+        std::mem::take(&mut self.after_group_tokens)
+    }
+
+    /// Report an error and CARRY ON — `tex.web` §82's `print_err(msg)` followed
+    /// by `error`, which prints a period and then §311's context display.
+    ///
+    /// This is TeX's error model and it is not a detail: a document with one
+    /// bad constant in it still sets, because every condition tex can guess a
+    /// value for is reported and then given one. Raising a `TexError` instead
+    /// stops the run, which is right only for what §93 calls fatal.
+    ///
+    /// The three lines tex writes are joined with nothing, because that is what
+    /// separates them: `print_ln` ends a terminal line and adds no character,
+    /// so the message stream reads `! Number too big.l.6 \count1=…`. It is the
+    /// same reading `crate::parity::messages_of` takes of tex's own output,
+    /// which is what makes the two comparable at all.
+    pub fn report(&mut self, lx: &Lexer, msg: &str) {
+        let context = lx.context().unwrap_or_default();
+        self.errors
+            .push(format!("! {msg}.{}", context.replace('\n', "")));
+    }
+
+    /// The errors reported since the last call, clearing them.
+    pub fn take_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.errors)
     }
 
     /// Record the current value so the enclosing group can put it back.
@@ -319,6 +476,8 @@ impl Engine {
             }
             Token::Char(_, Cat::EndGroup) => {
                 self.end_group()?;
+                let after = self.take_after_group();
+                lx.push_back(&after);
                 return Ok(false);
             }
             Token::Char(..) => return Ok(false),
@@ -370,7 +529,36 @@ impl Engine {
                 return out;
             }
             "begingroup" => self.begin_group(),
-            "endgroup" => self.end_group()?,
+            "endgroup" => {
+                self.end_group()?;
+                let after = self.take_after_group();
+                lx.push_back(&after);
+            }
+            // `tex.web` §1288. The group is read unexpanded and its characters
+            // are looked up in `\uccode`/`\lccode`.
+            "uppercase" | "lowercase" => {
+                let table = match name.name() {
+                    "uppercase" => crate::charcodes::Table::Upper,
+                    _ => crate::charcodes::Table::Lower,
+                };
+                self.do_case_shift(lx, table)?
+            }
+            // §326: hold the next token and insert it after the enclosing
+            // group's `}`.
+            "aftergroup" => {
+                let Some(t) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Missing token for \\aftergroup".into()));
+                };
+                self.after_group(lx, t);
+            }
+            // §1269: hold the next token and insert it after the assignment
+            // that follows finishes.
+            "afterassignment" => {
+                let Some(t) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Missing token for \\afterassignment".into()));
+                };
+                self.after_assignment = Some(t);
+            }
             "catcode" => self.do_catcode(lx)?,
             "mathcode" | "lccode" | "uccode" | "sfcode" | "delcode" => {
                 let t = crate::charcodes::Table::from_name(name.name())
@@ -485,6 +673,19 @@ impl Engine {
                 }
                 Ok(true)
             }
+            // `\meaning` is a `convert` primitive (`tex.web` §470), so it is
+            // expandable and belongs beside `\string` rather than in the
+            // executor: it turns the NEXT token into the characters §296's
+            // `print_meaning` would write for it.
+            "meaning" => {
+                if let Some(t) = self.take(lx, pending_only) {
+                    let text = self.meaning_text(&t);
+                    let toks: Vec<Token> =
+                        text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
+                    lx.push_back(&toks);
+                }
+                Ok(true)
+            }
             "csname" => {
                 let built = self.read_csname(lx, pending_only)?;
                 // An undefined \csname name becomes \relax, per tex.web §372.
@@ -550,6 +751,18 @@ impl Engine {
                     _ => a == b,
                 }
             }
+            // `tex.web` §503: the same comparison `\ifnum` makes, over
+            // dimensions -- only the scanner differs.
+            "ifdim" => {
+                let a = self.scan_dimen(lx, pending_only)?;
+                let rel = self.read_relation(lx, pending_only)?;
+                let b = self.scan_dimen(lx, pending_only)?;
+                match rel {
+                    '<' => a < b,
+                    '>' => a > b,
+                    _ => a == b,
+                }
+            }
             "ifodd" => self.scan_number(lx, pending_only)? % 2 != 0,
             "ifdefined" => match self.take(lx, pending_only) {
                 Some(Token::Cs(n)) => self.meanings.contains_key(&n),
@@ -587,15 +800,28 @@ impl Engine {
     }
 
     /// `\ifcase<n>` selects the nth `\or` branch, `\else` being the default.
+    ///
+    /// `tex.web` §509 is `while n<>0`, not `while n>0`, and only an `\or`
+    /// decrements: landing on `\else` goes straight to `common_ending`, which
+    /// runs the else text, and landing on `\fi` ends the conditional with
+    /// nothing run. That is why a selector that is NEGATIVE, or past the last
+    /// `\or`, takes the `\else` branch rather than case 0 -- a negative n never
+    /// reaches zero, so every `\or` is skipped until the `\else` stops it.
     fn do_ifcase(&mut self, lx: &mut Lexer, n: i64, pending_only: bool) -> R<()> {
         let mut remaining = n;
-        while remaining > 0 {
-            // Skip one branch; landing on `\fi` means no branch matched.
-            let hit_else = self.skip_to(lx, true, pending_only)?;
-            if !hit_else {
-                return Ok(());
+        while remaining != 0 {
+            match self.pass_text(lx, pending_only)? {
+                // Another case boundary: one case skipped, keep counting.
+                Stop::Or => remaining -= 1,
+                // §509's `common_ending` with `cur_chr <> fi_code`: the else
+                // text runs and its `\fi` closes the conditional.
+                Stop::Else => {
+                    self.conds.push(CondState::Done);
+                    return Ok(());
+                }
+                // The conditional ended before the case was reached.
+                Stop::Fi => return Ok(()),
             }
-            remaining -= 1;
         }
         self.conds.push(CondState::Taken);
         Ok(())
@@ -607,6 +833,25 @@ impl Engine {
     /// Nested conditionals are counted so a skipped branch containing its own
     /// `\if` does not mistake that one's `\fi` for the outer one's.
     fn skip_to(&mut self, lx: &mut Lexer, stop_at_else: bool, pending_only: bool) -> R<bool> {
+        loop {
+            match self.pass_text(lx, pending_only)? {
+                Stop::Fi => return Ok(false),
+                // `\else` and `\or` only stop a skip that is looking for one;
+                // to a skip that is not, they are ordinary tokens of the
+                // skipped text and the scan runs on to the `\fi`.
+                _ if !stop_at_else => continue,
+                _ => return Ok(true),
+            }
+        }
+    }
+
+    /// `tex.web` §494's `pass_text`: skip balanced conditional text and say
+    /// WHICH of the three boundaries stopped it.
+    ///
+    /// `\ifcase` needs the distinction -- `\or` counts down a case and `\else`
+    /// does not -- while an ordinary skip only needs "else-or-or versus fi",
+    /// which is why `skip_to` is a wrapper rather than a second scanner.
+    fn pass_text(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Stop> {
         let mut depth = 0usize;
         loop {
             let Some(t) = self.take(lx, pending_only) else {
@@ -616,10 +861,11 @@ impl Engine {
             match n.name() {
                 n if CONDITIONALS.contains(&n) => depth += 1,
                 "fi" => match depth {
-                    0 => return Ok(false),
+                    0 => return Ok(Stop::Fi),
                     _ => depth -= 1,
                 },
-                "else" | "or" if depth == 0 && stop_at_else => return Ok(true),
+                "else" if depth == 0 => return Ok(Stop::Else),
+                "or" if depth == 0 => return Ok(Stop::Or),
                 _ => {}
             }
         }
@@ -747,6 +993,12 @@ impl Engine {
             }
         }
         let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
+        // `tex.web` §453 takes an optional `true` in front of the unit and
+        // divides by the magnification ratio. `\mag` is 1000 here and there is
+        // no way to change it, so a true unit IS the unit -- but the keyword
+        // still has to be eaten, or `1truept` reads as the unit `tr` and the
+        // document stops on an illegal unit of measure.
+        let _true_prefix = self.scan_keyword(lx, "true", pending_only);
         let mut unit = String::new();
         while unit.len() < 2 {
             let Some(t) = self.take(lx, pending_only) else {
@@ -771,6 +1023,124 @@ impl Engine {
             }
         }
         Ok((sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN))
+    }
+
+    /// `\uppercase{...}` / `\lowercase{...}` — `tex.web` §1288.
+    ///
+    /// The group is read WITHOUT expanding it, every character token is looked
+    /// up in `\uccode` or `\lccode`, and the result is pushed back to be read
+    /// again. A zero code means "no case", so the character stands: that is why
+    /// `\uppercase{a1}` is `A1` and not `A` followed by nothing. The catcode
+    /// travels with the character unchanged, which is the property LaTeX's
+    /// `\MakeUppercase` is built on.
+    pub fn do_case_shift(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<()> {
+        let group = self.read_group_tokens(lx)?;
+        let shifted: Vec<Token> = group
+            .into_iter()
+            .map(|t| match &t {
+                Token::Char(c, cat) => match self.charcodes.get(table, *c) {
+                    0 => t,
+                    code => match u32::try_from(code).ok().and_then(char::from_u32) {
+                        Some(to) => Token::Char(to, *cat),
+                        None => t,
+                    },
+                },
+                Token::Cs(_) => t,
+            })
+            .collect();
+        lx.push_back(&shifted);
+        Ok(())
+    }
+
+    /// What `\meaning` writes for a token (`tex.web` §296's `print_meaning`
+    /// over §298's `print_cmd_chr`).
+    ///
+    /// Every shape here was read off tex 3.141592653, not derived from the
+    /// source: a macro is `macro:` then its parameter text, `->`, and its body;
+    /// a `\chardef` constant is `\char"41`; a register name is the register it
+    /// stands for; a character carries the NAME of its category, which is why
+    /// this cannot be `Token::to_text`.
+    pub fn meaning_text(&self, tok: &Token) -> String {
+        let Token::Cs(name) = tok else {
+            let Token::Char(c, cat) = tok else {
+                unreachable!("a token is a character or a control sequence")
+            };
+            return Self::char_meaning(*c, *cat);
+        };
+        match self.meanings.get(name) {
+            Some(Meaning::Char(c, cat)) => Self::char_meaning(*c, *cat),
+            // A `\mathchardef` name reads back as `\char` rather than
+            // `\mathchar`: both are `Meaning::CharDef`, and telling them apart
+            // needs a variant `src/format.rs` also has to serialise.
+            Some(Meaning::CharDef(v)) => format!("{}char\"{v:X}", self.escape),
+            Some(Meaning::CountDef(r)) => self.register_name(*r),
+            Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.escape),
+            Some(Meaning::Primitive(p)) => format!("{}{}", self.escape, p.name()),
+            Some(Meaning::Macro(m)) => {
+                let mut out = String::new();
+                // §1295's `print_cmd_chr` prints the whole thing as ONE escaped
+                // string -- `print_esc("long outer macro")` -- so the prefixes
+                // run together and a single space separates the last of them
+                // from the word `macro`: `\long\outer macro:`.
+                for (on, word) in [
+                    (m.protected, "protected"),
+                    (m.long, "long"),
+                    (m.outer, "outer"),
+                ] {
+                    if on {
+                        out.push(self.escape);
+                        out.push_str(word);
+                    }
+                }
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str("macro:");
+                out.push_str(&self.tokens_text(&m.params));
+                out.push_str("->");
+                out.push_str(&self.tokens_text(&m.body));
+                out
+            }
+            // Not in the meaning table: either a primitive nothing has
+            // redefined, or a name that means nothing at all. The corpus is
+            // the list of primitives texrs resolves -- `tests/docs_reference_
+            // sections.rs` is what keeps it level with the dispatch -- so it
+            // answers which of the two this is.
+            None => match crate::corpus::lookup(&format!("{}{}", self.escape, name.name())) {
+                Some(_) => format!("{}{}", self.escape, name.name()),
+                None => "undefined".to_string(),
+            },
+        }
+    }
+
+    /// The register a slot number names, spelt as the document would spell it.
+    fn register_name(&self, slot: i64) -> String {
+        let e = self.escape;
+        if slot >= crate::compiler::SKIP_BASE {
+            let n = (slot - crate::compiler::SKIP_BASE) / crate::compiler::SKIP_STRIDE;
+            return format!("{e}skip{n}");
+        }
+        match slot >= crate::compiler::DIMEN_BASE {
+            true => format!("{e}dimen{}", slot - crate::compiler::DIMEN_BASE),
+            false => format!("{e}count{slot}"),
+        }
+    }
+
+    /// A character token's meaning: the category's own name and the character
+    /// (`tex.web` §298). Measured against tex, one category at a time.
+    fn char_meaning(c: char, cat: Cat) -> String {
+        match cat {
+            Cat::Letter => format!("the letter {c}"),
+            Cat::BeginGroup => format!("begin-group character {c}"),
+            Cat::EndGroup => format!("end-group character {c}"),
+            Cat::MathShift => format!("math shift character {c}"),
+            Cat::AlignTab => format!("alignment tab character {c}"),
+            Cat::Param => format!("macro parameter character {c}"),
+            Cat::Superscript => format!("superscript character {c}"),
+            Cat::Subscript => format!("subscript character {c}"),
+            Cat::Space => format!("blank space {c}"),
+            _ => format!("the character {c}"),
+        }
     }
 
     /// `\toks<n>={...}` or `\toks<n>=\toks<m>`.
@@ -967,6 +1337,10 @@ impl Engine {
     /// 0 being an ordinary finite dimension.
     pub fn scan_dimen_or_fil(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64)> {
         let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
+        // §453's optional `true`, eaten here for the same reason it is eaten in
+        // `scan_dimen`: with `\mag` fixed at 1000 a true unit is the unit, but
+        // the word still has to come off the stream.
+        let _true_prefix = self.scan_keyword(lx, "true", pending_only);
         // Up to five letters, because `filll` is five; whatever is not part of
         // the unit goes back, so `1pt x` still leaves the `x` in the document.
         let mut letters = String::new();
@@ -1207,26 +1581,59 @@ impl Engine {
         }
     }
 
-    fn do_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
-        let global = matches!(kind, "gdef" | "xdef") || self.global;
-        let expand_body = matches!(kind, "edef" | "xdef");
-        let name = self.scan_defined_name(lx)?;
+    /// The parameter text between a definition's name and its body
+    /// (`tex.web` §476), and the left brace of a trailing `#{` if there was one.
+    ///
+    /// `#{` is the one form where the brace that ends the parameter text is
+    /// also a DELIMITER: it goes into the parameter text so the argument stops
+    /// there, it opens the body as any brace does, and §473 puts it back on the
+    /// end of the body. Nothing else in the scan is special -- the `#` before
+    /// it is dropped rather than becoming a match token, which is why
+    /// `\def\a#{...}` takes no argument at all while `\def\a#1#{...}` takes one
+    /// delimited by the brace.
+    fn scan_parameter_text(&mut self, lx: &mut Lexer) -> R<(Vec<Token>, Option<Token>)> {
         let mut params = Vec::new();
         loop {
             let Some(t) = lx.next_token(&self.cats) else {
                 return Err(TexError("Runaway definition".into()));
             };
             if matches!(t, Token::Char(_, Cat::BeginGroup)) {
-                break;
+                return Ok((params, None));
+            }
+            if matches!(t, Token::Char(_, Cat::Param)) {
+                let Some(next) = lx.next_token(&self.cats) else {
+                    return Err(TexError("Runaway definition".into()));
+                };
+                if matches!(next, Token::Char(_, Cat::BeginGroup)) {
+                    params.push(next);
+                    return Ok((params, Some(next)));
+                }
+                params.push(t);
+                params.push(next);
+                continue;
             }
             params.push(t);
         }
+    }
+
+    fn do_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        let global = matches!(kind, "gdef" | "xdef") || self.global;
+        let expand_body = matches!(kind, "edef" | "xdef");
+        let name = self.scan_defined_name(lx)?;
+        let (params, hash_brace) = self.scan_parameter_text(lx)?;
         validate_params(&params)?;
         let raw = self.read_balanced(lx)?;
-        let body = match expand_body {
+        let mut body = match expand_body {
             true => self.expand_to_tokens(lx, &raw)?,
             false => raw,
         };
+        // `tex.web` §473: a parameter text that ended with `#{` appends that
+        // left brace to the BODY, which is how the brace tex matched comes
+        // back out. `\def\a#{[X]}` called as `\a{Y}` therefore produces
+        // `[X]` then `{`, and the document's own `Y}` follows.
+        if let Some(brace) = hash_brace {
+            body.push(brace);
+        }
         let was = std::mem::replace(&mut self.global, global);
         self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
         self.global = was;
@@ -1458,7 +1865,7 @@ impl Engine {
             return Err(TexError("Missing control sequence inserted".into()));
         };
         self.skip_equals_file(lx)?;
-        let v = self.scan_number_file(lx)?;
+        let mut v = self.scan_number_file(lx)?;
         // Both are limited to 0..255, and tex names the limit differently for
         // each: `! Bad character code (256).` against `! Bad register code
         // (256).`. Measured, and worth keeping apart -- the message is how a
@@ -1472,8 +1879,14 @@ impl Engine {
             "chardef" => (255, "character code"),
             _ => (255, "register code"),
         };
+        // `tex.web` §434's `scan_char_num` and §433's `scan_eight_bit_int` both
+        // say "I changed this one to zero": the code is reported, replaced by
+        // zero, and the definition is still made. `\chardef\x=256` therefore
+        // leaves `\x` meaning `\char0` and the document carries on, which is
+        // the whole of TeX's error model in one line.
         if !(0..=limit).contains(&v) {
-            return Err(TexError(format!("Bad {what} ({v})")));
+            self.report(lx, &format!("Bad {what} ({v})"));
+            v = 0;
         }
         let meaning = match kind {
             // A mathchar is a constant like a chardef: what differs is the
@@ -1804,12 +2217,13 @@ impl Engine {
                     "Paragraph ended before argument was complete".into(),
                 ));
             };
-            match &t {
-                Token::Char(_, Cat::BeginGroup) => depth += 1,
-                Token::Char(_, Cat::EndGroup) => depth = depth.saturating_sub(1),
-                _ => {}
-            }
             out.push(t);
+            // `tex.web` §392 compares the token against the delimiter BEFORE it
+            // touches the brace count, and the order is load-bearing twice: a
+            // `{` can then BE the delimiter (the `#{` form), and the `}` that
+            // closes a group inside the argument cannot be mistaken for a
+            // delimiter `}` because the count is still one deep when it is
+            // tested.
             if depth == 0 && out.len() >= delim.len() && out[out.len() - delim.len()..] == *delim {
                 out.truncate(out.len() - delim.len());
                 let wrapped = out.len() >= 2
@@ -1820,6 +2234,11 @@ impl Engine {
                     out.pop();
                 }
                 return Ok(out);
+            }
+            match &t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => depth = depth.saturating_sub(1),
+                _ => {}
             }
         }
     }
@@ -2009,35 +2428,43 @@ impl Engine {
                 8 => ('0'..='7').contains(&c),
                 _ => c.is_ascii_digit() || ('A'..='F').contains(&c),
             };
-            let mut digits = String::new();
+            let mut value = 0i64;
+            let mut any = false;
+            let mut ok_so_far = true;
             while let Some(t) = self.take(lx, pending_only) {
                 match &t {
-                    Token::Char(c, _) if ok(*c) => digits.push(*c),
-                    other if other.is_space() && !digits.is_empty() => break,
+                    Token::Char(c, _) if ok(*c) => {
+                        let d = i64::from(c.to_digit(16).unwrap_or(0));
+                        value = self.fold_digit(lx, value, d, i64::from(radix), &mut ok_so_far);
+                        any = true;
+                    }
+                    other if other.is_space() && any => break,
                     other => {
                         lx.push_back(std::slice::from_ref(other));
                         break;
                     }
                 }
             }
-            if digits.is_empty() {
+            if !any {
                 return Err(TexError("Missing number, treated as zero".into()));
             }
-            const INFINITY: i64 = 2147483647;
-            return match i64::from_str_radix(&digits, radix) {
-                Ok(n) if n <= INFINITY => Ok(sign * n),
-                _ => Err(TexError("Number too big".into())),
-            };
+            return Ok(sign * value);
         }
-        let mut digits = String::new();
+        let mut value = 0i64;
+        let mut any = false;
+        let mut ok_so_far = true;
         loop {
             match &cur {
-                Token::Char(c, _) if c.is_ascii_digit() => digits.push(*c),
+                Token::Char(c, _) if c.is_ascii_digit() => {
+                    let d = i64::from(c.to_digit(10).unwrap_or(0));
+                    value = self.fold_digit(lx, value, d, 10, &mut ok_so_far);
+                    any = true;
+                }
                 // A constant is terminated by ONE optional space, which is
                 // ABSORBED (tex.web §444) -- it delimits the number and is not
                 // part of what follows. Pushing it back put it in the text, so
                 // `\ifnum\count0>3 BIG` rendered as " BIG".
-                other if other.is_space() && !digits.is_empty() => break,
+                other if other.is_space() && any => break,
                 other => {
                     lx.push_back(std::slice::from_ref(other));
                     break;
@@ -2048,19 +2475,47 @@ impl Engine {
                 None => break,
             }
         }
-        if digits.is_empty() {
+        if !any {
             return Err(TexError("Missing number, treated as zero".into()));
         }
-        // tex.web §445: a constant above 2147483647 is too big. The limit is
-        // TeX's, not the host integer's -- checking only for `i64` overflow let
-        // `\\count1=99999999999` through, where real tex reports and clamps.
-        // The magnitude is tested before the sign is applied, which is why tex
-        // answers -2147483647 (not -2147483648) for a too-big negative.
+        Ok(sign * value)
+    }
+
+    /// Fold one digit into a constant being scanned — `tex.web` §445's
+    /// "Accumulate the constant until `cur_tok` is not a suitable digit".
+    ///
+    /// The limit is TeX's `infinity` (2147483647), not the host integer's, and
+    /// the test is made BEFORE the digit is folded in: `m` is the largest value
+    /// that can still take one, and at `m` exactly only a digit above 7
+    /// overflows (a radix other than ten has no such slack, which is the
+    /// `radix<>10` arm). Deciding it per digit rather than by parsing the whole
+    /// run is what puts the report at the right place -- tex's context display
+    /// for `\count1=99999999999` shows ten nines read and the eleventh still to
+    /// come, because that is the digit the overflow was found on.
+    ///
+    /// Reported and clamped, not raised: §445 calls `error` and sets
+    /// `cur_val:=infinity`, then keeps scanning with `OK_so_far` false so the
+    /// remaining digits are eaten in silence. The magnitude is tested before
+    /// the sign is applied, which is why tex answers -2147483647 (not
+    /// -2147483648) for a too-big negative.
+    fn fold_digit(
+        &mut self,
+        lx: &Lexer,
+        value: i64,
+        d: i64,
+        radix: i64,
+        ok_so_far: &mut bool,
+    ) -> i64 {
         const INFINITY: i64 = 2147483647;
-        match digits.parse::<i64>() {
-            Ok(n) if n <= INFINITY => Ok(sign * n),
-            _ => Err(TexError("Number too big".into())),
+        let m = INFINITY / radix;
+        if value >= m && (value > m || d > 7 || radix != 10) {
+            if *ok_so_far {
+                self.report(lx, "Number too big");
+                *ok_so_far = false;
+            }
+            return INFINITY;
         }
+        value * radix + d
     }
 
     // ── text production ──────────────────────────────────────────────────
@@ -2326,6 +2781,26 @@ impl Engine {
         self.expand_macro(lx, name, true)
     }
 
+    /// One expansion step inside a token list, over the pending list alone.
+    ///
+    /// `tex.web` §366's `expand` does not care that the token is a macro:
+    /// `\expandafter\A\B` expands `\B` whatever `\B` is, so a second
+    /// `\expandafter`, a `\csname` or a `\string` behind the held token has to
+    /// run here too. Returns whether anything was expanded.
+    pub fn expand_pending(&mut self, lx: &mut Lexer, name: CsId) -> R<bool> {
+        self.try_expand(lx, name, true)
+    }
+
+    /// Whether `name` is a conditional primitive (`tex.web` §487's list).
+    ///
+    /// The lowerer owns the conditionals inside a `\message` body -- they
+    /// become run-time branches over registers the VM holds, not a decision
+    /// taken now -- so it has to be able to keep them away from the expander's
+    /// own immediate evaluation.
+    pub fn is_conditional(name: CsId) -> bool {
+        CONDITIONALS.contains(&name.name()) || matches!(name.name(), "else" | "or" | "fi")
+    }
+
     /// Read `{...}` after `\message`, unexpanded — the pieces are split by the
     /// lowering pass, which has to keep `\the` as a run-time read.
     pub fn read_message_body(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
@@ -2560,6 +3035,16 @@ impl Engine {
     pub fn set_global_prefix(&mut self, on: bool) {
         self.global = on;
     }
+
+    /// Whether a `\global` prefix is in force, SPENDING it.
+    ///
+    /// A prefix belongs to the assignment it precedes and to nothing after it
+    /// (`tex.web` §1211's `prefixed_command`), so the register arms of the
+    /// lowerer read it through here rather than leaving it set to colour the
+    /// next assignment as well.
+    pub fn take_global_prefix(&mut self) -> bool {
+        std::mem::take(&mut self.global)
+    }
     /// `\ifx` equality over the CURRENT meanings — decidable while lowering,
     /// because a macro's meaning is a frontend fact and not VM state.
     pub fn ifx_equal(&mut self, lx: &mut Lexer) -> R<bool> {
@@ -2569,6 +3054,25 @@ impl Engine {
     }
     pub fn take_file(&mut self, lx: &mut Lexer) -> Option<Token> {
         lx.next_token(&self.cats)
+    }
+
+    /// One token from whichever source the caller is reading, so a scanner the
+    /// lowerer runs in BOTH contexts -- a file and a `\message` body -- needs
+    /// one copy rather than two that can drift.
+    pub fn take_any(&mut self, lx: &mut Lexer, pending_only: bool) -> Option<Token> {
+        self.take(lx, pending_only)
+    }
+
+    pub fn scan_number_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        self.scan_number(lx, pending_only)
+    }
+
+    pub fn scan_dimen_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        self.scan_dimen(lx, pending_only)
+    }
+
+    pub fn read_relation_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+        self.read_relation(lx, pending_only)
     }
 }
 

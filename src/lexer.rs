@@ -178,6 +178,77 @@ impl Lexer {
         line
     }
 
+    /// The two lines `tex.web` §313 and §318 print under an error message:
+    /// where the mouth is, and how much of that line it had read.
+    ///
+    /// The first line is `l.<n> ` and the text already consumed; the second is
+    /// spaces to the same width and the text not yet consumed, so the break
+    /// between them points at the character the scanner had reached. The two
+    /// are separated by the newline tex's `print_ln` writes there.
+    ///
+    /// `None` for a mouth over a token list rather than a file: tex prints
+    /// `<recently read>` and the token list itself for those (§319), a display
+    /// this does not have, and inventing a file position for one would put a
+    /// diagnostic on a line that has nothing to do with it.
+    pub fn context(&self) -> Option<String> {
+        if self.chars.is_empty() {
+            return None;
+        }
+        let pos = self.pos.min(self.chars.len());
+        // tex reads a LINE at a time into `buffer` (§303) and `loc` may sit one
+        // past its end, with `line` still naming the line that ended. Taking
+        // the line of the last character CONSUMED rather than of the next one
+        // to read is what reproduces that: `\chardef\x=256` reports on its own
+        // line even though scanning the constant ate the line's end.
+        let last = pos.saturating_sub(1);
+        let line = 1 + self.chars[..last].iter().filter(|c| **c == '\n').count();
+        let start = self.chars[..last]
+            .iter()
+            .rposition(|c| *c == '\n')
+            .map_or(0, |i| i + 1);
+        // §318 stops at `end_line_char`: a line's own terminator is not part of
+        // what is shown.
+        let end = self.chars[start..]
+            .iter()
+            .position(|c| *c == '\n')
+            .map_or(self.chars.len(), |i| start + i);
+        let split = pos.min(end);
+        let before: String = self.chars[start..split].iter().collect();
+        let after: String = self.chars[split..end].iter().collect();
+        Some(Self::context_lines(&format!("l.{line} "), &before, &after))
+    }
+
+    /// `tex.web` §317's two-line display, trimmed the way tex trims it.
+    ///
+    /// Line one ends where the mouth stopped, so it is the TAIL that is kept
+    /// and a cut front is marked `...`; line two begins there, so it is the
+    /// HEAD that is kept and a cut tail is marked `...`. The widths are tex's
+    /// own `error_line` and `half_error_line`.
+    fn context_lines(tag: &str, before: &str, after: &str) -> String {
+        const ERROR_LINE: usize = 79;
+        const HALF_ERROR_LINE: usize = 50;
+        let l = tag.chars().count();
+        let first_count = before.chars().count();
+        let m = after.chars().count();
+        // §317: `if l+first_count<=half_error_line then p:=0; n:=l+first_count
+        // else print("..."); p:=l+first_count-half_error_line+3; n:=half_error_line`.
+        let (ellipsis, drop, n) = match l + first_count <= HALF_ERROR_LINE {
+            true => ("", 0, l + first_count),
+            false => (
+                "...",
+                l + first_count + 3 - HALF_ERROR_LINE,
+                HALF_ERROR_LINE,
+            ),
+        };
+        let head: String = before.chars().skip(drop).collect();
+        // `if m+n<=error_line then p:=first_count+m else p:=first_count+(error_line-n-3)`.
+        let (tail, cut): (String, &str) = match m + n <= ERROR_LINE {
+            true => (after.to_string(), ""),
+            false => (after.chars().take(ERROR_LINE - n - 3).collect(), "..."),
+        };
+        format!("{tag}{ellipsis}{head}\n{:n$}{tail}{cut}", "")
+    }
+
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }

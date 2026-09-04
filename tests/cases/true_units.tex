@@ -1,0 +1,10 @@
+% tex.web §453 takes an optional `true' in front of a unit and divides by the
+% magnification ratio. \mag is 1000, so a true unit IS the unit -- but the
+% keyword still has to come off the stream, or `1truept' reads as the unit
+% `tr' and the document stops on an illegal unit of measure.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=1truept \dimen1=1truein \dimen2=2.5truecm
+\message{[\the\dimen0][\the\dimen1][\the\dimen2]}
+\skip0=1truept plus 2truept minus 3truept
+\message{[\the\skip0]}
+\end

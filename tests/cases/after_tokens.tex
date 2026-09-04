@@ -1,0 +1,15 @@
+% \aftergroup holds a token on the save stack and inserts it after the `}'
+% (tex.web §326), so several in one group come back in the order they were
+% given -- which is how a whole call is assembled a token at a time.
+% \afterassignment holds one until the ASSIGNMENT that follows has finished
+% (§1269), and nothing else counts as an assignment.
+\catcode`\{=1 \catcode`\}=2
+\def\marker{\message{MARK}}
+\message{A}
+{\aftergroup\marker \message{IN}}
+\message{B}
+{\aftergroup\message\aftergroup{\aftergroup X\aftergroup}}
+\count1=1
+\afterassignment\marker \count1=5
+\message{[\the\count1]}
+\end

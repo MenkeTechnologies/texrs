@@ -126,6 +126,24 @@ pub const CORPUS: &[Entry] = &[
         "\\string\\cs\n\\message{\\string\\undefined}   % => \\undefined",
     ),
     (
+        "\\meaning",
+        "Expansion",
+        "What a token MEANS, as characters (tex.web \u{a7}296's print_meaning). A macro reads back as `macro:` then its parameter text, `->` and its body, with `\\long`, `\\outer` and `\\protected` run together in front; a `\\chardef` constant reads back as `\\char\"41`; a register name reads back as the register it stands for; a character carries the NAME of its category, so `\\meaning A` is `the letter A`. A name nothing has defined is `undefined`. Expandable, like `\\string`, so it works inside a `\\message`.",
+        "\\meaning<token>\n\\def\\a#1{[#1]}\n\\message{\\meaning\\a}   % => macro:#1->[#1]",
+    ),
+    (
+        "\\uppercase",
+        "Expansion",
+        "Read the following group WITHOUT expanding it, replace every character by its `\\uccode` and put the result back to be read again (tex.web \u{a7}1288). A zero code means the character has no case and stands, so digits and punctuation come through untouched, and the category code travels with the character unchanged \u{2014} which is what LaTeX's `\\MakeUppercase` is built on.",
+        "\\uppercase{<text>}\n\\uppercase{\\message{abc 123}}   % => ABC 123",
+    ),
+    (
+        "\\lowercase",
+        "Expansion",
+        "The same as `\\uppercase` over the `\\lccode` table: the group is read unexpanded, every character is replaced by its lowercase code, and the result is read again with its category codes intact.",
+        "\\lowercase{<text>}\n\\lowercase{\\message{ABC dEf}}   % => abc def",
+    ),
+    (
         "\\the",
         "Expansion",
         "The value of a register, as characters. The read happens at RUN time on the VM, which is why a `\\message` containing `\\the\\count0` follows a later assignment.",
@@ -170,8 +188,8 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ignorespaces",
         "Expansion",
-        "Skip the spaces that follow. Accepted and ignored: there is a page now, but the interword spacing this would suppress is set by the line breaker from the font's own space, not from the token run, so honouring it would change nothing that reaches the page.",
-        "\\ignorespaces",
+        "Skip the spaces that follow (tex.web \u{a7}1060). It is a mouth-level effect: the spaces are read and dropped, so what comes next is the first non-blank token. That is the whole of it here \u{2014} the horizontal-mode half needs a stomach.",
+        "\\ignorespaces\n\\def\\a{\\ignorespaces}\n\\a   X   % the spaces before X are gone",
     ),
     (
         "\\end",
@@ -576,6 +594,18 @@ pub const CORPUS: &[Entry] = &[
         "Close a `\\begingroup`, undoing every non-global assignment made since it. A `}` will not close one, and neither will the end of the file.",
         "\\begingroup <body>\\endgroup",
     ),
+    (
+        "\\aftergroup",
+        "Grouping",
+        "Hold the next token and insert it after the enclosing group closes (tex.web \u{a7}326). It goes on the SAVE STACK rather than in a list of its own, which is what makes several in one group come back in the order they were given and a nested group's tokens come out at ITS `}` \u{2014} so a whole call can be assembled a token at a time. Outside every group there is nothing to wait for and the token is inserted at once.",
+        "\\aftergroup<token>\n{\\aftergroup\\message\\aftergroup{\\aftergroup X\\aftergroup}}   % => X",
+    ),
+    (
+        "\\afterassignment",
+        "Grouping",
+        "Hold the next token until the following ASSIGNMENT has finished (tex.web \u{a7}1269). One only: a second `\\afterassignment` before the assignment replaces the first. A `\\message` is not an assignment and neither is a group, so the token waits for the next `\\def`, `\\let`, register write or arithmetic and is inserted after it.",
+        "\\afterassignment<token>\n\\def\\m{\\message{DONE}}\n\\afterassignment\\m \\count1=5   % => DONE, with \\count1 already 5",
+    ),
     // ══ LaTeX — latex.rs, expand::do_newcommand ════════════════════════════
     (
         "\\newcommand",
@@ -935,8 +965,8 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\directlua",
         "LaTeX",
-        "Hand a chunk to LuaTeX's embedded Lua interpreter. texrs has none, so the chunk is read and not run — and one thing in it IS read: `luaotfload.add_fallback` names the faces a glyph the document's own face lacks is fetched from, and that list is the only statement of it a document makes. The PDF backend loads those families in order, asks each one's `cmap` for the character, and draws the first face that has it, carrying only the glyphs the document borrowed. What a chunk computes is still not available, so a document whose OUTPUT depended on the Lua is wrong here rather than refused.",
-        "\\directlua{CHUNK}\n\\directlua{luaotfload.add_fallback(\"symfb\", {\"Arial Unicode MS:mode=base;\", \"Arial:mode=base;\"})}",
+        "Hand a chunk to an embedded Lua interpreter, and RUN it: PUC-Lua 5.3, the version LuaTeX itself embeds. Whatever the chunk prints comes back as input — `\\count10=20 a\\directlua{tex.print(tex.count[10]+5)}b` typesets `a25b`, the manual's own example. The `tex` table reaches the engine's real registers (`tex.count`, `tex.dimen`, `tex.toks`, `tex.glue`, and the `get*`/`set*`/`is*` functions), `token` reaches the input the chunk stands in front of (`token.scan_int`, `scan_dimen`, `scan_keyword`, `scan_string`, `scan_word`, `scan_csname`, `get_macro`, `set_macro`), and `texio.write` reaches the terminal. A chunk that fails STOPS the run with the Lua error as a TeX error, never silently. What is absent rather than stubbed is everything built on node lists: there is no `node` library, and `tex.skip`/`tex.getbox` refuse instead of inventing a value — `tex.getglue` is the same glue register as five plain numbers. `luaotfload.add_fallback` is answered for real: it names the faces a glyph the document's own face lacks is fetched from, and the PDF backend loads those families in order, asks each one's `cmap` for the character, and draws the first face that has it, carrying only the glyphs the document borrowed. `\\luadirect` is the same primitive under ConTeXt's name; `\\latelua` runs its chunk but contributes no input; `\\luaescapestring` makes a TeX value safe inside a Lua string literal; `\\luafunction`, `\\luafunctioncall` and `\\luadef` call a function stored in `lua.get_functions_table()`.",
+        "\\directlua{CHUNK}\n\\count10=20 \\directlua{tex.print(tex.count[10]+5)}\n\\directlua{luaotfload.add_fallback(\"symfb\", {\"Arial Unicode MS:mode=base;\", \"Arial:mode=base;\"})}",
     ),
     (
         "\\ttfamily",

@@ -1,0 +1,18 @@
+% \ifdim is \ifnum over dimensions (tex.web §503): the same comparison, a
+% different scanner. A dimension is an integer count of scaled points held in
+% a register, so the comparison is a real run-time branch on that number --
+% which is why a register on either side, a constant on either side, and a
+% glue coerced to its natural width all have to work.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=2pt \dimen1=3pt
+\message{[\ifdim\dimen0>1pt BIG\else SMALL\fi]}
+\message{[\ifdim\dimen0<1pt LT\else GE\fi]}
+\message{[\ifdim\dimen0=2pt EQ\else NE\fi]}
+\message{[\ifdim\dimen0<\dimen1 LT\else GE\fi]}
+\message{[\ifdim 1in=72.26999pt RATIO\else NORATIO\fi]}
+\skip0=4pt plus 1fil
+\message{[\ifdim\skip0>3pt NATURAL\else NARROW\fi]}
+\dimendef\dimenA=2
+\dimenA=1in
+\message{[\ifdim\dimenA>72pt INCH\else SHORT\fi]}
+\end
