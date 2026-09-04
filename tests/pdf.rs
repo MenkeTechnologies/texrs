@@ -49,6 +49,100 @@ fn info(path: &std::path::Path) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// How many pages `pdfinfo` reports, read off its `Pages:` line.
+///
+/// Read as FIELDS rather than matched as a literal. Poppler pads that column to
+/// a width of its own choosing and widened it by one space somewhere before
+/// 26.08, which failed five assertions here that are about the page COUNT and
+/// not about poppler's alignment -- they had been failing since that version
+/// landed on the machine, whatever the writer did.
+fn pages_reported(report: &str) -> Option<usize> {
+    report
+        .lines()
+        .find_map(|line| line.strip_prefix("Pages:"))
+        .and_then(|rest| rest.trim().parse().ok())
+}
+
+/// What a reader says is inside the file, one line a picture, in the
+/// `width=200 height=100 colorspace=DeviceRGB bpc=8` shape the assertions here
+/// read.
+///
+/// The listing flag is not the same in the two readers that provide this
+/// program: it is `-listonly` in xpdf and `-list` in poppler, and poppler
+/// answers the flag it does not know by treating it as the FILE to open --
+/// `I/O Error: Couldn't open file '-listonly'`, rc 1, nothing on stdout. The
+/// tests below then found no pictures in a file that has two, so both were
+/// failing on the reader rather than on the writer. Both spellings are tried.
+///
+/// Poppler also prints a COLUMN table where xpdf prints `key=value` pairs, so
+/// its header is read and each row rewritten into the pairs the callers expect.
+/// `None` when neither reader is installed.
+fn listed_images(path: &std::path::Path) -> Option<Vec<String>> {
+    for flag in ["-listonly", "-list"] {
+        let Ok(out) = Command::new("pdfimages").arg(flag).arg(path).output() else {
+            return None;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        // xpdf's spelling needs no translation.
+        let pairs: Vec<String> = text
+            .lines()
+            .filter(|line| line.contains("width="))
+            .map(str::to_string)
+            .collect();
+        if !pairs.is_empty() {
+            return Some(pairs);
+        }
+        // Poppler's: a header of column names, then a row per picture. The
+        // names are not the keys the callers ask for, so the four that are
+        // read here are renamed and the rest passed through under their own.
+        let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+        let Some(header) = lines.next() else {
+            continue;
+        };
+        let columns: Vec<&str> = header.split_whitespace().collect();
+        if !columns.contains(&"width") {
+            continue;
+        }
+        return Some(
+            lines
+                .filter(|line| !line.starts_with("---"))
+                .filter_map(|line| {
+                    let fields: Vec<&str> = line.split_whitespace().collect();
+                    (fields.len() >= columns.len()).then(|| {
+                        columns
+                            .iter()
+                            .zip(fields.iter())
+                            .map(|(name, value)| {
+                                // Poppler abbreviates both the column and the
+                                // value: `color` where xpdf says `colorspace`,
+                                // and `rgb` where it says `DeviceRGB`.
+                                let (name, value) = match *name {
+                                    "color" => (
+                                        "colorspace",
+                                        match *value {
+                                            "gray" => "DeviceGray",
+                                            "rgb" => "DeviceRGB",
+                                            "cmyk" => "DeviceCMYK",
+                                            other => other,
+                                        },
+                                    ),
+                                    other => (other, *value),
+                                };
+                                format!("{name}={value}")
+                            })
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    })
+                })
+                .collect(),
+        );
+    }
+    None
+}
+
 /// The text `pdftotext` finds.
 fn extracted(path: &std::path::Path) -> Option<String> {
     let out = Command::new("pdftotext").arg(path).arg("-").output().ok()?;
@@ -79,10 +173,19 @@ fn a_page_this_writes_is_a_page_a_reader_opens() {
     let path = write(&dir, &[page]);
 
     if let Some(report) = info(&path) {
-        assert!(report.contains("Pages:          1"), "{report}");
+        assert_eq!(pages_reported(&report), Some(1), "{report}");
         // 612 by 792 points is 8.5 by 11 inches, which is what was asked for.
         assert!(report.contains("612 x 792"), "{report}");
-        assert!(report.contains("PDF version:    1.7"), "{report}");
+        // Fields rather than a literal, for the reason `pages_reported` gives:
+        // the padding is poppler's and it has changed.
+        assert_eq!(
+            report
+                .lines()
+                .find_map(|line| line.strip_prefix("PDF version:"))
+                .map(str::trim),
+            Some("1.7"),
+            "{report}"
+        );
     }
 
     if let Some(text) = extracted(&path) {
@@ -130,7 +233,7 @@ fn every_page_is_there_and_holds_what_was_drawn_on_it() {
     let path = write(&dir, &pages);
 
     if let Some(report) = info(&path) {
-        assert!(report.contains("Pages:          5"), "{report}");
+        assert_eq!(pages_reported(&report), Some(5), "{report}");
     }
     if let Some(text) = extracted(&path) {
         for number in 1..=5 {
@@ -162,7 +265,32 @@ fn a_reader_refuses_a_file_whose_table_is_wrong() {
     let Some(report) = info(&path) else {
         return;
     };
-    assert!(report.contains("Pages:          1"));
+    assert_eq!(pages_reported(&report), Some(1));
+
+    // Is this reader strict enough for the question to mean anything? Ask it
+    // the easiest version: the same file with `startxref` pointing past the end
+    // of it, so there is no table to read at all. A reader that reports THAT is
+    // one whose silence about the subtler damage below is a verdict.
+    //
+    // Measured, poppler 26.08.0 is not such a reader: it reconstructs the file
+    // by scanning for object headers, says nothing on stderr and exits 0
+    // (`pdfinfo` on a texrs PDF with `startxref 999999` prints the full report,
+    // rc=0). Every writer's output passes through that repair, so the test can
+    // only report the reader's leniency, and it reports it by not asking.
+    let probe = dir.join("nostart.pdf");
+    let at = good
+        .windows(9)
+        .rposition(|window| window == b"startxref")
+        .expect("startxref");
+    let mut nostart = good[..at].to_vec();
+    nostart.extend(format!("startxref\n{}\n%%EOF\n", good.len() + 4096).as_bytes());
+    std::fs::write(&probe, &nostart).unwrap();
+    let said = Command::new("pdfinfo").arg(&probe).output().expect("pdfinfo");
+    let complained = !said.status.success()
+        || !String::from_utf8_lossy(&said.stderr).trim().is_empty();
+    if !complained {
+        return;
+    }
 
     // Move every offset in the table along by one byte. The table is an
     // `/XRef` stream (§7.5.8), so this is not a text edit: `startxref` names
@@ -496,23 +624,15 @@ fn a_picture_arrives_as_the_picture_it_was() {
 
     // The file still opens, and nothing had to be repaired.
     if let Some(report) = info(&path) {
-        assert!(report.contains("Pages:          1"), "{report}");
+        assert_eq!(pages_reported(&report), Some(1), "{report}");
     }
 
-    // What a reader finds inside it. `-listonly` is xpdf's spelling: `-list`
-    // alone wants somewhere to write the pictures too.
-    let Ok(listed) = Command::new("pdfimages")
-        .arg("-listonly")
-        .arg(&path)
-        .output()
-    else {
+    // What a reader finds inside it. Both readers' spellings of the listing
+    // are tried and translated to one shape: see `listed_images`.
+    let Some(rows) = listed_images(&path) else {
         return;
     };
-    let listed = String::from_utf8_lossy(&listed.stdout).to_string();
-    let rows: Vec<&str> = listed
-        .lines()
-        .filter(|line| line.contains("width="))
-        .collect();
+    let listed = rows.join("\n");
     assert_eq!(
         rows.len(),
         1 + jpeg.is_ok() as usize,
@@ -655,22 +775,14 @@ fn a_transparent_picture_keeps_its_transparency() {
     let path = write(&dir, &[page]);
 
     if let Some(report) = info(&path) {
-        assert!(report.contains("Pages:          1"), "{report}");
+        assert_eq!(pages_reported(&report), Some(1), "{report}");
     }
 
     // A reader sees two pictures: the colour and its mask, the same size.
-    let Ok(listed) = Command::new("pdfimages")
-        .arg("-listonly")
-        .arg(&path)
-        .output()
-    else {
+    let Some(rows) = listed_images(&path) else {
         return;
     };
-    let listed = String::from_utf8_lossy(&listed.stdout).to_string();
-    let rows: Vec<&str> = listed
-        .lines()
-        .filter(|line| line.contains("width="))
-        .collect();
+    let listed = rows.join("\n");
     assert_eq!(rows.len(), 2, "the reader found {listed}");
     assert!(
         rows.iter()
@@ -776,7 +888,7 @@ fn the_objects_are_packed_and_the_table_is_a_stream() {
     let head = String::from_utf8_lossy(&bytes[start..(start + 200).min(bytes.len())]).into_owned();
     assert!(head.contains(" 0 obj"), "startxref points at {head:?}");
     assert!(head.contains("/Type /XRef"), "startxref points at {head:?}");
-    assert!(head.contains("/W [1 "), "no field widths: {head:?}");
+    assert!(head.contains("/W [ 1 "), "no field widths: {head:?}");
 
     // And every entry lands where it says. A type 1 entry is a byte offset and
     // an object begins there; a type 2 entry names an object stream and an
@@ -829,6 +941,297 @@ fn the_objects_are_packed_and_the_table_is_a_stream() {
     for key in ["/Type /Page", "/Type /Pages", "/Type /Catalog"] {
         assert!(inside.contains(key), "{key} is in no object stream");
     }
+}
+
+/// The font descriptor's heights are the ones the font's own metrics state.
+///
+/// §9.8.1 asks a descriptor for `/Ascent`, `/Descent`, `/CapHeight` and
+/// `/XHeight`, and a Type 1 font states none of them: they are in the `.afm`
+/// beside it. Written off the bounding box instead -- which is what this did --
+/// they are the extremes of the OUTLINES rather than the heights of the
+/// letters, and for CMR10 that is 750 and -250 where the answers are 694 and
+/// -194.
+///
+/// Measured against LuaTeX on `tests/pdf_cases/two_words.tex`: it writes
+/// `/Ascent 694 /CapHeight 683 /Descent -194 /ItalicAngle 0 /StemV 69
+/// /XHeight 431`, and cmr10.afm states `Ascender 694`, `CapHeight 683`,
+/// `Descender -194`, `XHeight 431`. This reads that file and compares, so the
+/// oracle is the metrics rather than a number copied into an assertion.
+#[test]
+fn the_descriptor_states_what_the_fonts_metrics_state() {
+    let found = |name: &str| {
+        let out = Command::new("kpsewhich").arg(name).output().ok()?;
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!path.is_empty()).then_some(path)
+    };
+    let (Some(pfb), Some(afm)) = (found("cmr10.pfb"), found("cmr10.afm")) else {
+        return;
+    };
+    let metrics = std::fs::read_to_string(&afm).expect("the metrics read");
+    let stated = |key: &str| -> f64 {
+        metrics
+            .lines()
+            .take_while(|line| !line.starts_with("StartCharMetrics"))
+            .find_map(|line| line.strip_prefix(&format!("{key} ")))
+            .unwrap_or_else(|| panic!("{afm} states no {key}"))
+            .trim()
+            .parse()
+            .expect("a number")
+    };
+
+    let cmr10 = texrs::type1::Type1::open(&pfb).expect("the font reads");
+    let mut page = Page::letter();
+    page.text_in(Font::Embedded(Box::new(cmr10)), 10.0, 72.0, 700.0, "Hello");
+    let text =
+        String::from_utf8_lossy(&texrs::pdf::inflate_streams(&document(&[page]))).into_owned();
+
+    for (key, from) in [
+        ("Ascent", "Ascender"),
+        ("Descent", "Descender"),
+        ("CapHeight", "CapHeight"),
+        ("XHeight", "XHeight"),
+    ] {
+        let want = format!("/{key} {}", stated(from));
+        assert!(
+            text.contains(&want),
+            "the descriptor does not say {want}: {}",
+            text.split("/FontDescriptor")
+                .nth(1)
+                .unwrap_or(&text)
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
+    }
+    // The bounding box is still the bounding box, which is a different question
+    // and a different pair of numbers.
+    assert!(
+        text.contains("/FontBBox [ -40 -250 1009 750 ]"),
+        "the bounding box moved: {text}"
+    );
+    // §9.8.1's `/CharSet`, spelled the way LuaTeX spells it: a space before each
+    // name. Every glyph, because the program goes in whole.
+    assert!(
+        text.contains("/CharSet ( /.notdef /A /AE /B"),
+        "no CharSet, or not in LuaTeX's spelling: {text}"
+    );
+}
+
+/// A graphics state the content stream names is one the page's `/Resources`
+/// carries.
+///
+/// Constant alpha has no operator: §11.6.4.4 puts it in a dictionary and
+/// `/name gs` selects it. So `0.5 CA` does not exist, `/pgf@CA0.5 gs` is how a
+/// half-transparent stroke is asked for, and a page emitting that name without
+/// the dictionary behind it draws the stroke opaque -- silently, since an
+/// unresolved resource name is not an error a reader reports.
+///
+/// This is what TikZ's `opacity=` needs from the writer: `Picture::ext_gstates`
+/// says which dictionaries a picture's operators name, and until now there was
+/// nowhere on a `Page` to put them.
+#[test]
+fn a_named_graphics_state_reaches_the_pages_resources() {
+    let dir = scratch("gstate");
+    let mut page = Page::letter();
+    page.ext_gstate("pgf@CA0.5", "CA", 0.5);
+    page.ext_gstate("pgf@ca0.25", "ca", 0.25);
+    // Naming the same one twice is what a picture with two half-transparent
+    // paths does, and the resource dictionary is keyed by the name.
+    page.ext_gstate("pgf@CA0.5", "CA", 0.5);
+    assert_eq!(page.ext_gstates.len(), 2);
+    page.content
+        .push_str("q /pgf@CA0.5 gs /pgf@ca0.25 gs 100 100 200 200 re B Q\n");
+    let bytes = document(&[page]);
+
+    // The page dictionary is packed into an object stream, so this reads the
+    // inflated file rather than its own bytes.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&bytes)).into_owned();
+    assert!(text.contains("/ExtGState"), "no ExtGState: {text}");
+    assert!(
+        text.contains("/pgf@CA0.5 << /CA 0.5 >>"),
+        "the stroking state is not the one the operator names: {text}"
+    );
+    assert!(
+        text.contains("/pgf@ca0.25 << /ca 0.25 >>"),
+        "the non-stroking state is not the one the operator names: {text}"
+    );
+
+    // And a reader opens it without complaint, which is the part a malformed
+    // resource dictionary fails.
+    let path = dir.join("out.pdf");
+    std::fs::write(&path, &bytes).unwrap();
+    if let Some(report) = info(&path) {
+        assert_eq!(pages_reported(&report), Some(1), "{report}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A TrueType face goes into the file carrying the glyphs its codes can name
+/// and no others, and a reader still draws the text.
+///
+/// A simple `/TrueType` font is addressed by CHARACTER: one byte, WinAnsi says
+/// what it means, and the font's own `cmap` says which glyph draws it. So the
+/// glyphs worth keeping are the ones those 224 codes reach, and everything else
+/// in the face -- Arimo carries about ten times as many -- is weight the
+/// document cannot use. The test that matters is not that the file shrank but
+/// that it still WORKS after shrinking: a subset with a broken `loca` is
+/// smaller and draws nothing.
+#[test]
+fn a_truetype_face_is_embedded_subsetted_and_still_drawn() {
+    let path = std::path::Path::new(
+        "/usr/local/texlive/2026/texmf-dist/fonts/truetype/google/arimo/Arimo-Regular.ttf",
+    );
+    if !path.exists() {
+        return;
+    }
+    let whole = std::fs::read(path).expect("the font file");
+    let font = texrs::sfnt::Sfnt::parse(whole.clone()).expect("the font reads");
+    let head = font.head().expect("head");
+    let hhea = font.hhea().expect("hhea");
+    let cmap = font.cmap().expect("cmap");
+    let advances = font.advance_widths().expect("hmtx");
+    let scale = |n: i64| n * 1000 / head.units_per_em as i64;
+    // Codes 32..=255, in the thousandths of an em a PDF states widths in.
+    let widths: Vec<i64> = (32u8..=255)
+        .map(|code| {
+            texrs::typeset::winansi_unicode(code)
+                .and_then(|ch| cmap.get(&(ch as u32)))
+                .and_then(|&glyph| advances.get(glyph as usize))
+                .map(|&w| scale(w as i64))
+                .unwrap_or(0)
+        })
+        .collect();
+
+    let mut page = Page::letter();
+    page.text_in(
+        Font::TrueType {
+            name: "Arimo".to_string(),
+            bytes: whole.clone(),
+            widths,
+            bbox: [
+                scale(head.x_min as i64),
+                scale(head.y_min as i64),
+                scale(head.x_max as i64),
+                scale(head.y_max as i64),
+            ],
+            ascent: scale(hhea.ascender as i64),
+            descent: scale(hhea.descender as i64),
+        },
+        12.0,
+        72.0,
+        700.0,
+        "Handgloves",
+    );
+    let dir = scratch("subset");
+    let path = write(&dir, &[page]);
+    let bytes = std::fs::read(&path).expect("the pdf");
+
+    // Smaller than the face it came from, by a lot: this is the whole point.
+    assert!(
+        bytes.len() * 2 < whole.len(),
+        "the file is {} bytes and the font alone is {}, so nothing was dropped",
+        bytes.len(),
+        whole.len()
+    );
+    // `/Length1` is the font program's length, so it says what actually went in.
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&bytes)).into_owned();
+    let length1: usize = text
+        .split("/Length1 ")
+        .nth(1)
+        .expect("a Length1")
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .expect("a number");
+    assert!(
+        length1 < whole.len(),
+        "the embedded program is {length1} bytes, the whole font {}",
+        whole.len()
+    );
+
+    // A reader agrees it is there, embedded, and a subset.
+    if let Ok(out) = Command::new("pdffonts").arg(&path).output() {
+        let listed = String::from_utf8_lossy(&out.stdout).to_string();
+        let row = listed
+            .lines()
+            .find(|line| line.contains("Arimo"))
+            .unwrap_or_else(|| panic!("Arimo is not in the file: {listed}"));
+        let fields: Vec<&str> = row.split_whitespace().collect();
+        assert!(row.contains("TrueType"), "{row}");
+        // `... emb sub uni ...`: three yes/no columns before the object number.
+        let object = fields
+            .iter()
+            .rposition(|f| *f == "yes" || *f == "no")
+            .expect("the yes/no columns");
+        assert_eq!(fields[object - 2], "yes", "not embedded: {row}");
+        assert_eq!(fields[object - 1], "yes", "not a subset: {row}");
+    }
+
+    // And the glyphs still draw: a subset whose `loca` no longer lines up with
+    // its `glyf` is smaller, valid to a table reader, and blank on the page.
+    if let Some(found) = extracted(&path) {
+        assert!(found.contains("Handgloves"), "the text is gone: {found}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The trailer names an information dictionary and an identifier, and the same
+/// document written twice under a pinned clock is the same bytes.
+///
+/// LuaTeX writes both for every file it produces -- measured on
+/// `tests/pdf_cases/two_words.tex`, `11 0 obj << /Producer (LuaTeX-1.24.0)
+/// /Creator (TeX) /CreationDate (D:19691231190000-05'00') ... /Trapped /False
+/// >>` and `/ID [ <23826C1D...> <23826C1D...> ]` in the `/XRef` dictionary --
+/// and texrs wrote neither. Reproducibility is the reason to care: `/ID` is a
+/// digest and `/CreationDate` a clock, and if either is drawn from the run
+/// rather than from the document then no two builds of it are the same file and
+/// byte parity is a question that cannot be asked.
+#[test]
+fn the_trailer_names_an_information_dictionary_and_a_stable_identifier() {
+    let build = || {
+        let mut page = Page::letter();
+        page.text("Helvetica", 12.0, 72.0, 700.0, "Hello");
+        document(&[page])
+    };
+    // SAFETY: single-threaded here, and the value is what the harness pins.
+    unsafe { std::env::set_var("SOURCE_DATE_EPOCH", "0") };
+    let once = build();
+    let twice = build();
+    assert_eq!(once, twice, "two builds of one document are two files");
+
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&once)).into_owned();
+    for key in ["/Producer", "/Creator", "/CreationDate", "/ModDate"] {
+        assert!(text.contains(key), "{key} is not in the file");
+    }
+    // "This shall be the name False, not the boolean value false" (Table 317).
+    assert!(text.contains("/Trapped /False"), "no /Trapped: {text}");
+    // Epoch zero, as §7.9.4 spells a date. UT rather than a local offset, so
+    // the same document on two machines is the same file.
+    assert!(
+        text.contains("(D:19700101000000Z)"),
+        "the clock was not pinned: {text}"
+    );
+    // §14.4: two byte strings, equal when a file is first written.
+    let id = text.split("/ID [").nth(1).expect("an /ID").to_string();
+    let id = id.split(']').next().expect("the array ends");
+    let halves: Vec<&str> = id.split_whitespace().collect();
+    assert_eq!(halves.len(), 2, "/ID is not a pair: {id}");
+    assert_eq!(halves[0], halves[1], "the two identifiers differ: {id}");
+    assert_eq!(halves[0].len(), 34, "not sixteen bytes of hex: {id}");
+
+    // The digest is of the CONTENTS, so a document that differs has a different
+    // name for its bytes -- which is what §14.4 asks the identifier to be.
+    let mut other = Page::letter();
+    other.text("Helvetica", 12.0, 72.0, 700.0, "Goodbye");
+    let other = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&document(&[other])))
+        .into_owned();
+    let other = other.split("/ID [").nth(1).expect("an /ID").to_string();
+    assert_ne!(
+        halves[0],
+        other.split_whitespace().next().expect("a first half"),
+        "two different documents share one identifier"
+    );
 }
 
 /// The entries of the `/XRef` stream that begins at `start`, as

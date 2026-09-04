@@ -53,10 +53,75 @@ pub struct Type1 {
     /// StandardEncoding.
     pub encoding: BTreeMap<u8, String>,
     pub uses_standard_encoding: bool,
+    /// `/ItalicAngle`, in degrees and negative for a face that leans right.
+    /// A PDF font descriptor asks for it and this is where it is stated.
+    pub italic_angle: f64,
+    /// `/StdVW`, the dominant vertical stem width, out of the Private DICT --
+    /// so it is inside the encrypted half and a font need not state it.
+    ///
+    /// This is what a descriptor's `/StemV` is asking for. LuaTeX does not
+    /// answer it from the font: measured, it writes `/StemV 69` for both CMR10
+    /// and CMTT10, whose stems are not the same width, so 69 is a constant in
+    /// the writer rather than a measurement of the face.
+    pub stem_v: Option<f64>,
     /// How many subroutines the private part holds. They are what a charstring
     /// calls, and a driver embeds them with it.
     pub subroutines: usize,
+    /// The four heights a PDF font descriptor asks for and a Type 1 font does
+    /// not state: `Ascender`, `Descender`, `CapHeight` and `XHeight`, in the
+    /// order §9.8.1 wants them -- ascent, descent, cap height, x-height.
+    ///
+    /// They are in the `.afm` beside the font and nowhere in the `.pfb`, which
+    /// is why they are `None` for a font read from bytes alone. Measured, that
+    /// is where LuaTeX gets them too: for CMR10 it writes `/Ascent 694
+    /// /CapHeight 683 /Descent -194 /XHeight 431`, and cmr10.afm states
+    /// `Ascender 694`, `CapHeight 683`, `Descender -194`, `XHeight 431` -- the
+    /// same four numbers, none of which appears in cmr10.pfb. Writing the
+    /// bounding box instead, which is what this did, gave `/Ascent 750
+    /// /CapHeight 750 /Descent -250`: the extremes of the outlines rather than
+    /// the heights of the letters.
+    pub afm_metrics: Option<AfmMetrics>,
     glyphs: BTreeMap<String, Glyph>,
+}
+
+/// The four heights an `.afm` states about a face, in the font's own units.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct AfmMetrics {
+    pub ascender: f64,
+    pub descender: f64,
+    pub cap_height: f64,
+    pub x_height: f64,
+}
+
+impl AfmMetrics {
+    /// Read the four out of an `.afm`'s global section.
+    ///
+    /// Adobe's metrics format is `Key value` a line, and these four are single
+    /// numbers in the header before `StartCharMetrics`. Only the header is
+    /// read: a `C 72 ; WX 750 ; N H ;` line also begins with a key and a number
+    /// and states nothing about the face.
+    pub fn parse(text: &str) -> AfmMetrics {
+        let mut out = AfmMetrics::default();
+        for line in text.lines() {
+            if line.starts_with("StartCharMetrics") {
+                break;
+            }
+            let Some((key, value)) = line.split_once(char::is_whitespace) else {
+                continue;
+            };
+            let Ok(value) = value.trim().parse::<f64>() else {
+                continue;
+            };
+            match key {
+                "Ascender" => out.ascender = value,
+                "Descender" => out.descender = value,
+                "CapHeight" => out.cap_height = value,
+                "XHeight" => out.x_height = value,
+                _ => {}
+            }
+        }
+        out
+    }
 }
 
 /// The key for the whole encrypted body (`eexec`), from the Type 1 book.
@@ -83,6 +148,26 @@ fn decrypt(bytes: &[u8], key: u16, skip: usize) -> Vec<u8> {
     out
 }
 
+/// The metrics beside a font program: `cmr10.afm` for `cmr10.pfb`.
+///
+/// A TeX installation does not keep the two in one directory -- the fonts are
+/// under `fonts/type1/` and the metrics under `fonts/afm/` -- so the sibling is
+/// tried first for a font that came from somewhere else, and `kpsewhich`
+/// second, which is how everything else in the tree finds a TeX file.
+fn afm_beside(path: &Path) -> Option<AfmMetrics> {
+    let read = |at: &Path| std::fs::read_to_string(at).ok().map(|t| AfmMetrics::parse(&t));
+    if let Some(found) = read(&path.with_extension("afm")) {
+        return Some(found);
+    }
+    let name = format!("{}.afm", path.file_stem()?.to_string_lossy());
+    let out = std::process::Command::new("kpsewhich").arg(&name).output().ok()?;
+    let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    match found.is_empty() {
+        true => None,
+        false => read(Path::new(&found)),
+    }
+}
+
 /// Where `needle` is in `haystack`, if anywhere.
 fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
@@ -96,7 +181,9 @@ impl Type1 {
         let path = path.as_ref();
         let bytes =
             std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        Type1::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+        let mut font = Type1::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        font.afm_metrics = afm_beside(path);
+        Ok(font)
     }
 
     /// Read a `.pfb` (segmented binary) or a `.pfa` (all text, with the body in
@@ -179,6 +266,11 @@ impl Type1 {
         font.font_bbox = numbers_after(clear, b"/FontBBox")
             .try_into()
             .unwrap_or_default();
+        font.italic_angle = numbers_after(clear, b"/ItalicAngle")
+            .first()
+            .copied()
+            .unwrap_or(0.0);
+        font.stem_v = numbers_after(&private, b"/StdVW").first().copied();
         font.read_encoding(clear);
 
         // §  : how many bytes of each charstring are random padding.

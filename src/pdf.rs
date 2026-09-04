@@ -120,9 +120,17 @@ impl Object {
             Object::Name(text) => {
                 out.push(b'/');
                 for byte in text.bytes() {
-                    // Anything outside the ordinary characters is written as
-                    // `#` and two hexadecimal digits.
-                    match byte.is_ascii_alphanumeric() || b"-_.+".contains(&byte) {
+                    // §7.3.5: a name carries its bytes as they are except for
+                    // the delimiters, whitespace, `#` itself, and anything
+                    // outside the graphic range, which go as `#` and two
+                    // hexadecimal digits. Escaping more than that is not
+                    // wrong for a reader, but it is not what the file should
+                    // say: `@` is a graphic character and PGF names a
+                    // graphics state `/pgf@CA0.5`, which this wrote as
+                    // `/pgf#40CA0.5` -- measured against the same picture set
+                    // by lualatex, whose content stream has the `@`.
+                    const DELIMITERS: &[u8] = b"()<>[]{}/%#";
+                    match byte.is_ascii_graphic() && !DELIMITERS.contains(&byte) {
                         true => out.push(byte),
                         false => out.extend(format!("#{byte:02X}").as_bytes()),
                     }
@@ -705,6 +713,17 @@ pub struct Page {
     /// name is what the content stream says; `document` joins the two back
     /// together across the pages, since a font is written once for the file.
     pub used: BTreeMap<String, std::collections::BTreeSet<u8>>,
+    /// The graphics-state dictionaries the content names, as `(name, key,
+    /// value)` -- `("pgf@CA0.5", "CA", 0.5)`.
+    ///
+    /// Constant alpha is the one drawing parameter PDF gives no operator for:
+    /// §11.6.4.4 puts it in a dictionary, and `gs` (§8.4.4, Table 57) sets it
+    /// by NAME out of the page's `/ExtGState`. So `0.5 CA` does not exist and
+    /// `/pgf@CA0.5 gs` is the whole of how a half-transparent stroke is asked
+    /// for -- which means a page emitting that operator and carrying no such
+    /// resource is a page whose transparency a reader silently drops, the name
+    /// resolving to nothing.
+    pub ext_gstates: Vec<(String, String, f64)>,
 }
 
 impl Page {
@@ -717,7 +736,23 @@ impl Page {
             fonts: Vec::new(),
             images: Vec::new(),
             used: BTreeMap::new(),
+            ext_gstates: Vec::new(),
         }
+    }
+
+    /// Name a graphics-state dictionary this page's content stream uses, so
+    /// the page's `/Resources` carries it.
+    ///
+    /// Naming the same one twice is what a picture with two half-transparent
+    /// paths does, and the second is dropped rather than written again: the
+    /// resource dictionary is keyed by the name, so a duplicate is at best a
+    /// wasted entry and at worst two entries a reader may pick between.
+    pub fn ext_gstate(&mut self, name: &str, key: &str, value: f64) {
+        if self.ext_gstates.iter().any(|(used, _, _)| used == name) {
+            return;
+        }
+        self.ext_gstates
+            .push((name.to_string(), key.to_string(), value));
     }
 
     /// Draw `text` at `(x, y)` in `size` points of `font`, where `y` is
@@ -917,13 +952,26 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             };
             images.insert(name.clone(), object);
         }
-        let resources = match images.is_empty() {
-            true => Object::dict([("Font", Object::Dict(fonts))]),
-            false => Object::dict([
-                ("Font", Object::Dict(fonts)),
-                ("XObject", Object::Dict(images)),
-            ]),
-        };
+        let mut resources = BTreeMap::from([("Font".to_string(), Object::Dict(fonts))]);
+        if !images.is_empty() {
+            resources.insert("XObject".to_string(), Object::Dict(images));
+        }
+        // The graphics states the content named. Built up rather than matched
+        // on, because a page may have any combination of the three.
+        if !page.ext_gstates.is_empty() {
+            let states: BTreeMap<String, Object> = page
+                .ext_gstates
+                .iter()
+                .map(|(name, key, value)| {
+                    (
+                        name.clone(),
+                        Object::Dict(BTreeMap::from([(key.clone(), Object::Real(*value))])),
+                    )
+                })
+                .collect();
+            resources.insert("ExtGState".to_string(), Object::Dict(states));
+        }
+        let resources = Object::Dict(resources);
         kids.push(pdf.add(Object::dict([
             ("Type", Object::name("Page")),
             ("Parent", Object::Reference(tree)),
@@ -1314,7 +1362,22 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
     // standard encodings, so `Symbolic` is set: that is what tells a reader to
     // believe the font's own encoding rather than overlay a standard one.
     let bbox = type1.font_bbox;
-    let descriptor = pdf.add(Object::dict([
+    // What the font says about itself, where it says anything. `/ItalicAngle`
+    // is in the cleartext header and `/StdVW` in the Private DICT, and both
+    // were written as constants here before they were read.
+    //
+    // Ascent, descent, cap height and x-height are asked for and are in NONE of
+    // a Type 1 font: they are in the `.afm` beside it, which `Type1::open`
+    // reads. Measured, that is where LuaTeX gets them -- for CMR10 it writes
+    // `/Ascent 694 /CapHeight 683 /Descent -194 /XHeight 431`, which is
+    // cmr10.afm's `Ascender`, `CapHeight`, `Descender` and `XHeight` to the
+    // digit and none of which is anywhere in cmr10.pfb.
+    //
+    // Without the metrics the bounding box is what there is to say, and it says
+    // something else: the box's top and bottom are the extremes of the OUTLINES
+    // -- 750 and -250 for CMR10, where the letters reach 694 and -194.
+    let heights = type1.afm_metrics;
+    let mut entries = vec![
         ("Type", Object::name("FontDescriptor")),
         ("FontName", Object::name(&type1.font_name)),
         ("Flags", Object::Integer(4)),
@@ -1322,15 +1385,30 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             "FontBBox",
             Object::Array(bbox.iter().map(|&n| Object::Real(n)).collect()),
         ),
-        ("ItalicAngle", Object::Integer(0)),
-        // Ascent, descent and cap height are asked for and are not in a Type 1
-        // font; the bounding box is what there is to say.
-        ("Ascent", Object::Real(bbox[3])),
-        ("Descent", Object::Real(bbox[1])),
-        ("CapHeight", Object::Real(bbox[3])),
-        ("StemV", Object::Integer(80)),
+        ("ItalicAngle", Object::Real(type1.italic_angle)),
+        (
+            "Ascent",
+            Object::Real(heights.map(|m| m.ascender).unwrap_or(bbox[3])),
+        ),
+        (
+            "Descent",
+            Object::Real(heights.map(|m| m.descender).unwrap_or(bbox[1])),
+        ),
+        (
+            "CapHeight",
+            Object::Real(heights.map(|m| m.cap_height).unwrap_or(bbox[3])),
+        ),
+        // The font's own dominant stem width when it states one. LuaTeX writes
+        // 69 whatever the face, which is a default rather than an answer.
+        ("StemV", Object::Real(type1.stem_v.unwrap_or(80.0))),
         ("FontFile", file),
-    ]));
+    ];
+    // Only when it is known: §9.8.1 marks `/XHeight` optional, and a face whose
+    // metrics could not be found has nothing to say about it.
+    if let Some(metrics) = heights {
+        entries.push(("XHeight", Object::Real(metrics.x_height)));
+    }
+    let descriptor = pdf.add(Object::dict(entries));
 
     // The codes the font's own encoding uses, and what each is called. A
     // reader that was told nothing would use its own idea of what code 11 is,

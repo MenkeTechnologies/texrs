@@ -213,3 +213,80 @@ fn the_glyph_names_are_the_ones_otfinfo_lists() {
         );
     }
 }
+
+/// A font embedded as a simple `/TrueType` font carries the glyphs its 224
+/// codes can name, and no more.
+///
+/// This is the other half of subsetting from `subset`: that one is for a font
+/// addressed by glyph id, where the file names the glyphs it wants; this one is
+/// for a font addressed by CHARACTER, where what it can draw is decided by
+/// WinAnsi and the font's own `cmap`. The `cmap` is what makes the difference
+/// -- a glyph-addressed subset drops it and this one cannot.
+#[test]
+fn a_font_addressed_by_character_keeps_its_cmap_and_drops_the_rest() {
+    let path = Path::new("/usr/local/texlive/2026/texmf-dist/fonts/truetype/google/arimo/Arimo-Regular.ttf");
+    if !path.exists() {
+        return;
+    }
+    let font = Sfnt::open(path).expect("reads");
+    let cmap = font.cmap().expect("cmap");
+    let whole = std::fs::read(path).expect("the file");
+
+    // What WinAnsi can name, which is what such a font is asked for.
+    let keep: std::collections::BTreeSet<u16> = (32u8..=255)
+        .filter_map(texrs::typeset::winansi_unicode)
+        .filter_map(|ch| cmap.get(&(ch as u32)).copied())
+        .collect();
+    assert!(keep.len() > 200, "only {} codes map anywhere", keep.len());
+
+    let bytes = font.subset_encoded(&keep).expect("the subset builds");
+    assert!(
+        bytes.len() < whole.len(),
+        "the subset is not smaller: {} of {}",
+        bytes.len(),
+        whole.len()
+    );
+    let subset = Sfnt::parse(bytes.clone()).expect("and reads back");
+
+    // The `cmap` came across, and says the same things: a code still finds the
+    // glyph it found, which is the whole reason this variant exists.
+    let after = subset.cmap().expect("the subset has a cmap");
+    for ch in ['A', 'z', '0', 'ä', '\u{2013}'] {
+        assert_eq!(
+            after.get(&(ch as u32)),
+            cmap.get(&(ch as u32)),
+            "{ch:?} moved"
+        );
+    }
+    // The ids did not move, which is what lets the `cmap` come across unread.
+    assert_eq!(
+        subset.num_glyphs().expect("maxp"),
+        font.num_glyphs().expect("maxp")
+    );
+
+    // A glyph nobody can name is blank, and one that was kept is not.
+    let outline = |font: &Sfnt, glyph: u16| -> usize {
+        let long = font.head().expect("head").long_loca;
+        let loca = font.table("loca").expect("loca");
+        let at = |g: usize| match long {
+            true => u32::from_be_bytes([
+                loca[g * 4],
+                loca[g * 4 + 1],
+                loca[g * 4 + 2],
+                loca[g * 4 + 3],
+            ]) as usize,
+            false => u16::from_be_bytes([loca[g * 2], loca[g * 2 + 1]]) as usize * 2,
+        };
+        at(glyph as usize + 1) - at(glyph as usize)
+    };
+    let a = *cmap.get(&(b'A' as u32)).expect("A");
+    assert!(outline(&subset, a) > 0, "A was kept and is empty");
+    let dropped = (0..font.num_glyphs().expect("maxp"))
+        .find(|g| !keep.contains(g) && outline(&font, *g) > 0)
+        .expect("a glyph WinAnsi cannot name");
+    assert_eq!(
+        outline(&subset, dropped),
+        0,
+        "glyph {dropped} is unreachable and still in the file"
+    );
+}

@@ -236,6 +236,19 @@ fn main() -> ExitCode {
         return match texrs::run_pdf_at(Some(std::path::Path::new(&path)), &src) {
             Ok(bytes) => {
                 let out = output_path(&cli, &path, "pdf");
+                // A document with nothing on it gets no file. Measured, that is
+                // what luatex does -- `luatex empty_document.tex` says
+                // `warning  (pdf backend): no pages of output.` and leaves the
+                // directory holding only the log -- and what tex and pdftex do
+                // for the same document. texrs wrote a valid PDF declaring zero
+                // pages instead, which poppler answers with `Syntax Error:
+                // Invalid page count 0`: a file no reader will open is worse
+                // than the absence of one, and the absence is also the answer
+                // the reference engine gives.
+                if texrs::pdf_page_count(&bytes) == 0 {
+                    println!("({path} -> no pages of output)");
+                    return ExitCode::SUCCESS;
+                }
                 match std::fs::write(&out, &bytes) {
                     Ok(()) => {
                         println!("({path} -> {} [{} bytes])", out.display(), bytes.len());
@@ -280,8 +293,16 @@ fn main() -> ExitCode {
     }
     if cli.text {
         // The document's own words, after expansion. Printed as-is: this is not
-        // a typeset page and does not pretend to be one.
-        return match texrs::run_text(&src) {
+        // a typeset page and does not pretend to be one. Told which FILE it is,
+        // so a cross reference is answered out of the `.aux` beside the
+        // document -- run with a string and nothing else, every `\ref` in it
+        // stays `??`.
+        let at = std::path::Path::new(&path);
+        let run = match no_cache {
+            true => texrs::run_text_at(at, &src),
+            false => texrs::run_text_cached(at, &src),
+        };
+        return match run {
             Ok(text) => {
                 print!("{text}");
                 ExitCode::SUCCESS

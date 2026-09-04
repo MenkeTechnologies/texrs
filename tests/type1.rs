@@ -228,3 +228,58 @@ fn the_encoding_is_the_one_the_metrics_record() {
     // TeX can put an ff ligature at position 11.
     assert!(!font.uses_standard_encoding);
 }
+
+/// The four heights a font descriptor needs come from the `.afm`, and are read
+/// off it rather than guessed from the outlines.
+///
+/// A Type 1 font states none of them: `cmr10.pfb` has no `Ascender`, no
+/// `CapHeight`, no `Descender` and no `XHeight` anywhere in it, encrypted half
+/// included. `cmr10.afm` states all four, and that is where LuaTeX gets the
+/// `/Ascent 694 /CapHeight 683 /Descent -194 /XHeight 431` it writes.
+///
+/// The bounding box is a different question with a different answer -- CMR10's
+/// outlines reach 750 and -250, its letters 694 and -194 -- so the two must not
+/// agree here or the metrics were not read at all.
+#[test]
+fn the_descriptor_heights_come_from_the_metrics_file() {
+    let (Some(pfb), Some(afm)) = (installed("cmr10.pfb"), installed("cmr10.afm")) else {
+        return;
+    };
+    let font = Type1::open(&pfb).expect("the font reads");
+    let metrics = font.afm_metrics.expect("the metrics beside it were found");
+
+    // Against the file itself, read a second way: the assertion is that the
+    // reader agrees with the metrics, not with a number typed in here.
+    let text = std::fs::read_to_string(&afm).expect("the metrics read");
+    let stated = |key: &str| -> f64 {
+        text.lines()
+            .take_while(|line| !line.starts_with("StartCharMetrics"))
+            .find_map(|line| line.strip_prefix(&format!("{key} ")))
+            .unwrap_or_else(|| panic!("{afm} states no {key}"))
+            .trim()
+            .parse()
+            .expect("a number")
+    };
+    assert_eq!(metrics.ascender, stated("Ascender"));
+    assert_eq!(metrics.descender, stated("Descender"));
+    assert_eq!(metrics.cap_height, stated("CapHeight"));
+    assert_eq!(metrics.x_height, stated("XHeight"));
+
+    // And they are not the bounding box, which is what they used to be.
+    assert_ne!(metrics.ascender, font.font_bbox[3]);
+    assert_ne!(metrics.descender, font.font_bbox[1]);
+
+    // The font itself says none of this: the whole reason for the second file.
+    let raw = std::fs::read(&pfb).expect("the font reads");
+    for key in [&b"Ascender"[..], b"CapHeight", b"XHeight"] {
+        assert!(
+            !raw.windows(key.len()).any(|w| w == key),
+            "the .pfb states {}, so the metrics file was not needed",
+            String::from_utf8_lossy(key)
+        );
+    }
+
+    // A font read from BYTES has no file to look beside, so it says nothing
+    // rather than inventing an answer.
+    assert_eq!(Type1::parse(&raw).expect("reads").afm_metrics, None);
+}
