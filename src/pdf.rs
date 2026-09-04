@@ -44,6 +44,9 @@ pub enum Object {
     Real(f64),
     /// A string, written in parentheses with what must be escaped escaped.
     Str(String),
+    /// A string written as hexadecimal between angle brackets, which is what
+    /// the trailer's `/ID` is: two byte strings that are not text.
+    Hex(Vec<u8>),
     /// `/Name`.
     Name(String),
     Array(Vec<Object>),
@@ -117,6 +120,13 @@ impl Object {
                 }
                 out.push(b')');
             }
+            Object::Hex(bytes) => {
+                out.push(b'<');
+                for byte in bytes {
+                    out.extend(format!("{byte:02X}").as_bytes());
+                }
+                out.push(b'>');
+            }
             Object::Name(text) => {
                 out.push(b'/');
                 for byte in text.bytes() {
@@ -137,12 +147,22 @@ impl Object {
                 }
             }
             Object::Array(items) => {
+                // `[ a b c ]`, spaced the way LuaTeX spaces it and for the same
+                // reason `write_dict` is: measured on `Hello world.`, LuaTeX
+                // writes `/MediaBox [ 0 0 612 792 ]`, `/W [ 1 2 1 ]` and
+                // `/Index [ 0 13 ]`. The spec asks only for whitespace between
+                // the items (§7.3.6), so which whitespace is a writer's habit
+                // -- and two habits are a difference in every array in the file
+                // for a comparison that is about bytes.
+                //
+                // An empty array stays `[]`: LuaTeX writes no `[  ]`.
                 out.push(b'[');
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        out.push(b' ');
-                    }
+                for item in items {
+                    out.push(b' ');
                     item.write(out);
+                }
+                if !items.is_empty() {
+                    out.push(b' ');
                 }
                 out.push(b']');
             }
@@ -197,6 +217,81 @@ fn deflate(data: &[u8]) -> Vec<u8> {
     let mut out = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     out.write_all(data).expect("deflate into a vector");
     out.finish().expect("deflate into a vector")
+}
+
+/// A name for these bytes: the first sixteen of their SHA-256, which is what
+/// goes in the trailer's `/ID`.
+///
+/// The spec suggests MD5 (§14.4) and MD5 is not in the tree; the digest's
+/// algorithm is not part of the format -- what a reader does with an `/ID` is
+/// compare it with another one -- and `sha2` is already a dependency for the
+/// input digests in `io.rs`. Sixteen bytes because that is the length every
+/// writer uses and the length a reader's field is sized for.
+fn file_identifier(bytes: &[u8]) -> Vec<u8> {
+    use sha2::Digest as _;
+    let mut hash = sha2::Sha256::new();
+    hash.update(bytes);
+    hash.finalize()[..16].to_vec()
+}
+
+/// The moment a document is stamped with: `SOURCE_DATE_EPOCH` when the
+/// environment sets it, and the wall clock otherwise.
+///
+/// A PDF carries the time it was written, so two runs of the same document
+/// differ in the two dates and nothing else -- measured on LuaTeX, 60 bytes.
+/// `SOURCE_DATE_EPOCH` (reproducible-builds.org's specification) is how every
+/// engine that cares is told to use a fixed one instead, LuaTeX included, and
+/// texrs honours it here for the same reason: it is what makes byte equality
+/// with LuaTeX a question that can be asked at all.
+fn stamp() -> i64 {
+    std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|text| text.trim().parse::<i64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        })
+}
+
+/// A Unix time as §7.9.4 spells a date.
+///
+/// "A date shall be a text string of the form `(D:YYYYMMDDHHmmSSOHH'mm)`",
+/// where `O` is the relationship of local time to UT and may be `Z` for a
+/// time that IS UT. This writes UT: the alternative is the local zone, which
+/// is what LuaTeX writes -- `D:19691231190000-05'00'` for epoch zero on a
+/// machine five hours west -- and which makes the same document build to
+/// different bytes on two machines. A stamp that a reproducible build can rely
+/// on is worth more here than one more matching key.
+fn pdf_date(epoch: i64) -> String {
+    let (days, seconds) = (epoch.div_euclid(86_400), epoch.rem_euclid(86_400));
+    let (year, month, day) = civil_from_days(days);
+    let (hour, minute, second) = (seconds / 3600, (seconds / 60) % 60, seconds % 60);
+    format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}Z")
+}
+
+/// The civil date `days` after 1970-01-01, by Howard Hinnant's algorithm.
+///
+/// The calendar is not a division: months are of four lengths and February is
+/// of two. This is the standard closed form for it -- shift the era to start
+/// in March so the leap day falls at the end of a year, count eras of 400
+/// years, and undo the shift at the end.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
+    let month = match shifted < 10 {
+        true => shifted + 3,
+        false => shifted - 9,
+    };
+    (year + i64::from(month <= 2), month, day)
 }
 
 /// How many bytes it takes to write `value`, at least one.
@@ -365,6 +460,8 @@ pub struct Pdf {
     objects: Vec<Object>,
     /// What the trailer's `Root` points at.
     catalog: Option<u32>,
+    /// The document information dictionary, when there is one (§14.3.3).
+    info: Option<u32>,
 }
 
 impl Default for Pdf {
@@ -378,6 +475,7 @@ impl Pdf {
         Pdf {
             objects: Vec::new(),
             catalog: None,
+            info: None,
         }
     }
 
@@ -405,6 +503,11 @@ impl Pdf {
     /// Say which object is the catalogue, which is where a reader starts.
     pub fn set_catalog(&mut self, number: u32) {
         self.catalog = Some(number);
+    }
+
+    /// Name the information dictionary the trailer points at.
+    pub fn set_info(&mut self, number: u32) {
+        self.info = Some(number);
     }
 
     /// Serialise the file, in the PDF 1.5 form LuaTeX writes.
@@ -571,6 +674,26 @@ impl Pdf {
         if let Some(catalog) = self.catalog {
             dict.insert("Root".to_string(), Object::Reference(catalog));
         }
+        if let Some(info) = self.info {
+            dict.insert("Info".to_string(), Object::Reference(info));
+        }
+        // §14.4: "The value of this entry shall be an array of two byte
+        // strings. The first byte string shall be a permanent identifier based
+        // on the contents of the file at the time it was originally created
+        // ... When a file is first written, both identifiers shall be set to
+        // the same value."
+        //
+        // The spec's own recipe is a digest of "the current time", the file's
+        // pathname and its size, which is three ways of making the same
+        // document twice give two different files. This digests the CONTENTS
+        // instead -- everything written above this table -- so the identifier
+        // is what the spec says it is, a name for these bytes, and a
+        // reproducible build stays reproducible.
+        let id = file_identifier(&out);
+        dict.insert(
+            "ID".to_string(),
+            Object::Array(vec![Object::Hex(id.clone()), Object::Hex(id)]),
+        );
         out.extend(format!("{table_number} 0 obj\n").as_bytes());
         Object::Stream {
             dict,
@@ -1004,6 +1127,31 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     if let Object::Reference(number) = catalog {
         pdf.set_catalog(number);
     }
+    // §14.3.3's document information dictionary, which LuaTeX writes for every
+    // file and texrs wrote for none. The keys are the ones LuaTeX writes:
+    // `/Producer`, `/Creator`, `/CreationDate`, `/ModDate` and `/Trapped`.
+    //
+    // `/Creator` is "the name of the conforming product that created the
+    // ORIGINAL document" and `/Producer` the one "that converted it to PDF"
+    // (Table 317), which for a TeX engine is TeX and the engine: LuaTeX writes
+    // `(TeX)` and `(LuaTeX-1.24.0)`, and this writes `(TeX)` and the same shape
+    // of its own name. The date is the same one in both places because nothing
+    // has modified the file since it was written.
+    let date = pdf_date(stamp());
+    let info = pdf.add(Object::dict([
+        (
+            "Producer",
+            Object::string(&format!("texrs-{}", env!("CARGO_PKG_VERSION"))),
+        ),
+        ("Creator", Object::string("TeX")),
+        ("CreationDate", Object::string(&date)),
+        ("ModDate", Object::string(&date)),
+        // "This shall be the name False, not the boolean value false."
+        ("Trapped", Object::name("False")),
+    ]));
+    if let Object::Reference(number) = info {
+        pdf.set_info(number);
+    }
     pdf.finish()
 }
 
@@ -1401,6 +1549,21 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
         // The font's own dominant stem width when it states one. LuaTeX writes
         // 69 whatever the face, which is a default rather than an answer.
         ("StemV", Object::Real(type1.stem_v.unwrap_or(80.0))),
+        // §9.8.1: the glyphs the file actually carries, as a string of names.
+        // Spelled the way LuaTeX spells it -- `/CharSet( /H /d /e /l /o /one
+        // /period /r /w)`, a space before each name -- and a reader uses it to
+        // tell a subset from a whole font without decrypting the font program.
+        // These are all of them, because the program goes in whole.
+        (
+            "CharSet",
+            Object::string(
+                &type1
+                    .glyph_names()
+                    .iter()
+                    .map(|name| format!(" /{name}"))
+                    .collect::<String>(),
+            ),
+        ),
         ("FontFile", file),
     ];
     // Only when it is known: §9.8.1 marks `/XHeight` optional, and a face whose
@@ -1525,7 +1688,12 @@ mod tests {
 
         assert_eq!(
             written(Object::Array(vec![Object::Integer(1), Object::name("x")])),
-            "[1 /x]"
+            // Spaced inside the brackets, which is LuaTeX's habit and now this
+            // writer's: measured, luatex writes `/W [ 1 2 1 ]` and
+            // `/Index [ 0 13 ]`. §7.3.6 asks only for whitespace between the
+            // items, so the spacing is a writer's choice, and matching it is
+            // one fewer difference in every array in the file.
+            "[ 1 /x ]"
         );
         assert_eq!(
             written(Object::dict([
@@ -1601,7 +1769,7 @@ mod tests {
         let dict =
             String::from_utf8_lossy(&bytes[start..(start + 200).min(bytes.len())]).into_owned();
         assert!(dict.contains("/Type /XRef"), "{dict}");
-        assert!(dict.contains("/W [1 2 1]"), "{dict}");
+        assert!(dict.contains("/W [ 1 2 1 ]"), "{dict}");
 
         let table = inflated_stream(&bytes, start);
         assert_eq!(table.len(), 6 * 4, "six entries of four bytes");
@@ -1730,7 +1898,9 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), numbers.len(), "an object came back twice");
-        assert_eq!(sorted, vec![1, 2, 3, 4, 5, 6, 7, 8, 10], "{plain}");
+        // Nine objects and the table: the information dictionary §14.3.3 asks
+        // for is one of them, which is why this is not the eight it was.
+        assert_eq!(sorted, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 11], "{plain}");
 
         // The object stream itself is gone: what it held is what stands in its
         // place.
