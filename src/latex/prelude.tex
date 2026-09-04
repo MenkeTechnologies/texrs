@@ -302,7 +302,22 @@
 % takes the other path here than it would under tex, and that is a real
 % difference rather than a hidden one -- it is why \ifdim is listed as
 % recognised-but-not-evaluated in the primitive corpus.
-\let\ifdim=\iffalse
+%
+% \ifdim is \def rather than \let, and it is the only one of these that is.
+% The engine really implements \ifdim now -- `src/lower.rs' lowers it to a
+% branch over two dimensions, `src/expand.rs' evaluates it -- and BOTH dispatch
+% on the control sequence's NAME, before the \let alias is resolved. So
+% `\let\ifdim=\iffalse' was ignored in running text and the comparison was made
+% after all: `\ifdim 1pt>0pt' took the true branch under a prelude that had
+% just said it was false, and pandoc's \pandocbounded --
+% `\ifdim\@tempb\p@<\@tempa\p@', where \Gscale@div left \@tempb undefined
+% because it measures a box -- stopped 54 corpus documents with
+% `! Illegal unit of measure (pt inserted).' A MACRO is looked up before the
+% name is, so `\def\ifdim{\iffalse}' is honoured where the \let was not; what
+% it means is the same thing, since it expands to \iffalse before anything
+% reads it. The neighbours below stay \let because no arm dispatches on their
+% names -- they reach the alias resolution and take it.
+\def\ifdim{\iffalse}
 \let\ifvoid=\iffalse
 \let\ifhbox=\iffalse
 \let\ifvbox=\iffalse

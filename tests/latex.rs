@@ -127,12 +127,19 @@ fn a_newcommand_whose_name_is_not_definable_does_not_stop_the_document() {
 }
 
 #[test]
-fn directlua_is_consumed_rather_than_run() {
-    // texrs has no Lua. Consuming the chunk lets the document be read; a
-    // document whose OUTPUT depended on what the Lua computed is wrong here
-    // rather than refused, which is why this is stated in the README.
+fn what_a_chunk_prints_is_input_and_not_a_message() {
+    // The chunk RUNS -- `tests/lua.rs` pins the arithmetic -- and what
+    // `tex.print` writes is pushed back as INPUT, to be read as the document
+    // continues. It is not a message, so it does not reach this stream: the
+    // `x` here is set, and only `after` was sent to the terminal.
     let src = "\\documentclass{article}\n\\directlua{tex.print('x')}\n\\message{after}\n\\end\n";
     assert_eq!(out(src), "after");
+    // And it really did run: a chunk that fails stops the run, which a
+    // consumed chunk could not do.
+    assert!(texrs::run_messages(
+        "\\documentclass{article}\n\\directlua{error('boom')}\n\\end\n"
+    )
+    .is_err());
 }
 
 #[test]
@@ -311,4 +318,142 @@ fn a_circumflex_over_nothing_is_a_caret() {
             .collect::<Vec<_>>(),
         ["/^END/", "e", "o", "^"]
     );
+}
+
+/// A counter is a `\count` register, and the five representations read it.
+///
+/// `\setcounter`, `\addtocounter` and `\stepcounter` were two-argument macros
+/// producing nothing, so every counter in every document stayed at whatever it
+/// was declared with and `\arabic` had nothing to read.
+#[test]
+fn a_declared_counter_is_set_stepped_and_read_back() {
+    let src = "\\documentclass{article}\n\\newcounter{step}\n\
+               \\setcounter{step}{4}\\stepcounter{step}\\addtocounter{step}{2}\n\
+               \\message{[\\arabic{step}][\\alph{step}][\\Alph{step}]}\n\\end\n";
+    assert_eq!(out(src), "[7][g][G]");
+}
+
+/// A counter with no register is not a counter: LaTeX raises
+/// `! LaTeX Error: No counter 'a' defined.` and texrs, which has no error
+/// recovery to raise it into, consumes the arguments and produces nothing.
+///
+/// The alternative is what the port did first: `\setcounter{a}{1}` expanded to
+/// the characters `\count \cr@a =1`, and an assignment is not expandable, so a
+/// `\message` wrote them out as the document's text.
+#[test]
+fn a_counter_that_was_never_declared_writes_nothing_and_eats_its_arguments() {
+    let src = "\\documentclass{article}\n\
+               \\message{[\\setcounter{nosuch}{1}\\addtocounter{nosuch}{2}]}\n\\end\n";
+    assert_eq!(out(src), "[]");
+}
+
+/// `\section` steps its counter, which is what makes a `\label` inside it
+/// record the section's number rather than nothing at all.
+///
+/// The starred form is not numbered, exactly as latex.ltx's `\@ssect` is not,
+/// and the optional argument -- the contents entry -- is read and dropped.
+#[test]
+fn a_section_steps_its_counter_and_a_starred_one_does_not() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\section{One}\\section[toc]{Two}\\section*{Unnumbered}\n\
+               \\message{[\\arabic{section}]}\n\\end{document}\n";
+    assert_eq!(out(src), "[2]");
+}
+
+/// `\ref` to a label nothing wrote down answers `??`, and -- the part that was
+/// broken -- answers it WITHOUT eating the text after the reference.
+///
+/// `\@setref` reached an undefined `\r@x` and `\@firstoftwo` took the two
+/// tokens following the reference as its arguments instead: `\ref{x} on page`
+/// came out as `n page`, the reference gone and the `o` of `on` with it.
+#[test]
+fn an_unresolved_reference_is_two_question_marks_and_eats_no_text() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               See \\ref{gone} on page \\pageref{gone} now.\n\\end{document}\n";
+    assert_eq!(
+        texrs::run_text(src)
+            .expect("run")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["See", "??", "on", "page", "??", "now."]
+    );
+}
+
+/// `\DeclareOption` records the code an option runs and `\ExecuteOptions` runs
+/// it, walking the comma list.
+///
+/// latex.ltx walks it with `\@for`, which cannot run here -- `\@iforloop` calls
+/// itself and the lowerer inlines a macro's body -- so the walk is unrolled.
+/// Every class stopped at its own `\ExecuteOptions` line before this.
+#[test]
+fn declared_options_are_run_by_execute_options_in_the_order_written() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\DeclareOption{a}{\\message{A}}\\DeclareOption{b}{\\message{B}}\n\
+               \\ExecuteOptions{b,a,b}\n\\makeatother\n\\end\n";
+    assert_eq!(out(src), "B A B");
+}
+
+/// `\newenvironment` defines both bodies, including a `[n]` argument count.
+/// They were both dropped, so a document that defined its own environment got
+/// neither half of it.
+#[test]
+fn a_new_environment_runs_both_of_its_bodies() {
+    let src = "\\documentclass{article}\n\
+               \\newenvironment{note}[1]{<#1:}{>}\n\
+               \\message{\\begin{note}{k}body\\end{note}}\n\\end\n";
+    assert_eq!(out(src), "<k:body>");
+}
+
+/// A bibliography entry is numbered from the `.aux`, which is where LaTeX takes
+/// a `\cite`'s number from too -- so the label and the citation always agree.
+/// `\bibitem` was undefined, and an undefined control sequence ends the run:
+/// everything after the bibliography was lost.
+#[test]
+fn a_bibliography_numbers_its_entries_and_its_citations_alike() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               Read \\cite{one} and \\cite{two}.\n\
+               \\begin{thebibliography}{9}\n\
+               \\bibitem{one} First.\n\\bibitem{two} Second.\n\
+               \\end{thebibliography}\n\\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    // Without a file to write the .aux into, every key is the `?` LaTeX prints
+    // for a citation with no entry -- and the entries are still there.
+    assert!(got.contains("Read [?] and [?]."), "{got}");
+    assert!(got.contains("First.") && got.contains("Second."), "{got}");
+}
+
+/// The `.aux` round trip: a run writes what its labels resolved to, and the
+/// next run reads them back. This is LaTeX's own two-pass model, and it is why
+/// `latex` has to be run twice.
+#[test]
+fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
+    let dir = std::env::temp_dir().join(format!("texrs-aux-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let doc = dir.join("crossref.tex");
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\section{First}\\label{sec:a}\n\
+               Section \\ref{sec:a} and \\cite{k}.\n\
+               \\begin{thebibliography}{9}\\bibitem{k} A book.\\end{thebibliography}\n\
+               \\end{document}\n";
+    std::fs::write(&doc, src).expect("write");
+    let _ = std::fs::remove_file(dir.join("crossref.aux"));
+    let got = texrs::run_text_at(&doc, src).expect("run");
+    let aux = std::fs::read_to_string(dir.join("crossref.aux")).expect("aux written");
+    assert!(aux.contains("\\newlabel{sec:a}{{1}{0}}"), "{aux}");
+    assert!(aux.contains("\\bibcite{k}{1}"), "{aux}");
+    assert!(got.contains("Section 1 and [1]."), "{got}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `\newif` gives a switch its two setters, and the ones the FORMAT declares
+/// have to be there before a class reads them: article.cls says
+/// `\@mparswitchfalse` on its first page, and the class would not load at all
+/// without it -- `texrs: package article needs \@mparswitchfalse`.
+#[test]
+fn a_kernel_switch_has_both_of_its_setters() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\@mparswitchtrue\\if@mparswitch\\message{on}\\else\\message{off}\\fi\n\
+               \\@mparswitchfalse\\if@mparswitch\\message{on}\\else\\message{off}\\fi\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(out(src), "on off");
 }

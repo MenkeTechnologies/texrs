@@ -35,7 +35,7 @@ fn the_document_says_which_faces_a_missing_glyph_comes_from() {
         "the families, in order, with luaotfload's own options cut off at the colon"
     );
 
-    // Anything else in a chunk yields no chain: texrs has no Lua, and guessing
+    // Anything else in a chunk yields no chain from the TEXT reader, and guessing
     // at what a chunk computes would put a face nobody asked for in a book.
     assert!(texrs::typeset::fallback_chain("tex.print('x')").is_empty());
     assert!(texrs::typeset::fallback_chain("luaotfload.add_fallback(\"only\")").is_empty());

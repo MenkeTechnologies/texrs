@@ -1,0 +1,934 @@
+% The LaTeX kernel, ported from latex.ltx rather than invented.
+%
+% `prelude.tex` is the stand-in: a macro that would have drawn something is
+% answered with its text, and a macro whose effect the stomach would have read
+% is answered with nothing. This file is the opposite kind of thing. Every
+% definition here is the one `latex.ltx` makes, carried over as TeX, with the
+% place it came from written above it. Where a definition could NOT be carried
+% over, the substitution is named and the primitive that is missing is named
+% with it, because "this is not what LaTeX does" is the fact a reader of this
+% file most needs.
+%
+% It is read AFTER `prelude.tex`, so a name that appears in both ends up with
+% the ported definition. The stand-in stays for the names this file does not
+% reach yet.
+%
+% The line numbers are against
+% /usr/local/texlive/2026/texmf-dist/tex/latex/base/latex.ltx, LaTeX2e
+% <2025-11-01>. They move between releases; the definitions do not.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\@=11
+%
+% ---- ltdefns: the plumbing every other definition rests on ---------------
+% latex.ltx:1225-1226. A name built out of characters, defined and used.
+\def\@namedef#1{\expandafter\def\csname #1\endcsname}
+\def\@nameuse#1{\csname #1\endcsname}
+% latex.ltx:1090-1091, 896-897.
+\def\@empty{}
+\long\def\@gobbletwo#1#2{}
+\long\def\@gobblefour#1#2#3#4{}
+\long\def\@firstofone#1{#1}
+\long\def\@firstofthree#1#2#3{#1}
+\long\def\@secondofthree#1#2#3{#2}
+\long\def\@thirdofthree#1#2#3{#3}
+% latex.ltx:1382-1383. \@car takes the head of a list, \@cdr the tail.
+\def\@car#1#2\@nil{#1}
+\def\@cdr#1#2\@nil{#2}
+\def\@nnil{\@nil}
+% latex.ltx:1389. Both arguments expanded once, then the command applied.
+\def\@expandtwoargs#1#2#3{\edef\reserved@a{\noexpand#1{#2}{#3}}\reserved@a}
+% latex.ltx (ltcntrl): the loop the option lists and the counter reset lists are
+% both walked with. Carried verbatim -- the delimited parameter texts ARE the
+% mechanism, and any paraphrase of them is a different macro.
+\long\def\@fornoop#1\@@#2#3{}
+\long\def\@for#1:=#2\do#3{%
+  \expandafter\def\expandafter\@fortmp\expandafter{#2}%
+  \ifx\@fortmp\@empty \else
+    \expandafter\@forloop#2,\@nil,\@nil\@@#1{#3}\fi}
+\long\def\@forloop#1,#2,#3\@@#4#5{\def#4{#1}\ifx #4\@nnil \else
+       #5\def#4{#2}\ifx #4\@nnil \else#5\@iforloop #3\@@#4{#5}\fi\fi}
+\long\def\@iforloop#1,#2\@@#3#4{\def#3{#1}\ifx #3\@nnil
+       \expandafter\@fornoop \else
+      #4\relax\expandafter\@iforloop \fi#2\@@#3{#4}}
+%
+% ---- counters: ltcounts.dtx ----------------------------------------------
+% A LaTeX counter IS a \count register: \@definecounter says
+%
+%     \expandafter\newcount\csname c@foo\endcsname
+%
+% and every read of it is `\csname c@foo\endcsname' used as a number. texrs has
+% \count, \advance, \divide, \multiply and \the\count, and all of them work --
+% but not through a name \csname built, and not through anything that has to be
+% FROZEN. Four refusals, each measured against target/debug/texrs:
+%
+%   \expandafter\countdef\csname c@foo\endcsname=3   assigns, and the matching
+%       \expandafter\the\csname c@foo\endcsname      answers `! Unsupported \the.'
+%   \count\csname cr@foo\endcsname=0                 works at the top level and
+%       answers `! Missing number, found \the.' from inside a macro body: the
+%       \csname is not expanded while a register number is being scanned.
+%   \edef\x{\csname c@foo\endcsname}                 stores the three tokens
+%       rather than the counter's digits: \edef does not expand \csname.
+%   \count255=5 \edef\x{\the\count255}\count255=9 \message{\x}   says 9, not 5:
+%       \edef does not expand \the, \number or \numexpr either. NOTHING can be
+%       frozen into a macro body here, which is what rules out carrying a
+%       counter's value as a macro instead of as a register, and what rules out
+%       writing plain TeX's \newcount allocator, whose whole job is to freeze
+%       the next free register number into a name.
+%
+% So the value lives in a register, as it does under LaTeX, and what is carried
+% by name is the register's NUMBER: `\cr@foo' expands to the digits of the
+% register holding counter foo. Reaching the register from a counter name is
+% then \expandafter through a DELIMITED parameter --
+%
+%     \def\@stepctr#1\@nil{\advance\count#1 by 1 }
+%     \def\stepcounter#1{\expandafter\@stepctr\csname cr@#1\endcsname\@nil}
+%
+% -- rather than `\count\csname cr@#1\endcsname', which is the form that fails
+% inside a macro. The \@nil delimiter is what makes a two-digit register number
+% arrive whole: texrs's \expandafter expands the \csname AND the macro it names,
+% so `\cr@foo' arrives as the characters `1' `2' `0' and an undelimited #1 would
+% take only the first of them.
+%
+% The register NUMBERS are allocated in Rust, in `src/latex/counters.rs', and
+% reach a run as `\@namedef{cr@NAME}{NN}' lines after this file. A counter with
+% no register stops the document at `! Missing number, found \cr@NAME.', which
+% is loud and names the counter.
+%
+% Registers 100..119 are the counters every LaTeX document has; 120 and up are
+% the ones a document declares; 254 and 255 are scratch.
+%
+% latex.ltx: \def\@definecounter#1{...}
+\def\@definecounter#1{%
+  \setcounter{#1}{0}%
+  \expandafter\let\csname cl@#1\endcsname\@empty
+  \@addtoreset{#1}{@ckpt}%
+  \expandafter\let\csname p@#1\endcsname\@empty
+  \@namedef{the#1}{\arabic{#1}}}
+% latex.ltx: \def\newcounter#1{...\@ifnextchar[{\@newctr{#1}}{}}
+% The optional argument is the counter this one is reset by.
+\def\newcounter#1{\@definecounter{#1}\@ifnextchar[{\@newctr{#1}}{}}
+\def\@newctr#1[#2]{\@addtoreset{#1}{#2}}
+% latex.ltx: \def\@addtoreset#1#2{\expandafter\@cons\csname cl@#2\endcsname{{#1}}}
+% \@cons appends `\@elt{#1}' to the list macro; the list is walked with \@elt
+% \let to whatever the walk wants done.
+\def\@cons#1#2{\begingroup\let\@elt\relax\xdef#1{#1\@elt #2}\endgroup}
+\def\@addtoreset#1#2{\expandafter\@cons\csname cl@#2\endcsname{{#1}}}
+\let\@elt\relax
+\expandafter\let\csname cl@@ckpt\endcsname\@empty
+% The three commands that WRITE a counter go through one macro per counter --
+% `\ctr@NAME' -- rather than through `\cr@NAME' and the delimited parameter the
+% reads use. The reason is what happens to a name NOTHING has allocated.
+%
+% `\setcounter{a}{1}' for an undeclared `a' expanded to the characters
+% `\count \cr@a =1', and an assignment is not expandable, so in every place a
+% macro is expanded WITHOUT being executed -- a \message body above all -- those
+% characters were written out as text. Measured: `\message{[\setcounter{a}{1}]}'
+% said `[\count \cr@a =1 ]' where the stand-in this file replaced said `[]', and
+% `tests/latex.rs', state_macros_consume_their_arguments_and_produce_nothing,
+% pins the empty answer.
+%
+% There is no way for a macro to know it is inside a \message, so the branch is
+% taken by NAME instead, where Rust can take it: `src/latex/counters.rs' writes
+% `\ctr@NAME' for every counter name the source mentions -- the real assignment
+% for a name with a register, and a two-argument macro producing NOTHING for a
+% name without one, which is LaTeX's `! No counter `a' defined.' as far as an
+% engine with no error recovery can carry it. A counter that HAS a register is
+% still an assignment and is still written out inside a \message; the counters
+% every document actually steps are declared, and the value is right everywhere
+% it is executed.
+%
+% \ctr@NAME takes the operation and the operand: `\ctr@section\@ctrset{4}'.
+\def\@ctrset#1#2{\count#1=#2 }
+\def\@ctradd#1#2{\advance\count#1 by #2 }
+% latex.ltx: \def\setcounter#1#2{...\global\csname c@#1\endcsname#2\relax}
+\def\setcounter#1#2{\@nameuse{ctr@#1}\@ctrset{#2}}
+% latex.ltx: \def\addtocounter#1#2{...\global\advance\csname c@#1\endcsname#2\relax}
+\def\addtocounter#1#2{\@nameuse{ctr@#1}\@ctradd{#2}}
+% latex.ltx: \def\stepcounter#1{\addtocounter{#1}\@ne
+%              \begingroup \let\@elt\@stpelt \csname cl@#1\endcsname \endgroup}
+% The second half is what makes \section reset \subsection: the counters listed
+% in \cl@section are each set back to zero.
+\def\stepcounter#1{%
+  \@nameuse{ctr@#1}\@ctradd{1}%
+  \begingroup \let\@elt\@stpelt \csname cl@#1\endcsname \endgroup}
+% latex.ltx: \def\@stpelt#1{\global\csname c@#1\endcsname \m@ne\stepcounter{#1}}
+% Set to -1 and step, so a counter with subordinates of its own resets those too.
+\def\@stpelt#1{\setcounter{#1}{-1}\stepcounter{#1}}
+% latex.ltx: \def\refstepcounter#1{\stepcounter{#1}%
+%              \protected@edef\@currentlabel{\csname p@#1\endcsname\csname the#1\endcsname}}
+% This is what a later \label writes down: the value \ref will answer with.
+%
+% SUBSTITUTION: LaTeX SNAPSHOTS the representation here -- \protected@edef
+% freezes `2.1' into \@currentlabel, so a \label written after the next step of
+% the same counter still records the number the step it belongs to produced.
+% Nothing can be frozen here (see the four refusals above), so \@currentlabel is
+% defined to READ the counter instead. A \label immediately after its
+% \refstepcounter -- which is where LaTeX puts every one of them, inside the
+% sectioning and caption commands -- records the same value either way. A \label
+% separated from its own step by another step of the same counter does not.
+\def\refstepcounter#1{\stepcounter{#1}\@refstepcounter@{#1}}
+\def\@refstepcounter@#1{\def\@currentlabel{\csname the#1\endcsname}}
+\def\@currentlabel{}
+% latex.ltx: \def\value#1{\csname c@#1\endcsname}
+\def\value#1{\expandafter\@valuectr\csname cr@#1\endcsname\@nil}
+\def\@valuectr#1\@nil{\count#1}
+% latex.ltx: the five representations, each applied to the counter's register.
+\def\arabic#1{\expandafter\@arabicctr\csname cr@#1\endcsname\@nil}
+\def\roman#1{\expandafter\@romanctr\csname cr@#1\endcsname\@nil}
+\def\Roman#1{\expandafter\@Romanctr\csname cr@#1\endcsname\@nil}
+\def\alph#1{\expandafter\@alphctr\csname cr@#1\endcsname\@nil}
+\def\Alph#1{\expandafter\@Alphctr\csname cr@#1\endcsname\@nil}
+\def\fnsymbol#1{\expandafter\@fnsymbolctr\csname cr@#1\endcsname\@nil}
+\def\@arabicctr#1\@nil{\@arabic{\count#1}}
+\def\@romanctr#1\@nil{\@roman{\count#1}}
+\def\@Romanctr#1\@nil{\@Roman{\count#1}}
+\def\@alphctr#1\@nil{\@alph{\count#1}}
+\def\@Alphctr#1\@nil{\@Alph{\count#1}}
+\def\@fnsymbolctr#1\@nil{\@fnsymbol{\count#1}}
+% latex.ltx: \def\@arabic#1{\number #1}
+\def\@arabic#1{\number #1}
+% latex.ltx: \def\@alph#1{\ifcase#1\or a\or b\or ...\else\@ctrerr\fi}
+\def\@alph#1{%
+  \ifcase#1\or a\or b\or c\or d\or e\or f\or g\or h\or i\or j\or k\or l\or m\or
+    n\or o\or p\or q\or r\or s\or t\or u\or v\or w\or x\or y\or z\else\@ctrerr\fi}
+\def\@Alph#1{%
+  \ifcase#1\or A\or B\or C\or D\or E\or F\or G\or H\or I\or J\or K\or L\or M\or
+    N\or O\or P\or Q\or R\or S\or T\or U\or V\or W\or X\or Y\or Z\else\@ctrerr\fi}
+% latex.ltx: \def\@fnsymbol#1{\ifcase#1\or *\or \dagger\or \ddagger\or ...}
+% The symbols are the characters rather than the math atoms LaTeX sets them as,
+% for the same reason \texttt yields text here.
+\def\@fnsymbol#1{%
+  \ifcase#1\or *\or \dagger\or \ddagger\or \S\or \P\or \|\or **\or
+    \dagger\dagger\or \ddagger\ddagger\else\@ctrerr\fi}
+\def\@ctrerr{??}
+% SUBSTITUTION. latex.ltx writes \@roman with the primitive:
+%
+%     \def\@roman#1{\romannumeral#1}
+%
+% texrs has no \romannumeral. What is written out instead is the conversion
+% tex.web S69 performs -- walk the value/letters table from the top, emit the
+% letters and subtract while the remainder is at least the value -- with the
+% loop UNROLLED to its bound. tex.web recurses; a recursive macro that takes
+% arguments cannot be lowered here, because the lowerer inlines a macro's body
+% and a body holding its own call is inlined forever. A letter repeats at most
+% three times in a roman numeral, so three copies of each repeatable step IS the
+% whole loop. The remainder is \count254 rather than a macro, for the reason the
+% counters themselves are registers.
+%
+% The bound is 3999, which is where roman numerals stop having a spelling made
+% of these letters. Above it \romannumeral goes on emitting m's; this says
+% \@ctrerr, which is what LaTeX's own \@alph does when asked for a letter it has
+% not got.
+%
+% WHERE IT DOES NOT WORK, and why it is the only representation with a place
+% like this: the scratch register makes \@roman an ASSIGNMENT, and an assignment
+% is not expandable, so anywhere a macro is expanded WITHOUT being executed the
+% characters `\count 254=\count 100 \relax' come out instead of a numeral.
+% \@arabic (`\number #1') and \@alph (`\ifcase#1...') have no such place: both
+% are read by the message walker as a run-time read of the register.
+% Measured: a \label inside a \part -- \thepart is \Roman{part} -- wrote
+% `\newlabel{p:a}{{\count 254=\count 100 \relax }{0}}' into the .aux, which
+% `src/latex/aux.rs' now drops rather than carry into the next run.
+% The assignment-free form is a nest of \ifnum over absolute thresholds, and it
+% is four thousand branches deep, because the remainder after each place is a
+% subtraction and there is nowhere but a register to put one.
+\def\@roman#1{\count254=#1 \relax\@rmn@guard\@rmn@list}
+\def\@Roman#1{\count254=#1 \relax\@rmn@guard\@rmn@LIST}
+\def\@rmn@guard{\ifnum\count254>3999 \@ctrerr\count254=0 \fi}
+\def\@rmn@d#1#2{\ifnum\count254<#1 \else#2\advance\count254 by -#1 \fi}
+\def\@rmn@list{%
+  \@rmn@d{1000}{m}\@rmn@d{1000}{m}\@rmn@d{1000}{m}%
+  \@rmn@d{900}{cm}\@rmn@d{500}{d}\@rmn@d{400}{cd}%
+  \@rmn@d{100}{c}\@rmn@d{100}{c}\@rmn@d{100}{c}%
+  \@rmn@d{90}{xc}\@rmn@d{50}{l}\@rmn@d{40}{xl}%
+  \@rmn@d{10}{x}\@rmn@d{10}{x}\@rmn@d{10}{x}%
+  \@rmn@d{9}{ix}\@rmn@d{5}{v}\@rmn@d{4}{iv}%
+  \@rmn@d{1}{i}\@rmn@d{1}{i}\@rmn@d{1}{i}}
+% The capital form. LaTeX reaches it through \@slowromancap over the lowercase
+% letters; \uppercase is not a primitive here either, so the table is written
+% again in capitals rather than a case change being faked.
+\def\@rmn@D#1#2{\ifnum\count254<#1 \else#2\advance\count254 by -#1 \fi}
+\def\@rmn@LIST{%
+  \@rmn@D{1000}{M}\@rmn@D{1000}{M}\@rmn@D{1000}{M}%
+  \@rmn@D{900}{CM}\@rmn@D{500}{D}\@rmn@D{400}{CD}%
+  \@rmn@D{100}{C}\@rmn@D{100}{C}\@rmn@D{100}{C}%
+  \@rmn@D{90}{XC}\@rmn@D{50}{L}\@rmn@D{40}{XL}%
+  \@rmn@D{10}{X}\@rmn@D{10}{X}\@rmn@D{10}{X}%
+  \@rmn@D{9}{IX}\@rmn@D{5}{V}\@rmn@D{4}{IV}%
+  \@rmn@D{1}{I}\@rmn@D{1}{I}\@rmn@D{1}{I}}
+%
+% ---- the counters a class declares (article.cls / report.cls) -------------
+% article.cls: \newcounter{part} \newcounter{section} \newcounter{subsection}[section]
+% and so on; report.cls adds \newcounter{chapter} above them, and its
+% \thesection is `\thechapter.\arabic{section}' where article's is
+% `\arabic{section}'. report's is used, because the corpus sets books.
+%
+% Their registers, written out. A counter a DOCUMENT declares gets its register
+% from `src/latex/counters.rs', which reads the source for \newcounter and
+% \newtheorem and allocates from 120 upward; these are the ones every LaTeX
+% document has whether it declares them or not, so they are fixed here and the
+% Rust side starts past them.
+%
+% \@ctrreg{NAME}{NN} is the one place a register number is written: it makes
+% both names that carry it -- \cr@NAME, the digits the READS expand through, and
+% \ctr@NAME, the WRITE. `src/latex/counters.rs' emits the same two names for a
+% counter the document declares, in the same shape.
+\def\@ctrreg#1#2{\@namedef{cr@#1}{#2}\@namedef{ctr@#1}##1##2{##1{#2}{##2}}}
+\@ctrreg{part}{100}
+\@ctrreg{chapter}{101}
+\@ctrreg{section}{102}
+\@ctrreg{subsection}{103}
+\@ctrreg{subsubsection}{104}
+\@ctrreg{paragraph}{105}
+\@ctrreg{subparagraph}{106}
+\@ctrreg{figure}{107}
+\@ctrreg{table}{108}
+\@ctrreg{equation}{109}
+\@ctrreg{footnote}{110}
+\@ctrreg{mpfootnote}{111}
+\@ctrreg{page}{112}
+\@ctrreg{secnumdepth}{113}
+\@ctrreg{tocdepth}{114}
+\@ctrreg{enumi}{115}
+\@ctrreg{enumii}{116}
+\@ctrreg{enumiii}{117}
+\@ctrreg{enumiv}{118}
+\@ctrreg{Hfootnote}{119}
+\newcounter{part}
+\newcounter{chapter}
+\newcounter{section}[chapter]
+\newcounter{subsection}[section]
+\newcounter{subsubsection}[subsection]
+\newcounter{paragraph}[subsubsection]
+\newcounter{subparagraph}[paragraph]
+\newcounter{figure}[chapter]
+\newcounter{table}[chapter]
+\newcounter{equation}[chapter]
+\newcounter{footnote}[chapter]
+\newcounter{mpfootnote}
+\newcounter{page}
+\newcounter{secnumdepth}
+\newcounter{tocdepth}
+\newcounter{enumi}
+\newcounter{enumii}
+\newcounter{enumiii}
+\newcounter{enumiv}
+\newcounter{Hfootnote}
+% The three counters LaTeX starts at something other than nought. WRITTEN, AND
+% NOT IN EFFECT: this file is read through `Lowerer::preload', which keeps the
+% definitions a preamble makes and DROPS the commands it emits, and a counter is
+% a register, so an assignment made here is one of the dropped ones. Measured:
+% `\documentclass{article}' then `\message{[\arabic{secnumdepth}]}' answers
+% `[0]'. They are left here because they are what latex.ltx sets and because the
+% moment a preamble's commands survive they will be right; what depends on them
+% -- \pageref answering 0 rather than 1, and the secnumdepth test \@sect@run does
+% not make -- says so where it depends on them.
+\setcounter{page}{1}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+% report.cls's own \the<counter> definitions.
+\def\thepart{\Roman{part}}
+\def\thechapter{\arabic{chapter}}
+\def\thesection{\thechapter.\arabic{section}}
+\def\thesubsection{\thesection.\arabic{subsection}}
+\def\thesubsubsection{\thesubsection.\arabic{subsubsection}}
+\def\theparagraph{\thesubsubsection.\arabic{paragraph}}
+\def\thesubparagraph{\theparagraph.\arabic{subparagraph}}
+\def\thefigure{\thechapter.\arabic{figure}}
+\def\thetable{\thechapter.\arabic{table}}
+\def\theequation{\thechapter.\arabic{equation}}
+\def\thefootnote{\arabic{footnote}}
+\def\thepage{\arabic{page}}
+\def\theenumi{\arabic{enumi}}
+\def\theenumii{\alph{enumii}}
+\def\theenumiii{\roman{enumiii}}
+\def\theenumiv{\Alph{enumiv}}
+%
+% ---- cross references: ltxref.dtx ----------------------------------------
+% latex.ltx:
+%   \def\newlabel{\@newl@bel r}
+%   \def\@newl@bel#1#2#3{...\global\@namedef{#1@#2}{#3}}
+% An .aux file is a list of these. texrs reads the .aux in Rust
+% (`src/latex/aux.rs') and hands the entries to a run as \newlabel calls in the
+% preamble, which is the same round trip LaTeX makes through \@input.
+\def\newlabel#1#2{\@namedef{r@#1}{#2}}
+\def\bibcite#1#2{\@namedef{b@#1}{#2}}
+% latex.ltx:
+%   \def\ref#1{\expandafter\@setref\csname r@#1\endcsname\@firstoftwo{#1}}
+%   \def\pageref#1{\expandafter\@setref\csname r@#1\endcsname\@secondoftwo{#1}}
+%   \def\@setref#1#2#3{\ifx#1\relax ...??... \else\expandafter#2#1\null\fi}
+%
+% SUBSTITUTION in \@setref only. `\ifx#1\relax' is how LaTeX asks whether the
+% label was ever written down, and in texrs that test answers FALSE for an
+% undefined control sequence -- `\expandafter\ifx\csname r@x\endcsname\relax'
+% takes the \else arm for a name nothing has defined, and \ifcsname is refused
+% outright with `! Unsupported conditional \ifcsname.' So the question is asked
+% where it CAN be answered: `src/latex/aux.rs' knows every label the .aux
+% defines and every label the document references, and defines \r@X as
+% `{??}{??}' for the ones referenced and not defined. \@setref then never meets
+% an undefined name, and `??' -- LaTeX's own answer for an unresolved reference
+% -- comes out of the same place it comes out of under LaTeX.
+\def\ref#1{\expandafter\@setref\csname r@#1\endcsname\@firstoftwo{#1}}
+\def\pageref#1{\expandafter\@setref\csname r@#1\endcsname\@secondoftwo{#1}}
+\def\@setref#1#2#3{\expandafter#2#1}
+% amsmath: \eqref{...} is \ref in parentheses, through \tagform@.
+\def\eqref#1{\textup{\tagform@{\ref{#1}}}}
+\def\tagform@#1{(#1)}
+\def\textup#1{#1}
+% latex.ltx:
+%   \def\label#1{...\protected@write\@auxout{}%
+%      {\string\newlabel{#1}{{\@currentlabel}{\thepage}}}...}
+% There is no \write here -- nor \openin, nor \read -- so the writing side is
+% Rust's: `src/latex/aux.rs' runs the document a second time with \label \let to
+% \@auxlabel, which puts the entry in the \message stream, and writes the .aux
+% from what came back. In an ordinary run \label produces nothing, exactly as it
+% does under LaTeX: a label is a target, not text.
+\def\label#1{}
+\def\@auxlabel#1{\message{\string\newlabel{#1}{{\@currentlabel}{\thepage}}}}
+%
+% ---- sectioning: ltsect.dtx ----------------------------------------------
+% latex.ltx:
+%   \def\@sect#1#2#3#4#5#6[#7]#8{%
+%     \ifnum #2>\c@secnumdepth \let\@svsec\@empty
+%     \else \refstepcounter{#1}%
+%           \protected@edef\@svsec{\@seccntformat{#1}\relax}\fi ...}
+%   \def\@startsection#1#2#3#4#5#6{... \@ifstar{\@ssect...}{\@dblarg{\@sect...}}}
+%
+% What is carried over is the two things a sectioning command does that a
+% mouth can do: it STEPS its counter, and it yields its title. What is dropped
+% is everything \@startsection's six arguments describe -- the space above and
+% below, the indent, the font -- because that is the stomach's, and in a run
+% that is setting text `src/lower.rs' claims \section, \subsection,
+% \subsubsection and \chapter before this definition is reached and gives them
+% the breaks and the heading marks a page needs.
+%
+% Stepping the counter is what makes a \label inside a section record the
+% SECTION's number: \refstepcounter is where \@currentlabel is set, and without
+% it every entry written into the .aux carried an empty value.
+%
+% SUBSTITUTION: latex.ltx's `\ifnum #2>\c@secnumdepth' is dropped and the
+% counter is always stepped. \c@secnumdepth would have to be right to test it,
+% and it is not: the preamble's `\setcounter{secnumdepth}{2}' is read by
+% `Lowerer::preload', which keeps the DEFINITIONS a preamble makes and drops
+% the commands, so every counter starts a run at zero whatever the preamble set
+% it to. Measured: `\documentclass{article}' then
+% `\message{[\arabic{secnumdepth}]}' answers `[0]'. Stepping regardless numbers
+% a section the document asked not to number; testing against nought would
+% number nothing at all.
+%
+% The optional argument is the entry a table of contents would have carried,
+% and there is no contents in the mouth, so it is read and dropped.
+\def\@sect@run#1#2{\refstepcounter{#1}#2}
+\def\@sect@opt#1[#2]#3{\@sect@run{#1}{#3}}
+\def\@sect@plain#1{\@ifnextchar[{\@sect@opt{#1}}{\@sect@run{#1}}}
+% The starred form takes no number, so no counter is stepped: latex.ltx sends it
+% to \@ssect, which is \@sect without the \refstepcounter.
+\def\@sect@#1{\@ifstar\@firstofone{\@sect@plain{#1}}}
+%
+% ---- the bibliography: ltbibl.dtx -----------------------------------------
+% latex.ltx:
+%   \def\@biblabel#1{[#1]}
+%   \def\bibitem{\@ifnextchar[\@lbibitem\@bibitem}
+%   \def\@lbibitem[#1]#2{\item[\@biblabel{#1}\hfill]...\bibcite{#2}{#1}...}
+%   \def\@bibitem#1{\item ...\bibcite{#1}{\the\value{\@listctr}}...\ignorespaces}
+%   \def\@cite#1#2{[{#1\if@tempswa , #2\fi}]}
+%
+% \bibitem was UNDEFINED here, and an undefined control sequence stops a
+% document: `\begin{thebibliography}{9}\bibitem{a} An entry.' ended the run at
+% `! Undefined control sequence \bibitem.' and lost everything after it.
+%
+% The number a \bibitem gets is its position in the list, which latex.ltx reads
+% off the enclosing list's counter; enumiv is the counter a \bibitem list uses
+% and it is stepped here directly, because there is no list to ask. The label is
+% \@biblabel's, so an entry reads `[1] An entry.' as it does under LaTeX --
+% minus the hanging indent, which is the stomach's.
+%
+% \cite answers out of \b@KEY, which is what \bibcite defines, exactly as \ref
+% answers out of \r@KEY: the .aux carries both and `src/latex/aux.rs' seeds a
+% key nothing defined -- with `?', which is LaTeX's own answer for a citation
+% with no entry.
+\def\@biblabel#1{[#1]}
+% latex.ltx's list opens `\usecounter{enumiv}' with `\def\@listctr{enumiv}' and
+% `\let\p@enumiv\@empty', and it is where \theenumiv stops being the enumerate
+% form (\Alph) and becomes the entry number.
+\def\thebibliography#1{\setcounter{enumiv}{0}\def\theenumiv{\arabic{enumiv}}}
+\def\endthebibliography{}
+\def\bibitem{\@ifnextchar[\@lbibitem\@bibitem}
+\def\@lbibitem[#1]#2{\@biblabel{#1} }
+% The label printed is \b@KEY -- the number the .aux carries -- and NOT
+% \@ctrtotext{enumiv}, though the counter is stepped for the pass that writes
+% that file. The reason is the one \@ctrtotext exists for: a counter cannot be
+% read into the document's text, so an entry labelled from the counter came out
+% as `[]'. \b@KEY is characters, seeded by `src/latex/aux.rs', and characters
+% reach the text. It is also LaTeX's own data flow -- the number a \cite prints
+% comes from the .aux either way -- so a first run says `[?]' and the run after
+% it says `[1]', which is what latex does.
+\def\@bibitem#1{\stepcounter{enumiv}\@biblabel{\@nameuse{b@#1}} }
+% The diversion `src/latex/aux.rs' runs the document under to collect the
+% entries, beside \@auxlabel and for the same reason.
+\def\@auxbibitem{\@ifnextchar[\@auxlbibitem\@auxbibitem@}
+\def\@auxlbibitem[#1]#2{\message{\string\bibcite{#2}{#1}}}
+\def\@auxbibitem@#1{\stepcounter{enumiv}%
+  \message{\string\bibcite{#1}{\@ctrtotext{enumiv}}}}
+\def\cite{\@ifnextchar[\@citeopt\@cite@}
+\def\@citeopt[#1]#2{\@cite@{#2}}
+\def\@cite@#1{\@biblabel{\@nameuse{b@#1}}}
+\def\nocite#1{}
+\def\part{\@sect@{part}}
+\def\chapter{\@sect@{chapter}}
+\def\section{\@sect@{section}}
+\def\subsection{\@sect@{subsection}}
+\def\subsubsection{\@sect@{subsubsection}}
+\def\paragraph{\@sect@{paragraph}}
+\def\subparagraph{\@sect@{subparagraph}}
+%
+% ---- \newenvironment: ltdefns.dtx ----------------------------------------
+% latex.ltx:
+%   \def\newenvironment{\@star@or@long\new@environment}
+%   \def\new@environment#1{\@ifundefined{#1}{...}...\@newenv{#1}}
+%   \def\@newenv#1#2#3#4{\@namedef{#1}...\@namedef{end#1}{#4}}
+% \begin{x} runs \x and \end{x} runs \endx (latex.ltx, ltmiscen), which the
+% prelude already does. What was missing is that \newenvironment threw both
+% bodies away, so a document that defined its own environment got neither of
+% them. The argument count and the optional default are handed to \newcommand,
+% which is what latex.ltx does too.
+%
+% The \@ifundefined guard latex.ltx opens with is dropped rather than faked: it
+% exists to REFUSE a redefinition, and refusing needs the test that does not
+% work here. A document that defines the same environment twice gets the second
+% definition instead of an error.
+\def\newenvironment{\@ifstar\@newenv@\@newenv@}
+\def\renewenvironment{\@ifstar\@newenv@\@newenv@}
+\def\@newenv@#1{\@ifnextchar[{\@newenv@opt{#1}}{\@newenv@plain{#1}}}
+\long\def\@newenv@plain#1#2#3{%
+  \expandafter\def\csname #1\endcsname{#2}%
+  \expandafter\def\csname end#1\endcsname{#3}}
+\def\@newenv@opt#1[#2]{\@ifnextchar[{\@newenv@optdef{#1}{#2}}{\@newenv@args{#1}{#2}}}
+\long\def\@newenv@args#1#2#3#4{%
+  \expandafter\newcommand\csname #1\endcsname[#2]{#3}%
+  \expandafter\def\csname end#1\endcsname{#4}}
+\long\def\@newenv@optdef#1#2[#3]#4#5{%
+  \expandafter\newcommand\csname #1\endcsname[#2][#3]{#4}%
+  \expandafter\def\csname end#1\endcsname{#5}}
+% latex.ltx: \def\@ifdefinable#1#2{...}, which \newcommand uses to refuse a name
+% that is already taken. The refusal needs \ifx against \relax; the
+% definable-name half is what callers here want, so that is what is kept.
+\def\@ifdefinable#1#2{#2}
+%
+% ---- a counter on its way into the DOCUMENT'S TEXT -----------------------
+% Every read of a counter that ends up as WORDS goes through \@ctrtotext, and
+% there is one reason for it: \number and \the do not reach the text stream.
+% `\count110=7 A\number\count110 B' under --text answers
+% `! Undefined control sequence \number.', and \the answers the same; both work
+% inside \message, where the lowerer keeps them as a run-time read, and while
+% \edef scans an operand. So \arabic -- which latex.ltx defines as `\number #1'
+% and which this file ports unchanged -- is usable everywhere a counter is
+% TESTED or MESSAGED and nowhere a counter is PRINTED.
+%
+% `src/latex.rs' redefines this to produce nothing when the run is setting text,
+% which is what a footnote mark and a caption number produced before this file
+% existed, so nothing regresses. The moment the lowerer can splice a register
+% into text the way it already splices one into a \message, the redefinition
+% goes and the numbers appear.
+\def\@ctrtotext#1{\csname the#1\endcsname}
+%
+% ---- footnotes: ltfloat.dtx ----------------------------------------------
+% latex.ltx:
+%   \def\footnote{\@ifnextchar[\@xfootnote\@yfootnote}
+%   \def\@yfootnote{\stepcounter\@mpfn
+%      \protected@xdef\@thefnmark{\thempfn}\@footnotemark\@footnotetext}
+%   \def\@xfootnote[#1]{\begingroup\csname c@\@mpfn\endcsname #1\relax
+%      \unrestored@protected@xdef\@thefnmark{\thempfn}\endgroup
+%      \@footnotemark\@footnotetext}
+%
+% The numbering is LaTeX's: the counter steps, \@thefnmark is its
+% representation, and that mark is what \footnotemark alone also produces. Where
+% the note GOES is the difference -- LaTeX puts it in an \insert and the output
+% routine sets it at the foot of the page, and there is no \insert here, so the
+% note follows its mark in the text. That is the reading the rest of this layer
+% takes: the words survive, the page does not.
+%
+% \@thefnmark is \def rather than \protected@xdef for the reason \@currentlabel
+% is: nothing freezes here.
+\def\@mpfn{footnote}
+\def\thempfn{\@ctrtotext{footnote}}
+\def\footnote{\@ifnextchar[\@xfootnote\@yfootnote}
+\long\def\@yfootnote#1{%
+  \stepcounter{footnote}\def\@thefnmark{\thempfn}%
+  \@footnotemark\@footnotetext{#1}}
+\long\def\@xfootnote[#1]#2{%
+  \setcounter{footnote}{#1}\def\@thefnmark{\thempfn}%
+  \@footnotemark\@footnotetext{#2}}
+\def\@footnotemark{\textsuperscript{\@thefnmark}}
+\long\def\@footnotetext#1{ [\@thefnmark] #1 }
+\def\footnotemark{\@ifnextchar[\@xfootnotemark\@yfootnotemark}
+\def\@yfootnotemark{\stepcounter{footnote}\def\@thefnmark{\thempfn}\@footnotemark}
+\def\@xfootnotemark[#1]{\setcounter{footnote}{#1}\def\@thefnmark{\thempfn}\@footnotemark}
+\def\footnotetext{\@ifnextchar[\@xfootnotetext\@yfootnotetext}
+\long\def\@yfootnotetext#1{\@footnotetext{#1}}
+\long\def\@xfootnotetext[#1]#2{%
+  \setcounter{footnote}{#1}\def\@thefnmark{\thempfn}\@footnotetext{#2}}
+%
+% ---- captions: ltfloat.dtx -----------------------------------------------
+% latex.ltx:
+%   \def\caption{\refstepcounter\@captype \@dblarg{\@caption\@captype}}
+%   \long\def\@caption#1[#2]#3{...\@makecaption{\csname fnum@#1\endcsname}%
+%      {\ignorespaces #3}...}
+%   \def\fnum@figure{\figurename\nobreakspace\thefigure}
+%
+% \@captype is set by the float environment -- `figure' inside a figure,
+% `table' inside a table. The number is the counter's, stepped by
+% \refstepcounter, which is also what makes a \label inside a caption record the
+% FIGURE's number rather than the section's. What LaTeX does with the text --
+% set it in a box of the float's width, centred if it fits on one line -- is the
+% stomach's, so the caption reads as its own run of text here.
+\def\@captype{figure}
+\def\figurename{Figure}
+\def\tablename{Table}
+\def\fnum@figure{\figurename\ \@ctrtotext{figure}}
+\def\fnum@table{\tablename\ \@ctrtotext{table}}
+\def\caption{\refstepcounter\@captype\@ifnextchar[{\@caption\@captype}{\@caption\@captype[]}}
+\long\def\@caption#1[#2]#3{\csname fnum@#1\endcsname: #3}
+%
+% ---- the option and file machinery: ltclass.dtx ---------------------------
+% What `\usepackage{x}' does when the package really loads. The loading itself
+% is Rust's -- `src/latex/load.rs' finds x.sty with kpsewhich and puts it in the
+% preamble -- and these are the declarations the .sty file's own text needs in
+% order to be read at all.
+%
+% latex.ltx:18801-18821, reduced to the classic form. The 2025 kernel routes
+% \@pass@ptions through the expl3 file hooks
+% (\@expl@@@filehook@set@curr@file@@nNN, \tl_trim_spaces:n); no expl3 runs here,
+% so what is carried is the option-list append those hooks are wrapped around.
+\def\@ptionlist#1{\@nameuse{opt@#1}}
+\def\@pass@ptions#1#2#3{\@namedef{opt@#3.#1}{#2}}
+\def\@pkgextension{sty}
+\def\@clsextension{cls}
+% \PassOptionsToPackage and \PassOptionsToClass are NOT defined here, and the
+% omission is deliberate. The lowerer reads both by name -- `src/lower.rs',
+% "PassOptionsToPackage" | "PassOptionsToClass" -- because they are where a
+% pandoc preamble states the page it is set on:
+%
+%     \PassOptionsToPackage{margin=0.5in}{geometry}
+%
+% is the only place that half-inch is written, and `Layout::absorb_geometry_
+% options' takes it from there. That dispatch is by name and only for a name
+% nothing has defined as a macro, so defining either of them here TOOK the
+% options away from the page: `tests/typeset.rs',
+% options_passed_to_the_class_and_to_geometry_reach_the_page_too, set its text
+% at 72pt rather than at the 36pt it asked for.
+%
+% What is lost is the recording -- \@ptionlist{x.sty} answers nothing for a
+% package the preamble passed options to -- and the lowerer consumes both
+% arguments, so a .sty that calls either one still reads to the end.
+% latex.ltx:18824-18831.
+\def\DeclareOption{\@ifstar\@defdefault@ds\@declareoption}
+\long\def\@declareoption#1#2{%
+  \xdef\@declaredoptions{\@declaredoptions,#1}%
+  \@namedef{ds@#1}{#2}}
+\long\def\@defdefault@ds#1{\def\default@ds{#1}}
+\def\@declaredoptions{}
+\def\default@ds{}
+\def\CurrentOption{}
+% SUBSTITUTION: the comma list is walked UNROLLED, not with \@for.
+%
+% latex.ltx spells both \ProcessOptions and \ExecuteOptions as \@for over the
+% option list, and \@for is carried above verbatim -- and does not run here.
+% Measured: `\@for\x:=a,b\do{\message{<\x>}}' answers `! Extra \else.', because
+% \@iforloop calls ITSELF and the lowerer inlines a macro's body, so a body
+% holding its own call cannot be lowered (`src/latex/kernel.tex' says the same
+% thing about tex.web's \romannumeral). Every class stopped on the line that
+% used it: article.cls:111 is \ExecuteOptions{letterpaper,10pt,oneside,...}, and
+% `texrs: package article is not loadable: Extra \fi' was that.
+%
+% What replaces it is the same unrolling \@roman uses: a delimited parameter
+% text takes eight items at a time, three of them in a row, and the list is
+% padded with \@nil so a shorter list still matches. Twenty-four options is the
+% bound -- article.cls's own \ExecuteOptions has five, and a \documentclass line
+% rarely has three -- and an option past it is dropped rather than run.
+%
+% \@opt@one is the loop body: latex.ltx's `\ifx\CurrentOption\@empty\else...',
+% with the \@nil guard the padding needs beside it.
+\def\@opt@one#1{\def\CurrentOption{#1}%
+  \ifx\CurrentOption\@nnil\else\ifx\CurrentOption\@empty\else
+    \@nameuse{ds@#1}\fi\fi}
+\def\@opt@eight#1#2#3#4#5#6#7#8{%
+  \@opt@one{#1}\@opt@one{#2}\@opt@one{#3}\@opt@one{#4}%
+  \@opt@one{#5}\@opt@one{#6}\@opt@one{#7}\@opt@one{#8}}
+\def\@opt@A#1,#2,#3,#4,#5,#6,#7,#8,#9\@@{%
+  \@opt@eight{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}\@opt@B#9\@@}
+\def\@opt@B#1,#2,#3,#4,#5,#6,#7,#8,#9\@@{%
+  \@opt@eight{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}\@opt@C#9\@@}
+% The last eight, and #9 -- everything past twenty-four -- dropped.
+\def\@opt@C#1,#2,#3,#4,#5,#6,#7,#8,#9\@@{%
+  \@opt@eight{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}}
+% Twenty-five \@nil, so a list of k options leaves the last level a ninth
+% parameter to swallow for every k from 0 to 24.
+\def\@do@ptions#1{\@opt@A#1,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,%
+  \@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,\@nil,%
+  \@nil,\@nil,\@nil,\@nil,\@nil\@@\let\CurrentOption\@empty}
+% latex.ltx:18847-18899, reduced: \ProcessOptions runs the declared option code
+% for every option the document asked for. The unused-option bookkeeping and the
+% \detokenize round trip are dropped -- \detokenize is not a primitive here.
+% \@curroptions is set by `src/latex/load.rs' from the [...] the document wrote,
+% which is where \usepackage would have taken it from.
+\def\ProcessOptions{\@ifstar\@process@ptions\@process@ptions}
+\def\@process@ptions{\expandafter\@do@ptions\expandafter{\@curroptions}}
+\def\@curroptions{}
+\def\@options{\ProcessOptions*}
+% latex.ltx:18901-18907.
+\def\ExecuteOptions#1{\@do@ptions{#1}}
+% latex.ltx:18955-18974. texrs is not the LaTeX2e format, and saying so would
+% stop every .sty file on its first line; what the test guards is a version
+% warning, so it is answered the way a matching format answers it.
+\def\fmtname{LaTeX2e}
+\def\fmtversion{2025/11/01}
+\def\NeedsTeXFormat#1{\@ifnextchar[\@needsf@rmat@gobble\@empty}
+\def\@needsf@rmat@gobble[#1]{}
+% latex.ltx:18763-18789, reduced to what it records: the version string, under
+% the name every \@ifpackageloaded test reads.
+\def\ProvidesPackage#1{\@ifnextchar[{\@pr@videpackage{#1}}{\@pr@videpackage{#1}[]}}
+\def\@pr@videpackage#1[#2]{\@namedef{ver@#1.\@currext}{#2}}
+\def\ProvidesClass#1{\@ifnextchar[{\@pr@videclass{#1}}{\@pr@videclass{#1}[]}}
+\def\@pr@videclass#1[#2]{\@namedef{ver@#1.cls}{#2}}
+\def\ProvidesFile#1{\@ifnextchar[\@providesfile@gobble\@empty}
+\def\@providesfile@gobble[#1]{}
+\def\@currext{sty}
+\def\@currname{}
+% latex.ltx:18697-18716. The date comparison every package opens with, and the
+% single most-reported thing a package wanted: `texrs: package xcolor needs
+% \@ifl@t@r' was the first line of the run for 54 of the 274 corpus documents.
+%
+%   \def\@ifl@t@r#1#2{\ifnum\expandafter\@parse@version@#1//00\@nil<%
+%                           \expandafter\@parse@version@#2//00\@nil
+%     \expandafter\@secondoftwo \else \expandafter\@firstoftwo \fi}
+%
+% Carried whole, delimiters and all: `2025/11/01' becomes the number 20251101
+% through \@parse@version's parameter text, and the version is compared as an
+% integer. \fmtversion is this file's own, above.
+% The date PARSE is carried whole -- `2025/11/01' becomes 020251101 through
+% these three parameter texts, and `\count200=\expandafter\@parse@version@
+% \fmtversion//00\@nil' really holds 20251101.
+%
+% One \if of latex.ltx's is dropped: its \@parse@version@dash is
+%
+%     \def\@parse@version@dash#1-#2-#3#4#5\@nil{\if\relax#2\relax\else#1\fi#2#3#4 }
+%
+% and that \if sits inside the number \ifnum is scanning, which this engine's
+% number scanner does not expand -- `! Missing = inserted for \ifnum.' It drops
+% the year when the MONTH is empty, and the only version with an empty month is
+% the empty one, where #1 is the bare `0' \@parse@version@ prepended: dropping
+% it and keeping it both give nought.
+\def\@parse@version@#1{\@parse@version0#1}
+\def\@parse@version#1/#2/#3#4#5\@nil{\@parse@version@dash#1-#2-#3#4\@nil}
+\def\@parse@version@dash#1-#2-#3#4#5\@nil{#1#2#3#4 }
+% SUBSTITUTION, and the COMPARISON is what is substituted for. latex.ltx picks
+% between \@firstoftwo and \@secondoftwo inside an \ifnum, and neither shape of
+% that works here:
+%
+%   \expandafter\@secondoftwo\else\expandafter\@firstoftwo\fi  answers
+%       `! Extra \else.' -- an arm expanded while the conditional is open leaves
+%       the \fi for whatever the arm reads next, which `prelude.tex' explains at
+%       \@ifnch;
+%   \let\@arm\@secondoftwo\else\let\@arm\@firstoftwo\fi\@arm   assigns TWICE.
+%       An \ifnum at the top level of a file is lowered as a run-time branch and
+%       BOTH arms are lowered, so both \lets run and the second wins. Measured:
+%       `\ifnum 1<2 \let\a\@secondoftwo\else\let\a\@firstoftwo\fi \a{X}{Y}' says
+%       X, and so does the same line with `5<2'. An \ifnum is never decided
+%       while lowering, whatever its operands are.
+%
+% So the answer given is the one this format's own version makes true.
+% \fmtversion is 2025/11/01 and every use of this that reaches a package's first
+% page is `\IfFormatAtLeastTF{2022/06/01}' or older -- xcolor.sty:48-51,
+% ifthen.sty:75 -- so `later' is the right arm and the arm that goes on reading
+% the file: xcolor's else arm is \endinput. \@ifpackagelater, which shares this,
+% then says a loaded package is new enough, which is likewise the arm that keeps
+% the document running.
+\def\@ifl@t@r#1#2{\@firstoftwo}
+\def\IfFormatAtLeastTF{\@ifl@t@r\fmtversion}
+\def\@ifl@ter#1#2{\expandafter\@ifl@t@r\csname ver@#2.#1\endcsname}
+\def\@ifpackagelater{\@ifl@ter\@pkgextension}
+\def\@ifclasslater{\@ifl@ter\@clsextension}
+\let\IfPackageAtLeastTF\@ifpackagelater
+\let\IfClassAtLeastTF\@ifclasslater
+% latex.ltx:19464 and its neighbours. The whole body of each is inside
+% `\ifnum\pkgcls@targetdate>\z@' -- "some sort of rollback request" -- and
+% \pkgcls@targetdate is zero unless the document asked for one with
+% `\usepackage[=2020-02-02]{amsmath}'. Nothing here asks, so what these do IS
+% nothing, and that is what is written rather than the rollback machinery they
+% guard. They were the second most-reported name: amsmath, textcomp, parskip,
+% longtable and array all open with one.
+\def\DeclareRelease#1#2#3{}
+\def\DeclareCurrentRelease#1#2{}
+% latex.ltx:18687-18693. The test is `\ifx\csname ver@x.sty\endcsname\relax',
+% which is the one texrs cannot answer, so it goes through \@ifundefined -- see
+% the note on it directly below.
+\def\@ifpackageloaded#1{\@ifundefined{ver@#1.sty}}
+\def\@ifclassloaded#1{\@ifundefined{ver@#1.cls}}
+% latex.ltx:1737. \@ifundefined#1{true}{false} is true when NOTHING is defined
+% under that name:
+%
+%     \def\@ifundefined#1{\expandafter\ifx\csname #1\endcsname\relax
+%       \expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi}
+%
+% SUBSTITUTION, and the one that costs the most. texrs answers that \ifx FALSE
+% for a name nothing has defined -- an undefined control sequence is not
+% \ifx-equal to \relax here, and neither is a \let alias of a primitive equal to
+% the primitive -- and \ifcsname is refused outright. With no way to ask the
+% question, the answer given is the one that keeps a document running: the name
+% is treated as DEFINED, which is the arm that does not go on to define it a
+% second time. A .sty that branches on \@ifundefined to SUPPLY a missing macro
+% therefore does not supply it. That is a real divergence, and it is why
+% `src/latex/load.rs' will not quietly accept a package: a load is attempted and
+% either goes all the way through or is reported by name.
+\def\@ifundefined#1{\@secondoftwo}
+% latex.ltx (ltfiles). \IfFileExists asks the file system, which is Rust's job.
+% Answered `no' until it is wired to `src/latex/load.rs': the false arm is the
+% one a preamble takes when it means "use this only if it is here", and taking
+% it loads nothing that is not there.
+\def\IfFileExists#1#2#3{#3}
+% latex.ltx (ltclass): the hooks.
+%
+% NOT PORTED, and this is the one place in this file where a stand-in is kept on
+% purpose rather than for want of a primitive. \AtBeginDocument DEFERS its
+% argument to \begin{document}, by appending it to \@begindocumenthook, and
+% appending to a macro means reading the macro's body and writing it back --
+% \g@addto@macro's `\xdef#1{\the\toks@}'. Nothing freezes in this engine, so
+% the append cannot be written: every shape of it either loses the earlier
+% entries or builds a macro that reads itself.
+%
+% The two remaining readings are to RUN the body where it is registered, or to
+% drop it. Running it is nearer to LaTeX and is what an earlier revision of this
+% file did; the corpus says what that costs. scifi2/docs/book.tex registers
+%
+%     \AtBeginDocument{\ifcsname Shaded\endcsname\else...\fi ...}
+%
+% and \ifcsname is refused outright by this engine, so running the hook stopped
+% a 16,000-line book that had been reading to the end. The body is dropped, as
+% the prelude dropped it, until either the append or \ifcsname exists.
+\def\AtBeginDocument#1{}
+\def\AtEndDocument#1{}
+\def\AtEndOfPackage#1{#1}
+\def\AtEndOfClass#1{#1}
+\def\@onlypreamble#1{}
+% latex.ltx:1340. \newif, which nearly every package opens with:
+%
+%     \def\newif#1{\count@\escapechar \escapechar\m@ne
+%       \let#1\iffalse \@if#1\@empty\iftrue \@if#1\@empty\iffalse
+%       \escapechar\count@}
+%     \def\@if#1#2{\expandafter\def\csname\expandafter\@gobbletwo\string#1%
+%                    \expandafter\@gobbletwo\string#2\endcsname}
+%
+% HALF PORTED, and the missing half is said rather than faked. `\let#1\iffalse'
+% is here and works: \newif\ifdraft makes \ifdraft a false conditional. What is
+% NOT here is \ifdraft's pair of switches, \drafttrue and \draftfalse, because
+% building their names means taking `ifdraft' apart and dropping the `if', and
+% both ways TeX spells a control sequence as characters come back from this
+% engine as ONE opaque token rather than as the characters:
+%
+%   \def\g if#1\@nil{...}\expandafter\g\csstring\ifdraft\@nil
+%       answers `! Use of macro doesn't match its definition.', while the same
+%       macro applied to the characters -- \g ifdraft\@nil -- matches and gives
+%       `draft'. \string behaves the same way, and \escapechar, which is how
+%       latex.ltx spells a name without its backslash, is not a parameter this
+%       engine has at all.
+%
+% So a document that says \drafttrue stops on an undefined control sequence,
+% loudly and on the line that wrote it, rather than silently taking the false
+% branch of a switch it thought it had turned on.
+\def\newif#1{\let#1\iffalse}
+%
+% ---- the document environment --------------------------------------------
+% latex.ltx (ltmiscen): \begin{document} ends the preamble. There is no output
+% routine to start here, so what it does is nothing -- but it has to BE defined,
+% because \begin{document} expands \document and an undefined one is where a
+% document with no \documentclass line would stop.
+\def\document{}
+\def\enddocument{}
+%
+% ---- the format's own switches -------------------------------------------
+% latex.ltx declares these with \newif, and a CLASS reads them without
+% declaring them: article.cls opens with `\if@compatibility' and stops on the
+% first line if the format has not made it. They are the format's, so they are
+% ported here, and `src/latex/switches.rs` -- which is handed this file too --
+% writes each one's \NAMEtrue and \NAMEfalse.
+%
+% The list is every \newif in
+% /usr/local/texlive/2026/texmf-dist/tex/latex/base/latex.ltx, in its order,
+% minus the four that are internal to code this file does not carry
+% (\ifin@ is defined above, \if@includeinrelease guards a release wrapper the
+% port has no use for, and \ifh@ and \ifv@ belong to the picture environment).
+\newif\if@afterindent
+\newif\if@compatibility
+\newif\if@endpe
+\newif\if@eqnsw
+\newif\if@filesw
+\newif\if@firstamp
+\newif\if@font@series@context
+\newif\if@forced@series
+\newif\if@in@minipage@env
+\newif\if@inlabel
+\newif\if@negarg
+\newif\if@newlist
+\newif\if@nmbrlist
+\newif\if@noitemarg
+\newif\if@noparitem
+\newif\if@noparlist
+\newif\if@noskipsec
+\newif\if@ovb
+\newif\if@ovhline
+\newif\if@ovl
+\newif\if@ovr
+\newif\if@ovt
+\newif\if@ovvline
+\newif\if@partsw
+\newif\if@pboxsw
+\newif\if@rjfield
+\newif\if@tempswa
+\newif\ifdt@p
+\newif\ifmath@fonts
+\newif\ifmaybe@ic
+% latex.ltx:20674-20681, the output routine's own, written `\newif \if@insert'
+% with a space. They are the ones a CLASS turns on and off without declaring:
+% article.cls's first page of code says \@mparswitchfalse, and every document
+% that loaded article stopped there --
+% `texrs: package article needs \@mparswitchfalse' -- because the switch the
+% format was supposed to have made was not there for switches.rs to pair.
+\newif\if@insert
+\newif\if@fcolmade
+\newif\if@firstcolumn
+\newif\if@reversemargin
+\newif\if@mparswitch
+% latex.ltx turns three of them on or off on the line that declares them, and
+% \if@firstcolumn is the one whose initial value is not \newif's own false. It
+% is set with \let rather than with \@firstcolumntrue because THIS file is what
+% switches.rs reads to write \@firstcolumntrue: the pair does not exist yet on
+% the line below the \newif that asks for it.
+\let\if@firstcolumn\iftrue
+% classes.dtx declares these; every standard class reads all of them, and a
+% class that declares one itself simply gets it twice, which \newif allows.
+\newif\if@titlepage
+\newif\if@twoside
+\newif\if@twocolumn
+\newif\if@openright
+\newif\if@mainmatter
+\newif\if@restonecol
+\newif\if@specialpage
+\newif\if@dblfloat
+\newif\if@nobreak
+\newif\if@insertfootnotes
+%
+% ---- the dimensions a counter can be set from ----------------------------
+% plain.tex:  \newdimen\maxdimen  \maxdimen=16383.99998pt
+%
+% The prelude answers \maxdimen with nothing, which is right for a run that
+% cannot measure anything -- and wrong the moment a counter is really set,
+% because pandoc's preamble opens with
+%
+%     \setcounter{secnumdepth}{-\maxdimen}   % remove section numbering
+%
+% and `\count113=-' is `! Illegal unit of measure (pt inserted).' Used as a
+% <number>, which is what \setcounter uses it as, TeX coerces the dimension to
+% scaled points, and 16383.99998pt is 1073741823sp exactly. That number is what
+% is written here: it is what tex answers for this use, and the only use this
+% layer has for \maxdimen is this one.
+\def\maxdimen{1073741823}
