@@ -19,8 +19,16 @@
 //!
 //! The outlines themselves are kept as they came: a driver embeds a charstring,
 //! it does not interpret one, and texrs has nothing to draw with yet.
+//!
+//! Reading is also what WRITING one needs. `Type1::subset` cuts a font down to
+//! the glyphs a page drew and puts it back together -- a tagged `/FontName`, an
+//! `/Encoding` array of the codes that survived, a `/CharStrings` dictionary of
+//! the kept outlines -- and encrypts the body again, because a PDF carries the
+//! font in the same two halves it was read from. That is the difference between
+//! an 11 kB file and a 40 kB one for a page of a dozen words.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::Path;
 
 /// One glyph: its name, what the font says it costs, and its charstring.
@@ -82,6 +90,24 @@ pub struct Type1 {
     /// the heights of the letters.
     pub afm_metrics: Option<AfmMetrics>,
     glyphs: BTreeMap<String, Glyph>,
+    /// The eexec half, DECRYPTED: the Private DICT, the subroutines and the
+    /// CharStrings dictionary, as PostScript. Kept because a subset is built by
+    /// rewriting this and encrypting it again, and re-deriving it would mean
+    /// decrypting the font a second time.
+    private: Vec<u8>,
+    /// How many bytes of random padding each charstring carries -- `/lenIV`,
+    /// four unless the font says otherwise. A charstring is decrypted by
+    /// dropping that many and encrypted by putting that many back.
+    len_iv: usize,
+    /// What this font calls the two operators around a charstring's bytes:
+    /// `RD`/`ND` in a font written out in full, `-|`/`|-` in one squeezed for
+    /// space. A subset has to spell them the way the font's own Private DICT
+    /// defines them, since that is where they are defined.
+    charstring_tokens: (String, String),
+    /// Where `/CharStrings` begins in `private`, and where the entry for the
+    /// last glyph ends. Everything before the first and after the `end` that
+    /// follows the second is copied into a subset unchanged.
+    charstrings: (usize, usize),
 }
 
 /// The four heights an `.afm` states about a face, in the font's own units.
@@ -148,6 +174,29 @@ fn decrypt(bytes: &[u8], key: u16, skip: usize) -> Vec<u8> {
     out
 }
 
+/// The same cipher the other way, which is what writing a subset needs.
+///
+/// `pad` bytes of leading plaintext go in front of the message and are thrown
+/// away again by `decrypt`; they are meant to be random, and are a constant
+/// here so that the same document twice gives the same file. `0x00` would be a
+/// poor choice for the eexec half -- §7.2 of the Type 1 book asks that the
+/// first four ciphertext bytes not all be hexadecimal digits, or a reader
+/// cannot tell a binary body from a hexadecimal one -- so the padding is chosen
+/// to make the first ciphertext byte fall outside `0-9A-Fa-f`.
+fn encrypt(plain: &[u8], key: u16, pad: usize) -> Vec<u8> {
+    let mut r = key;
+    let mut out = Vec::with_capacity(plain.len() + pad);
+    for &byte in std::iter::repeat_n(&0x58u8, pad).chain(plain) {
+        let cipher = byte ^ (r >> 8) as u8;
+        r = (cipher as u16)
+            .wrapping_add(r)
+            .wrapping_mul(52845)
+            .wrapping_add(22719);
+        out.push(cipher);
+    }
+    out
+}
+
 /// The metrics beside a font program: `cmr10.afm` for `cmr10.pfb`.
 ///
 /// A TeX installation does not keep the two in one directory -- the fonts are
@@ -181,6 +230,77 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
         return None;
     }
     (from..=haystack.len() - needle.len()).find(|&at| &haystack[at..at + needle.len()] == needle)
+}
+
+/// Where `needle` stands as a WORD of its own at or after `from`.
+///
+/// PostScript is whitespace-separated, and a plain search is not: looking for
+/// `def` after `/Encoding` finds it inside `/.notdef put` in the very first
+/// line of a font's encoding array, three hundred bytes before the `readonly
+/// def` that actually closes it.
+fn word_at(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
+    let mut at = from;
+    loop {
+        let found = find(haystack, needle, at)?;
+        let before = found
+            .checked_sub(1)
+            .map(|i| haystack[i].is_ascii_whitespace());
+        let after = haystack
+            .get(found + needle.len())
+            .map(|c| c.is_ascii_whitespace());
+        if before.unwrap_or(true) && after.unwrap_or(true) {
+            return Some(found);
+        }
+        at = found + 1;
+    }
+}
+
+/// Replace what lies between `key` and the standalone `until` that follows it
+/// with `replacement`, keeping the key and dropping the old terminator, which
+/// `replacement` is expected to write again.
+///
+/// This is how a subset re-states `/FontName` and `/Encoding` without rewriting
+/// the rest of a font's cleartext header, every line of which -- the copyright,
+/// the `/UniqueID`, the `FontDirectory` guard -- is the font's own to keep.
+fn replace_after(bytes: &[u8], key: &[u8], replacement: &str, until: &[u8]) -> Option<Vec<u8>> {
+    let at = find(bytes, key, 0)? + key.len();
+    let end = word_at(bytes, until, at)? + until.len();
+    let mut out = bytes[..at].to_vec();
+    out.extend(replacement.as_bytes());
+    out.extend(&bytes[end..]);
+    Some(out)
+}
+
+/// Where TeX keeps the font program `file`, e.g. `cmr10.pfb`.
+///
+/// `typeset::find_font` answers the same question for a `.tfm`, and cannot be
+/// reused: it appends `.tfm` to the name it is given, and a `.pfb` is not on
+/// the `.tfm` search path at all -- `kpsewhich cmr10.pfb` and
+/// `kpsewhich cmr10.tfm` return two different directories. The answer is
+/// remembered per name because kpsewhich reads TeX Live's `ls-R` databases and
+/// costs the better part of a second, and the PDF writer asks for the same
+/// face once per document.
+pub fn installed(file: &str) -> Option<std::path::PathBuf> {
+    static SEEN: std::sync::OnceLock<
+        std::sync::Mutex<BTreeMap<String, Option<std::path::PathBuf>>>,
+    > = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(hit) = seen.lock().ok().and_then(|m| m.get(file).cloned()) {
+        return hit;
+    }
+    let found = std::process::Command::new("kpsewhich")
+        .arg(file)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.exists());
+    if let Ok(mut m) = seen.lock() {
+        m.insert(file.to_string(), found.clone());
+    }
+    found
 }
 
 impl Type1 {
@@ -287,7 +407,9 @@ impl Type1 {
         font.subroutines = find(&private, b"/Subrs", 0)
             .and_then(|at| numbers_after(&private[at..], b"/Subrs").first().copied())
             .unwrap_or(0.0) as usize;
+        font.len_iv = len_iv;
         font.read_charstrings(&private, len_iv)?;
+        font.private = private;
         Ok(font)
     }
 
@@ -379,7 +501,28 @@ impl Type1 {
                     charstring,
                 },
             );
+            // What this font spells the two operators around a charstring as,
+            // and how far the dictionary has got. A subset writes its own
+            // entries between these two offsets and copies the rest. The
+            // closing operator is read from AFTER the bytes rather than from
+            // the window the length was read out of, which stops at the
+            // charstring and holds no text past it.
+            let closing: String = private
+                .get(start + length..start + length + 16)
+                .unwrap_or_default()
+                .iter()
+                .map(|&b| b as char)
+                .collect();
+            self.charstring_tokens = (
+                token.to_string(),
+                closing
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("ND")
+                    .to_string(),
+            );
             from = start + length;
+            self.charstrings = (at, from);
         }
         match self.glyphs.is_empty() {
             true => Err("the font's /CharStrings holds no glyphs".into()),
@@ -399,6 +542,104 @@ impl Type1 {
         bytes.extend(body);
         bytes.extend(trailer);
         (bytes, clear.len(), body.len(), trailer.len())
+    }
+
+    /// The same font cut down to the codes a document actually drew, under a
+    /// subset name.
+    ///
+    /// This is what LuaTeX embeds and what makes the difference between an
+    /// 11 kB file and a 40 kB one: measured on `Hello world.`, luatex's
+    /// `/FontFile` is `/Length1 1510 /Length2 9354` where the whole cmr10.pfb is
+    /// 4287 and 30900. Its cleartext names the font `KJJYRX+CMR10`, its
+    /// `/Encoding` array carries the nine `dup <code> /<name> put` lines for the
+    /// glyphs the page set and nothing else, and its `/CharStrings` holds those
+    /// nine charstrings.
+    ///
+    /// Three parts are rebuilt and the rest is copied byte for byte:
+    ///
+    /// * the cleartext header, with `/FontName` tagged and the encoding array
+    ///   replaced. Everything else it says -- the notice, the `/FontInfo`, the
+    ///   `/UniqueID`, the `FontDirectory` guard -- is the font's own and stays.
+    /// * the `/CharStrings` dictionary inside the encrypted half, which is
+    ///   written out afresh with the kept glyphs re-encrypted. The Private DICT
+    ///   and ALL of the subroutines in front of it are copied: a charstring
+    ///   calls `callsubr` by index, and dropping a subroutine would renumber
+    ///   every call in the font. That is where this is still bigger than
+    ///   LuaTeX's -- measured on `Hello world.`, `/Length2 12183` against its
+    ///   9354, which is cmr10's 102 subroutines against the handful ten glyphs
+    ///   reach. Pruning them means keeping the array's length and stubbing the
+    ///   unused entries, and finding which are unused means INTERPRETING every
+    ///   kept charstring: hint replacement pushes a subroutine number, hands it
+    ///   to OtherSubr 3, takes it back with `pop` and only then calls it, so a
+    ///   scanner that reads the operand before `callsubr` does not see it and
+    ///   would stub a subroutine the font goes on calling. `xdvipdfmx`'s
+    ///   `t1_subset`, which this module is ported from, carries them all for
+    ///   the same reason.
+    /// * the eexec encryption itself, since the body it covers has changed.
+    ///
+    /// The 512 zeros and `cleartomark` that close the file are the original's.
+    ///
+    /// `None` when nothing would be kept, or when the font is one this cannot
+    /// take apart -- the caller then embeds it whole, which is what every font
+    /// did before there was a subset at all.
+    pub fn subset(&self, keep: &std::collections::BTreeSet<String>, tag: &str) -> Option<Type1> {
+        let kept: Vec<&Glyph> = keep.iter().filter_map(|name| self.glyphs.get(name)).collect();
+        if kept.is_empty() || self.private.is_empty() {
+            return None;
+        }
+        let name = format!("{tag}+{}", self.font_name);
+
+        // The cleartext header: the name it goes under, and the encoding array
+        // cut to the codes that survived.
+        let clear = replace_after(
+            &self.parts.0,
+            b"/FontName",
+            &format!(" /{name} def"),
+            b"def",
+        )?;
+        let mut array = String::from(" 256 array\n0 1 255 {1 index exch /.notdef put} for\n");
+        for (code, glyph) in &self.encoding {
+            if keep.contains(glyph) {
+                let _ = writeln!(array, "dup {code} /{glyph} put");
+            }
+        }
+        array.push_str("readonly def");
+        let clear = replace_after(&clear, b"/Encoding", &array, b"def")?;
+
+        // The encrypted half. `/CharStrings` is rewritten between the offsets
+        // the parse recorded; the `end` that closed the old dictionary is where
+        // the copied tail starts again.
+        let (from, after_last) = self.charstrings;
+        let tail = word_at(&self.private, b"end", after_last)?;
+        let (rd, nd) = &self.charstring_tokens;
+        let mut body = self.private[..from].to_vec();
+        body.extend(format!("/CharStrings {} dict dup begin\n", kept.len()).into_bytes());
+        for glyph in &kept {
+            // The charstring goes back in the way it came out: `lenIV` bytes of
+            // padding in front, encrypted with the charstring key.
+            let bytes = encrypt(&glyph.charstring, CHARSTRING_KEY, self.len_iv);
+            body.extend(format!("/{} {} {rd} ", glyph.name, bytes.len()).into_bytes());
+            body.extend(bytes);
+            body.extend(format!(" {nd}\n").into_bytes());
+        }
+        body.extend(self.private[tail..].to_vec());
+
+        let mut cut = self.clone();
+        cut.font_name = name;
+        cut.glyphs = kept
+            .iter()
+            .map(|glyph| (glyph.name.clone(), (*glyph).clone()))
+            .collect();
+        cut.encoding.retain(|_, glyph| keep.contains(glyph));
+        // No trailer. §9.9, Table 127: "If Length3 is 0, it indicates that the
+        // 512 zeros and cleartomark have not been included in the FontFile
+        // stream and shall be assumed by the consumer application." That is
+        // what LuaTeX writes -- measured, `/Length1 1510 /Length2 9354
+        // /Length3 0` -- and it saves the 545 bytes of zeros that a reader
+        // supplies for itself.
+        cut.parts = (clear, encrypt(&body, EEXEC_KEY, 4), Vec::new());
+        cut.private = body;
+        Some(cut)
     }
 
     /// The glyph of this name.

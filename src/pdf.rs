@@ -34,6 +34,80 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+/// A PDF dictionary, in the order its keys were PUT IN.
+///
+/// §7.3.7 says a dictionary's entries are unordered, so a reader does not care
+/// -- but two WRITERS that order them differently produce different bytes for
+/// the same dictionary, and that is a difference in every object of every file.
+/// This was a `BTreeMap`, which sorts: measured on `Hello world.`, LuaTeX writes
+/// `<< /Type /Page /Contents 3 0 R /Resources 1 0 R /MediaBox [ 0 0 612 792 ]
+/// /Parent 5 0 R >>` and texrs wrote `<< /Contents 2 0 R /MediaBox [ 0 0 612
+/// 792 ] /Parent 1 0 R /Resources << ... >> /Type /Page >>`. The two say the
+/// same thing and share no run of bytes, so the parity ladder's BYTES rung
+/// could never be reached however close the drawing came.
+///
+/// A dictionary is a handful of entries -- the largest one here is a font's
+/// nine -- so a lookup is a scan and there is no index to keep.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Dict(Vec<(String, Object)>);
+
+impl Dict {
+    pub fn new() -> Dict {
+        Dict(Vec::new())
+    }
+
+    /// Put `value` under `key`, keeping the place a key already there was put
+    /// in. Replacing in place rather than moving the entry to the end is what
+    /// makes a dictionary built by several `insert` calls independent of
+    /// whether one of them overwrote an earlier one.
+    pub fn insert(&mut self, key: impl Into<String>, value: Object) {
+        let key = key.into();
+        match self.0.iter_mut().find(|(seen, _)| *seen == key) {
+            Some((_, slot)) => *slot = value,
+            None => self.0.push((key, value)),
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Object> {
+        self.0
+            .iter()
+            .find(|(seen, _)| seen == key)
+            .map(|(_, value)| value)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Object)> {
+        self.0.iter().map(|(key, value)| (key, value))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<K: Into<String>, const N: usize> From<[(K, Object); N]> for Dict {
+    fn from(pairs: [(K, Object); N]) -> Dict {
+        let mut dict = Dict::new();
+        for (key, value) in pairs {
+            dict.insert(key, value);
+        }
+        dict
+    }
+}
+
+impl<K: Into<String>> FromIterator<(K, Object)> for Dict {
+    fn from_iter<I: IntoIterator<Item = (K, Object)>>(pairs: I) -> Dict {
+        let mut dict = Dict::new();
+        for (key, value) in pairs {
+            dict.insert(key, value);
+        }
+        dict
+    }
+}
+
 /// One PDF object.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {
@@ -42,6 +116,11 @@ pub enum Object {
     /// PDF has one number type in the file, written with or without a point.
     Integer(i64),
     Real(f64),
+    /// PDF source written through verbatim, for a dictionary a caller has
+    /// already spelled. `tikz`'s shadings are built this way: a shading is a
+    /// dictionary of a dictionary of functions, and the caller that knows the
+    /// ramp is the one that can write it.
+    Raw(String),
     /// A string, written in parentheses with what must be escaped escaped.
     Str(String),
     /// A string written as hexadecimal between angle brackets, which is what
@@ -50,11 +129,11 @@ pub enum Object {
     /// `/Name`.
     Name(String),
     Array(Vec<Object>),
-    Dict(BTreeMap<String, Object>),
+    Dict(Dict),
     /// A dictionary with bytes after it. `Length` is filled in by the writer,
     /// because it is the length of what was written and not of what was meant.
     Stream {
-        dict: BTreeMap<String, Object>,
+        dict: Dict,
         data: Vec<u8>,
     },
     /// `12 0 R`: a reference to an object written elsewhere in the file.
@@ -120,6 +199,7 @@ impl Object {
                 }
                 out.push(b')');
             }
+            Object::Raw(text) => out.extend(text.as_bytes()),
             Object::Hex(bytes) => {
                 out.push(b'<');
                 for byte in bytes {
@@ -171,7 +251,7 @@ impl Object {
                 let mut dict = dict.clone();
                 // The length is what was written, so it is set here rather
                 // than trusted from the caller.
-                dict.insert("Length".into(), Object::Integer(data.len() as i64));
+                dict.insert("Length", Object::Integer(data.len() as i64));
                 write_dict(&dict, out);
                 out.extend(b"\nstream\n");
                 out.extend(data);
@@ -182,14 +262,14 @@ impl Object {
     }
 }
 
-fn write_dict(pairs: &BTreeMap<String, Object>, out: &mut Vec<u8>) {
+fn write_dict(pairs: &Dict, out: &mut Vec<u8>) {
     // `<< /Key value >>`, spaced the way LuaTeX spaces it. The spec allows any
     // whitespace at all between the brackets and the first key, so this is a
     // writer's habit rather than a rule -- and two writers with different
     // habits produce different bytes for identical content, which is the
     // difference the parity ladder's BYTES rung would otherwise report forever.
     out.extend(b"<<");
-    for (key, value) in pairs {
+    for (key, value) in pairs.iter() {
         out.push(b' ');
         Object::Name(key.clone()).write(out);
         out.push(b' ');
@@ -600,7 +680,7 @@ impl Pdf {
             objstm_offset = out.len();
             out.extend(format!("{number} 0 obj\n").as_bytes());
             Object::Stream {
-                dict: BTreeMap::from([
+                dict: Dict::from([
                     ("Type".to_string(), Object::name("ObjStm")),
                     ("N".to_string(), Object::Integer(packed as i64)),
                     ("First".to_string(), Object::Integer(first as i64)),
@@ -654,7 +734,12 @@ impl Pdf {
 
         // The trailer's keys, in the table's own dictionary: this IS the
         // trailer now, and `startxref` points at the object holding it.
-        let mut dict = BTreeMap::from([
+        //
+        // In LuaTeX's order, which is `/Type /Index /Size /W /Root /Info /ID
+        // /Filter /Length` -- measured on `Hello world.` -- because the keys of
+        // a dictionary go into the file in the order they were put in and two
+        // orders are a difference in every byte of the object.
+        let mut dict = Dict::from([
             ("Type".to_string(), Object::name("XRef")),
             (
                 "Index".to_string(),
@@ -669,7 +754,6 @@ impl Pdf {
                     Object::Integer(third as i64),
                 ]),
             ),
-            ("Filter".to_string(), Object::name("FlateDecode")),
         ]);
         if let Some(catalog) = self.catalog {
             dict.insert("Root".to_string(), Object::Reference(catalog));
@@ -694,6 +778,7 @@ impl Pdf {
             "ID".to_string(),
             Object::Array(vec![Object::Hex(id.clone()), Object::Hex(id)]),
         );
+        dict.insert("Filter".to_string(), Object::name("FlateDecode"));
         out.extend(format!("{table_number} 0 obj\n").as_bytes());
         Object::Stream {
             dict,
@@ -796,6 +881,32 @@ impl Font {
     pub fn is_composite(&self) -> bool {
         matches!(self, Font::Glyphs { .. })
     }
+
+    /// The face a document that named none is set in: Computer Modern Roman at
+    /// ten point, embedded.
+    ///
+    /// This is what TeX means by "the font", and it is what luatex puts in the
+    /// file -- measured, `pdffonts` reports a subsetted `CMR10` for every one of
+    /// the ten corpus documents where texrs reported a base-14 `Helvetica`. The
+    /// widths were already cmr10's, because `typeset::to_pdf` measures out of
+    /// `cmr10.tfm` whenever the face carries no widths of its own, so this
+    /// changes the shapes drawn and not where the lines break.
+    ///
+    /// `None` when `cmr10.pfb` is not installed, and the caller then names one
+    /// of the fourteen instead: a document that cannot be set in Computer
+    /// Modern is still better set than refused.
+    pub fn computer_modern() -> Option<Font> {
+        // Read once. The file is a quarter of a megabyte and `Type1::parse`
+        // decrypts every charstring in it; a book of a hundred pages asks for
+        // the face once per `to_pdf` call and there is no reason to pay twice.
+        static FACE: std::sync::OnceLock<Option<Font>> = std::sync::OnceLock::new();
+        FACE.get_or_init(|| {
+            let path = crate::type1::installed("cmr10.pfb")?;
+            let font = crate::type1::Type1::open(path).ok()?;
+            Some(Font::Embedded(Box::new(font)))
+        })
+        .clone()
+    }
 }
 
 /// What a run of text is set at: what its glyphs come to, and what it is to
@@ -847,6 +958,13 @@ pub struct Page {
     /// resource is a page whose transparency a reader silently drops, the name
     /// resolving to nothing.
     pub ext_gstates: Vec<(String, String, f64)>,
+    /// The shading dictionaries the content names, as `(name, dictionary)` --
+    /// `("pgfsh0", "<< /ShadingType 2 ... >>")`.
+    ///
+    /// `sh` (§8.7.4.5) names an entry in the page's `/Shading` exactly as `gs`
+    /// names one in `/ExtGState`, so a page emitting the operator and carrying
+    /// no such resource paints nothing at all.
+    pub shadings: Vec<(String, String)>,
 }
 
 impl Page {
@@ -860,6 +978,7 @@ impl Page {
             images: Vec::new(),
             used: BTreeMap::new(),
             ext_gstates: Vec::new(),
+            shadings: Vec::new(),
         }
     }
 
@@ -876,6 +995,20 @@ impl Page {
         }
         self.ext_gstates
             .push((name.to_string(), key.to_string(), value));
+    }
+
+    /// Name a shading dictionary this page's content stream uses, so the
+    /// page's `/Resources` carries it. `dictionary` is PDF source, written
+    /// through as it stands.
+    ///
+    /// Naming the same one twice is dropped, as for `ext_gstate` and for the
+    /// same reason: the resource dictionary is keyed by the name.
+    pub fn shading(&mut self, name: &str, dictionary: &str) {
+        if self.shadings.iter().any(|(used, _)| used == name) {
+            return;
+        }
+        self.shadings
+            .push((name.to_string(), dictionary.to_string()));
     }
 
     /// Draw `text` at `(x, y)` in `size` points of `font`, where `y` is
@@ -1048,10 +1181,10 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     let mut kids = Vec::with_capacity(pages.len());
     for page in pages {
         let content = pdf.add(Object::Stream {
-            dict: BTreeMap::new(),
+            dict: Dict::new(),
             data: page.content.clone().into_bytes(),
         });
-        let mut fonts: BTreeMap<String, Object> = BTreeMap::new();
+        let mut fonts = Dict::new();
         for (name, font) in &page.fonts {
             let object = match font_objects.iter().find(|(seen, _)| *seen == font) {
                 Some((_, object)) => object.clone(),
@@ -1063,7 +1196,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             };
             fonts.insert(name.clone(), object);
         }
-        let mut images: BTreeMap<String, Object> = BTreeMap::new();
+        let mut images = Dict::new();
         for (name, image) in &page.images {
             let object = match image_objects.iter().find(|(seen, _)| *seen == image) {
                 Some((_, object)) => object.clone(),
@@ -1075,29 +1208,42 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             };
             images.insert(name.clone(), object);
         }
-        let mut resources = BTreeMap::from([("Font".to_string(), Object::Dict(fonts))]);
+        let mut resources = Dict::from([("Font".to_string(), Object::Dict(fonts))]);
         if !images.is_empty() {
             resources.insert("XObject".to_string(), Object::Dict(images));
         }
         // The graphics states the content named. Built up rather than matched
         // on, because a page may have any combination of the three.
         if !page.ext_gstates.is_empty() {
-            let states: BTreeMap<String, Object> = page
+            let states: Dict = page
                 .ext_gstates
                 .iter()
                 .map(|(name, key, value)| {
                     (
                         name.clone(),
-                        Object::Dict(BTreeMap::from([(key.clone(), Object::Real(*value))])),
+                        Object::Dict(Dict::from([(key.clone(), Object::Real(*value))])),
                     )
                 })
                 .collect();
             resources.insert("ExtGState".to_string(), Object::Dict(states));
         }
+        if !page.shadings.is_empty() {
+            let shades: Dict = page
+                .shadings
+                .iter()
+                .map(|(name, dictionary)| (name.clone(), Object::Raw(dictionary.clone())))
+                .collect();
+            resources.insert("Shading".to_string(), Object::Dict(shades));
+        }
         let resources = Object::Dict(resources);
+        // In LuaTeX's order -- measured, it writes `<< /Type /Page /Contents
+        // 3 0 R /Resources 1 0 R /MediaBox [ 0 0 612 792 ] /Parent 5 0 R >>`
+        // -- since a dictionary's keys reach the file in the order they were
+        // put in and two orders share no run of bytes.
         kids.push(pdf.add(Object::dict([
             ("Type", Object::name("Page")),
-            ("Parent", Object::Reference(tree)),
+            ("Contents", content),
+            ("Resources", resources),
             (
                 "MediaBox",
                 Object::Array(vec![
@@ -1107,8 +1253,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
                     Object::Real(page.height),
                 ]),
             ),
-            ("Resources", resources),
-            ("Contents", content),
+            ("Parent", Object::Reference(tree)),
         ])));
     }
 
@@ -1178,7 +1323,7 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
         _ => Object::name("DeviceRGB"),
     };
 
-    let mut dict = BTreeMap::from([
+    let mut dict = Dict::from([
         ("Type".to_string(), Object::name("XObject")),
         ("Subtype".to_string(), Object::name("Image")),
         ("Width".to_string(), Object::Integer(image.width as i64)),
@@ -1213,7 +1358,7 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
     // transparency for an image.
     if let Some(alpha) = &image.alpha {
         let mask = pdf.add(Object::Stream {
-            dict: BTreeMap::from([
+            dict: Dict::from([
                 ("Type".to_string(), Object::name("XObject")),
                 ("Subtype".to_string(), Object::name("Image")),
                 ("Width".to_string(), Object::Integer(image.width as i64)),
@@ -1333,7 +1478,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             subset_tag(name, glyphs.iter().map(|(gid, _, _)| *gid))
         );
         let file = pdf.add(Object::Stream {
-            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
+            dict: Dict::from([("Length1".to_string(), Object::Integer(bytes.len() as i64))]),
             data: bytes.clone(),
         });
         let descriptor = pdf.add(Object::dict([
@@ -1390,7 +1535,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             .map(|(gid, ch, _)| (*gid, ch.to_string()))
             .collect();
         let to_unicode = pdf.add(Object::Stream {
-            dict: BTreeMap::new(),
+            dict: Dict::new(),
             data: crate::agl::to_unicode_wide(name, &meanings).into_bytes(),
         });
         return pdf.add(Object::dict([
@@ -1425,7 +1570,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
         // not take one cut of a face for another.
         let name = &format!("{tag}{name}");
         let file = pdf.add(Object::Stream {
-            dict: BTreeMap::from([("Length1".to_string(), Object::Integer(program.len() as i64))]),
+            dict: Dict::from([("Length1".to_string(), Object::Integer(program.len() as i64))]),
             data: program,
         });
         let descriptor = pdf.add(Object::dict([
@@ -1488,7 +1633,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
                 .filter_map(|code| Some((code, crate::typeset::symbol_unicode(code)?.to_string())))
                 .collect();
             let map = pdf.add(Object::Stream {
-                dict: BTreeMap::new(),
+                dict: Dict::new(),
                 data: crate::agl::to_unicode(&name, &meanings).into_bytes(),
             });
             entries.push(("ToUnicode", map));
@@ -1496,9 +1641,67 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
         return pdf.add(Object::dict(entries));
     };
 
+    // Which glyph of the WHOLE font each code the driver drew asks for. That is
+    // what says how much of the font has to go into the file, so it is worked
+    // out before the program is written rather than after.
+    let wanted = |font: &crate::type1::Type1, code: u8| -> Option<String> {
+        // §9.3.3 gives word spacing to the single-byte code 32 and to nothing
+        // else, and `Page::text_set` writes a `Tw` for it, so this driver has
+        // already told every reader that 32 is the space. A TeX font's own
+        // encoding says otherwise -- cmr10 puts `suppress`, the Polish
+        // suppressed-l, in that slot -- and believing it draws a small stroke
+        // in the middle of every word gap on the page: measured, `Hello world.`
+        // came out as `Hello`, a stroke, `world.`.
+        if code == b' ' {
+            if let Some(glyph) = font.glyph("space") {
+                return Some(glyph.name.clone());
+            }
+        }
+        if let Some(glyph) = font.encoded(code) {
+            return Some(glyph.name.clone());
+        }
+        // A code the DRIVER used that the font's own encoding leaves empty.
+        //
+        // The driver addresses a simple font in WinAnsi, and a TeX font is in
+        // none of the standard encodings: `emdash` is at 124 in CMR10 and at
+        // 151 in WinAnsi, so a page that drew an em dash asked CMR10 for code
+        // 151 and got an unfilled slot -- the dash was simply absent from the
+        // page. §9.6.6 is exactly this case: `/Differences` remaps a code to a
+        // glyph by NAME, so the code the driver used is pointed at the glyph
+        // the font calls it.
+        //
+        // The join is through what a glyph MEANS rather than what it is called,
+        // because the two vocabularies do not agree by name either:
+        // `agl::unicode` turns each of the font's glyph names into the
+        // characters it draws, and the code's character comes from WinAnsi.
+        let character = crate::typeset::winansi_unicode(code)?.to_string();
+        font.glyph_names()
+            .into_iter()
+            .find(|name| crate::agl::unicode(name).as_deref() == Some(character.as_str()))
+            .map(str::to_string)
+    };
+
+    // The font cut down to those glyphs, under a subset name. A font nothing
+    // was drawn in cannot be measured for use and goes in whole, which is what
+    // every Type 1 font did before there was a subset at all.
+    let keep: std::collections::BTreeSet<String> =
+        codes.iter().filter_map(|&code| wanted(type1, code)).collect();
+    let cut = match keep.is_empty() {
+        true => None,
+        false => {
+            let tag = subset_tag(&type1.font_name, codes.iter().map(|&c| u16::from(c)));
+            type1.subset(&keep, &tag)
+        }
+    };
+    // Everything below reads the font that is actually going into the file:
+    // its name carries the subset tag, its `/CharSet` names what it carries,
+    // and its encoding is the cut one.
+    let subsetted = cut.is_some();
+    let type1 = cut.as_ref().unwrap_or(type1);
+
     let (bytes, clear, binary, trailer) = type1.embeddable();
     let file = pdf.add(Object::Stream {
-        dict: BTreeMap::from([
+        dict: Dict::from([
             ("Length1".to_string(), Object::Integer(clear as i64)),
             ("Length2".to_string(), Object::Integer(binary as i64)),
             ("Length3".to_string(), Object::Integer(trailer as i64)),
@@ -1533,19 +1736,23 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             "FontBBox",
             Object::Array(bbox.iter().map(|&n| Object::Real(n)).collect()),
         ),
-        ("ItalicAngle", Object::Real(type1.italic_angle)),
+        // The keys from here down are in LuaTeX's order -- measured, it writes
+        // `/Ascent 694 /CapHeight 683 /Descent -194 /ItalicAngle 0 /StemV 69
+        // /XHeight 431 /CharSet(...) /FontFile 9 0 R` -- so the two say the
+        // same thing in the same bytes rather than only in the same words.
         (
             "Ascent",
             Object::Real(heights.map(|m| m.ascender).unwrap_or(bbox[3])),
         ),
         (
-            "Descent",
-            Object::Real(heights.map(|m| m.descender).unwrap_or(bbox[1])),
-        ),
-        (
             "CapHeight",
             Object::Real(heights.map(|m| m.cap_height).unwrap_or(bbox[3])),
         ),
+        (
+            "Descent",
+            Object::Real(heights.map(|m| m.descender).unwrap_or(bbox[1])),
+        ),
+        ("ItalicAngle", Object::Real(type1.italic_angle)),
         // The font's own dominant stem width when it states one. LuaTeX writes
         // 69 whatever the face, which is a default rather than an answer.
         ("StemV", Object::Real(type1.stem_v.unwrap_or(80.0))),
@@ -1553,46 +1760,52 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
         // Spelled the way LuaTeX spells it -- `/CharSet( /H /d /e /l /o /one
         // /period /r /w)`, a space before each name -- and a reader uses it to
         // tell a subset from a whole font without decrypting the font program.
-        // These are all of them, because the program goes in whole.
-        (
-            "CharSet",
-            Object::string(
-                &type1
-                    .glyph_names()
-                    .iter()
-                    .map(|name| format!(" /{name}"))
-                    .collect::<String>(),
-            ),
-        ),
-        ("FontFile", file),
+        // These are what the program carries: the cut's glyphs when it was cut,
+        // and all of the font's when it went in whole.
     ];
     // Only when it is known: §9.8.1 marks `/XHeight` optional, and a face whose
-    // metrics could not be found has nothing to say about it.
+    // metrics could not be found has nothing to say about it. Before the two
+    // below, which is where LuaTeX writes it.
     if let Some(metrics) = heights {
         entries.push(("XHeight", Object::Real(metrics.x_height)));
     }
+    entries.push((
+        "CharSet",
+        Object::string(
+            &type1
+                .glyph_names()
+                .iter()
+                .map(|name| format!(" /{name}"))
+                .collect::<String>(),
+        ),
+    ));
+    entries.push(("FontFile", file));
     let descriptor = pdf.add(Object::dict(entries));
 
-    // The codes the font's own encoding uses, and what each is called. A
-    // reader that was told nothing would use its own idea of what code 11 is,
-    // which in a TeX font is an `ff` ligature.
-    let mut first = 256usize;
-    let mut last = 0usize;
-    for code in 0..=255usize {
-        if type1.encoded(code as u8).is_some() {
-            first = first.min(code);
-            last = last.max(code);
-        }
-    }
-    let (first, last) = match first > last {
-        true => (0, 0),
-        false => (first, last),
+    // Which glyph each code draws, in the font that is going into the file.
+    //
+    // A CUT font carries the glyphs the document drew and nothing else, so the
+    // codes are the ones it drew: `/FirstChar 46 /LastChar 119` for
+    // `Hello world.`, which is what LuaTeX writes for the same page. A font
+    // that went in whole is addressed over its own encoding as it always was,
+    // since a code it can draw may be drawn by a later edit of the document
+    // and the whole program is there for it.
+    let addressed: Vec<u8> = match subsetted {
+        true => codes.iter().copied().collect(),
+        false => (0..=255u8).collect(),
     };
+    let encoded: BTreeMap<u8, &crate::type1::Glyph> = addressed
+        .into_iter()
+        .filter_map(|code| Some((code, type1.glyph(&wanted(type1, code)?)?)))
+        .collect();
+
+    let first = encoded.keys().next().copied().unwrap_or(0) as usize;
+    let last = encoded.keys().next_back().copied().unwrap_or(0) as usize;
 
     let mut differences = Vec::new();
     let mut expected = usize::MAX;
     for code in first..=last {
-        let Some(glyph) = type1.encoded(code as u8) else {
+        let Some(glyph) = encoded.get(&(code as u8)) else {
             continue;
         };
         // A run of consecutive codes is written once with its first code, so
@@ -1612,8 +1825,8 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
     let widths: Vec<Object> = (first..=last)
         .map(|code| {
             Object::Real(
-                type1
-                    .encoded(code as u8)
+                encoded
+                    .get(&(code as u8))
                     .map(|glyph| glyph.width)
                     .unwrap_or(0.0),
             )
@@ -1627,25 +1840,34 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
     // text searchable rather than nearly searchable.
     let meanings: Vec<(u8, String)> = (first..=last)
         .filter_map(|code| {
-            let glyph = type1.encoded(code as u8)?;
+            let glyph = encoded.get(&(code as u8))?;
             Some((code as u8, crate::agl::unicode(&glyph.name)?))
         })
         .collect();
     let to_unicode = pdf.add(Object::Stream {
-        dict: BTreeMap::new(),
+        dict: Dict::new(),
         data: crate::agl::to_unicode(&type1.font_name, &meanings).into_bytes(),
     });
 
+    // In LuaTeX's order as far as the two write the same keys: measured, it
+    // writes `<< /Type /Font /Subtype /Type1 /BaseFont /KJJYRX+CMR10
+    // /FontDescriptor 8 0 R /FirstChar 46 /LastChar 119 /Widths 7 0 R >>`. The
+    // last two are texrs's own and go at the end -- LuaTeX writes NEITHER, and
+    // that is a difference in what the file says rather than in how it is
+    // spelled: it leaves the subset's own built-in encoding to say what a code
+    // means, and says nothing at all about what a code MEANS in Unicode, so a
+    // reader copying a ligature out of its file is guessing from the glyph
+    // name where a reader of this one is told.
     pdf.add(Object::dict([
         ("Type", Object::name("Font")),
         ("Subtype", Object::name("Type1")),
         ("BaseFont", Object::name(&type1.font_name)),
+        ("FontDescriptor", descriptor),
         ("FirstChar", Object::Integer(first as i64)),
         ("LastChar", Object::Integer(last as i64)),
         ("Widths", Object::Array(widths)),
         ("Encoding", encoding),
         ("ToUnicode", to_unicode),
-        ("FontDescriptor", descriptor),
     ]))
 }
 
@@ -1700,20 +1922,25 @@ mod tests {
                 ("Type", Object::name("Page")),
                 ("Count", Object::Integer(2))
             ])),
-            "<< /Count 2 /Type /Page >>"
+            // In the order the keys were PUT IN, not sorted: a dictionary is
+            // unordered to a reader (§7.3.7) and so the order is the writer's
+            // habit, and luatex's habit is insertion order. Matching it is what
+            // lets the page, the font and the descriptor agree with luatex key
+            // for key rather than only in content.
+            "<< /Type /Page /Count 2 >>"
         );
         // Spaced the way LuaTeX spaces a dictionary. The spec allows any
         // whitespace here, so this pins a writer's habit -- and pinning it is
         // the point: two writers with different habits give different bytes for
         // identical content, which the parity ladder would report forever.
-        assert_eq!(written(Object::Dict(BTreeMap::new())), "<< >>");
+        assert_eq!(written(Object::Dict(Dict::new())), "<< >>");
     }
 
     /// A stream's `Length` is what was written, not what was claimed.
     #[test]
     fn a_stream_carries_the_length_of_what_it_holds() {
         let text = written(Object::Stream {
-            dict: BTreeMap::from([("Length".to_string(), Object::Integer(9999))]),
+            dict: Dict::from([("Length".to_string(), Object::Integer(9999))]),
             data: b"12345".to_vec(),
         });
         assert!(text.starts_with("<< /Length 5 >>"), "{text}");

@@ -500,10 +500,18 @@ fn a_font_carried_in_the_file_is_one_a_reader_accepts() {
     // `type1.rs` that takes the font apart and checks each part is what it
     // should be -- a property, since there is no oracle for it.
 
-    // And the file really carries the font rather than naming it: a PFB is
-    // tens of kilobytes, and a page that named a font would be two.
+    // And the file really carries the font rather than naming it -- a page that
+    // named one is two kilobytes -- while carrying only the glyphs it drew.
+    // cmr10.pfb is a quarter of a megabyte with its 132 outlines in it, and a
+    // page setting one line of it goes in at a fraction of that; a file as big
+    // as the font is one the subset did not happen for.
     let size = std::fs::metadata(&path).expect("the file").len();
-    assert!(size > 20_000, "{size} bytes is too small to hold a font");
+    let whole = std::fs::metadata(&pfb).expect("the font").len();
+    assert!(size > 8_000, "{size} bytes is too small to hold a font");
+    assert!(
+        size < whole,
+        "{size} bytes carries the whole {whole}-byte font rather than a subset"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -521,7 +529,11 @@ fn the_widths_and_the_encoding_are_the_fonts_own() {
     let cmr10 = texrs::type1::Type1::open(&pfb).expect("the font reads");
 
     let mut page = Page::letter();
-    page.text_in(Font::Embedded(Box::new(cmr10)), 12.0, 72.0, 700.0, "A");
+    // An A and, at code 11, the ff ligature -- which is a vertical tab to
+    // anyone but a TeX font, and is the reason the encoding is written out.
+    // The font goes into the file cut to the glyphs the page drew, so the
+    // ligature has to be one of them for the encoding to be asked about it.
+    page.text_in(Font::Embedded(Box::new(cmr10)), 12.0, 72.0, 700.0, "A\u{b}");
     let bytes = document(&[page]);
     // Inflated, because the font dictionary and its descriptor are packed into
     // an object stream now and are not in the file's own bytes.
@@ -1012,10 +1024,14 @@ fn the_descriptor_states_what_the_fonts_metrics_state() {
         text.contains("/FontBBox [ -40 -250 1009 750 ]"),
         "the bounding box moved: {text}"
     );
-    // §9.8.1's `/CharSet`, spelled the way LuaTeX spells it: a space before each
-    // name. Every glyph, because the program goes in whole.
+    // §9.8.1's `/CharSet`, spelled the way LuaTeX spells it: a space before
+    // each name. The glyphs the program carries, which are the ones the page
+    // drew -- `Hello` is an H, an e, an l and an o -- because the font goes in
+    // cut to them. Measured, luatex writes `/CharSet( /H /d /e /l /o /one
+    // /period /r /w)` for `Hello world.` and its folio, which is the same list
+    // for the same reason.
     assert!(
-        text.contains("/CharSet ( /.notdef /A /AE /B"),
+        text.contains("/CharSet ( /H /e /l /o)"),
         "no CharSet, or not in LuaTeX's spelling: {text}"
     );
 }

@@ -283,3 +283,144 @@ fn the_descriptor_heights_come_from_the_metrics_file() {
     // rather than inventing an answer.
     assert_eq!(Type1::parse(&raw).expect("reads").afm_metrics, None);
 }
+
+/// A subset carries the glyphs it was cut to, and a reader gets them back.
+///
+/// This is the piece that makes an embedded Computer Modern 11 kB instead of
+/// 40: measured, luatex's `/FontFile` for `Hello world.` is `/Length1 1510
+/// /Length2 9354` where the whole cmr10.pfb is 4287 and 30900. Cutting one
+/// wrongly is not a small error -- the eexec half is encrypted, so a body
+/// rebuilt a byte out of step decrypts to noise and the page draws nothing --
+/// and there are three independent oracles here that it was not:
+///
+///  * the subset reads back through the same parser, which decrypts both
+///    halves and finds the charstrings by the lengths the file states;
+///  * every kept charstring is byte for byte the one the whole font held, so
+///    the outlines are the font's own rather than something re-encoded;
+///  * `t1disasm`, which decrypts the font by itself and prints what it finds.
+#[test]
+fn a_subset_carries_the_glyphs_it_was_cut_to_and_no_others() {
+    let Some(pfb) = installed("cmr10.pfb") else {
+        return;
+    };
+    let whole = Type1::open(&pfb).expect("the font reads");
+    let keep: std::collections::BTreeSet<String> = ["H", "e", "l", "o", "period"]
+        .iter()
+        .map(|name| name.to_string())
+        .collect();
+    let cut = whole.subset(&keep, "ABCDEF").expect("the font cuts");
+
+    // §9.6.4: a subset is named for itself, so a reader never takes one cut of
+    // a face for another.
+    assert_eq!(cut.font_name, "ABCDEF+CMR10");
+    assert_eq!(cut.glyph_names(), vec!["H", "e", "l", "o", "period"]);
+    // The font's own encoding, cut to the same glyphs: CMR10 has 166 codes and
+    // these five are at the five the whole font put them at.
+    for (code, name) in &cut.encoding {
+        assert!(keep.contains(name), "code {code} kept {name}");
+        assert_eq!(whole.encoding.get(code), Some(name));
+    }
+    assert_eq!(cut.encoding.len(), keep.len());
+
+    // Read back through the parser, which undoes both encryptions.
+    let (bytes, clear, binary, trailer) = cut.embeddable();
+    assert_eq!(bytes.len(), clear + binary + trailer, "the lengths cover it");
+    let again = Type1::parse(&bytes).expect("the subset reads back");
+    assert_eq!(again.font_name, "ABCDEF+CMR10");
+    assert_eq!(again.glyph_names(), cut.glyph_names());
+    assert_eq!(again.encoding, cut.encoding);
+    for name in &keep {
+        let was = whole.glyph(name).expect("the whole font has it");
+        let now = again.glyph(name).expect("the subset has it");
+        assert_eq!(now.charstring, was.charstring, "{name}'s outline changed");
+        assert_eq!(now.width, was.width, "{name}'s width changed");
+    }
+    // And what it left behind is gone.
+    assert!(again.glyph("Omega").is_none(), "a glyph nobody drew is in it");
+
+    // Much smaller than the font it came out of, which is the point.
+    let size = std::fs::metadata(&pfb).expect("the font").len() as usize;
+    assert!(
+        bytes.len() * 2 < size,
+        "{} bytes is not a subset of a {size}-byte font",
+        bytes.len()
+    );
+
+    // A second decryptor, sharing no code with this one.
+    let dir = std::env::temp_dir().join(format!("texrs-t1subset-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let path = dir.join("cut.pfa");
+    std::fs::write(&path, &bytes).expect("the subset writes");
+    if let Ok(out) = Command::new("t1disasm").arg(&path).output() {
+        // Installed and refusing the font is the finding, not a reason to
+        // skip: a subset no second decryptor accepts is a subset nothing can
+        // draw with.
+        assert!(
+            out.status.success(),
+            "t1disasm refused the subset: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        for name in &keep {
+            assert!(
+                text.contains(&format!("/{name} {{")),
+                "t1disasm did not find /{name} in the subset"
+            );
+        }
+        assert!(
+            !text.contains("/Omega {"),
+            "t1disasm found a glyph the subset should not carry"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Cutting works on every face the reader reads, not only on cmr10.
+///
+/// The three Computer Modern faces put different things in their headers --
+/// cmti10 leans, cmsy10 and cmex10 are symbol fonts with their own glyph
+/// vocabularies -- and the URW faces are in Adobe's StandardEncoding, so their
+/// cleartext says `/Encoding StandardEncoding def` and has no array to cut at
+/// all. A subsetter that only ever saw one font's header would take one of the
+/// others apart wrongly, and the encryption means it would do so silently.
+#[test]
+fn a_subset_of_any_face_the_reader_reads_still_decrypts() {
+    let mut cut_any = false;
+    for name in FONTS.iter().chain(["uhvr8a", "utmr8a"].iter()) {
+        let Some(path) = installed(&format!("{name}.pfb")) else {
+            continue;
+        };
+        let whole = Type1::open(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // The first five glyphs it has, whatever they are called.
+        let keep: std::collections::BTreeSet<String> = whole
+            .glyph_names()
+            .into_iter()
+            .filter(|glyph| *glyph != ".notdef")
+            .take(5)
+            .map(str::to_string)
+            .collect();
+        let cut = whole
+            .subset(&keep, "ZZZZZZ")
+            .unwrap_or_else(|| panic!("{name}: the font would not cut"));
+        cut_any = true;
+
+        let (bytes, clear, binary, trailer) = cut.embeddable();
+        assert_eq!(bytes.len(), clear + binary + trailer, "{name}: the lengths");
+        let again = Type1::parse(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(again.font_name, format!("ZZZZZZ+{}", whole.font_name));
+        for glyph in &keep {
+            assert_eq!(
+                again.glyph(glyph).map(|g| g.charstring.clone()),
+                whole.glyph(glyph).map(|g| g.charstring.clone()),
+                "{name}/{glyph}: the outline changed"
+            );
+        }
+        assert!(
+            bytes.len() < std::fs::metadata(&path).expect("the font").len() as usize,
+            "{name}: the cut is no smaller than the font"
+        );
+    }
+    if installed("cmr10.pfb").is_some() {
+        assert!(cut_any, "no font was cut, so nothing was tested");
+    }
+}

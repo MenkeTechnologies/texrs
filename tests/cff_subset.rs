@@ -10,9 +10,10 @@
 //! `FontFile3` of subtype `Type1C`, which is the bare CFF and not the OpenType
 //! container it was cut out of.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
+use texrs::pdf::Dict;
 
 use texrs::cff::{subset, Cff};
 use texrs::pdf::{Object, Pdf};
@@ -43,7 +44,7 @@ fn page(program: Vec<u8>, names: &[(u8, String, f64)], text: &str) -> Vec<u8> {
     let tree = pdf.reserve();
 
     let file = pdf.add(Object::Stream {
-        dict: BTreeMap::from([("Subtype".to_string(), Object::name("Type1C"))]),
+        dict: Dict::from([("Subtype".to_string(), Object::name("Type1C"))]),
         data: program,
     });
     let descriptor = pdf.add(Object::dict([
@@ -99,7 +100,7 @@ fn page(program: Vec<u8>, names: &[(u8, String, f64)], text: &str) -> Vec<u8> {
         })
         .collect();
     let content = pdf.add(Object::Stream {
-        dict: BTreeMap::new(),
+        dict: Dict::new(),
         data: format!("BT /F1 36 Tf 1 0 0 1 72 700 Tm ({escaped}) Tj ET\n").into_bytes(),
     });
     let page = pdf.add(Object::dict([
@@ -118,7 +119,7 @@ fn page(program: Vec<u8>, names: &[(u8, String, f64)], text: &str) -> Vec<u8> {
             "Resources",
             Object::dict([(
                 "Font",
-                Object::Dict(BTreeMap::from([("F1".to_string(), font)])),
+                Object::Dict(Dict::from([("F1".to_string(), font)])),
             )]),
         ),
         ("Contents", content),

@@ -1,9 +1,10 @@
 //! PDF parity: the same document through `luatex` and through texrs, compared
 //! as far as they agree.
 //!
-//! The goal is byte-identical output. That is a long way off — texrs writes a
-//! 624-byte PDF where luatex writes 11,729 for the same two words — so a
-//! harness that only answered "identical?" would say "no" every day and tell
+//! The goal is byte-identical output. That is still some way off — measured on
+//! `Hello world.`, texrs writes 15,435 bytes where luatex writes 11,729, both
+//! of them mostly a subsetted Computer Modern — so a harness that only answered
+//! "identical?" would say "no" every day and tell
 //! nobody anything. This one reports how far up a LADDER each document gets,
 //! and a floor file records the rung each currently reaches, so a change that
 //! drops one is a failure even while the top rung is out of reach.
@@ -230,9 +231,12 @@ pub fn lines(pdf: &[u8]) -> Option<Vec<String>> {
 
 /// The fonts a PDF names, as `name type embedded`.
 ///
-/// This is where the two engines part company most visibly: luatex embeds a
-/// subsetted `CMR10`, texrs names a non-embedded `Helvetica`. Byte equality is
-/// unreachable while the typeface differs, so it is worth its own rung.
+/// This is where the two engines used to part company most visibly: luatex
+/// embedded a subsetted `CMR10` and texrs named a non-embedded `Helvetica`, so
+/// the same document was set in two different typefaces. Both now embed a
+/// subsetted `CMR10` and the rung is reached; it keeps its own place on the
+/// ladder because byte equality is unreachable while the typeface differs, and
+/// nothing else on the ladder would notice if the face changed back.
 pub fn fonts(pdf: &[u8]) -> Option<Vec<String>> {
     let out = run_tool("pdffonts", pdf)?;
     Some(
