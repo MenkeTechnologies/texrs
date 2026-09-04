@@ -62,7 +62,18 @@ fn lines(pdf: &[u8]) -> Vec<String> {
 fn set(body: &str) -> Vec<String> {
     let src =
         format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\n\\end{{document}}\n");
-    lines(&texrs::run_pdf(&src).expect("typeset"))
+    let mut lines = lines(&texrs::run_pdf(&src).expect("typeset"));
+    // The folio is the page builder's, not the paragraph's: it sits on its own
+    // baseline below the text, so it arrives as a last line reading `1`. Every
+    // assertion in this file is about where the BREAKER put the words, so the
+    // page number is dropped here rather than repeated into each expectation.
+    // That it is written at all is pinned by `tests/typeset.rs`'s
+    // `every_page_is_numbered_the_way_plain_numbers_it` and by the PDF ladder,
+    // which climbed nine documents when it started being written.
+    if lines.last().is_some_and(|line| line == "1") {
+        lines.pop();
+    }
+    lines
 }
 
 /// The same paragraph, broken by total badness rather than by first fit.

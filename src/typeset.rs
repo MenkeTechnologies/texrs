@@ -211,9 +211,66 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
             w.pop();
             baseline += layout.leading;
         }
+        set_footline(&mut w, page + 1, chain, layout, &mut current);
         w.end_page();
     }
     w.finish()
+}
+
+/// `\baselineskip` for `plain.tex`'s footline: 24pt below the page body.
+const FOOTLINE_SKIP: f64 = 24.0;
+
+/// The page number at the foot of the page, where `plain.tex`'s output routine
+/// puts it.
+///
+/// A page is not the text alone. `\output` in `plain.tex` is `\plainoutput`,
+/// which ships `\vbox{\makeheadline\pagebody\makefootline}`, and
+/// `\makefootline` is `\baselineskip24pt \line{\the\footline}` with
+/// `\footline={\hss\tenrm\folio\hss}` — an `\hbox to \hsize` holding the folio
+/// between two `\hss`. So every page `tex` writes carries its number, and a
+/// DVI without one differs from `tex`'s in the last character of every page.
+///
+/// The centring is not a division: it is `hpack` distributing the slack
+/// between the two `\hss` glues (`tex.web` §658, §625), which is what puts the
+/// odd scaled point on one side rather than losing it. The same code sets
+/// every other box, so the folio is centred the way `\centerline` is.
+fn set_footline(
+    w: &mut Writer,
+    folio: usize,
+    chain: &FontChain,
+    layout: &Layout,
+    current: &mut usize,
+) {
+    use crate::node::{CharNode, GlueNode, Node};
+    let folio = folio.to_string();
+    let sp = |points: f64| (points * SP) as i64;
+    let mut list = vec![Node::Glue(GlueNode::new(crate::box_::fill::ss()))];
+    for ch in folio.chars() {
+        list.push(Node::Char(CharNode {
+            font: 0,
+            character: ch,
+            width: sp(chain.width(ch, layout.size)),
+            height: 0,
+            depth: 0,
+        }));
+    }
+    list.push(Node::Glue(GlueNode::new(crate::box_::fill::ss())));
+    let line = crate::pack::hpack(
+        list,
+        crate::pack::Spec::Exactly(sp(layout.measure)),
+        crate::pack::Tolerances::plain(),
+        None,
+    );
+    let lead = crate::pack::glue_widths(&line.node)
+        .first()
+        .copied()
+        .unwrap_or(0) as f64
+        / SP;
+    w.push();
+    w.down(((layout.margin + layout.height + FOOTLINE_SKIP) * SP) as i32);
+    w.right(((layout.margin + lead) * SP) as i32);
+    set_line(w, &folio, chain, layout, current);
+    w.pop();
 }
 
 /// Put one line's characters down, switching fonts as the chain requires.
@@ -277,6 +334,16 @@ fn set_line(w: &mut Writer, line: &str, chain: &FontChain, layout: &Layout, curr
                     break;
                 }
             }
+            continue;
+        }
+        // An interword space is glue (`tex.web` §1041), and glue in a set hlist
+        // is a MOVEMENT rather than a glyph (§625: `cur_h:=cur_h+rule_wd`).
+        // `tex` writes no character for a space, so a DVI that sets one differs
+        // from tex's in the very first word of every document -- and the glyph
+        // it sets is cmr10's code 32, which in OT1 is a Polish suppressed-l.
+        if ch == ' ' {
+            let space = chain.fonts[0].tfm.params.space;
+            w.right((space * layout.size * SP) as i32);
             continue;
         }
         if let Some((f, slot)) = chain.resolve(ch) {
@@ -974,6 +1041,17 @@ impl FontChain {
         // the next line for text that is not there.
         if matches!(ch, '\u{1}' | '\u{2}' | '\u{3}') || ch.is_control() {
             return 0.0;
+        }
+        // An interword space is GLUE, not a character (`tex.web` §1041): its
+        // width is the font's `\fontdimen2`, and no glyph is set for it.
+        //
+        // Resolving it as a character finds one -- cmr10 defines code 32, and
+        // in OT1 that slot holds the Polish suppressed-l, 0.27778em wide
+        // against the space's 0.33333em. So every space in a DVI was drawn as
+        // a wrong glyph at a wrong width, and every line measured 0.056em per
+        // space too narrow.
+        if ch == ' ' {
+            return self.fonts[0].tfm.params.space * size;
         }
         if let Some((f, slot)) = self.resolve(ch) {
             return self.fonts[f].tfm.char(slot).map(|m| m.width).unwrap_or(0.0) * size;
@@ -1709,8 +1787,9 @@ pub struct Families {
 ///   "Arial:mode=base;", "STIX Two Math:mode=base;", "Noto Emoji:mode=base;"})}
 /// ```
 ///
-/// texrs has no Lua, so the chunk is read rather than run: what is wanted from
-/// it is the list of family names, and a name is everything before the `:` that
+/// This READS the chunk rather than running it -- `crate::lua` runs it, and the
+/// two are asked for different things. What is wanted here is the list of family
+/// names, and a name is everything before the `:` that
 /// introduces luaotfload's own options. Anything else inside `\directlua`
 /// yields nothing, which leaves the document with no chain and the stand-ins it
 /// had before.
@@ -2040,6 +2119,12 @@ pub fn to_pdf(
     // words where the same line uncoloured holds seventeen. It cost whole
     // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
     let width_of = |word: &str, face: Face| -> f64 {
+        // A formula measures what `mlist_to_hlist` made it, not what its
+        // characters come to in the text face: the width of `$\frac{1}{2}$` is
+        // the fraction's, and nothing about it can be read off the glyphs.
+        if let Some(w) = crate::math::run_width(word) {
+            return w;
+        }
         // Plain ASCII is the case that runs a million times a book: every face
         // draws it, and the code and the character are the same number, so
         // there is nothing to decide per character. Answering it here keeps an
@@ -2233,6 +2318,36 @@ pub fn to_pdf(
                 // gets the colour it was NESTED IN back. Resetting to `0 g`
                 // instead is what drew the rest of a dark-paged book black.
                 page.content.push_str(&format!("{r} {g} {b} rg\n"));
+                // A formula is DRAWN where `mlist_to_hlist` put every glyph of
+                // it -- each at its own position, in its own size, with the
+                // fraction bars and radical rules between them -- rather than
+                // set as a run of characters. Each glyph still goes through the
+                // font chain, because which face can draw a sigma is a question
+                // about the document's fonts and not about the formula.
+                if let Some(set) = crate::math::run_setting(&plain) {
+                    for (glyph, gx, gy, size) in crate::math::glyphs(&set) {
+                        for piece in drawn(&glyph, &|c| covers(c, face), &outside) {
+                            let font = match piece.from {
+                                Source::Symbol => Font::Base14(SYMBOL_FONT_NAME.to_string()),
+                                Source::Outside(at) => match fallbacks.font(at) {
+                                    Some(font) => font.clone(),
+                                    None => continue,
+                                },
+                                Source::Face => fonts[face.index()].clone(),
+                            };
+                            let at = Set {
+                                natural: 0.0,
+                                width: 0.0,
+                            };
+                            page.text_set(font, size, x + gx, y + gy, &piece.codes, at);
+                        }
+                    }
+                    for (rx, ry, rw, rh) in crate::math::rules(&set) {
+                        page.rule(x + rx, y + ry, rw, rh);
+                    }
+                    x += crate::math::pt(set.width);
+                    continue;
+                }
                 // A run is not necessarily one font either: a character the
                 // face cannot draw is drawn from the fallback, which is a
                 // different font resource and so a `Tf` of its own. The pieces
@@ -4747,6 +4862,21 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
                         break;
                     }
                     spec.push(c);
+                }
+                // A formula's marker has the same shape and carries its
+                // SETTING rather than a colour: where every glyph of it goes,
+                // decided by `mlist_to_hlist`. The text between the marker and
+                // its close is the formula spelled out for a reader, which the
+                // page does not draw -- it draws the setting -- so it is
+                // skipped here along with the `\u{3}` that ends it.
+                if crate::math::is_setting(&spec) {
+                    for c in chars.by_ref() {
+                        if c == '\u{3}' {
+                            break;
+                        }
+                    }
+                    runs.push((crate::math::run(&spec), top(stack), current_face(faces)));
+                    continue;
                 }
                 let p: Vec<&str> = spec.split(',').collect();
                 // A spec that is not three components still pushes -- the

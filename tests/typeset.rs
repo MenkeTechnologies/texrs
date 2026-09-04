@@ -1753,7 +1753,7 @@ fn a_longtable_sets_its_foot_after_its_body_and_not_before_it() {
 /// line is on, so this keeps the pages apart. The PDF writer adds each page
 /// object as it finishes the page, so ascending object number is the order
 /// they are bound in.
-fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
+fn page_runs(pdf: &[u8]) -> Vec<Vec<String>> {
     let pdf = read_back(pdf);
     let objects = objects(&pdf);
     let mut pages = Vec::new();
@@ -1798,6 +1798,47 @@ fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
         pages.push(runs);
     }
     pages
+}
+
+/// What the DOCUMENT set on each page: `page_runs` without the folio.
+///
+/// The page number sits on its own baseline below the text, so it arrives as a
+/// last run reading `1`, `2`, ... It is the page builder's furniture rather
+/// than anything the document wrote, and every caller here is asking about the
+/// document, so it is dropped once here instead of being repeated into each
+/// expectation. That it is written at all is pinned by
+/// `every_page_is_numbered_the_way_plain_numbers_it`.
+fn by_page(pdf: &[u8]) -> Vec<Vec<String>> {
+    let mut pages = page_runs(pdf);
+    for (number, runs) in pages.iter_mut().enumerate() {
+        if runs.last().is_some_and(|run| *run == (number + 1).to_string()) {
+            runs.pop();
+        }
+    }
+    pages
+}
+
+/// Every page carries its number, centred on the measure, as plain's
+/// `\makefootline` puts it there -- and luatex ships one on every page.
+///
+/// This is the assertion `by_page` drops for everyone else, so it is made once
+/// here against the undropped runs. Before the folio was written, the PDF
+/// ladder reported nine of its ten documents differing from luatex by exactly
+/// one word, and this was the word.
+#[test]
+fn every_page_is_numbered_the_way_plain_numbers_it() {
+    let body: String = (1..=60).map(|n| format!("paragraph{n}\n\n")).collect();
+    let src = format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\\end{{document}}\n");
+    let pages = page_runs(&texrs::run_pdf(&src).expect("pdf"));
+    assert!(pages.len() > 1, "60 paragraphs do not fit on one page");
+    for (number, runs) in pages.iter().enumerate() {
+        assert_eq!(
+            runs.last().map(String::as_str),
+            Some((number + 1).to_string().as_str()),
+            "page {} ends with its own number: {runs:?}",
+            number + 1
+        );
+    }
 }
 
 /// Which page a run answering `holds` was drawn on, or `None`.

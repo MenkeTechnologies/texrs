@@ -18,6 +18,7 @@ pub mod banner;
 pub mod bib;
 pub mod bst;
 pub mod bstvm;
+pub mod box_;
 pub mod bundle;
 pub mod catcode;
 pub mod cff;
@@ -48,11 +49,17 @@ pub mod lexer;
 pub mod linebreak;
 pub mod lower;
 pub mod lsp;
+pub mod lua;
+pub mod math;
+pub mod node;
+pub mod pack;
+pub mod page;
 pub mod parallel;
 pub mod parity;
 pub mod pdf;
 pub mod pdf_parity;
 pub mod pk;
+pub mod postline;
 pub mod repl;
 pub mod runtime;
 pub mod rust_ffi;
@@ -216,13 +223,37 @@ pub fn run_text(src: &str) -> Result<String, TexError> {
     Ok(without_marks(&crate::typeset::refs_numbered(&marked)))
 }
 
+/// The document's text, told which FILE it was read from and not using the
+/// bytecode cache.
+///
+/// The file is what a cross reference needs: `\ref` is answered out of the
+/// `.aux` beside the document, and this run writes the labels it finds back
+/// there. `run_text` -- which is handed a string and nothing else -- cannot do
+/// either, so every reference in it stays `??`.
+pub fn run_text_at(path: &std::path::Path, src: &str) -> Result<String, TexError> {
+    let src_d = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
+    if crate::latex::looks_like_latex(&src_d) {
+        crate::latex::aux::update(path, &src_d);
+        lowerer.preload(&crate::latex::preamble_at(
+            path,
+            &src_d,
+            crate::latex::Mode::Text,
+        ))?;
+    }
+    let cmds = lowerer.lower(&src_d)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let _ = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(without_marks(&crate::runtime::take_text()))
+}
+
 /// The bytecode [`run_text`] runs: the same pipeline, with the document's own
 /// words lowered as well as its messages.
 pub fn compile_text(src: &str) -> Result<fusevm::Chunk, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src) {
-        lowerer.preload(crate::latex::PRELUDE)?;
+        lowerer.preload(&crate::latex::preamble_text(&src))?;
     }
     let cmds = lowerer.lower(&src)?;
     crate::compiler::Compiler::new().compile(&cmds)
@@ -262,17 +293,32 @@ pub fn run_text_marked_cached(path: &std::path::Path, src: &str) -> Result<Strin
 /// synthetic `foo.tex.text` path, which does not exist, so `canonicalize` failed
 /// and the cache never hit at all.
 fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk, TexError> {
-    if let Some(chunk) = crate::script_cache::try_load_mode(path, "text") {
+    let src_d = crate::rust_ffi::desugar(src);
+    let latex = crate::latex::looks_like_latex(&src_d);
+    // The `.aux` first: it is what `\ref` is resolved from, and the cache key
+    // has to carry it or a second run serves the first run's `??`.
+    // `crate::latex::aux::update` is a no-op for a document with no references.
+    let mode = match latex {
+        true => {
+            crate::latex::aux::update(path, &src_d);
+            format!("text{}", crate::latex::aux::stamp(path))
+        }
+        false => "text".to_string(),
+    };
+    if let Some(chunk) = crate::script_cache::try_load_mode(path, &mode) {
         return Ok(chunk);
     }
-    let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
-    if crate::latex::looks_like_latex(&src_d) {
-        lowerer.preload(crate::latex::PRELUDE)?;
+    if latex {
+        lowerer.preload(&crate::latex::preamble_at(
+            path,
+            &src_d,
+            crate::latex::Mode::Text,
+        ))?;
     }
     let cmds = lowerer.lower(&src_d)?;
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
-    crate::script_cache::store_mode(path, "text", &chunk);
+    crate::script_cache::store_mode(path, &mode, &chunk);
     Ok(chunk)
 }
 
@@ -318,7 +364,20 @@ pub fn run_pdf_with_messages(
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src_d) {
-        lowerer.preload(crate::latex::PRELUDE)?;
+        // With the file known, `\ref` is resolved from the `.aux` beside it and
+        // the labels this run finds are written back there; without one, every
+        // reference is `??`. Both are no-ops for a document with no references.
+        match path {
+            Some(p) => {
+                crate::latex::aux::update(p, &src_d);
+                lowerer.preload(&crate::latex::preamble_at(
+                    p,
+                    &src_d,
+                    crate::latex::Mode::Text,
+                ))?;
+            }
+            None => lowerer.preload(&crate::latex::preamble_text(&src_d))?,
+        }
     }
     let cmds = lowerer.lower(&src_d)?;
     // The families are read while lowering, because that is where the preamble
@@ -478,7 +537,7 @@ pub fn commands(src: &str) -> Result<Vec<crate::ir::Cmd>, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new();
     if crate::latex::looks_like_latex(&src) {
-        lowerer.preload(crate::latex::PRELUDE)?;
+        lowerer.preload(&crate::latex::preamble(&src))?;
     }
     lowerer.lower(&src)
 }

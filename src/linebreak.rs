@@ -105,6 +105,16 @@ const TIGHT: usize = 3;
 
 /// §108: how bad it is to stretch or shrink `t` points of glue that has `s`
 /// points to give.
+///
+/// This was `100*(t/s)^3` rounded, which is what §108 SAYS badness is and not
+/// what §108 DOES: "all implementations of TeX should use precisely this
+/// method", and the method is integer arithmetic on scaled points whose
+/// constant is $297^3/2^{18} = 99.94$ rather than 100, with everything above
+/// 8189 jumping straight to `inf_bad`. The gap is a couple of parts in ten
+/// thousand and it lands exactly where badness is read -- §817's fitness
+/// classes are decided by `badness<=12` and `badness>99`. So the port in
+/// `crate::pack` is called here, with the widths converted to the scaled
+/// points TeX holds them in.
 fn badness(t: f64, s: f64) -> f64 {
     if t <= 0.0 {
         return 0.0;
@@ -112,7 +122,8 @@ fn badness(t: f64, s: f64) -> f64 {
     if s <= 0.0 {
         return INF_BAD;
     }
-    (100.0 * (t / s).powi(3)).round().min(INF_BAD)
+    let sp = |x: f64| (x * crate::dimen::UNITY as f64).round() as i64;
+    crate::pack::badness(sp(t), sp(s)) as f64
 }
 
 /// §817: which of the four classes a line of this badness falls in.

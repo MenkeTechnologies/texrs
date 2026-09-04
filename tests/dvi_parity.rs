@@ -57,7 +57,7 @@ fn no_document_agrees_with_tex_less_than_it_did() {
     );
 }
 
-/// The three differences the ladder currently reports, pinned as facts.
+/// The two differences the ladder currently reports, pinned as facts.
 ///
 /// Each is a real typesetting decision texrs makes differently, and each will
 /// change the rung when it is fixed — so they are written down here rather than
@@ -82,15 +82,17 @@ fn the_current_differences_are_the_ones_recorded() {
     let sd = texrs::dvi::Dvi::parse(&subject).expect("texrs writes a readable DVI");
 
     // A space between words is a MOVEMENT in tex's DVI, not a character, so
-    // tex's text runs together. texrs sets a space glyph instead.
+    // neither engine's text has spaces in it. texrs set a space GLYPH until the
+    // interword space became glue (tex.web 625, 658); this pinned that
+    // divergence, and now pins its absence.
     assert!(
         !rd.text().contains("The first"),
         "tex moves between words rather than setting spaces, got {:?}",
         rd.text()
     );
     assert!(
-        sd.text().contains("The first") || sd.text().contains("The rst"),
-        "texrs sets the words, got {:?}",
+        !sd.text().contains("The first"),
+        "texrs moves between words too, got {:?}",
         sd.text()
     );
 
