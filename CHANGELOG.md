@@ -4,9 +4,86 @@ All notable changes to texrs are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-04
+
+Version 0.5.0 was released without cutting a section here, as 0.2.0, 0.3.0 and
+0.3.1 were before it; everything below had accumulated under Unreleased and is
+filed under 0.6.0, which is the release that carries it to crates.io and the
+Homebrew tap.
 
 ### Added
+
+- Maths. `$…$`, `$$…$$`, `\(`, `\[` and the display environments are read into
+  an mlist and converted by `tex.web`'s own `mlist_to_hlist` (§680-§767), with
+  §764's 64-digit spacing table ported verbatim because that table IS the spec,
+  and the geometry driven by `cmsy10`/`cmex10`'s own `fontdimen`s. Styles,
+  sub- and superscripts by §756-§759's shifts, `\over`/`\frac`, `\sqrt` and
+  `\sqrt[n]`, `\left…\right` with delimiter growth, `\mathaccent` and the
+  twelve accents plain.tex names, `\vcenter`, `\mathchoice`, `\mkern`/`\mskip`
+  in real math units, and `&` lining a display's columns up by §810's rule.
+- `\directlua` runs its chunk, in PUC-Lua 5.3 — the version LuaTeX embeds. It
+  was consumed before, which the README called the one failure mode worth
+  knowing about: a document whose output depended on what its Lua computed was
+  WRONG rather than refused. The `tex` table reaches the real registers,
+  `token` reaches the input the chunk stands in front of, and a `node` library
+  carries the half of LuaTeX's that this engine can honestly answer — the
+  other half refuses by name, because texrs sets a page from runs of strings
+  and so has no CURRENT node list to hand over.
+- Pictures reach the page. `src/tikz` was 3,400 lines of verified PGF port with
+  NO CALLER: the prelude said `\def\draw#1;{}`, so every diagram in every
+  document arrived as blank space, and every test drew through the library
+  rather than through a document. A `tikzpicture` is now read raw, travels the
+  text stream as a marker, takes its bounding box's height and is drawn under
+  `--pdf` — paths, arrows, nodes with real anchors, shadings through a
+  `/Shading` resource, decorations, and `\pgfmath` in coordinates.
+- The `.tfm`'s ligature and kern program, §906-§911's `reconstitute` with all
+  eight ligature ops and the boundary characters, applied where text is
+  measured AND where it is drawn. `tex`'s `fi` ligature is texrs's now, and its
+  quotation marks and dashes with it.
+- A node-list shipper: `src/shipout.rs` ports §619-§640's `ship_out`,
+  `hlist_out` and `vlist_out`, so `--dvi` draws a box tree and breaks by total
+  demerits like `--pdf`. The standing excuse — a DVI driver cannot be told to
+  set a run to a width — went with the thing that made it true.
+- `\ifcsname`, and with it LaTeX's `\@ifundefined`, `\@ifpackageloaded` and
+  `\AtBeginDocument`. Two more fixes were needed before the idiom ran: `\ifx`
+  could not see a bare primitive, and the file-level conditional arms were
+  bounded token regions where LaTeX's three `\expandafter`s exist to expand the
+  `\fi` and the `\else` away.
+- `\muskip`, `\muskipdef` and `\muexpr`, in real mu (§455), and `\ifvoid`,
+  `\ifhbox`, `\ifvbox` evaluating rather than only skipping.
+- Eleven files that load all the way through — `minimal.cls` and ten packages —
+  where nothing did. `\input{...}` in the braced form, a texmf search,
+  `\newcount` and its relatives, and a package's own `\RequirePackage` chain
+  followed in order.
+- Type 1 subsetting, and a document that names no family set in a subsetted
+  Computer Modern rather than a base-14 Helvetica, as luatex does.
+
+### Fixed
+
+- The em dash VANISHED from every PDF: CMR10 puts `emdash` at 124 and WinAnsi
+  puts it at 151, so it landed in an empty slot. Found by rendering, not by
+  reading code — as was the small stroke every word gap drew, which is CMR10's
+  `suppress` at 32.
+- Every math accent taken from family 0 drew NO GLYPH AT ALL: `font.rs`'s
+  `roman()` mapped OT1 slots `"12`-`"16`, `"5F` and `"7B`-`"7F` to ASCII or to
+  nothing, so `\hat x` was silently a bare `x`.
+- `\let` on a primitive with a dispatch arm of its own was ignored, so
+  `\let\ifdim=\iffalse` scanned a dimension where tex takes the false branch.
+- `texrs --text FILE` answered every `\ref` with `??` while `--no-cache` on the
+  same file answered correctly: the cached path skipped the numbering pass. Two
+  paths disagreeing is why it survived — any check run with `--no-cache` said
+  the feature worked.
+- A PGF circle node was drawn from the true hypotenuse where PGF's own
+  TeX-dimension arithmetic lands 0.4% short, so every circle was visibly bigger
+  than PGF draws it. `\draw[fill=…]` emitted `S` and drew an outline where
+  lualatex fills.
+- `\multiply` and `\divide` past the range report and carry on, as §1236 does,
+  rather than stopping the run.
+- An unresolved `\ref` ATE THE TWO TOKENS after it: `\@setref` met an undefined
+  `\r@x` and `\@firstoftwo` consumed them, so `\ref{x} on page` came out as
+  `n page`.
+
+### Added (earlier, unreleased)
 
 - `texrs FILE` writes `FILE.pdf`. texrs stands in for lualatex in a PDF
   pipeline, and `lualatex FILE` leaves a `FILE.pdf` behind; the bare invocation
@@ -778,5 +855,6 @@ which is the release that carries it to crates.io and the Homebrew tap.
   printed output — output parity alone would not distinguish a frontend from a
   tree-walker.
 
-[Unreleased]: https://github.com/MenkeTechnologies/texrs/compare/v0.1.0...HEAD
+[0.6.0]: https://github.com/MenkeTechnologies/texrs/compare/v0.4.0...v0.6.0
+[0.4.0]: https://github.com/MenkeTechnologies/texrs/compare/v0.1.0...v0.4.0
 [0.1.0]: https://github.com/MenkeTechnologies/texrs/releases/tag/v0.1.0
