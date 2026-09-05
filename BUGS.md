@@ -210,6 +210,19 @@ SOURCE bytes and leaves the font to map them. `pdftotext -enc UTF-8` goes
 through the ToUnicode table and shows what a reader gets. The content stream is
 not the rendering.
 
+- **`package article needs \abovedisplayskip`** on stderr, for a document as
+  simple as `\documentclass{article}` with one word in it. The output is
+  correct; the line is not suppressible and it is the first thing anyone trying
+  the engine sees. `\abovedisplayskip` and its three neighbours are `tex.web`
+  §247 engine glue parameters that `latex.ltx` never declares, and behind them
+  `size10.clo`'s `10\p@` wants §453's `<factor><internal unit>`, which the dimen
+  scanner cannot represent.
+
+  Worth knowing before measuring it: **the script cache masks it.** It prints on
+  a first run and not on a second, because the second never re-reads the
+  package. `TEXRS_CACHE=0` shows it every time. A diagnostic that vanishes on
+  re-run looks exactly like a diagnostic somebody fixed.
+
 - **Characters above U+00FF are one Letter token.** TeX82 reads BYTES, so `é` in
   a UTF-8 file is two `Other` tokens there and one `Letter` here. That changes
   what `\string` prints and how a delimited argument matches. Deliberate for now

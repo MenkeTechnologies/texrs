@@ -535,26 +535,25 @@ and three of the things a document controls survive the trip:
   than lualatex sets it. With per-run sizes that reasoning is void, and no page
   ratio was ever published here — see the note under the corpus figure about
   which numbers are facts about the engine and which are facts about a run.
-- **Images do NOT survive.** `\includegraphics` is
-  `\newcommand{\includegraphics}[2][]{}` in the prelude: the file is dropped and
-  contributes NO VERTICAL SPACE, while the `\caption` beside it survives. The
-  two documents below produce PDFs within a byte of each other — 16,182 against
-  16,183 — one with a figure in it and one without, and a REAL image file
-  present changes nothing: no `/Subtype /Image` reaches the PDF at all:
+- **Images.** `\includegraphics` embeds the file and reserves the room it takes.
+  Measured on the same two documents that used to prove the opposite — one with
+  a figure, one without, a real PNG present:
 
-  ```tex
-  \begin{figure}\includegraphics[width=\textwidth]{x.png}\caption{C}\end{figure}
-  \begin{figure}\caption{C}\end{figure}
+  ```
+  with a figure     24,329 bytes, /Subtype /Image present, "After." baseline y=523.2
+  without           16,183 bytes, no image,                "After." baseline y=703.2
   ```
 
-  That is worth knowing beyond the missing picture, because it is a page-count
-  bug rather than a rendering one: a book whose figures each occupied part of a
-  page comes out SHORTER than the same book set by lualatex, and the deficit
-  scales with how many it has. 12 of the corpus's 167 documents call
-  `\includegraphics`, 136 times between them. `src/image.rs` reads image files
-  but nothing on the typesetting path calls it yet. Not to be confused with a
-  `tikzpicture`, which DOES reach the page — a drawing texrs generates itself is
-  a different path from an image file it would have to embed.
+  180pt of room reserved, and the text below moves down for it. An image given
+  no size is bounded to the measure and the text height rather than set at the
+  file's own — a diagram exported at 1600 pixels is 1600 big points wide, which
+  is wider than the page. A file the reader cannot rasterise (a `.pdf` named
+  where a `.png` sits beside it) falls back to a sibling of the same name.
+
+  This entry said the opposite until v0.6.0, and said it with numbers. Three
+  faults were stacked and the first hid the other two: the primitive was wired
+  to nothing, `\pandocbounded` boxed every figure without setting the box, and
+  once figures did reach the page they were placed at the file's own size.
 
 What `--dvi` still does not do is draw a picture or break its pages by penalty:
 it stacks a fixed number of lines on each, where `--pdf` prices the whole
