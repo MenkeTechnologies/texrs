@@ -240,13 +240,21 @@ not the rendering.
   headings in a sans face with a large x-height come out too big — which makes
   pages hold less, in the opposite direction from the deficits recorded above.
 
-- **`package article needs \abovedisplayskip`** on stderr, for a document as
-  simple as `\documentclass{article}` with one word in it. The output is
-  correct; the line is not suppressible and it is the first thing anyone trying
-  the engine sees. `\abovedisplayskip` and its three neighbours are `tex.web`
-  §247 engine glue parameters that `latex.ltx` never declares, and behind them
-  `size10.clo`'s `10\p@` wants §453's `<factor><internal unit>`, which the dimen
-  scanner cannot represent.
+- **`package article is not loadable: Illegal unit of measure (pt inserted)`**
+  on stderr, for a document as simple as `\documentclass{article}` with one word
+  in it. The output is correct; the line is not suppressible and it is the first
+  thing anyone trying the engine sees.
+
+  The failure is `size10.clo`'s `\abovedisplayskip 10\p@`. `10\p@` is §453's
+  `<factor><internal unit>`: `\p@` is `\dimendef\p@=3`, its value lives in a VM
+  slot, and `scan_dimen` answers with an `i64` that has nowhere to put a slot
+  read. Representing factor-times-register needs a new variant on the IR's `Num`,
+  which is matched in roughly forty places — an additive fix would not do it.
+
+  The message used to read `package article needs \abovedisplayskip`, and the
+  §247 display glue parameters it was asking for now exist. The symptom did not
+  go away when they landed; it moved one step later in the same line. Worth
+  keeping in mind when this one is fixed too.
 
   Worth knowing before measuring it: **the script cache masks it.** It prints on
   a first run and not on a second, because the second never re-reads the
