@@ -1976,6 +1976,30 @@ impl FontFile {
         out
     }
 
+    /// Let the mandatory `{...}` argument name the FILE, when it names one.
+    ///
+    /// fontspec has two spellings for the same thing, and lualatex honours
+    /// both: `\setmainfont{Arimo}[Path=..., Extension=.ttf,
+    /// UprightFont=Arimo-VF]` names the family and describes the file, while
+    /// `\setmainfont{Arimo-VF.ttf}[Path=...]` names the file outright. The
+    /// second spelling put the filename nowhere near the file resolution --
+    /// `upright` stayed empty, no path was ever built, and the document was
+    /// set in one of the fourteen without a word about it.
+    ///
+    /// The option list wins wherever it said anything: it is the more specific
+    /// statement, and a document that writes both meant the keys.
+    pub fn absorb_filename(&mut self, name: &str) {
+        let Some((stem, extension)) = split_font_filename(name.trim()) else {
+            return;
+        };
+        if self.upright.is_none() {
+            self.upright = Some(stem.to_string());
+        }
+        if self.extension.is_none() {
+            self.extension = Some(extension.to_string());
+        }
+    }
+
     /// The file this names, looked for where it might actually be.
     ///
     /// `Path=` is written by whatever produced the document and is regularly an
@@ -2022,6 +2046,42 @@ impl FontFile {
         let beside = near?.join(&file);
         beside.is_file().then_some(beside)
     }
+}
+
+/// The extensions that make a fontspec argument a FILENAME rather than a
+/// family name, without their dots and in lower case.
+///
+/// `.ttc` and `.otc` are collections; naming one resolves to a real file and
+/// falls back on its own if the collection cannot be read as a single font.
+const FONT_FILE_EXTENSIONS: [&str; 4] = ["ttf", "otf", "ttc", "otc"];
+
+/// `Arimo-VF.ttf` as its stem and its extension, or `None` for a family name.
+///
+/// The test is the extension, which is how fontspec itself tells the two
+/// spellings apart. It is case-insensitive because the file on disk is
+/// regularly `.TTF` and a document names it as it is written there; the
+/// extension is returned as WRITTEN, since that is the name to be opened on a
+/// case-sensitive filesystem.
+pub fn split_font_filename(name: &str) -> Option<(&str, &str)> {
+    let dot = name.rfind('.')?;
+    let (stem, extension) = name.split_at(dot);
+    if stem.is_empty() {
+        return None;
+    }
+    FONT_FILE_EXTENSIONS
+        .iter()
+        .any(|known| extension[1..].eq_ignore_ascii_case(known))
+        .then_some((stem, extension))
+}
+
+/// The family a mandatory fontspec argument stands for.
+///
+/// A filename stands for the family its stem names: the family lookup strips
+/// every non-alphanumeric character before comparing, so `Arimo-VF.ttf` asked
+/// it for `arimovfttf` and matched nothing installed either. A name that is
+/// not a filename is its own family and is returned untouched.
+pub fn font_family_name(name: &str) -> &str {
+    split_font_filename(name).map_or(name, |(stem, _)| stem)
 }
 
 /// The last directory of a path written with a trailing separator.
@@ -6061,6 +6121,72 @@ mod font_file_tests {
             fonts.display()
         );
         assert_eq!(FontFile::parse(&direct).resolve(None), Some(file));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_mandatory_argument_ending_in_a_font_extension_names_the_file_itself() {
+        // `\setmainfont{Arimo-VF.ttf}[Path=...]` is the spelling lualatex
+        // honours and this read as a family name, which named nothing
+        // installed: `upright` stayed empty, `resolve_face` returned at its
+        // first `?`, and no path was ever built.
+        let mut spec = FontFile::parse("Path=/somewhere/.fonts/");
+        spec.absorb_filename("Arimo-VF.ttf");
+        assert_eq!(spec.upright.as_deref(), Some("Arimo-VF"));
+        assert_eq!(spec.extension.as_deref(), Some(".ttf"));
+        assert_eq!(spec.path.as_deref(), Some("/somewhere/.fonts/"));
+        // The extension is kept as the document wrote it, since that is the
+        // name to open on a filesystem that tells the cases apart.
+        let mut upper = FontFile::default();
+        upper.absorb_filename("Arimo-VF.TTF");
+        assert_eq!(upper.upright.as_deref(), Some("Arimo-VF"));
+        assert_eq!(upper.extension.as_deref(), Some(".TTF"));
+        for spelt in ["A.otf", "A.OTF", "A.ttc", "A.otc"] {
+            let mut one = FontFile::default();
+            one.absorb_filename(spelt);
+            assert_eq!(one.upright.as_deref(), Some("A"), "{spelt} is a filename");
+        }
+    }
+
+    #[test]
+    fn a_family_name_is_not_read_as_a_file_and_explicit_options_win() {
+        // The other spelling must be untouched: `\setmainfont{Arimo}` names a
+        // family, and a family with a dot in it -- `Dr. Sugiyama` is one --
+        // is still not a filename.
+        for family in ["Arimo", "NoSuchFontExistsAnywhere", "Dr. Sugiyama", ".ttf"] {
+            assert_eq!(super::split_font_filename(family), None, "{family}");
+            assert_eq!(super::font_family_name(family), family);
+            let mut spec = FontFile::default();
+            spec.absorb_filename(family);
+            assert_eq!(spec.upright, None, "{family} named no file");
+            assert_eq!(spec.extension, None, "{family} named no extension");
+        }
+        // A document that writes both said the keys last and meant them: the
+        // filename fills what the options left empty and overrides nothing.
+        let mut both = FontFile::parse("Path=/f/,Extension=.otf,UprightFont=Arimo-Regular");
+        both.absorb_filename("Arimo-VF.ttf");
+        assert_eq!(both.upright.as_deref(), Some("Arimo-Regular"));
+        assert_eq!(both.extension.as_deref(), Some(".otf"));
+        assert_eq!(super::font_family_name("Arimo-VF.ttf"), "Arimo-VF");
+    }
+
+    #[test]
+    fn the_filename_spelling_resolves_to_the_file_beside_the_document() {
+        // The whole point: a path is built, and it is the file the document
+        // ships. A file that is NOT there resolves to nothing so the caller
+        // still falls back rather than failing the run.
+        let dir = std::env::temp_dir().join(format!("texrs_ffn_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let file = dir.join("Arimo-VF.ttf");
+        std::fs::write(&file, b"not really a font").expect("write");
+
+        let mut spec = FontFile::parse(&format!("Path={}/", dir.display()));
+        spec.absorb_filename("Arimo-VF.ttf");
+        assert_eq!(spec.resolve(None), Some(file));
+
+        let mut missing = FontFile::parse(&format!("Path={}/", dir.display()));
+        missing.absorb_filename("NotThere-VF.ttf");
+        assert_eq!(missing.resolve(None), None, "a missing file falls back");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

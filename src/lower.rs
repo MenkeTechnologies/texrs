@@ -156,6 +156,31 @@ pub struct Lowerer {
     /// `\\` mean -- a cell boundary and a row end inside a table, a space and
     /// a line break outside one.
     table_depth: usize,
+    /// The face markers open in the text run, innermost last, each recording
+    /// whether it is the mono face.
+    ///
+    /// A face reaches the text as marker CHARACTERS rather than as a command
+    /// -- the prelude expands `\texttt{#1}` to `^^11m#1^^12` -- so this is how
+    /// the ligature program below knows it is looking at code. A stack because
+    /// the markers nest: `\texttt{a\textbf{b}c}` opens two and closes two.
+    faces: Vec<bool>,
+    /// How many code listings are being lowered.
+    ///
+    /// A listing is deliberately NOT read verbatim -- `lower_listing` re-lexes
+    /// every line so that `\NormalTok` and the colour it carries still expand
+    /// -- so a program's characters arrive through `push_text_char` exactly as
+    /// prose does, and only this tells the two apart.
+    listing_depth: usize,
+    /// The character `push_text_char` last appended, while it is still the
+    /// last character of the run and a ligature can form on it.
+    ///
+    /// A ligature joins two characters the DOCUMENT wrote side by side, so
+    /// this records that it wrote one. Without it the pair would be taken from
+    /// whatever happens to end the run -- a verbatim body's last character
+    /// after `\end{verbatim}`, or a marker. It is cleared at every group
+    /// boundary, which is what makes `-{}-` two hyphens: the spelling a LaTeX
+    /// document has always used to ask for them.
+    lig: Option<char>,
 }
 
 /// A list environment that is open, and how many items it has had.
@@ -217,6 +242,9 @@ impl Lowerer {
             depth: 0,
             lists: Vec::new(),
             table_depth: 0,
+            faces: Vec::new(),
+            listing_depth: 0,
+            lig: None,
             toc_depth: 2,
         }
     }
@@ -378,15 +406,69 @@ impl Lowerer {
     /// constant. A 4 MB book then exhausts fusevm's 65,536-entry constant pool
     /// — which a u16 operand cannot address past — and the compile panics.
     /// Coalescing keeps one constant per stretch of text between real commands.
-    fn push_text_char(out: &mut Vec<Cmd>, c: char) {
+    ///
+    /// This is also where TeX's ligature program runs (`tex.web` S1034): the
+    /// pairs a text font joins into one character are joined HERE, because the
+    /// run in progress still holds the character before this one. `--` becomes
+    /// an en dash, `---` an em dash, two backticks a left double quote and two
+    /// apostrophes a right one. Doing it at the single point every prose
+    /// character passes through is what keeps the measurement and the drawing
+    /// agreeing: in Arimo at 10pt a literal pair of backticks is 6.660pt
+    /// against 3.330pt for the one character it stands for, so a quoted line
+    /// measured from the literal is set too wide for the page it is broken to.
+    fn push_text_char(&mut self, out: &mut Vec<Cmd>, c: char) {
         let mut at = out.len();
         while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
             at -= 1;
         }
+        let tail = at.checked_sub(1).and_then(|i| match &out[i] {
+            Cmd::Text(t) => Some(t.as_str()),
+            _ => None,
+        });
+        // A text command's face arrives as characters, so it is seen here: the
+        // marker, the one character naming the face, and the closing marker.
+        if c == crate::typeset::FACE_POP {
+            self.faces.pop();
+        } else if tail.is_some_and(|t| t.ends_with(crate::typeset::FACE_PUSH)) {
+            self.faces.push(c == crate::typeset::Face::Mono.code());
+        }
+        // The pair a ligature joins is ONE character, so the first of it comes
+        // back out of the run before the character they form goes in. `prev`
+        // is taken whatever happens: a character that forms no ligature ends
+        // the one that was building.
+        let prev = std::mem::take(&mut self.lig);
+        let code = self.in_code();
+        let joined = match code {
+            true => None,
+            false => prev
+                .filter(|p| tail.is_some_and(|t| t.ends_with(*p)))
+                .and_then(|p| ligature(p, c)),
+        };
+        let mut c = c;
+        if let Some(j) = joined {
+            if let Some(Cmd::Text(t)) = at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+                t.pop();
+            }
+            c = j;
+        }
+        self.lig = (!code).then_some(c);
         match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
             Some(Cmd::Text(t)) => t.push(c),
             _ => out.push(Cmd::Text(c.to_string())),
         }
+    }
+
+    /// Whether the characters arriving now are code rather than prose.
+    ///
+    /// Code is exempt from the ligature program: `\texttt{--flag}` names a
+    /// flag that has two hyphens in it, and a listing is source, so joining
+    /// the pair would rewrite the program the document is showing. A verbatim
+    /// body needs nothing here -- it never reaches `push_text_char`, being
+    /// pushed whole -- but a listing's body does, and so does the argument of
+    /// a text command, because the prelude expands `\texttt` to markers around
+    /// characters that then flow through here one at a time.
+    fn in_code(&self) -> bool {
+        self.listing_depth > 0 || self.faces.contains(&true)
     }
 
     fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
@@ -397,7 +479,13 @@ impl Lowerer {
                 "TeX capacity exceeded, sorry [input stack size=100]".into(),
             ));
         }
+        // A group is a ligature boundary. `-{}-` is how a LaTeX document has
+        // always asked for two hyphens where two hyphens are meant, and that
+        // only works if the hyphen before the group cannot pair with the one
+        // after it.
+        self.lig = None;
         let out = self.block_inner(lx, stop);
+        self.lig = None;
         self.depth -= 1;
         out
     }
@@ -520,12 +608,12 @@ impl Lowerer {
                             true => crate::typeset::TABLE_CELL,
                             false => ' ',
                         };
-                        Self::push_text_char(&mut out, boundary);
+                        self.push_text_char(&mut out, boundary);
                     }
                     // The document's own words. Dropping these is why a book
                     // used to compile to a program that printed nothing.
                     Token::Char(c, _) if self.text_output => {
-                        Self::push_text_char(&mut out, *c);
+                        self.push_text_char(&mut out, *c);
                     }
                     _ => {}
                 }
@@ -580,6 +668,11 @@ impl Lowerer {
                             )));
                         };
                         if self.text_output {
+                            // Neither body is prose. A verbatim one is pushed
+                            // whole and never sees `push_text_char` at all, so
+                            // all that is needed is that the run so far cannot
+                            // pair a character with the first of it.
+                            self.lig = None;
                             match listing {
                                 true => self.lower_listing(&body, &mut out)?,
                                 false => out.push(Cmd::Text(body)),
@@ -1022,23 +1115,39 @@ impl Lowerer {
                     // says so, with `Path=` and `UprightFont=`. Discarding
                     // them left only a family name nothing has installed.
                     let options = self.optional_text(lx)?.unwrap_or_default();
-                    if k == "setmainfont" || k == "setromanfont" {
-                        self.fonts.main_file = crate::typeset::FontFile::parse(&options);
-                    }
-                    // The monospace face ships beside the document exactly as
-                    // the main one does -- `UprightFont=ShareTechMono-Regular`
-                    // in every corpus book -- so the family name on its own
-                    // resolves to nothing and `\texttt` falls back to the body
-                    // font it was meant to escape.
-                    if k == "setmonofont" {
-                        self.fonts.mono_file = crate::typeset::FontFile::parse(&options);
+                    let name = name.trim();
+                    // fontspec accepts the FILE's own name where a family name
+                    // goes -- `\setmainfont{Arimo-VF.ttf}[Path=...]` -- and
+                    // lualatex honours it. Read as a family it names nothing
+                    // installed, so a document written that way was set in
+                    // whatever fc-match answered with. The options still win:
+                    // an explicit `UprightFont=`/`Extension=` is what the
+                    // document said last and is not overwritten here.
+                    let mut file = crate::typeset::FontFile::parse(&options);
+                    file.absorb_filename(name);
+                    match k {
+                        "setmainfont" | "setromanfont" => self.fonts.main_file = file,
+                        // The monospace face ships beside the document exactly
+                        // as the main one does -- `UprightFont=
+                        // ShareTechMono-Regular` in every corpus book -- so the
+                        // family name on its own resolves to nothing and
+                        // `\texttt` falls back to the body font it was meant to
+                        // escape.
+                        "setmonofont" => self.fonts.mono_file = file,
+                        // `\setsansfont` has no file slot because nothing reads
+                        // a sans family yet; the stem below is what it keeps.
+                        _ => {}
                     }
                     let slot = match k {
                         "setsansfont" => &mut self.fonts.sans,
                         "setmonofont" => &mut self.fonts.mono,
                         _ => &mut self.fonts.main,
                     };
-                    *slot = Some(name.trim().to_string());
+                    // A filename is kept as its STEM: the family fallback
+                    // compares names with the punctuation stripped out, so
+                    // `Arimo-VF.ttf` became `arimovfttf` and matched no
+                    // installed file either.
+                    *slot = Some(crate::typeset::font_family_name(name).to_string());
                 }
                 // The class options carry the type size; geometry's options
                 // carry the margins. Both used to be consumed and dropped,
@@ -1221,7 +1330,7 @@ impl Lowerer {
                     // `crate::typeset` for it keeps that one table.
                     if let Some(ch) = crate::typeset::symbol_char(other) {
                         if self.text_output {
-                            Self::push_text_char(&mut out, ch);
+                            self.push_text_char(&mut out, ch);
                         }
                         continue;
                     }
@@ -1988,7 +2097,7 @@ impl Lowerer {
     ///
     /// Returns whether the command was one of these.
     fn lower_face(
-        &self,
+        &mut self,
         name: crate::token::CsId,
         out: &mut Vec<Cmd>,
         face_open: &mut bool,
@@ -2007,6 +2116,7 @@ impl Lowerer {
         // A second switch in one group REPLACES the first, as a second `\color`
         // does: there is one face in force, not a stack of them per group.
         self.close_face(out, face_open);
+        self.faces.push(matches!(face, Face::Mono));
         self.push_text(
             out,
             &format!("{}{}", crate::typeset::FACE_PUSH, face.code()),
@@ -2016,8 +2126,9 @@ impl Lowerer {
     }
 
     /// End a face declaration that is still in force, if there is one.
-    fn close_face(&self, out: &mut Vec<Cmd>, face_open: &mut bool) {
+    fn close_face(&mut self, out: &mut Vec<Cmd>, face_open: &mut bool) {
         if std::mem::take(face_open) {
+            self.faces.pop();
             self.push_text(out, &crate::typeset::FACE_POP.to_string());
         }
     }
@@ -2112,11 +2223,16 @@ impl Lowerer {
         // The newline that ENDS the `\begin` line is not a code line.
         let body = body.strip_prefix('\n').unwrap_or(body);
         self.push_text(out, "\n\n");
+        // A listing is source, and the ligature program must not rewrite it:
+        // the `--` in a flag and the `''` in a string literal are what the
+        // program says.
+        self.listing_depth += 1;
         for line in body.lines() {
             let mut lx = Lexer::new(line);
             self.lower_lexer_into(&mut lx, out)?;
             self.push_text(out, &crate::typeset::LISTING_BREAK.to_string());
         }
+        self.listing_depth -= 1;
         self.push_text(out, "\n\n");
         Ok(())
     }
@@ -3052,6 +3168,32 @@ impl Lowerer {
 struct TailLoop {
     body: Vec<Token>,
     cond: Vec<Token>,
+}
+
+/// The one character a text font joins these two into, if it joins them.
+///
+/// `tex.web` S1034 runs the font's ligature program over the horizontal list
+/// as it is built, and these are the pairs cmr carries and every text font
+/// since has kept: two hyphens are an en dash, an en dash and a hyphen an em
+/// dash, two backticks a left double quote, two apostrophes a right one.
+///
+/// A longer run falls out of the pairs rather than needing a rule of its own,
+/// which is what TeX does too. `----` is an em dash and a hyphen, because the
+/// fourth hyphen finds an em dash to its left and no pair joins those;
+/// `-----` is an em dash and an en dash; three backticks are a left double
+/// quote and a backtick.
+///
+/// A LONE backtick or apostrophe is left as it is. That a cmr apostrophe draws
+/// as a right single quote is the font's ENCODING rather than its ligature
+/// program, and this is the ligature program.
+fn ligature(prev: char, c: char) -> Option<char> {
+    match (prev, c) {
+        ('-', '-') => Some('\u{2013}'),
+        ('\u{2013}', '-') => Some('\u{2014}'),
+        ('`', '`') => Some('\u{201c}'),
+        ('\'', '\'') => Some('\u{201d}'),
+        _ => None,
+    }
 }
 
 /// The environments whose bodies are characters rather than TeX.

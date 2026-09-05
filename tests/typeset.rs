@@ -641,6 +641,123 @@ fn the_lowerer_keeps_the_font_file_the_preamble_named() {
     );
 }
 
+/// The name the probe font is copied under. Nothing installed can match it, so
+/// a `/FontFile2` in a document that names it can only have come from the file.
+const PROBE_FACE: &str = "TexrsProbeFace-VF";
+
+/// A real TrueType font copied into a directory of its own, under a name no
+/// installed family answers to.
+///
+/// A font that is BOTH a file beside the document and an installed family
+/// cannot tell the two resolutions apart: naming `Georgia.ttf` would embed
+/// Georgia either way. Copying it under a name fontconfig has never heard of
+/// makes the file the only route to an embedded font.
+fn a_probe_font_directory(label: &str) -> Option<std::path::PathBuf> {
+    let source = texrs::typeset::find_family(some_installed_family()?)?;
+    // A CFF-flavoured OpenType is not carried as a /FontFile2 at all.
+    texrs::typeset::embed_file(&source)?;
+    let dir = std::env::temp_dir().join(format!("texrs_probe_{label}_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = dir.join(format!("{PROBE_FACE}.ttf"));
+    std::fs::copy(&source, &file).ok()?;
+    // `Path=` is written into the document, so a directory whose name would
+    // not survive the option list is no test of anything.
+    let written = dir.to_str()?;
+    (!written.contains([' ', ',', '{', '}', '%'])).then_some(dir)
+}
+
+/// `\setmainfont{Arimo-VF.ttf}[Path=...]` is fontspec's other spelling: when
+/// the mandatory argument ends in a font extension it names a FILE, relative
+/// to `Path=`, and lualatex embeds it. texrs read it as a family name, found
+/// nothing installed under it, and fell silently back to one of the fourteen.
+#[test]
+fn a_mandatory_argument_that_names_a_font_file_embeds_that_file() {
+    let Some(dir) = a_probe_font_directory("filename") else {
+        eprintln!("skipping: no embeddable font installed");
+        return;
+    };
+    let document = |mandatory: &str| {
+        format!(
+            "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\
+             \\setmainfont{{{mandatory}}}[Path={}/]\n\
+             \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n",
+            dir.display()
+        )
+    };
+
+    let pdf = texrs::run_pdf(&document(&format!("{PROBE_FACE}.ttf"))).expect("pdf");
+    let s = read_back(&pdf);
+    assert!(
+        s.contains("/FontFile2"),
+        "the file the document named must be in the file"
+    );
+    assert!(s.contains("/TrueType"), "and declared as one");
+
+    // The control: the same name WITHOUT the extension names a family, and no
+    // machine has that family installed. Anything embedded above therefore
+    // came from the filename and not from a lucky family match.
+    let control = texrs::run_pdf(&document(PROBE_FACE)).expect("pdf");
+    assert!(
+        !read_back(&control).contains("/FontFile2"),
+        "a family nothing matches must still fall back rather than embed"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The spelling that already worked must go on working, byte for byte: the
+/// family in the braces, the file in the options.
+#[test]
+fn the_family_and_upright_font_spelling_embeds_the_same_file_as_before() {
+    let Some(dir) = a_probe_font_directory("options") else {
+        eprintln!("skipping: no embeddable font installed");
+        return;
+    };
+    let src = format!(
+        "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{TexrsProbeFace}}[\n\
+         \x20   Path={}/,\n\x20   Extension=.ttf,\n\x20   UprightFont={PROBE_FACE},\n]\n\
+         \\begin{{document}}\nThe quick brown fox.\n\\end{{document}}\n",
+        dir.display()
+    );
+    let pdf = texrs::run_pdf(&src).expect("pdf");
+    let s = read_back(&pdf);
+    assert!(s.contains("/FontFile2"), "the option list still resolves");
+    assert!(s.contains("/TrueType"), "and declared as one");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What the lowerer keeps for each of the four commands: the file in the file
+/// slot, and the family without its extension in the family slot, since the
+/// family lookup strips the dot and `Arimo-VF.ttf` matched nothing as
+/// `arimovfttf`.
+#[test]
+fn a_filename_in_the_braces_reaches_the_file_slot_for_every_font_command() {
+    let src = concat!(
+        "\\documentclass{article}\n\\usepackage{fontspec}\n",
+        "\\setmainfont{Arimo-VF.ttf}[Path=/somewhere/.fonts/]\n",
+        "\\setsansfont{Arimo-Sans-VF.OTF}\n",
+        "\\setmonofont{ShareTechMono-Regular.ttf}[Path=/somewhere/.fonts/]\n",
+        "\\begin{document}\nwords\n\\end{document}\n"
+    );
+    let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
+    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer.lower(src).expect("lower");
+    assert_eq!(lowerer.fonts.main_file.upright.as_deref(), Some("Arimo-VF"));
+    assert_eq!(lowerer.fonts.main_file.extension.as_deref(), Some(".ttf"));
+    assert_eq!(
+        lowerer.fonts.main_file.path.as_deref(),
+        Some("/somewhere/.fonts/")
+    );
+    assert_eq!(lowerer.fonts.main.as_deref(), Some("Arimo-VF"));
+    assert_eq!(lowerer.fonts.sans.as_deref(), Some("Arimo-Sans-VF"));
+    assert_eq!(
+        lowerer.fonts.mono_file.upright.as_deref(),
+        Some("ShareTechMono-Regular"),
+        "the monospace file, which is what \\texttt is set from"
+    );
+    assert_eq!(lowerer.fonts.mono.as_deref(), Some("ShareTechMono-Regular"));
+}
+
 /// `\newpage` and its siblings were defined by the prelude to expand to
 /// nothing, so a book's title page, copyright page and first chapter ran
 /// together into one stream of prose: the scifi2 novel came out at 144 pages
