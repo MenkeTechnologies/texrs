@@ -441,13 +441,14 @@ and three of the things a document controls survive the trip:
 - **Fonts.** `\setmainfont{Arimo}` is honoured, both ways a document writes it.
   A family the machine has installed is resolved through `fc-match`; a document
   that ships its own font names a FILE instead, with fontspec's `Path=`,
-  `UprightFont=` and `Extension=`, and that is read too — but only in that
-  form. `\setmainfont{Arimo}[Path=…, Extension=.ttf, UprightFont=Arimo-VF]`
-  embeds `CRYLIS+Arimo-VF`; `\setmainfont{Arimo-VF.ttf}[Path=…]`, naming the
-  FILE where a family is expected, resolves nothing and falls back to base-14
-  Helvetica without saying so. lualatex honours the second form. `pdffonts` is
-  how you tell: a document that meant to ship its own face and reports
-  `Helvetica Type 1 no` got the fallback. The difference matters
+  `UprightFont=` and `Extension=`, and that is read too — in either spelling.
+  `\setmainfont{Arimo}[Path=…, Extension=.ttf, UprightFont=Arimo-VF]` embeds
+  `CRYLIS+Arimo-VF`, and so does `\setmainfont{Arimo-VF.ttf}[Path=…]`: a
+  mandatory argument ending in `.ttf`, `.otf`, `.ttc` or `.otc` — in any case —
+  names the FILE, relative to `Path=`, which is what lualatex does with it. An
+  explicit `UprightFont=`/`Extension=` still wins where the document writes
+  both. `pdffonts` is how you tell: a document that meant to ship its own face
+  and reports `Helvetica Type 1 no` got the fallback. The difference matters
   because `fc-match` ALWAYS answers — asked for a font nobody has installed it
   returns its default, so a book whose fonts travel with it was set in whatever
   that default happened to be. `Path=` is written when the document is built

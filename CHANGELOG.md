@@ -4,6 +4,22 @@ All notable changes to texrs are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- fontspec's filename spelling. `\setmainfont{Arimo-VF.ttf}[Path=…]` names the
+  FILE, not a family, and lualatex honours it; texrs read the braces as a family
+  name, resolved nothing under it and fell back to base-14 Helvetica without
+  saying so, so a book that ships its own face came out in the wrong one. A
+  mandatory argument ending in `.ttf`, `.otf`, `.ttc` or `.otc` — in any case —
+  now fills the upright face and the extension, which is what the file
+  resolution reads, and the family slot keeps the stem so the installed-family
+  fallback compares `arimovf` rather than `arimovfttf`. An explicit
+  `UprightFont=`/`Extension=` still wins, all four of `\setmainfont`,
+  `\setromanfont`, `\setsansfont` and `\setmonofont` read it the same way, and a
+  file that is not there falls back as before.
+
 ## [0.6.0] - 2026-09-04
 
 Version 0.5.0 was released without cutting a section here, as 0.2.0, 0.3.0 and
