@@ -190,18 +190,26 @@ for `\thesection`.
   prelude change: giving `\Large` a body would change nothing while there is no
   per-run size on the measure, break, pagination and draw paths for it to set.
 
-- **Quote ligatures.** `` `` `` and `` '' `` are set as the ASCII characters
-  themselves rather than as the opening and closing quotes every TeX engine
-  renders them into. `texrs --text` on ``` ``hello there'' ``` prints
-  ``` ``hello there'' ```, and the PDF's content stream carries the same four
-  marks. Two consequences, and the second is the one that costs something
-  measurable: the page is visibly wrong where a document quotes, and the literal
-  marks measure wider than the quotes they should be, so every line carrying a
-  quotation is set wider than lualatex sets it. `---` is likewise three literal
-  hyphens rather than an em dash, though there the widths agree to 0.01pt so it
-  is only visual. The direction is worth stating because it is easy to get
-  backwards: wider lines hold FEWER words and produce MORE lines, so this cannot
-  contribute to a document coming out short.
+- **The ligature program does not run on pairs.** The encoding is right and the
+  ligatures are not. A lone `` ` `` sets ‘ and a lone `` ' `` sets ’, which is
+  correct; what does not happen is the TFM ligature program joining two of them
+  into a single `“` or `”`, or building `--` and `---` into the dashes. The same
+  source through both engines, extracted with `pdftotext -enc UTF-8`:
+
+  ```
+  lualatex   en – dash, em — dash, open “ close ”, single ‘ and ’
+  texrs      en -- dash, em --- dash, open ‘‘ close ’’, single ‘ and ’
+  ```
+
+  An earlier version of this entry said the marks are set "as the ASCII
+  characters themselves". That was wrong: ` and ' ARE mapped, and reading the
+  raw content stream is what makes it look otherwise, because the stream carries
+  the source bytes and the font maps them. Extraction through the ToUnicode
+  table is what shows the real result.
+
+  The direction, since it is easy to get backwards: two glyphs where one belongs
+  is WIDER, wider lines hold fewer words, and that produces MORE lines. This
+  cannot contribute to a document coming out short.
 
 - **Characters above U+00FF are one Letter token.** TeX82 reads BYTES, so `é` in
   a UTF-8 file is two `Other` tokens there and one `Letter` here. That changes

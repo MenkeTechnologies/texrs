@@ -528,21 +528,29 @@ and three of the things a document controls survive the trip:
   fewer lines AND more lines per page than the same book set by lualatex.
   Defining the size commands in the prelude would not fix it — there is no
   per-run size underneath for them to set.
-- **Quote ligatures are not converted.** TeX's `` `` `` and `` '' `` are set
-  literally: `` ``hello there'' `` reaches the page as four ASCII marks where
-  every TeX engine since 1982 sets curly quotes. Visible in `--text` and in the
-  PDF's own content stream, and it is not only cosmetic — the literal marks are
-  wider than the quotes they stand for, so every line carrying a quotation is
-  set wider than it should be. `---` is not converted either: three literal
-  hyphens where lualatex sets an em dash, which is purely visual because the
-  widths happen to agree to a hundredth of a point. Note the DIRECTION: wider
-  lines hold fewer words and so produce MORE lines, so none of this can be part
-  of why pages come out short.
+- **The ligature program does not run on PAIRS.** A single `` ` `` and a single
+  `` ' `` come out right — the encoding gives ‘ and ’ — but the TFM ligature
+  program that joins two of them into one glyph does not, and neither does the
+  one that builds the dashes. Set the same file with both engines and extract
+  it:
+
+  ```
+  lualatex   en – dash, em — dash, open “ close ”, single ‘ and ’
+  texrs      en -- dash, em --- dash, open ‘‘ close ’’, single ‘ and ’
+  ```
+
+  So a document that quotes gets two single quotes where one double belongs, and
+  `--`/`---` stay as repeated hyphens. This is a visible defect but it cannot be
+  a cause of short pages, and the direction is worth stating because the
+  inference runs the other way naturally: a pair set where one glyph belongs is
+  WIDER, wider lines hold fewer words, and fewer words per line produce MORE
+  lines, not fewer.
 - **Images do NOT survive.** `\includegraphics` is
   `\newcommand{\includegraphics}[2][]{}` in the prelude: the file is dropped and
   contributes NO VERTICAL SPACE, while the `\caption` beside it survives. The
-  two documents below produce byte-identical PDFs, 709 bytes each — one has a
-  figure in it and one does not:
+  two documents below produce PDFs within a byte of each other — 16,182 against
+  16,183 — one with a figure in it and one without, and a REAL image file
+  present changes nothing: no `/Subtype /Image` reaches the PDF at all:
 
   ```tex
   \begin{figure}\includegraphics[width=\textwidth]{x.png}\caption{C}\end{figure}
@@ -554,7 +562,9 @@ and three of the things a document controls survive the trip:
   page comes out SHORTER than the same book set by lualatex, and the deficit
   scales with how many it has. 12 of the corpus's 167 documents call
   `\includegraphics`, 136 times between them. `src/image.rs` reads image files
-  but nothing on the typesetting path calls it yet.
+  but nothing on the typesetting path calls it yet. Not to be confused with a
+  `tikzpicture`, which DOES reach the page — a drawing texrs generates itself is
+  a different path from an image file it would have to embed.
 
 What `--dvi` still does not do is draw a picture or break its pages by penalty:
 it stacks a fixed number of lines on each, where `--pdf` prices the whole
