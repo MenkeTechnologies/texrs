@@ -594,15 +594,26 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<Broken
     // ones the PDF path measures -- a word, or the fragments a hyphenation
     // point cuts it into -- measured through this chain rather than through a
     // face, because this path has one face.
-    let width_of = |text: &str, _face: Face| chain.width_of(text, layout.size);
+    let width_of = |text: &str, _face: Face, size: f64| chain.width_of(text, size);
     let mut colours: Vec<Spec> = Vec::new();
     let mut faces: Vec<Face> = Vec::new();
+    let mut sizes: Vec<TypeSize> = vec![TypeSize {
+        size: layout.size,
+        leading: layout.leading,
+    }];
     let mut pieces: Vec<crate::linebreak::Piece> = Vec::new();
     for word in words_carrying_refs(para) {
         if let Some(previous) = pieces.last_mut() {
             previous.after = crate::linebreak::After::Glue(chain.width(' ', layout.size));
         }
-        measure_word(&word, &mut colours, &mut faces, &width_of, &mut pieces);
+        measure_word(
+            &word,
+            &mut colours,
+            &mut faces,
+            &mut sizes,
+            &width_of,
+            &mut pieces,
+        );
     }
     let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure);
 
@@ -1097,6 +1108,7 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut face_code = false;
     let mut in_ref = false;
     let mut in_picture = false;
+    let mut in_size_spec = false;
     text.chars().filter(move |&ch| match ch {
         // A cross-reference span -- the marker, its code, the label key, and
         // the marker again -- is a question the typesetter answers by
@@ -1147,6 +1159,16 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
             false
         }
         FACE_POP => false,
+        // A size marker's spec is digits, a semicolon and a dot, every one of
+        // which the font has a real width for. Measuring it would charge a
+        // heading for the number it was set at -- which is the fault the
+        // colour spec already had, and it cost whole pages.
+        SIZE_PUSH => {
+            in_size_spec = !in_size_spec;
+            false
+        }
+        _ if in_size_spec => false,
+        SIZE_POP => false,
         // Its code character goes the same way the face's does, and so does
         // the code saying which part of a longtable a line is -- and the code
         // on a contents mark, which says whether the mark is a request, a
@@ -2178,6 +2200,145 @@ pub const FACE_PUSH: char = '\u{11}';
 /// `\textbf` needs: the outer face comes back when the inner one ends.
 pub const FACE_POP: char = '\u{12}';
 
+/// The size a run is set at, and the leading its line is set on.
+///
+/// The two travel together because `\@setfontsize` receives both and because
+/// setting one without the other is what makes a heading's own lines collide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TypeSize {
+    /// The type size in PDF points, which is what a `Tf` operator states.
+    pub size: f64,
+    /// `\baselineskip` in PDF points, which is what the line under this one
+    /// drops by.
+    pub leading: f64,
+}
+
+impl Default for TypeSize {
+    /// plain.tex's, matching [`Layout::default`]: a size marker that arrives
+    /// damaged must leave the document readable rather than set at nothing.
+    fn default() -> Self {
+        TypeSize {
+            size: 10.0,
+            leading: 12.0 * BP_PER_PT,
+        }
+    }
+}
+
+/// The size in force, which is the top of the stack the caller carries.
+pub fn current_size(sizes: &[TypeSize]) -> TypeSize {
+    sizes.last().copied().unwrap_or_default()
+}
+
+/// What each of LaTeX's ten size commands sets, in TeX points.
+///
+/// Read off `size10.clo`, `size11.clo` and `size12.clo` -- the class option
+/// files themselves -- joined to the point values `latex.ltx` gives their
+/// roman-numeral names (`\@xivpt` is 14.4, `\@xxvpt` is 24.88). The three
+/// tables are NOT one table scaled: `\footnotesize` is 8pt in a 10pt document
+/// and 10pt in a 12pt one, and `\Large` is 14.4pt in both a 10pt and an 11pt
+/// document. Scaling one of them by the base size would be a guess that looks
+/// right for `\large` and is wrong for half the rest.
+///
+/// Each entry is `(name, size, baselineskip)`.
+const SIZE_STEPS_10: &[(&str, f64, f64)] = &[
+    ("tiny", 5.0, 6.0),
+    ("scriptsize", 7.0, 8.0),
+    ("footnotesize", 8.0, 9.5),
+    ("small", 9.0, 11.0),
+    ("normalsize", 10.0, 12.0),
+    ("large", 12.0, 14.0),
+    ("Large", 14.4, 18.0),
+    ("LARGE", 17.28, 22.0),
+    ("huge", 20.74, 25.0),
+    ("Huge", 24.88, 30.0),
+];
+
+/// The 11pt class's table. See [`SIZE_STEPS_10`].
+const SIZE_STEPS_11: &[(&str, f64, f64)] = &[
+    ("tiny", 6.0, 7.0),
+    ("scriptsize", 8.0, 9.5),
+    ("footnotesize", 9.0, 11.0),
+    ("small", 10.0, 12.0),
+    ("normalsize", 10.95, 13.6),
+    ("large", 12.0, 14.0),
+    ("Large", 14.4, 18.0),
+    ("LARGE", 17.28, 22.0),
+    ("huge", 20.74, 25.0),
+    ("Huge", 24.88, 30.0),
+];
+
+/// The 12pt class's table, where the top two steps meet: `\huge` and `\Huge`
+/// are both 24.88pt, as `size12.clo` sets them. See [`SIZE_STEPS_10`].
+const SIZE_STEPS_12: &[(&str, f64, f64)] = &[
+    ("tiny", 6.0, 7.0),
+    ("scriptsize", 8.0, 9.5),
+    ("footnotesize", 10.0, 12.0),
+    ("small", 10.95, 13.6),
+    ("normalsize", 12.0, 14.5),
+    ("large", 14.4, 18.0),
+    ("Large", 17.28, 22.0),
+    ("LARGE", 20.74, 25.0),
+    ("huge", 24.88, 30.0),
+    ("Huge", 24.88, 30.0),
+];
+
+/// What a size command sets, in PDF points, for a document whose body size is
+/// `base` PDF points.
+///
+/// `None` for a command that is not one of the ten, which is how the lowerer
+/// tells a size declaration from every other control sequence.
+pub fn size_step(name: &str, base: f64) -> Option<TypeSize> {
+    // The class the document was loaded with, back from the body size it left
+    // behind. A base that is none of the three takes the 10pt table, which is
+    // what `\documentclass` itself falls back to.
+    let table = match (base / BP_PER_PT).round() as i64 {
+        11 => SIZE_STEPS_11,
+        12 => SIZE_STEPS_12,
+        _ => SIZE_STEPS_10,
+    };
+    table
+        .iter()
+        .find(|(step, _, _)| *step == name)
+        .map(|(_, size, leading)| TypeSize {
+            size: size * BP_PER_PT,
+            leading: leading * BP_PER_PT,
+        })
+}
+
+/// A size marker opens, and closes its own spec: U+0019, the size and the
+/// baselineskip it was set with, and U+0019 again.
+///
+/// A face needs one character because there are four faces; a size cannot,
+/// because `\fontsize{14.4}{18}` names a number rather than one of a fixed
+/// set. So this carries a spec the way colour does and delimits it the way
+/// `PICTURE` does -- the same marker at both ends -- rather than spending two
+/// more control characters on it.
+///
+/// The pair is `size;baselineskip`, both in PDF points, because the two travel
+/// together: `\@setfontsize` receives both, and a heading that is set larger
+/// and led the same is a heading whose lines collide.
+pub const SIZE_PUSH: char = '\u{19}';
+
+/// A size marker closes, restoring the size under it. `\large` inside a
+/// `\Large` heading gets the `\Large` back, which is the same stack the face
+/// and the colour markers keep and for the same reason.
+pub const SIZE_POP: char = '\u{1a}';
+
+/// The size and baselineskip a size marker carries, in PDF points.
+///
+/// `None` for a marker that arrives damaged: a document must not lose its
+/// remaining pages to one unreadable spec, so the reader falls back to the
+/// size already in force rather than to zero.
+pub fn size_spec(spec: &str) -> Option<(f64, f64)> {
+    let (size, leading) = spec.split_once(';')?;
+    Some((size.trim().parse().ok()?, leading.trim().parse().ok()?))
+}
+
+/// A size marker wrapping `body`, stated at `size` with `leading`.
+pub fn size_span(size: f64, leading: f64, body: &str) -> String {
+    format!("{SIZE_PUSH}{size};{leading}{SIZE_PUSH}{body}{SIZE_POP}")
+}
+
 /// What a requested family maps to among the fourteen fonts a PDF reader has.
 ///
 /// The mapping is by what the face IS, not by its name: Arimo is Arial's
@@ -2371,7 +2532,7 @@ pub fn to_pdf(
     // will hold and the characters are what the document wrote; the two differ
     // wherever WinAnsi puts a character somewhere other than its codepoint, and
     // each table is indexed by the one it is stated in.
-    let own_width = |codes: &str, source: &str, face: Face| -> f64 {
+    let own_width = |codes: &str, source: &str, face: Face, size: f64| -> f64 {
         if let Some(Some(w)) = embedded_widths.get(face.index()) {
             // PDF widths are 1/1000 em, and codes below 32 are not in the table.
             return codes
@@ -2379,18 +2540,18 @@ pub fn to_pdf(
                 .map(|c| {
                     let at = (c as usize).saturating_sub(32);
                     let mille = w.get(at).copied().unwrap_or(500);
-                    mille as f64 / 1000.0 * layout.size
+                    mille as f64 / 1000.0 * size
                 })
                 .sum();
         }
         match &metrics {
             // The .tfm reader kerns and ligatures across neighbouring
             // characters, so it needs the string whole rather than an iterator.
-            Some(f) => f.width_of(source) * layout.size,
-            None => source.chars().count() as f64 * layout.size * 0.5,
+            Some(f) => f.width_of(source) * size,
+            None => source.chars().count() as f64 * size * 0.5,
         }
     };
-    let piece_width = |piece: &Piece, face: Face| -> f64 {
+    let piece_width = |piece: &Piece, face: Face, size: f64| -> f64 {
         match piece.from {
             // The fallback font's metrics are its own, and they are nothing
             // like the face's: `arrowright` is 987/1000 em where a letter is
@@ -2399,15 +2560,15 @@ pub fn to_pdf(
             Source::Symbol => piece
                 .codes
                 .chars()
-                .map(|c| symbol_width(c as u8) as f64 / 1000.0 * layout.size)
+                .map(|c| symbol_width(c as u8) as f64 / 1000.0 * size)
                 .sum(),
             // A borrowed face's metrics are its own for the same reason, and
             // they are read from its `hmtx` by the glyph the piece names --
             // two bytes to the glyph, so the codes are taken in pairs.
             Source::Outside(at) => glyph_ids(&piece.codes)
-                .map(|glyph| fallbacks.width(at, glyph, layout.size))
+                .map(|glyph| fallbacks.width(at, glyph, size))
                 .sum(),
-            Source::Face => own_width(&piece.codes, &piece.source, face),
+            Source::Face => own_width(&piece.codes, &piece.source, face, size),
         }
     };
     // Every branch measures through `printing_chars`. A marker's spec is digits
@@ -2416,7 +2577,7 @@ pub fn to_pdf(
     // spec characters plus three markers -- and a line of them broke after four
     // words where the same line uncoloured holds seventeen. It cost whole
     // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
-    let width_of = |word: &str, face: Face| -> f64 {
+    let width_of = |word: &str, face: Face, size: f64| -> f64 {
         // A formula measures what `mlist_to_hlist` made it, not what its
         // characters come to in the text face: the width of `$\frac{1}{2}$` is
         // the fraction's, and nothing about it can be read off the glyphs.
@@ -2429,11 +2590,11 @@ pub fn to_pdf(
         // ordinary word measured exactly as it was before any of this.
         if word.is_ascii() {
             let plain: String = printing_chars(word).collect();
-            return own_width(&plain, &plain, face);
+            return own_width(&plain, &plain, face, size);
         }
         drawn(word, &|c| covers(c, face), &outside)
             .iter()
-            .map(|piece| piece_width(piece, face))
+            .map(|piece| piece_width(piece, face, size))
             .sum()
     };
 
@@ -2483,6 +2644,12 @@ pub fn to_pdf(
     // The face stack, for the same reason: `\ttfamily` holds until its group
     // closes, and a group can hold a paragraph.
     let mut faces: Vec<Face> = vec![Face::Main];
+    // Seeded with the document's own size, which is the entry never popped:
+    // an unbalanced size marker leaves the body size in force.
+    let mut sizes: Vec<TypeSize> = vec![TypeSize {
+        size: layout.size,
+        leading: layout.leading,
+    }];
 
     // The printed page number. It counts from one and starts again after a
     // title page, which is what `\end{titlepage}` does to LaTeX's counter.
@@ -2511,7 +2678,7 @@ pub fn to_pdf(
             // drawn on it. Falling through to the run loop below would draw the
             // marker itself as a character.
             if is_space_line(line) {
-                y -= line_height(line, layout);
+                y -= line_height(line, leading_on(line, &mut sizes.clone()));
                 continue;
             }
             // A picture is DRAWN where the line it stands on is, in the
@@ -2560,7 +2727,11 @@ pub fn to_pdf(
             if let Some(rest) = line.strip_prefix(TABLE_MARK) {
                 let mut rest = rest.chars();
                 let kind = rest.next().unwrap_or(RULE_MID);
-                let span = width_of(rest.as_str(), current_face(&faces));
+                let span = width_of(
+                    rest.as_str(),
+                    current_face(&faces),
+                    current_size(&sizes).size,
+                );
                 // booktabs' own weights, relative to the type size:
                 // `\heavyrulewidth` above and below the table, `\lightrulewidth`
                 // between its head and its body (booktabs.sty).
@@ -2622,10 +2793,10 @@ pub fn to_pdf(
             // them for real.
             let width: f64 = match centred {
                 true => {
-                    let (mut c, mut f) = (colours.clone(), faces.clone());
-                    styled_runs(line, &mut c, &mut f)
+                    let (mut c, mut f, mut s) = (colours.clone(), faces.clone(), sizes.clone());
+                    styled_runs(line, &mut c, &mut f, &mut s)
                         .iter()
-                        .map(|(plain, _, face)| width_of(plain, *face))
+                        .map(|(plain, _, face, ts)| width_of(plain, *face, ts.size))
                         .sum()
                 }
                 false => 0.0,
@@ -2638,15 +2809,15 @@ pub fn to_pdf(
             // and is set where it stands.
             let extra: f64 = match justified {
                 true => {
-                    let (mut c, mut f) = (colours.clone(), faces.clone());
-                    let runs = styled_runs(line, &mut c, &mut f);
+                    let (mut c, mut f, mut s) = (colours.clone(), faces.clone(), sizes.clone());
+                    let runs = styled_runs(line, &mut c, &mut f, &mut s);
                     let natural: f64 = runs
                         .iter()
-                        .map(|(plain, _, face)| width_of(plain, *face))
+                        .map(|(plain, _, face, ts)| width_of(plain, *face, ts.size))
                         .sum();
                     let spaces: usize = runs
                         .iter()
-                        .map(|(plain, _, _)| plain.chars().filter(|c| *c == ' ').count())
+                        .map(|(plain, _, _, _)| plain.chars().filter(|c| *c == ' ').count())
                         .sum();
                     match spaces {
                         0 => 0.0,
@@ -2658,11 +2829,16 @@ pub fn to_pdf(
                 }
                 false => 0.0,
             };
+            // Asked on a COPY: `styled_runs` below walks the real stack for
+            // this same line, and advancing it twice would lose a size.
+            let led = leading_on(line, &mut sizes.clone());
             let mut x = match centred {
                 true => layout.margin + (layout.measure - width).max(0.0) / 2.0,
                 false => layout.margin + indent,
             };
-            for (plain, (r, g, b), face) in styled_runs(line, &mut colours, &mut faces) {
+            for (plain, (r, g, b), face, run) in
+                styled_runs(line, &mut colours, &mut faces, &mut sizes)
+            {
                 if plain.is_empty() {
                     continue;
                 }
@@ -2721,7 +2897,7 @@ pub fn to_pdf(
                     // x advances by what was actually SET and not by what the
                     // glyphs come to, or the piece after it would be drawn back
                     // over the space just widened.
-                    let natural = piece_width(&piece, face);
+                    let natural = piece_width(&piece, face, run.size);
                     // A borrowed face's codes are glyph ids, and a byte 0x20
                     // inside one is half an id rather than a space: there is
                     // nothing on such a piece for the room to be shared over.
@@ -2733,11 +2909,17 @@ pub fn to_pdf(
                         natural,
                         width: natural + extra * spaces,
                     };
-                    page.text_set(font, layout.size, x, y, &piece.codes, set);
+                    // At the run's own size, not the document's: this is the
+                    // `Tf` operator, and a heading set at the body size is
+                    // exactly what made every book short. The width above was
+                    // measured at the same number, so the two agree.
+                    page.text_set(font, run.size, x, y, &piece.codes, set);
                     x += set.width;
                 }
             }
-            y -= layout.leading;
+            // The same step the fitter charged for this line: `leading_on` is
+            // asked once here and once there, never spelled twice.
+            y -= led;
         }
         // The page number, as LaTeX's `plain` style sets it: centred at the
         // foot. texrs drew none at all, and it is the ONE thing that held every
@@ -2752,7 +2934,7 @@ pub fn to_pdf(
             folio = 1;
         }
         let shown = folio.to_string();
-        let width = width_of(&shown, Face::Main);
+        let width = width_of(&shown, Face::Main, layout.size);
         page.text_in(
             main.clone(),
             layout.size,
@@ -2775,7 +2957,7 @@ pub fn to_pdf(
 /// idea of what the document's font is.
 struct FaceMetrics<'a> {
     /// `to_pdf`'s own `width_of`, which measures at `size`.
-    measure: &'a dyn Fn(&str, Face) -> f64,
+    measure: &'a dyn Fn(&str, Face, f64) -> f64,
     /// The size those widths are stated at: the document's type size.
     size: f64,
 }
@@ -2784,7 +2966,7 @@ impl crate::tikz::Metrics for FaceMetrics<'_> {
     /// A node is set in the body face -- `\node[font=\ttfamily]` is a font
     /// option this does not read -- and a font's widths scale with its size.
     fn width_of(&self, text: &str, size: f64) -> f64 {
-        (self.measure)(text, Face::Main) * size / self.size
+        (self.measure)(text, Face::Main, self.size) * size / self.size
     }
 }
 
@@ -2896,13 +3078,19 @@ fn face_coverage(font: &crate::pdf::Font) -> Option<std::collections::BTreeSet<u
 fn break_lines_measured(
     text: &str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> Vec<String> {
     // The breaker cares about the face and not about the colour, but the two
     // markers are interleaved in one stream, so the same splitter reads both
     // and the colour half goes on a stack nothing here looks at.
     let mut colours: Vec<Spec> = Vec::new();
     let mut faces: Vec<Face> = vec![Face::Main];
+    // Seeded with the document's own size, which is the entry never popped:
+    // an unbalanced size marker leaves the body size in force.
+    let mut sizes: Vec<TypeSize> = vec![TypeSize {
+        size: layout.size,
+        leading: layout.leading,
+    }];
     let mut lines = Vec::new();
     // Centring is a REGION and outlives the paragraph its marker landed in: a
     // title page is one `\begin{center}` holding half a dozen `\par`-separated
@@ -2952,7 +3140,7 @@ fn break_lines_measured(
         // what says a paragraph is one, the way a listing break says a
         // paragraph is a listing.
         if para.contains(TABLE_ROW) {
-            table_lines(para, layout, &colours, &faces, width_of, &mut lines);
+            table_lines(para, layout, &colours, &faces, &sizes, width_of, &mut lines);
             continue;
         }
         // A forced break is its own line, so the paginator can see one. It has
@@ -2976,6 +3164,7 @@ fn break_lines_measured(
                     layout,
                     &mut colours,
                     &mut faces,
+                    &mut sizes,
                     width_of,
                     &mut lines,
                 );
@@ -3001,7 +3190,8 @@ fn fill(
     layout: &Layout,
     colours: &mut Vec<Spec>,
     faces: &mut Vec<Face>,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    sizes: &mut Vec<TypeSize>,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
     lines: &mut Vec<String>,
 ) {
     use crate::linebreak::After;
@@ -3051,9 +3241,13 @@ fn fill(
             // Measuring a monospace word in the prose font is how a line of
             // code came out narrower than it sets.
             if let Some(previous) = pieces.last_mut() {
-                previous.after = crate::linebreak::After::Glue(width_of(" ", current_face(faces)));
+                previous.after = crate::linebreak::After::Glue(width_of(
+                    " ",
+                    current_face(faces),
+                    current_size(sizes).size,
+                ));
             }
-            measure_word(&word, colours, faces, width_of, &mut pieces);
+            measure_word(&word, colours, faces, sizes, width_of, &mut pieces);
         }
         // tex.web §813: the set of breakpoints that costs the WHOLE paragraph
         // least, rather than the ones a left-to-right fill happens to reach.
@@ -3114,11 +3308,13 @@ fn measure_word(
     word: &str,
     colours: &mut Vec<Spec>,
     faces: &mut Vec<Face>,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    sizes: &mut Vec<TypeSize>,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
     out: &mut Vec<crate::linebreak::Piece>,
 ) {
     use crate::linebreak::{After, Piece};
     let face = current_face(faces);
+    let size = current_size(sizes).size;
     let whole = |text: &str, width: f64| Piece {
         text: text.to_string(),
         width,
@@ -3130,7 +3326,7 @@ fn measure_word(
     // breakpoint scan below cuts at -- would leave a fragment with no opening
     // marker on it, and the label key would be measured and drawn as text.
     if word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP, REF]) {
-        let width = word_width(word, colours, faces, width_of);
+        let width = word_width(word, colours, faces, sizes, width_of);
         out.push(whole(word, width));
         return;
     }
@@ -3141,7 +3337,7 @@ fn measure_word(
         for (number, part) in parts.iter().enumerate() {
             out.push(Piece {
                 text: part.to_string(),
-                width: width_of(part, face),
+                width: width_of(part, face, size),
                 after: match number + 1 < parts.len() {
                     true => After::Explicit,
                     false => After::Nothing,
@@ -3166,15 +3362,15 @@ fn measure_word(
         false => Vec::new(),
     };
     if points.is_empty() {
-        out.push(whole(word, width_of(word, face)));
+        out.push(whole(word, width_of(word, face, size)));
         return;
     }
-    let dash = width_of("-", face);
+    let dash = width_of("-", face, size);
     let mut from = 0usize;
     for at in points.iter().copied().chain(std::iter::once(word.len())) {
         out.push(Piece {
             text: word[from..at].to_string(),
-            width: width_of(&word[from..at], face),
+            width: width_of(&word[from..at], face, size),
             after: match at == word.len() {
                 true => After::Nothing,
                 false => After::Discretionary(dash),
@@ -3271,18 +3467,81 @@ fn is_break_line(line: &str) -> bool {
 /// `\parskip`, which is half of one: that is the smallest space the page
 /// spends, so it is the unit the rest are counted in -- a heading asks for its
 /// space as that many of them (`lower::push_heading`).
-fn line_height(line: &str, layout: &Layout) -> f64 {
+/// What each broken line is led on, in order, once for the whole document.
+///
+/// A line does not carry its own size the way a picture carries its own
+/// height: a heading long enough to wrap sets its marker on the FIRST line
+/// only, and the lines after it are inside a size that opened before them. So
+/// the stack has to be walked in order across every line, which is what this
+/// does once, rather than asked of a line on its own -- the fitter considers a
+/// line many times and would get a different answer each way round.
+///
+/// A line is led on the LARGEST size standing anywhere on it, which is what
+/// keeps a body line holding one `\large` word from being set into the line
+/// above it.
+fn line_leadings(lines: &[String], layout: &Layout) -> Vec<f64> {
+    let mut sizes: Vec<TypeSize> = vec![TypeSize {
+        size: layout.size,
+        leading: layout.leading,
+    }];
+    lines
+        .iter()
+        .map(|line| leading_on(line, &mut sizes))
+        .collect()
+}
+
+/// The leading one line is set on, advancing `sizes` by the markers it holds.
+///
+/// The fitter and the drawing pass MUST take their vertical step from this
+/// same function: the fitter charges what it returns and the page advances by
+/// it, and two spellings of the same rule are two chances for the page to
+/// drift from what was fitted for it. The drawing pass asks on a copy of the
+/// stack, because `styled_runs` walks the real one for the same line.
+fn leading_on(line: &str, sizes: &mut Vec<TypeSize>) -> f64 {
+    // What is in force as the line OPENS counts: a wrapped heading's second
+    // line carries no marker of its own.
+    let mut most = current_size(sizes).leading;
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            SIZE_PUSH => {
+                let mut spec = String::new();
+                for c in chars.by_ref() {
+                    if c == SIZE_PUSH {
+                        break;
+                    }
+                    spec.push(c);
+                }
+                let pushed = match size_spec(&spec) {
+                    Some((size, leading)) => TypeSize { size, leading },
+                    None => current_size(sizes),
+                };
+                sizes.push(pushed);
+                most = most.max(pushed.leading);
+            }
+            // The bottom entry is the document's own size and is never popped,
+            // so an unbalanced close leaves the body size in force.
+            SIZE_POP if sizes.len() > 1 => {
+                sizes.pop();
+            }
+            _ => {}
+        }
+    }
+    most
+}
+
+fn line_height(line: &str, leading: f64) -> f64 {
     // A picture takes its bounding box, and a leading under it before the next
     // line's baseline -- so its slot is the height of the drawing plus one
     // ordinary line. The number is read off the marker rather than measured
     // here, because measuring means parsing the picture and this is asked once
     // per line per page the fitter considers. See `PICTURE`.
     if let Some((height, _, _)) = picture_parts(line) {
-        return height + layout.leading;
+        return height + leading;
     }
     match is_space_line(line) {
-        true => layout.leading * PARAGRAPH_SPACE,
-        false => layout.leading,
+        true => leading * PARAGRAPH_SPACE,
+        false => leading,
     }
 }
 
@@ -3337,9 +3596,10 @@ fn sets_text(para: &str) -> bool {
 /// of `lines` like any other, so repeating one costs nothing -- the page holds
 /// the same `&str` again.
 fn paginate<'a>(lines: &'a [String], layout: &Layout) -> Vec<Vec<&'a str>> {
-    let items = page_items(lines, layout);
+    let leadings = line_leadings(lines, layout);
+    let items = page_items(lines, layout, &leadings);
     let mut pages: Vec<Vec<&str>> = Vec::new();
-    for Planned { from, upto, foot } in plan_pages(&items, lines, layout) {
+    for Planned { from, upto, foot } in plan_pages(&items, lines, layout, &leadings) {
         let mut page: Vec<&str> = Vec::new();
         // The head of a table this page opens in the middle of.
         if items[from].repeat_head {
@@ -3406,10 +3666,11 @@ struct Item {
 }
 
 /// The height a run of lines takes.
-fn run_height(lines: &[String], run: (usize, usize), layout: &Layout) -> f64 {
+fn run_height(lines: &[String], run: (usize, usize), leadings: &[f64]) -> f64 {
     lines[run.0..run.1]
         .iter()
-        .map(|l| line_height(l, layout))
+        .enumerate()
+        .map(|(i, l)| line_height(l, leadings[run.0 + i]))
         .sum()
 }
 
@@ -3417,7 +3678,7 @@ fn run_height(lines: &[String], run: (usize, usize), layout: &Layout) -> f64 {
 ///
 /// This is the walk `paginate` did, with the fitting taken out of it: every
 /// decision left here is about what the lines ARE.
-fn page_items(lines: &[String], layout: &Layout) -> Vec<Item> {
+fn page_items(lines: &[String], layout: &Layout, leadings: &[f64]) -> Vec<Item> {
     const EMPTY: (usize, usize) = (0, 0);
     // A run of lines held back, extended one line at a time. They are written
     // consecutively (`table_lines`), so the run is a range; a line that does
@@ -3462,7 +3723,7 @@ fn page_items(lines: &[String], layout: &Layout) -> Vec<Item> {
             items.push(Item {
                 at: i,
                 len: 1,
-                kind: Kind::Set(line_height(line, layout)),
+                kind: Kind::Set(line_height(line, leadings[i])),
                 head,
                 repeat_head: false,
                 foot,
@@ -3513,7 +3774,7 @@ fn page_items(lines: &[String], layout: &Layout) -> Vec<Item> {
         // it out of shape.
         // A table's lines are all lines of text, so the room a page under the
         // head has for them is what is left of it divided by the leading.
-        let room = ((layout.height - run_height(lines, head, layout)) / layout.leading)
+        let room = ((layout.height - run_height(lines, head, leadings)) / layout.leading)
             .floor()
             .max(1.0) as usize;
         let step = group.min(room);
@@ -3556,13 +3817,19 @@ struct Stop {
 ///
 /// The last of them is where the old paginator broke -- the first break that
 /// did not fit -- and the ones before it are what it never offered.
-fn page_stops(items: &[Item], lines: &[String], layout: &Layout, from: usize) -> Vec<Stop> {
+fn page_stops(
+    items: &[Item],
+    lines: &[String],
+    layout: &Layout,
+    leadings: &[f64],
+    from: usize,
+) -> Vec<Stop> {
     // Float slack, so a page that comes to exactly its height is not one line
     // short of it.
     const SLACK: f64 = 1e-6;
     let mut stops = Vec::new();
     let mut used = match items[from].repeat_head {
-        true => run_height(lines, items[from].head, layout),
+        true => run_height(lines, items[from].head, leadings),
         false => 0.0,
     };
     let mut set = 0usize;
@@ -3589,7 +3856,7 @@ fn page_stops(items: &[Item], lines: &[String], layout: &Layout, from: usize) ->
                     // keeps the foot's height back on every page for the same
                     // reason.
                     let foot = (item.foot.0 != item.foot.1).then_some(item.foot);
-                    let below = foot.map_or(0.0, |f| run_height(lines, f, layout));
+                    let below = foot.map_or(0.0, |f| run_height(lines, f, leadings));
                     stops.push(Stop {
                         next: j,
                         used: used + below,
@@ -3768,7 +4035,7 @@ fn heading_line(line: &str) -> bool {
 /// backwards from the end of the document.
 ///
 /// Returns each page as the items it holds and the foot that goes under it.
-fn plan_pages(items: &[Item], lines: &[String], layout: &Layout) -> Vec<Planned> {
+fn plan_pages(items: &[Item], lines: &[String], layout: &Layout, leadings: &[f64]) -> Vec<Planned> {
     // Float slack, so a page that comes to exactly its height is not one line
     // short of it.
     const SLACK: f64 = 1e-6;
@@ -3782,7 +4049,7 @@ fn plan_pages(items: &[Item], lines: &[String], layout: &Layout) -> Vec<Planned>
         // where every break is forbidden or none of them fits, the fullest is
         // taken anyway -- which is what the old paginator did with all of them.
         let mut fallback: Option<(Stop, f64)> = None;
-        for stop in page_stops(items, lines, layout, from) {
+        for stop in page_stops(items, lines, layout, leadings, from) {
             let room = layout.height - stop.used;
             let fits = room >= -SLACK;
             let empty = match stop.forced {
@@ -4060,16 +4327,16 @@ fn entry_lines(
     title: &str,
     page: usize,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> Vec<String> {
     let face = Face::Main;
     let number = page.to_string();
     let indent = list_indent(level, layout);
-    let space = width_of(" ", face);
+    let space = width_of(" ", face, layout.size);
     // A face whose full stop measures nothing would divide by zero; one dot is
     // then the whole leader, which is honest about knowing no better.
-    let dot = width_of(".", face).max(f64::EPSILON);
-    let room = layout.measure - indent - width_of(&number, face) - 2.0 * space;
+    let dot = width_of(".", face, layout.size).max(f64::EPSILON);
+    let room = layout.measure - indent - width_of(&number, face, layout.size) - 2.0 * space;
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     for word in title.split_whitespace() {
@@ -4077,12 +4344,14 @@ fn entry_lines(
             true => word.to_string(),
             false => format!("{current} {word}"),
         };
-        match !current.is_empty() && width_of(&wider, face) > room {
+        match !current.is_empty() && width_of(&wider, face, layout.size) > room {
             true => lines.push(std::mem::replace(&mut current, word.to_string())),
             false => current = wider,
         }
     }
-    let dots = ((room - width_of(&current, face)) / dot).floor().max(0.0) as usize;
+    let dots = ((room - width_of(&current, face, layout.size)) / dot)
+        .floor()
+        .max(0.0) as usize;
     lines.push(format!("{current} {} {number}", ".".repeat(dots)));
     // Level 0 sets at the margin and carries no mark at all; a deeper entry
     // carries the indent marker a list item does, so the page positions it the
@@ -4104,7 +4373,7 @@ fn contents_block(
     entries: &[(usize, String)],
     pages: &[usize],
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> String {
     let mut listing = String::new();
     for (at, (level, title)) in entries.iter().enumerate() {
@@ -4140,7 +4409,7 @@ fn with_contents(
     entries: &[(usize, String)],
     pages: &[usize],
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> String {
     let block = contents_block(entries, pages, layout, width_of);
     let mut out = String::with_capacity(text.len() + block.len());
@@ -4174,7 +4443,7 @@ fn with_contents(
 fn contents_set<'a>(
     text: &'a str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> std::borrow::Cow<'a, str> {
     let Some(depth) = contents_depth(text) else {
         return std::borrow::Cow::Borrowed(text);
@@ -4503,7 +4772,7 @@ fn with_pagerefs(text: &str, pages: &std::collections::HashMap<String, usize>) -
 fn refs_paged<'a>(
     text: &'a str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> std::borrow::Cow<'a, str> {
     if !has_ref(text, REF_PAGE) {
         return std::borrow::Cow::Borrowed(text);
@@ -4724,6 +4993,11 @@ pub const MARKERS: &[(char, bool)] = &[
     // The one that carries an argument: the character naming the face.
     (FACE_PUSH, true),
     (FACE_POP, false),
+    // The size pair. `SIZE_PUSH` brackets its own spec -- it appears twice,
+    // once at each end -- so it swallows no single character the way a face
+    // code does; the walk toggles on it instead, as it does for `PICTURE`.
+    (SIZE_PUSH, false),
+    (SIZE_POP, false),
     (TABLE_CELL, false),
     (TABLE_ROW, false),
     // The list indent carries an argument too: the digit saying how deep the
@@ -5012,7 +5286,8 @@ fn table_lines(
     layout: &Layout,
     colours: &[Spec],
     faces: &[Face],
-    width_of: &dyn Fn(&str, Face) -> f64,
+    sizes: &[TypeSize],
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
     out: &mut Vec<String>,
 ) {
     let sections = table_sections(para);
@@ -5041,15 +5316,15 @@ fn table_lines(
     // Padding is written in spaces, so the space is the unit every width here
     // is counted in. booktabs leaves a `\tabcolsep` either side of a column;
     // two spaces is that gap in this unit.
-    let space = width_of(" ", current_face(faces)).max(f64::MIN_POSITIVE);
+    let space = width_of(" ", current_face(faces), current_size(sizes).size).max(f64::MIN_POSITIVE);
     let gutter = 2.0 * space;
     // What a cell costs, in the faces its own markers select, measured on
     // copies of the stacks so measuring never moves them.
     let measure = |text: &str| -> f64 {
-        let (mut c, mut f) = (colours.to_vec(), faces.to_vec());
-        styled_runs(text, &mut c, &mut f)
+        let (mut c, mut f, mut s) = (colours.to_vec(), faces.to_vec(), sizes.to_vec());
+        styled_runs(text, &mut c, &mut f, &mut s)
             .iter()
-            .map(|(plain, _, face)| width_of(plain, *face))
+            .map(|(plain, _, face, ts)| width_of(plain, *face, ts.size))
             .sum()
     };
 
@@ -5102,7 +5377,7 @@ fn table_lines(
         let wrapped: Vec<Vec<String>> = cells
             .iter()
             .enumerate()
-            .map(|(j, cell)| wrap_cell(cell, widths[j], colours, faces, width_of))
+            .map(|(j, cell)| wrap_cell(cell, widths[j], colours, faces, sizes, width_of))
             .collect();
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(0);
         let mut lines = Vec::with_capacity(height);
@@ -5210,10 +5485,11 @@ fn wrap_cell(
     width: f64,
     colours: &[Spec],
     faces: &[Face],
-    width_of: &dyn Fn(&str, Face) -> f64,
+    sizes: &[TypeSize],
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> Vec<String> {
-    let (mut c, mut f) = (colours.to_vec(), faces.to_vec());
-    let space = width_of(" ", current_face(&f));
+    let (mut c, mut f, mut s) = (colours.to_vec(), faces.to_vec(), sizes.to_vec());
+    let space = width_of(" ", current_face(&f), current_size(&s).size);
     // What this cell has opened and not closed, as the text that opens it and
     // the character that closes it.
     let mut open: Vec<(String, char)> = Vec::new();
@@ -5223,9 +5499,9 @@ fn wrap_cell(
     for word in cell.split(' ').filter(|w| !w.is_empty()) {
         // Measuring advances the stacks, which is what keeps the word after a
         // `\texttt` measured in the face that `\texttt` left in force.
-        let cost: f64 = styled_runs(word, &mut c, &mut f)
+        let cost: f64 = styled_runs(word, &mut c, &mut f, &mut s)
             .iter()
-            .map(|(plain, _, face)| width_of(plain, *face))
+            .map(|(plain, _, face, ts)| width_of(plain, *face, ts.size))
             .sum();
         let need = match line.is_empty() {
             true => cost,
@@ -5343,7 +5619,7 @@ type Spec = (String, String, String);
 /// Always a colour, never "none": the stack it comes off is seeded with the
 /// document's default, so every run says what it is drawn in. The face is the
 /// same -- the bottom of its stack is the main face.
-type StyledRun = (String, Spec, Face);
+type StyledRun = (String, Spec, Face, TypeSize);
 
 /// The colour every LaTeX document starts in, as PDF wants it written.
 ///
@@ -5375,7 +5651,12 @@ const DEFAULT_COLOUR: (&str, &str, &str) = ("0", "0", "0");
 /// because the two nest inside each other: a book's `\texttt` is a mono face
 /// wrapped around a `\color`, and two passes would have to agree about where
 /// the other one's markers were.
-fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<StyledRun> {
+fn styled_runs(
+    line: &str,
+    stack: &mut Vec<Spec>,
+    faces: &mut Vec<Face>,
+    sizes: &mut Vec<TypeSize>,
+) -> Vec<StyledRun> {
     let mut runs = Vec::new();
     let mut text = String::new();
     let mut chars = line.chars().peekable();
@@ -5389,7 +5670,12 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
         match ch {
             FACE_PUSH => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
                 }
                 // The code character belongs to the marker whatever it is: a
                 // marker read as one character would set the other as a glyph.
@@ -5398,7 +5684,12 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
             }
             FACE_POP => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
                 }
                 // The bottom entry is the main face and is never popped, so an
                 // unbalanced close leaves the document in its own face.
@@ -5406,9 +5697,59 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
                     faces.pop();
                 }
             }
+            SIZE_PUSH => {
+                if !text.is_empty() {
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
+                }
+                // The spec runs to the marker that closes it, which is the
+                // same character: read to it whatever is between, so a
+                // damaged spec costs its own heading and not the rest of the
+                // document.
+                let mut spec = String::new();
+                for c in chars.by_ref() {
+                    if c == SIZE_PUSH {
+                        break;
+                    }
+                    spec.push(c);
+                }
+                // A spec that cannot be read still pushes, because the
+                // `SIZE_POP` that closes it is coming either way and has to
+                // pop what this pushed rather than the entry underneath.
+                let pushed = match size_spec(&spec) {
+                    Some((size, leading)) => TypeSize { size, leading },
+                    None => current_size(sizes),
+                };
+                sizes.push(pushed);
+            }
+            SIZE_POP => {
+                if !text.is_empty() {
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
+                }
+                // The bottom entry is the document's own size and is never
+                // popped: an unbalanced close leaves the body size in force
+                // rather than nothing at all.
+                if sizes.len() > 1 {
+                    sizes.pop();
+                }
+            }
             '\u{1}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
                 }
                 let mut spec = String::new();
                 for c in chars.by_ref() {
@@ -5429,7 +5770,12 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
                             break;
                         }
                     }
-                    runs.push((crate::math::run(&spec), top(stack), current_face(faces)));
+                    runs.push((
+                        crate::math::run(&spec),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
                     continue;
                 }
                 let p: Vec<&str> = spec.split(',').collect();
@@ -5445,7 +5791,12 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
             }
             '\u{3}' => {
                 if !text.is_empty() {
-                    runs.push((std::mem::take(&mut text), top(stack), current_face(faces)));
+                    runs.push((
+                        std::mem::take(&mut text),
+                        top(stack),
+                        current_face(faces),
+                        current_size(sizes),
+                    ));
                 }
                 if stack.len() > 1 {
                     stack.pop();
@@ -5455,7 +5806,7 @@ fn styled_runs(line: &str, stack: &mut Vec<Spec>, faces: &mut Vec<Face>) -> Vec<
         }
     }
     if !text.is_empty() {
-        runs.push((text, top(stack), current_face(faces)));
+        runs.push((text, top(stack), current_face(faces), current_size(sizes)));
     }
     runs
 }
@@ -5475,14 +5826,15 @@ fn word_width(
     word: &str,
     colours: &mut Vec<Spec>,
     faces: &mut Vec<Face>,
-    width_of: &dyn Fn(&str, Face) -> f64,
+    sizes: &mut Vec<TypeSize>,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> f64 {
     if !word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP]) {
-        return width_of(word, current_face(faces));
+        return width_of(word, current_face(faces), current_size(sizes).size);
     }
-    styled_runs(word, colours, faces)
+    styled_runs(word, colours, faces, sizes)
         .iter()
-        .map(|(text, _, face)| width_of(text, *face))
+        .map(|(text, _, face, ts)| width_of(text, *face, ts.size))
         .sum()
 }
 

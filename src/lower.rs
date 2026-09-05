@@ -417,6 +417,9 @@ impl Lowerer {
         // of its group, which is what `{\ttfamily code}` -- the body every book
         // redefines `\texttt` to -- depends on.
         let mut face_open = false;
+        // A size declaration is scoped to its group exactly as a face is, and
+        // is closed everywhere a face is closed.
+        let mut size_open = false;
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
@@ -500,6 +503,7 @@ impl Lowerer {
                         self.close_colour(&mut out, &mut colour_open);
                         self.close_centre(&mut out, &mut centre_open);
                         self.close_face(&mut out, &mut face_open);
+                        self.close_size(&mut out, &mut size_open);
                         return Ok(Self::drop_empty_line_directives(out));
                     }
                     // An alignment tab is a cell BOUNDARY, not a character the
@@ -534,6 +538,7 @@ impl Lowerer {
                     self.close_colour(&mut out, &mut colour_open);
                     self.close_centre(&mut out, &mut centre_open);
                     self.close_face(&mut out, &mut face_open);
+                    self.close_size(&mut out, &mut size_open);
                     return Ok(Self::drop_empty_line_directives(out));
                 }
             }
@@ -595,6 +600,9 @@ impl Lowerer {
             // defines `\ttfamily` and its siblings to expand to nothing, so
             // every `\texttt` in every book was set in the body font.
             if self.text_output && self.lower_face(name, &mut out, &mut face_open) {
+                continue;
+            }
+            if self.text_output && self.lower_size(name, &mut out, &mut size_open) {
                 continue;
             }
             // Page structure, for the same reason and in the same place.
@@ -1237,6 +1245,7 @@ impl Lowerer {
         self.close_colour(&mut out, &mut colour_open);
         self.close_centre(&mut out, &mut centre_open);
         self.close_face(&mut out, &mut face_open);
+        self.close_size(&mut out, &mut size_open);
         Ok(Self::drop_empty_line_directives(out))
     }
 
@@ -1558,8 +1567,39 @@ impl Lowerer {
         self.push_text(out, &space.repeat(above));
         self.push_text(out, "\n\n");
         self.push_text(out, &crate::typeset::toc_entry_mark(level));
+        // The size book.cls sets each level at: `\Huge` for a chapter title
+        // (book.cls:387), `\Large` for a section (407), `\large` for a
+        // subsection (411), the body size below that. Set here rather than in
+        // the prelude because a heading is read as an argument and the size
+        // has to wrap what that argument lowers to.
+        //
+        // This is the whole of the page-count gap: a heading set at the body
+        // size does not wrap where lualatex's does, and takes one body line
+        // where lualatex gives it a larger box.
+        let step = match level {
+            0 => "Huge",
+            1 => "Large",
+            2 => "large",
+            _ => "normalsize",
+        };
+        let sized = crate::typeset::size_step(step, self.layout.size);
+        if let Some(size) = sized {
+            self.push_text(
+                out,
+                &format!(
+                    "{}{};{}{}",
+                    crate::typeset::SIZE_PUSH,
+                    size.size,
+                    size.leading,
+                    crate::typeset::SIZE_PUSH
+                ),
+            );
+        }
         let raw = self.eng.read_balanced_group(lx)?;
         self.lower_into(&raw, out)?;
+        if sized.is_some() {
+            self.push_text(out, &crate::typeset::SIZE_POP.to_string());
+        }
         self.push_text(out, "\n\n");
         self.push_text(out, &space.repeat(below));
         self.push_text(out, "\n\n");
@@ -1979,6 +2019,48 @@ impl Lowerer {
     fn close_face(&self, out: &mut Vec<Cmd>, face_open: &mut bool) {
         if std::mem::take(face_open) {
             self.push_text(out, &crate::typeset::FACE_POP.to_string());
+        }
+    }
+
+    /// `\large`, `\Large`, `\huge` and the other seven, as a size marker.
+    ///
+    /// A size is a declaration exactly as a face is -- `{\Large text}` rather
+    /// than `\Large{text}` -- so it is caught here and scoped to its group the
+    /// same way, rather than defined in the prelude. `\@setfontsize` is what
+    /// these route through in LaTeX and it is stubbed empty in `kernel.tex`,
+    /// which is why every heading in every book set at the body size.
+    ///
+    /// Returns whether the command was one of the ten.
+    fn lower_size(
+        &self,
+        name: crate::token::CsId,
+        out: &mut Vec<Cmd>,
+        size_open: &mut bool,
+    ) -> bool {
+        let Some(size) = crate::typeset::size_step(name.name(), self.layout.size) else {
+            return false;
+        };
+        // A second size in one group REPLACES the first, as a second face
+        // does: there is one size in force, not a stack of them per group.
+        self.close_size(out, size_open);
+        self.push_text(
+            out,
+            &format!(
+                "{}{};{}{}",
+                crate::typeset::SIZE_PUSH,
+                size.size,
+                size.leading,
+                crate::typeset::SIZE_PUSH
+            ),
+        );
+        *size_open = true;
+        true
+    }
+
+    /// End a size declaration that is still in force, if there is one.
+    fn close_size(&self, out: &mut Vec<Cmd>, size_open: &mut bool) {
+        if std::mem::take(size_open) {
+            self.push_text(out, &crate::typeset::SIZE_POP.to_string());
         }
     }
 

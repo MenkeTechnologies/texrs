@@ -2807,3 +2807,134 @@ fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
     )));
     assert!((after - 72.2).abs() < 0.01, "the region ended: {after}");
 }
+
+/// The ten size commands each reach the page at the size their class file
+/// states.
+///
+/// texrs set every glyph of every book at one size: `\section`, `{\huge ...}`
+/// and the title page all came out at the body size, because `\@setfontsize`
+/// -- which all ten route through -- was stubbed empty. lualatex emits sixteen
+/// distinct `Tf` sizes for one of the corpus books against texrs's one.
+///
+/// The numbers are `size10.clo`'s own, scaled to PDF points the way every
+/// other length here is: `\Large` is 14.4pt, which is the 14.3462 lualatex
+/// writes.
+#[test]
+fn every_size_command_sets_at_the_size_its_class_file_states() {
+    let bp = 72.0 / 72.27;
+    for (command, points) in [
+        ("tiny", 5.0),
+        ("scriptsize", 7.0),
+        ("footnotesize", 8.0),
+        ("small", 9.0),
+        ("normalsize", 10.0),
+        ("large", 12.0),
+        ("Large", 14.4),
+        ("LARGE", 17.28),
+        ("huge", 20.74),
+        ("Huge", 24.88),
+    ] {
+        let pdf = texrs::run_pdf(&format!(
+            "\\documentclass{{book}}\n\\begin{{document}}\nbody\n\n{{\\{command} sized}}\n\\end{{document}}\n"
+        ))
+        .expect("pdf");
+        let want = points * bp;
+        assert!(
+            set_text(&pdf)
+                .iter()
+                .any(|(size, _, _)| (size - want).abs() < 0.01),
+            "\\{command} must set at {want:.4}, saw {:?}",
+            set_text(&pdf).iter().map(|s| s.0).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A heading is set larger than the text under it, at the size book.cls gives
+/// its level.
+#[test]
+fn a_heading_is_set_larger_than_the_body_under_it() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\begin{document}\n\
+         \\chapter{Chapter}\nbody one\n\\section{Section}\nbody two\n\
+         \\subsection{Subsection}\nbody three\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let sizes: Vec<f64> = set_text(&pdf).iter().map(|(s, _, _)| *s).collect();
+    // `Layout::default` states the body size unscaled, where a stated class
+    // option is scaled to PDF points -- so a bare \documentclass sets at 10.
+    let body = 10.0;
+    for (level, points) in [("chapter", 24.88), ("section", 14.4), ("subsection", 12.0)] {
+        let want = points * 72.0 / 72.27;
+        assert!(
+            sizes.iter().any(|s| (s - want).abs() < 0.01),
+            "a {level} title must be set at {want:.4}, saw {sizes:?}"
+        );
+    }
+    assert!(
+        sizes.iter().any(|s| (s - body).abs() < 0.01),
+        "the body must still be set at the body size, saw {sizes:?}"
+    );
+}
+
+/// A size marker takes no room on the line and is never drawn.
+///
+/// Its spec is digits, a semicolon and a dot -- every one of which the font has
+/// a real width for. Measured as text it pushes words onto later pages; drawn
+/// as text it sets the number in front of every heading. This is the fault the
+/// colour spec already had, and it cost whole pages.
+#[test]
+fn a_size_marker_costs_nothing_on_the_line_and_is_never_set() {
+    let doc = |body: String| {
+        format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\n\\end{{document}}\n")
+    };
+    // `\normalsize` is the body size, so the two documents differ only by the
+    // marker and must break identically.
+    let plain = texrs::run_pdf(&doc("alpha ".repeat(600))).expect("pdf");
+    let sized = texrs::run_pdf(&doc("{\\normalsize alpha} ".repeat(600))).expect("pdf");
+    assert_eq!(
+        count_pages(&sized),
+        count_pages(&plain),
+        "a size is not text and must not push words onto later pages"
+    );
+    for (_, text) in drawn(&sized) {
+        assert!(
+            !text.contains(char::from(59)) && !text.contains(texrs::typeset::SIZE_PUSH),
+            "the size spec reached the page as text: {text:?}"
+        );
+    }
+}
+
+/// A heading long enough to wrap is led at its own size on every line, not
+/// just the first.
+///
+/// The marker opens on the first line only; the lines after it are inside a
+/// size that opened before them. Reading the size off each line on its own
+/// would set the continuation at the body leading and run it into the line
+/// above -- which is why the leading is walked in order across the document.
+#[test]
+fn a_wrapped_heading_is_led_at_its_own_size_on_every_line() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\begin{document}\n\\section{A section heading long \
+         enough that it cannot possibly be set on one line of the measure and so \
+         must wrap onto a second}\nbody\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let big = 14.4 * 72.0 / 72.27;
+    let heads: Vec<(f64, f64)> = set_text(&pdf)
+        .iter()
+        .filter(|(size, _, _)| (size - big).abs() < 0.01)
+        .map(|(_, _, y)| (*y, 0.0))
+        .collect();
+    assert!(
+        heads.len() >= 2,
+        "the heading must wrap onto a second line, saw {} lines at {big:.3}",
+        heads.len()
+    );
+    // 18pt is `\Large`'s baselineskip in size10.clo; the body's is 12.
+    let step = (heads[0].0 - heads[1].0).abs();
+    let want = 18.0 * 72.0 / 72.27;
+    assert!(
+        (step - want).abs() < 0.5,
+        "the wrapped line must sit {want:.2} below the first, sits {step:.2}"
+    );
+}
