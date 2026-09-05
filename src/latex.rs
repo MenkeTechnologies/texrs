@@ -189,8 +189,9 @@ pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String 
 ///
 /// Which one a document gets is decided by the CLASS FILE rather than by a list
 /// of class names -- [`class_declares_chapters`] is the question, and it says
-/// how it is asked. A class `kpsewhich` cannot find is read as report's, which
-/// is what this layer carried before there was a choice to make.
+/// how it is asked. A class that is neither one of LaTeX's own nor findable by
+/// `kpsewhich` is read as report's, which is what this layer carried before
+/// there was a choice to make.
 fn numbering(src: &str) -> &'static str {
     const ARTICLE: &str = "\
 \\def\\thesection{\\arabic{section}}\n\
@@ -208,8 +209,10 @@ fn numbering(src: &str) -> &'static str {
 /// `report.cls` and `book.cls` say `\newcounter {chapter}` and `article.cls`
 /// does not, and neither do the classes built on article that a name-matching
 /// rule would have to be told about one at a time -- so the CLASS FILE is what
-/// is read, through the same scan `counters.rs` uses. `None` is a class
-/// `kpsewhich` cannot find, or a source with no `\documentclass` at all.
+/// is read, through the same scan `counters.rs` uses. A class file that cannot
+/// be read falls back to `base_class_declares_chapters`; `None` is a class
+/// outside that list which `kpsewhich` cannot find either, or a source with no
+/// `\documentclass` at all.
 ///
 /// Public because it answers a question outside this module as well.
 /// `typeset::unit_numbers` counts chapter, section and subsection and joins
@@ -221,9 +224,29 @@ pub fn class_declares_chapters(src: &str) -> Option<bool> {
     let class = load::requests(src)
         .into_iter()
         .find(|r| r.extension == "cls")?;
-    let path = load::resolve(&class.name, "cls")?;
-    let text = std::fs::read_to_string(path).ok()?;
-    Some(counters::declared(&text).iter().any(|c| c == "chapter"))
+    let read = load::resolve(&class.name, "cls").and_then(|p| std::fs::read_to_string(p).ok());
+    match read {
+        Some(text) => Some(counters::declared(&text).iter().any(|c| c == "chapter")),
+        None => base_class_declares_chapters(&class.name),
+    }
+}
+
+/// Whether one of the classes LaTeX itself ships declares a `chapter` counter,
+/// answered from the name because there is no file to read.
+///
+/// A machine with no TeX installation has no `kpsewhich` and so no class file
+/// at all, and reading every unfindable class as report's numbered an
+/// `article`'s first section `0.1` -- the reference resolved to a chapter the
+/// document has not got. These five names are LaTeX's own classes and their
+/// answer is a fact about LaTeX rather than about the installation, so it can
+/// be stated here; anything else is still `None`, because a class built on
+/// article is exactly what a name-matching rule cannot be told about.
+fn base_class_declares_chapters(name: &str) -> Option<bool> {
+    match name {
+        "report" | "book" => Some(true),
+        "article" | "proc" | "letter" | "slides" | "minimal" => Some(false),
+        _ => None,
+    }
 }
 
 /// Say, once each, what would not load.
@@ -267,4 +290,26 @@ pub fn looks_like_latex(src: &str) -> bool {
         "\\begin{document}",
     ];
     MARKERS.iter().any(|m| src.contains(m))
+}
+
+#[cfg(test)]
+mod tests {
+    /// The numbering an article gets where there is no class file to read.
+    ///
+    /// `\thesection` is `\arabic{section}` for a class with no chapter counter
+    /// and `\thechapter.\arabic{section}` for one that has it, so reading an
+    /// unfindable `article` as report's wrote `\newlabel{sec:a}{{0.1}{0}}` into
+    /// the `.aux` -- a reference to a chapter the document has not got, on
+    /// every machine with no TeX installation. `numbering` asks this question,
+    /// and it is the answer for a name and not for a file.
+    #[test]
+    fn latex_s_own_classes_are_known_without_a_class_file() {
+        use super::base_class_declares_chapters as declares;
+        assert_eq!(declares("article"), Some(false));
+        assert_eq!(declares("report"), Some(true));
+        assert_eq!(declares("book"), Some(true));
+        // A class built on article is what a name table cannot be told about,
+        // so it stays unanswered here and the file is the only way to know.
+        assert_eq!(declares("beamer"), None);
+    }
 }
