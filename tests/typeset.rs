@@ -1593,6 +1593,15 @@ fn a_character_the_face_lacks_is_drawn_rather_than_written_out_as_its_utf8() {
         !all.contains('\u{2192}') && !all.contains('\u{2014}'),
         "a character reached the content stream as itself: {runs:?}"
     );
+    // Everything above holds with no fonts at all -- it is about what reached
+    // the content stream -- and that is the regression this test was written
+    // for, so it runs on any machine. What follows names Computer Modern, which
+    // belongs to an INSTALLATION and not to this crate; the thirteen metric
+    // tests above stop here for the same reason, through `font_or_skip!`.
+    if font().is_none() {
+        eprintln!("skipping the face comparisons: no TeX installation, so no Computer Modern");
+        return;
+    }
     // The em dash IS in WinAnsi, at 0x97, and the document's own face has it --
     // so it stays there rather than being fetched from anywhere. That face is
     // Computer Modern, which a document naming no family is set in; CMR10 puts
