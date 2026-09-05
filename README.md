@@ -447,7 +447,20 @@ and three of the things a document controls survive the trip:
   mandatory argument ending in `.ttf`, `.otf`, `.ttc` or `.otc` — in any case —
   names the FILE, relative to `Path=`, which is what lualatex does with it. An
   explicit `UprightFont=`/`Extension=` still wins where the document writes
-  both. `pdffonts` is how you tell: a document that meant to ship its own face
+  both. What is NOT acted on is `Scale=`: it parses and does nothing, so a
+  family scaled to match the body face is set at full size. The same file
+  through both engines, differing only by `Scale=0.5`:
+
+  ```
+  lualatex   9.96264 pt  ->  4.98132 pt
+  texrs        10.0  pt  ->    10.0  pt   (byte-identical PDFs)
+  ```
+
+  `Scale=MatchLowercase` is the form that matters in practice, because it is
+  what a document writes to bring a display face down to its body face's
+  x-height — and a sans family whose x-height is larger than the body's is then
+  set too large here, in every heading that uses it.
+  `pdffonts` is how you tell: a document that meant to ship its own face
   and reports `Helvetica Type 1 no` got the fallback. The difference matters
   because `fc-match` ALWAYS answers — asked for a font nobody has installed it
   returns its default, so a book whose fonts travel with it was set in whatever
