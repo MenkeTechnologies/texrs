@@ -1546,6 +1546,27 @@ impl Lowerer {
             // The lengths are read as the document wrote them: `\textwidth` is
             // a measure the lowerer does not have, so it travels as a fraction
             // and is resolved in `to_pdf`. See `IMAGE`.
+            // pandoc wraps every figure it emits in this, and the prelude
+            // defines it as a pass-through -- but the DOCUMENT defines it too,
+            // and the document's definition wins. Pandoc's own is
+            //
+            //   \sbox\pandoc@box{#1} ... \usebox{\pandoc@box}
+            //
+            // which boxes the image, divides by its height with \Gscale@div
+            // and sets it through \scalebox. None of that is on this path, so
+            // the figure went into a box that was never set and every one of
+            // them vanished -- 51 in `inventions` alone, silently, since the
+            // caption is outside the wrapper and survived to look right.
+            //
+            // Caught here rather than left to expand, for the reason the arms
+            // around it are: what the wrapper MEANS is "set this, scaled down
+            // if it would overflow", and setting it unscaled is the faithful
+            // half of that. Scaling is a box operation and is not pretended at.
+            "pandocbounded" => {
+                let raw = self.eng.read_balanced_group(lx)?;
+                self.lower_into(&raw, out)?;
+                Ok(true)
+            }
             "includegraphics" => {
                 let options = self.optional_text(lx)?.unwrap_or_default();
                 let path = self.eng.read_group_text_pub(lx)?;

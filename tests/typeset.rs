@@ -3219,3 +3219,42 @@ fn an_image_contributes_no_words_and_leaves_no_marker() {
         "the image span reached the text: {text:?}"
     );
 }
+
+/// An image larger than the page is brought down to it, keeping its shape.
+///
+/// A diagram exported at 1600 pixels is 1600 big points wide -- three times
+/// the measure and taller than the sheet -- and placed at that size it takes a
+/// page to itself and overruns it. `inventions` came out at 333 pages against
+/// a 240 reference that way, having been 203 with the figures dropped
+/// entirely. Pandoc's `\pandocbounded`, which wraps every figure it emits,
+/// exists to scale exactly this case down, and says so in its own comment.
+#[test]
+fn an_image_too_big_for_the_page_is_brought_down_to_it() {
+    let png = a_png("oversize", 1600, 800);
+    let pdf = texrs::run_pdf(&figure_document(Some(&png), "")).expect("pdf");
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
+    let (w, h) = regex_lite_cm(&text).expect("the image is placed");
+    assert!(
+        w <= 469.75 + 0.5,
+        "the image must not be set wider than the measure, was {w:.2}"
+    );
+    assert!(
+        (w / h - 2.0).abs() < 0.05,
+        "scaling must keep the file's 2:1 shape, was {w:.2}x{h:.2}"
+    );
+    // The whole document still fits a sensible number of pages.
+    assert!(count_pages(&pdf) <= 3, "{} pages", count_pages(&pdf));
+}
+
+/// An image that already fits is left at its own size, never scaled up.
+#[test]
+fn an_image_that_fits_the_page_is_left_at_its_own_size() {
+    let png = a_png("small", 120, 60);
+    let pdf = texrs::run_pdf(&figure_document(Some(&png), "")).expect("pdf");
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
+    let (w, h) = regex_lite_cm(&text).expect("the image is placed");
+    assert!(
+        (w - 120.0).abs() < 0.5 && (h - 60.0).abs() < 0.5,
+        "a pixel is a big point and a small image is left alone, was {w:.2}x{h:.2}"
+    );
+}

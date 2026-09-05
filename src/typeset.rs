@@ -5080,7 +5080,25 @@ fn image_size(
             match (w, h) {
                 (Some(w), None) => Some((w, w * nh / nw)),
                 (None, Some(h)) => Some((h * nw / nh, h)),
-                _ => Some((nw, nh)),
+                // Neither stated: the file's own size, brought down to the
+                // page if it does not fit. A diagram exported at 1600 pixels
+                // is 1600 big points wide, three times the measure and taller
+                // than the sheet, and would take a page to itself and overrun
+                // it -- `inventions` came out at 333 pages against a 240
+                // reference that way, having been 203 with the figures gone.
+                //
+                // This is what pandoc's `\pandocbounded` wrapper is FOR: its
+                // own comment reads "scales image to fit in text
+                // height/width", and every figure in the corpus is inside
+                // one. Scaling DOWN only, never up, which is what that
+                // wrapper does -- it compares against 1 and leaves a small
+                // image alone.
+                _ => {
+                    let fit = (layout.measure / nw)
+                        .min(layout.height / nh)
+                        .clamp(f64::MIN_POSITIVE, 1.0);
+                    Some((nw * fit, nh * fit))
+                }
             }
         }
     }
@@ -5093,16 +5111,45 @@ fn image_size(
 /// absolute path is taken as it stands.
 fn image_file(path: &str, near: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
     let named = std::path::Path::new(path);
-    if named.is_absolute() && named.is_file() {
-        return Some(named.to_path_buf());
-    }
-    if let Some(dir) = near {
-        let beside = dir.join(named);
-        if beside.is_file() {
-            return Some(beside);
+    let found = |candidate: std::path::PathBuf| candidate.is_file().then_some(candidate);
+    let resolve = |candidate: &std::path::Path| -> Option<std::path::PathBuf> {
+        if candidate.is_absolute() {
+            return found(candidate.to_path_buf());
+        }
+        near.and_then(|dir| found(dir.join(candidate)))
+            .or_else(|| found(candidate.to_path_buf()))
+    };
+    // The file the document named, if this engine can read it. A PDF, an EPS
+    // or an SVG is a legal thing for `\includegraphics` to name and lualatex
+    // reads all three; `image::read` reads PNG and JPEG, and nothing here can
+    // rasterise the others.
+    let readable = |candidate: &std::path::Path| {
+        matches!(
+            candidate
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("png" | "jpg" | "jpeg")
+        )
+    };
+    if readable(named) {
+        if let Some(file) = resolve(named) {
+            return Some(file);
         }
     }
-    named.is_file().then(|| named.to_path_buf())
+    // Otherwise the same picture in a format that can be read, beside the one
+    // that cannot. graphicx resolves an extensionless name against a
+    // preference list of its own (`\DeclareGraphicsExtensions`), so trying the
+    // siblings of a name is its convention rather than an invention here --
+    // and a pipeline that emits a diagram as PDF generally emits the PNG
+    // next to it. Dropping the figure instead would lose every one of them.
+    for extension in ["png", "jpg", "jpeg"] {
+        if let Some(file) = resolve(&named.with_extension(extension)) {
+            return Some(file);
+        }
+    }
+    resolve(named)
 }
 
 /// An image line with its lengths resolved to points against the layout and

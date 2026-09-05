@@ -957,6 +957,12 @@ pub const CORPUS: &[Entry] = &[
         "\\pagecolor{NAME}\n\\definecolor{bgPrimary}{HTML}{05050A}\n\\pagecolor{bgPrimary}",
     ),
     (
+        "\\pandocbounded",
+        "LaTeX",
+        "Set the argument, scaled down if it would overflow the page. Pandoc wraps every figure it emits in this, and a pandoc document also DEFINES it — as a box, a `\\Gscale@div` against the box's height, and a `\\scalebox` — and the document's definition wins over the preamble's. None of that is on this path, so the figure went into a box that was never set and vanished silently, the caption being outside the wrapper and surviving to look right. It is read here instead of expanded, so the argument is set. The bounding is real: an image with no stated size is brought down to the measure and the text height, keeping its proportions, which is what the wrapper's own comment says it is for. Scaling up never happens, which is also what it does.",
+        "\\pandocbounded{CONTENT}\n\\pandocbounded{\\includegraphics[keepaspectratio]{diagrams/plot.pdf}}",
+    ),
+    (
         "\\includegraphics",
         "LaTeX",
         "Place an image, and reserve the room it takes. PNG and JPEG are read; the file is embedded once however many pages draw it, with its alpha carried as an `/SMask`. `width=` and `height=` are honoured, in any of TeX's units and as a multiple of `\\textwidth`, `\\linewidth` or `\\columnwidth`; give one and the other follows the file's own proportions, give neither and a pixel is a big point, which is what graphicx does with a file that states no resolution. The figure owns its own lines rather than running into the prose either side, and is centred by its own width inside a `center` region. A file that cannot be found or read costs the document its picture and not its remaining pages. Other keys — `scale`, `angle`, `keepaspectratio`, `trim`, `clip` — are consumed and not acted on, and no format beyond PNG and JPEG is read.",

@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">163</div>
+            <div class="stat-val">164</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -558,6 +558,8 @@ back at the margin</pre></td></tr>
             <tr><td><code>\pagecolor</code></td><td>Paint the page. Drawn under everything else, which is the only order that leaves the words on top of it -- and it has to be honoured, because a document that sets a dark page also sets light text to go on it, and doing one without the other leaves white on white.</td><td><pre>\pagecolor{NAME}
 \definecolor{bgPrimary}{HTML}{05050A}
 \pagecolor{bgPrimary}</pre></td></tr>
+            <tr><td><code>\pandocbounded</code></td><td>Set the argument, scaled down if it would overflow the page. Pandoc wraps every figure it emits in this, and a pandoc document also DEFINES it — as a box, a <code>\Gscale@div</code> against the box's height, and a <code>\scalebox</code> — and the document's definition wins over the preamble's. None of that is on this path, so the figure went into a box that was never set and vanished silently, the caption being outside the wrapper and surviving to look right. It is read here instead of expanded, so the argument is set. The bounding is real: an image with no stated size is brought down to the measure and the text height, keeping its proportions, which is what the wrapper's own comment says it is for. Scaling up never happens, which is also what it does.</td><td><pre>\pandocbounded{CONTENT}
+\pandocbounded{\includegraphics[keepaspectratio]{diagrams/plot.pdf}}</pre></td></tr>
             <tr><td><code>\includegraphics</code></td><td>Place an image, and reserve the room it takes. PNG and JPEG are read; the file is embedded once however many pages draw it, with its alpha carried as an <code>/SMask</code>. <code>width=</code> and <code>height=</code> are honoured, in any of TeX's units and as a multiple of <code>\textwidth</code>, <code>\linewidth</code> or <code>\columnwidth</code>; give one and the other follows the file's own proportions, give neither and a pixel is a big point, which is what graphicx does with a file that states no resolution. The figure owns its own lines rather than running into the prose either side, and is centred by its own width inside a <code>center</code> region. A file that cannot be found or read costs the document its picture and not its remaining pages. Other keys — <code>scale</code>, <code>angle</code>, <code>keepaspectratio</code>, <code>trim</code>, <code>clip</code> — are consumed and not acted on, and no format beyond PNG and JPEG is read.</td><td><pre>\includegraphics[OPTIONS]{FILE}
 \includegraphics[width=0.8\textwidth]{figures/plot.png}
 \includegraphics[width=5cm,height=3cm]{cover.jpg}</pre></td></tr>
