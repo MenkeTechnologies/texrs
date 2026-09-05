@@ -3425,3 +3425,65 @@ fn a_titleformat_naming_no_size_leaves_the_heading_at_the_body_size() {
         "the class default \\Large must not survive the format, saw {sizes:?}"
     );
 }
+
+/// fontspec's `Scale=` is applied, not merely parsed.
+///
+/// A document writes it so a display family sits beside its text family
+/// rather than looming over it. Unapplied, every heading in that family is
+/// set larger than the document asked for -- and it is measured at the wrong
+/// size too, so the lines it sits on are wrong as well as the glyphs.
+#[test]
+fn a_numeric_scale_sets_the_family_at_that_fraction() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\setmainfont{Times New Roman}\n\
+         \\setsansfont{Helvetica Neue}[Scale=0.5]\n\\begin{document}\n\
+         body text\n\n{\\sffamily scaled text}\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let sizes: Vec<f64> = set_text(&pdf).iter().map(|(s, _, _)| *s).collect();
+    assert!(
+        sizes.iter().any(|s| (s - 5.0).abs() < 0.01),
+        "Scale=0.5 must halve the 10pt body size, saw {sizes:?}"
+    );
+    assert!(
+        sizes.iter().any(|s| (s - 10.0).abs() < 0.01),
+        "and the main face must be unscaled, saw {sizes:?}"
+    );
+}
+
+/// `Scale=MatchLowercase` is the ratio of the main face's x-height to this
+/// one's, read from `OS/2`.
+#[test]
+fn match_lowercase_scales_a_family_to_the_main_faces_x_height() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = |scale: &str| {
+        format!(
+            "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+             \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+             \\setsansfont{{Orbitron}}[Path={dir}/,Extension=.ttf,UprightFont=Orbitron-VF{scale}]\n\
+             \\begin{{document}}\nbody\n\n{{\\sffamily\\Huge sans}}\n\\end{{document}}\n"
+        )
+    };
+    let plain = texrs::run_pdf(&doc("")).expect("pdf");
+    let matched = texrs::run_pdf(&doc(",Scale=MatchLowercase")).expect("pdf");
+    let biggest = |pdf: &[u8]| {
+        set_text(pdf)
+            .iter()
+            .map(|(s, _, _)| *s)
+            .fold(0.0f64, f64::max)
+    };
+    let unscaled = biggest(&plain);
+    let scaled = biggest(&matched);
+    assert!(
+        scaled < unscaled,
+        "Orbitron's x-height is larger than Arimo's, so it must scale DOWN: \
+         {scaled} against {unscaled}"
+    );
+    // Orbitron beside Arimo comes to 0.907, which is what lualatex sets `arb`'s
+    // chapter titles at: 24.88pt of \Huge reaching the page as 22.58.
+    let ratio = scaled / unscaled;
+    assert!(
+        (ratio - 0.907).abs() < 0.01,
+        "the x-height ratio is 0.907, computed {ratio:.4}"
+    );
+}

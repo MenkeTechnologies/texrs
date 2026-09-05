@@ -1956,6 +1956,12 @@ pub struct FontFile {
     pub bold: Option<String>,
     /// `ItalicFont=` -- the file `\emph` and `\textit` are set from.
     pub italic: Option<String>,
+    /// `Scale=` -- a number, or `MatchLowercase` to match the main face's
+    /// x-height. A display family set beside a text family at the same
+    /// nominal size looks wrong when their x-heights differ, and this is what
+    /// a document writes to fix that -- usually once, through
+    /// `\defaultfontfeatures`, for every family it loads.
+    pub scale: Option<String>,
     /// `Extension=` -- `.ttf`, including the dot.
     pub extension: Option<String>,
 }
@@ -1978,6 +1984,7 @@ impl FontFile {
                 "BoldFont" => out.bold = Some(value.to_string()),
                 "ItalicFont" => out.italic = Some(value.to_string()),
                 "Extension" => out.extension = Some(value.to_string()),
+                "Scale" => out.scale = Some(value.trim().to_string()),
                 _ => {}
             }
         }
@@ -2580,6 +2587,28 @@ pub fn to_pdf(
         })
         .unwrap_or_else(|| main.clone());
     let fonts = [main.clone(), mono, bold, italic, sans];
+    // What each family is scaled by. A document writes `Scale=MatchLowercase`
+    // so a display family sits beside its text family rather than looming over
+    // it, usually once through `\defaultfontfeatures` for everything it loads
+    // -- and unapplied, every heading in that family is set larger than the
+    // document asked for. The bold and italic faces are cuts of the MAIN
+    // family, so they take its scale rather than one of their own.
+    let main_path = families.main_file.resolve(near);
+    let scale_for = |file: &FontFile| {
+        face_scale(
+            file.scale.as_deref(),
+            file.resolve(near).as_deref(),
+            main_path.as_deref(),
+        )
+    };
+    let main_scale = scale_for(&families.main_file);
+    let scales = [
+        main_scale,
+        scale_for(&families.mono_file),
+        main_scale,
+        main_scale,
+        scale_for(&families.sans_file),
+    ];
 
     // Measure in the face that will be printed. An embedded font carries its
     // own widths; without one, cmr10's are the closest thing installed, and a
@@ -2633,6 +2662,9 @@ pub fn to_pdf(
     // wherever WinAnsi puts a character somewhere other than its codepoint, and
     // each table is indexed by the one it is stated in.
     let own_width = |codes: &str, source: &str, face: Face, size: f64| -> f64 {
+        // The family's own scale, so a face set at MatchLowercase is MEASURED
+        // at what it will be DRAWN at. The two must come from one number.
+        let size = size * scales[face.index()];
         if let Some(Some(w)) = embedded_widths.get(face.index()) {
             // PDF widths are 1/1000 em, and codes below 32 are not in the table.
             return codes
@@ -3043,7 +3075,15 @@ pub fn to_pdf(
                     // `Tf` operator, and a heading set at the body size is
                     // exactly what made every book short. The width above was
                     // measured at the same number, so the two agree.
-                    page.text_set(font, run.size, x, y, &piece.codes, set);
+                    // Scaled for the same reason the width above is: a family set
+                    // at MatchLowercase is drawn at the size it was measured at.
+                    // A borrowed or Symbol piece carries its own metrics and is
+                    // not the face the scale belongs to.
+                    let drawn_at = match piece.from {
+                        Source::Face => run.size * scales[face.index()],
+                        _ => run.size,
+                    };
+                    page.text_set(font, drawn_at, x, y, &piece.codes, set);
                     x += set.width;
                 }
             }
@@ -5133,6 +5173,50 @@ fn image_size(
                 }
             }
         }
+    }
+}
+
+/// A face's x-height as a fraction of its em, which is the unit
+/// `Scale=MatchLowercase` compares.
+fn relative_x_height(file: &std::path::Path) -> Option<f64> {
+    let sfnt = crate::sfnt::Sfnt::parse(std::fs::read(file).ok()?).ok()?;
+    let x = f64::from(sfnt.x_height()?);
+    let em = f64::from(sfnt.head().ok()?.units_per_em.max(1));
+    (x > 0.0).then_some(x / em)
+}
+
+/// What fontspec's `Scale=` asks a family to be set at.
+///
+/// A number is that number. `MatchLowercase` is the ratio of the MAIN face's
+/// x-height to this one's, which is what a document writes so a display family
+/// sits beside its text family without looming over it -- Orbitron's x-height
+/// is large against Arimo's, so an unscaled `\Huge` heading comes out visibly
+/// bigger than the document asked for.
+///
+/// 1.0 wherever the answer cannot be had: a `Scale=` naming something else, a
+/// file that cannot be read, or a face whose `OS/2` predates `sxHeight`.
+/// Scaling by a guess would be worse than not scaling.
+fn face_scale(
+    spec: Option<&str>,
+    file: Option<&std::path::Path>,
+    main: Option<&std::path::Path>,
+) -> f64 {
+    let Some(spec) = spec else { return 1.0 };
+    if let Ok(factor) = spec.parse::<f64>() {
+        return match factor > 0.0 {
+            true => factor,
+            false => 1.0,
+        };
+    }
+    if !spec.eq_ignore_ascii_case("MatchLowercase") {
+        return 1.0;
+    }
+    let (Some(file), Some(main)) = (file, main) else {
+        return 1.0;
+    };
+    match (relative_x_height(main), relative_x_height(file)) {
+        (Some(want), Some(have)) if have > 0.0 => want / have,
+        _ => 1.0,
     }
 }
 

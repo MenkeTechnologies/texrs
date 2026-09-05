@@ -229,6 +229,25 @@ impl Sfnt {
         })
     }
 
+    /// The height of a lowercase `x`, in font units.
+    ///
+    /// This is what fontspec's `Scale=MatchLowercase` matches: a display face
+    /// set beside a text face at the same nominal size looks wrong when their
+    /// x-heights differ, so the ratio of the two is the scale. Orbitron's is
+    /// large against Arimo's, which is why an unscaled `\Huge` heading is
+    /// visibly bigger than the document asked for.
+    ///
+    /// `OS/2` states it directly from version 2 on (`sxHeight`, offset 86).
+    /// Version 0 and 1 predate the field, and `None` there is honest: the
+    /// caller scales by 1 rather than by a guess.
+    pub fn x_height(&self) -> Option<i16> {
+        let os2 = self.table("OS/2")?;
+        if u16_at(os2, 0).ok()? < 2 {
+            return None;
+        }
+        i16_at(os2, 86).ok().filter(|h| *h > 0)
+    }
+
     /// How many glyphs the font holds.
     pub fn num_glyphs(&self) -> Result<u16, String> {
         let maxp = self.table("maxp").ok_or("the font has no maxp table")?;
