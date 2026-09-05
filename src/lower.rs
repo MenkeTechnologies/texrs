@@ -1537,6 +1537,23 @@ impl Lowerer {
                 self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
                 Ok(true)
             }
+            // A figure, caught here rather than left to the prelude's stub.
+            // Stubbed, the image was dropped AND reserved no room, so a
+            // document with a figure and one without produced byte-identical
+            // PDFs -- the caption survived alone and the page count was short
+            // by every figure in the book.
+            //
+            // The lengths are read as the document wrote them: `\textwidth` is
+            // a measure the lowerer does not have, so it travels as a fraction
+            // and is resolved in `to_pdf`. See `IMAGE`.
+            "includegraphics" => {
+                let options = self.optional_text(lx)?.unwrap_or_default();
+                let path = self.eng.read_group_text_pub(lx)?;
+                let (width, height) = crate::typeset::image_options(&options);
+                let mark = crate::typeset::image_mark(&width, &height, path.trim());
+                self.push_text(out, &mark);
+                Ok(true)
+            }
             // A chapter starts a page. `\chapter*{...}` is the unnumbered form
             // and `\chapter[short]{long}` carries a running-head title; both
             // begin a page, and the long title is what gets set.

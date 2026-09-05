@@ -3055,3 +3055,167 @@ fn a_wrapped_heading_is_led_at_its_own_size_on_every_line() {
         "the wrapped line must sit {want:.2} below the first, sits {step:.2}"
     );
 }
+
+/// A PNG of `w` by `h` solid pixels, written where the test can point a
+/// document at it. Built here rather than shelled out to Ghostscript, so the
+/// figure tests run on a machine that has none.
+fn a_png(name: &str, w: u32, h: u32) -> std::path::PathBuf {
+    use std::io::Write as _;
+    let chunk = |tag: &[u8], body: &[u8]| {
+        let mut out = (body.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(tag);
+        out.extend_from_slice(body);
+        let mut crc = 0xffff_ffffu32;
+        for byte in tag.iter().chain(body) {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & (0u32).wrapping_sub(crc & 1));
+            }
+        }
+        out.extend_from_slice(&(crc ^ 0xffff_ffff).to_be_bytes());
+        out
+    };
+    let mut head = w.to_be_bytes().to_vec();
+    head.extend_from_slice(&h.to_be_bytes());
+    // 8 bits a channel, truecolour, no interlace.
+    head.extend_from_slice(&[8, 2, 0, 0, 0]);
+    // Every row filtered as None, three bytes a pixel.
+    let mut raw = Vec::new();
+    for _ in 0..h {
+        raw.push(0u8);
+        raw.extend(std::iter::repeat_n([0x40u8, 0x80, 0xc0], w as usize).flatten());
+    }
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(&raw).expect("deflate the rows");
+    let pixels = z.finish().expect("deflate the rows");
+
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend(chunk(b"IHDR", &head));
+    png.extend(chunk(b"IDAT", &pixels));
+    png.extend(chunk(b"IEND", b""));
+
+    let path = std::env::temp_dir().join(format!("texrs-{name}-{w}x{h}.png"));
+    std::fs::write(&path, png).expect("write the png");
+    path
+}
+
+/// A document holding one figure, and the same document without it.
+fn figure_document(image: Option<&std::path::Path>, options: &str) -> String {
+    let figure = match image {
+        Some(path) => format!(
+            "\\begin{{figure}}\n\\includegraphics[{options}]{{{}}}\n\\caption{{A caption}}\n\\end{{figure}}\n",
+            path.display()
+        ),
+        None => "\\begin{figure}\n\\caption{A caption}\n\\end{figure}\n".to_string(),
+    };
+    format!(
+        "\\documentclass{{book}}\n\\begin{{document}}\nBefore the figure.\n\n{figure}\nAfter the figure.\n\\end{{document}}\n"
+    )
+}
+
+/// A figure takes room on the page, and its image reaches the file.
+///
+/// `\includegraphics` was a no-op that consumed its arguments and emitted
+/// nothing, so the image was dropped AND the space it would have occupied was
+/// never reserved -- a document with a figure and one without produced
+/// byte-identical PDFs, with the caption surviving alone to prove the figure
+/// had been seen. It cost a page count every figure in the book.
+#[test]
+fn a_figure_reserves_the_room_its_image_takes_and_carries_it() {
+    let png = a_png("reserves", 200, 100);
+    let with = texrs::run_pdf(&figure_document(Some(&png), "width=200bp")).expect("pdf");
+    let without = texrs::run_pdf(&figure_document(None, "")).expect("pdf");
+
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&with)).to_string();
+    assert!(
+        text.contains("/Subtype /Image") || text.contains("/Subtype/Image"),
+        "the image must reach the file as an XObject"
+    );
+    assert!(
+        with.len() > without.len(),
+        "a document with a figure must differ from one without: {} vs {}",
+        with.len(),
+        without.len()
+    );
+
+    // The text under the figure is pushed down by what the figure occupies.
+    // Measured on the prose after it, not on the lowest text on the page --
+    // the folio sits at the same foot in both and moves for nothing.
+    let after = |pdf: &[u8]| at(&placed(pdf), "After").1;
+    let drop = after(&without) - after(&with);
+    assert!(
+        drop > 50.0,
+        "the figure must push the text under it down the page, moved {drop:.1}"
+    );
+}
+
+/// A width stated as a fraction of the measure is that fraction of it, and the
+/// height follows the file's own proportions.
+///
+/// `width=0.5\textwidth` is what every book in the corpus writes. The lowerer
+/// has no measure to resolve it against, so it travels as a fraction and is
+/// resolved where the layout is known.
+#[test]
+fn a_width_given_as_a_fraction_of_the_measure_keeps_the_files_proportions() {
+    let png = a_png("fraction", 200, 100);
+    let pdf = texrs::run_pdf(&figure_document(Some(&png), "width=0.5\\textwidth")).expect("pdf");
+    let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
+    // `q w 0 0 h x y cm` is how an image is placed: the matrix carries its size.
+    let placed = regex_lite_cm(&text).expect("the image is placed with a cm matrix");
+    // Letter, one-inch margins by default in this class: the measure is 469.75.
+    let want = 469.75 / 2.0;
+    assert!(
+        (placed.0 - want).abs() < 1.0,
+        "half the measure is {want:.2}, the image was placed at {:.2}",
+        placed.0
+    );
+    // 200x100 asked for at half the measure keeps its 2:1 shape.
+    assert!(
+        (placed.0 / placed.1 - 2.0).abs() < 0.05,
+        "the file is 2:1 and was placed {:.2}x{:.2}",
+        placed.0,
+        placed.1
+    );
+}
+
+/// The width and height an image was drawn at, off its placement matrix.
+fn regex_lite_cm(content: &str) -> Option<(f64, f64)> {
+    let at = content.find(" cm")?;
+    let head = &content[..at];
+    let start = head.rfind('q')? + 1;
+    let mut numbers = head[start..].split_whitespace();
+    let w: f64 = numbers.next()?.parse().ok()?;
+    let _ = numbers.next()?;
+    let _ = numbers.next()?;
+    let h: f64 = numbers.next()?.parse().ok()?;
+    Some((w, h))
+}
+
+/// A figure whose file is not there costs the document its picture and not its
+/// remaining pages.
+#[test]
+fn a_figure_whose_file_is_missing_still_typesets() {
+    let missing = std::env::temp_dir().join("texrs-there-is-no-such-figure.png");
+    let _ = std::fs::remove_file(&missing);
+    let pdf = texrs::run_pdf(&figure_document(Some(&missing), "width=100bp")).expect("pdf");
+    let text = read_back(&pdf);
+    assert!(
+        text.contains("BT "),
+        "the document must still set its text with a figure it cannot find"
+    );
+    assert!(count_pages(&pdf) >= 1);
+}
+
+/// An image is drawn and has no words, so a reader asking for the text gets
+/// the prose and not the path.
+#[test]
+fn an_image_contributes_no_words_and_leaves_no_marker() {
+    let png = a_png("marker", 40, 40);
+    let text = texrs::run_text(&figure_document(Some(&png), "width=40bp")).expect("text");
+    assert!(text.contains("Before the figure."));
+    assert!(text.contains("After the figure."));
+    assert!(
+        !text.contains(".png") && !text.contains(texrs::typeset::IMAGE),
+        "the image span reached the text: {text:?}"
+    );
+}

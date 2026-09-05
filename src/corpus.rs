@@ -957,6 +957,12 @@ pub const CORPUS: &[Entry] = &[
         "\\pagecolor{NAME}\n\\definecolor{bgPrimary}{HTML}{05050A}\n\\pagecolor{bgPrimary}",
     ),
     (
+        "\\includegraphics",
+        "LaTeX",
+        "Place an image, and reserve the room it takes. PNG and JPEG are read; the file is embedded once however many pages draw it, with its alpha carried as an `/SMask`. `width=` and `height=` are honoured, in any of TeX's units and as a multiple of `\\textwidth`, `\\linewidth` or `\\columnwidth`; give one and the other follows the file's own proportions, give neither and a pixel is a big point, which is what graphicx does with a file that states no resolution. The figure owns its own lines rather than running into the prose either side, and is centred by its own width inside a `center` region. A file that cannot be found or read costs the document its picture and not its remaining pages. Other keys — `scale`, `angle`, `keepaspectratio`, `trim`, `clip` — are consumed and not acted on, and no format beyond PNG and JPEG is read.",
+        "\\includegraphics[OPTIONS]{FILE}\n\\includegraphics[width=0.8\\textwidth]{figures/plot.png}\n\\includegraphics[width=5cm,height=3cm]{cover.jpg}",
+    ),
+    (
         "\\setmainfont",
         "LaTeX",
         "Record the document's body typeface, and keep the name rather than dropping it. The PDF backend looks the family up on the system and EMBEDS it when it finds a TrueType-flavoured one, so the page is set in that face and measured with its own widths; failing that it falls back to one of the fourteen faces every reader has, chosen by metrics — Arimo, Liberation Sans and Arial all set at Helvetica's widths, and a name nothing is known about falls to Helvetica too. The DVI backend names `.tfm` fonts and cannot carry an OpenType one, so it still sets in Computer Modern. An optional bracket on either side of the family is consumed — and read: `Path=` and `UprightFont=` name a file the document ships, and `BoldFont=` and `ItalicFont=` name the files `\\bfseries` and `\\itshape` are set from. A mandatory argument ending in `.ttf`, `.otf`, `.ttc` or `.otc`, in any case, names that FILE rather than a family — fontspec's other spelling, resolved against `Path=` the same way — and an explicit `UprightFont=`/`Extension=` still wins where a document writes both.",

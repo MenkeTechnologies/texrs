@@ -1109,6 +1109,7 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut in_ref = false;
     let mut in_picture = false;
     let mut in_size_spec = false;
+    let mut in_image = false;
     text.chars().filter(move |&ch| match ch {
         // A cross-reference span -- the marker, its code, the label key, and
         // the marker again -- is a question the typesetter answers by
@@ -1130,6 +1131,13 @@ pub fn printing_chars(text: &str) -> impl Iterator<Item = char> + '_ {
             false
         }
         _ if in_picture => false,
+        // An image is a block DRAWN on the page, not a run of characters:
+        // neither the marker nor the base64 path between the two has a width.
+        IMAGE => {
+            in_image = !in_image;
+            false
+        }
+        _ if in_image => false,
         '\u{1}' => {
             in_spec = true;
             false
@@ -2685,6 +2693,12 @@ pub fn to_pdf(
     let lines: Vec<String> = break_lines_measured(&text, layout, &width_of)
         .into_iter()
         .map(|line| picture_remeasured(line, &picture_metrics))
+        // An image's lengths are resolved here for the same reason a picture's
+        // height is: `width=0.8\textwidth` is a fraction of a measure, and the
+        // natural size is a fact about a file, and the lowerer had neither.
+        // Resolved BEFORE the page is fitted, so the room the fitter keeps for
+        // a figure and the room the figure is given below are one number.
+        .map(|line| image_remeasured(line, layout, near))
         .collect();
 
     // The colour stack, seeded with what the document is set in where it has
@@ -2753,6 +2767,30 @@ pub fn to_pdf(
             // origin is chosen so the box's bottom left corner lands at the
             // margin: a picture's coordinates are its own and regularly
             // negative, and `bounds` is where they actually reach.
+            // An image is drawn where the fitter reserved room for it. Both
+            // lengths are already points -- `image_remeasured` resolved them
+            // against the layout and the file before anything was fitted.
+            if let Some((width, height, path)) = image_parts(line) {
+                let (Ok(w), Ok(h)) = (width.parse::<f64>(), height.parse::<f64>()) else {
+                    continue;
+                };
+                let left = match is_centred(line) {
+                    true => layout.margin + (layout.measure - w).max(0.0) / 2.0,
+                    false => layout.margin,
+                };
+                // A file readable when the room was reserved and unreadable
+                // now leaves the room reserved and nothing in it, which is
+                // what LaTeX does with a figure it cannot find.
+                if let Some(file) = image_file(&path, near) {
+                    if let Ok(image) = crate::image::open(&file) {
+                        page.image(image, left, y - h, w, h);
+                    }
+                }
+                // Exactly what `line_height` reserved, or the line after the
+                // figure is set somewhere the fitter did not put it.
+                y -= h + leading_on(line, &mut sizes.clone());
+                continue;
+            }
             if let Some((height, options, body)) = picture_parts(line) {
                 let picture = crate::tikz::parse_document(
                     &options,
@@ -3177,7 +3215,7 @@ fn break_lines_measured(
         // rather than set, so there is nothing in it to fill to a measure and
         // nothing a break may fall inside. `line_height` reads the room it
         // takes off the marker, and the drawing loop below draws it there.
-        if is_picture_para(para) {
+        if is_block_para(para) {
             // `\begin{center}\begin{tikzpicture}` is how most documents put a
             // drawing on a page, and the centring is a REGION that outlives the
             // paragraph its marker landed in -- so the flag `fill` is carrying
@@ -3596,6 +3634,13 @@ fn line_height(line: &str, leading: f64) -> f64 {
     // ordinary line. The number is read off the marker rather than measured
     // here, because measuring means parsing the picture and this is asked once
     // per line per page the fitter considers. See `PICTURE`.
+    // An image takes the room it was remeasured to, and a leading under it
+    // before the next baseline -- the same slot a picture gets.
+    if let Some((_, height, _)) = image_parts(line) {
+        if let Ok(height) = height.parse::<f64>() {
+            return height + leading;
+        }
+    }
     if let Some((height, _, _)) = picture_parts(line) {
         return height + leading;
     }
@@ -3618,7 +3663,7 @@ fn sets_text(para: &str) -> bool {
     // space between two paragraphs goes in either side of it: without this a
     // drawing was welded to the prose above it, since every character of a
     // picture span is an instruction and none of them prints.
-    is_picture_para(para) || printing_chars(para).any(|c| !c.is_whitespace())
+    is_block_para(para) || printing_chars(para).any(|c| !c.is_whitespace())
 }
 
 /// Split broken lines into pages: at a forced break, and otherwise wherever
@@ -4902,6 +4947,186 @@ pub const PAGE_BREAK: char = '\u{c}';
 /// registry below says what the rest are spent on.
 pub const PICTURE: char = '\u{18}';
 
+/// An `\includegraphics` marker, bracketing its own spec at both ends.
+///
+/// U+0018 is `PICTURE` and U+0019/U+001A are the size pair; this is the next
+/// free control character. See `MARKERS`.
+pub const IMAGE: char = '\u{1b}';
+
+/// One image span: the width and height asked for, and the file.
+///
+/// The two lengths are carried as the document WROTE them and resolved later:
+/// `width=0.8\textwidth` is a fraction of a measure the lowerer does not know,
+/// and the natural size is a fact about a file it has not opened. `f0.8` is
+/// that fraction, a bare number is absolute PDF points, and an empty field is
+/// "not asked for". `image_remeasured` turns all three into points once the
+/// layout and the file are both in hand -- the same two-step `PICTURE` uses,
+/// and for the same reason.
+pub fn image_span(width: &str, height: &str, path: &str) -> String {
+    format!("{IMAGE}{width};{height};{}{IMAGE}", base64(path.as_bytes()))
+}
+
+/// One `\includegraphics` length, as the spec [`image_span`] carries.
+///
+/// `\textwidth` and its two synonyms are the measure, which is a number this
+/// side of the engine does not have -- so a length stated in them is carried
+/// as the fraction it is and resolved where the layout is known. Every other
+/// length is a dimension and becomes points here.
+///
+/// A bare `\textwidth` is the whole measure: the factor LaTeX reads in front
+/// of a length defaults to one.
+pub fn image_length(value: &str) -> String {
+    let value = value.trim();
+    let relative = ["textwidth", "linewidth", "columnwidth", "textheight"]
+        .iter()
+        .find_map(|name| value.split_once(&format!("\\{name}")));
+    if let Some((factor, _)) = relative {
+        let factor = factor.trim();
+        let factor: f64 = match factor.is_empty() {
+            true => 1.0,
+            false => match factor.parse() {
+                Ok(f) => f,
+                Err(_) => return String::new(),
+            },
+        };
+        return format!("f{factor}");
+    }
+    match dimen_bp(value) {
+        Some(points) => points.to_string(),
+        None => String::new(),
+    }
+}
+
+/// The `width=` and `height=` an `\includegraphics` was given, as specs.
+///
+/// Every other key -- `scale`, `angle`, `keepaspectratio`, `trim`, `clip` --
+/// is dropped rather than guessed at. A figure at the wrong size is a figure
+/// a reader can still see; there is nothing to be gained by inventing what
+/// `angle=90` would have done to the page.
+pub fn image_options(options: &str) -> (String, String) {
+    let mut width = String::new();
+    let mut height = String::new();
+    for option in options.split(',') {
+        let Some((key, value)) = option.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "width" => width = image_length(value),
+            "height" => height = image_length(value),
+            _ => {}
+        }
+    }
+    (width, height)
+}
+
+/// An image as its own paragraph, the way a picture is one.
+pub fn image_mark(width: &str, height: &str, path: &str) -> String {
+    format!("\n\n{}\n\n", image_span(width, height, path))
+}
+
+/// What an image line says: its width spec, its height spec, and its file.
+///
+/// `None` for every line that is not one, which is nearly all of them.
+pub fn image_parts(line: &str) -> Option<(String, String, String)> {
+    let inner = line.trim();
+    // Centring is a prefix on the line rather than part of the span, so that
+    // everything reading one reads it the same way centred or not -- as for a
+    // picture, and `\begin{center}` around a figure is how most documents put
+    // an image on a page.
+    let inner = inner.strip_prefix(CENTRE).unwrap_or(inner);
+    let inner = inner.strip_prefix(IMAGE)?.strip_suffix(IMAGE)?;
+    let (width, rest) = inner.split_once(';')?;
+    let (height, path) = rest.split_once(';')?;
+    Some((
+        width.to_string(),
+        height.to_string(),
+        String::from_utf8(unbase64(path)?).ok()?,
+    ))
+}
+
+/// The room an image line takes, in PDF points, with its spec resolved.
+///
+/// A length is `f0.8` for a fraction of the measure, a bare number for points,
+/// or empty for "take it from the file". A file that cannot be read reserves
+/// nothing and draws nothing: a missing figure must cost a document its
+/// picture, never its remaining pages.
+///
+/// With one length given the other follows the file's own proportions, which
+/// is what `\includegraphics[width=\textwidth]` means and what every book in
+/// the corpus writes.
+fn image_size(
+    width: &str,
+    height: &str,
+    file: &std::path::Path,
+    layout: &Layout,
+) -> Option<(f64, f64)> {
+    let resolve = |spec: &str| -> Option<f64> {
+        match spec.strip_prefix('f') {
+            Some(fraction) => fraction.parse::<f64>().ok().map(|f| f * layout.measure),
+            None => spec.parse().ok(),
+        }
+    };
+    match (resolve(width), resolve(height)) {
+        (Some(w), Some(h)) => Some((w, h)),
+        (w, h) => {
+            // A pixel is a big point unless the document says otherwise, which
+            // is graphicx's rule for a file stating no resolution -- and
+            // neither PNG's `pHYs` nor JPEG's density is read here.
+            let image = crate::image::open(file).ok()?;
+            let (nw, nh) = (f64::from(image.width), f64::from(image.height));
+            if nw <= 0.0 || nh <= 0.0 {
+                return None;
+            }
+            match (w, h) {
+                (Some(w), None) => Some((w, w * nh / nw)),
+                (None, Some(h)) => Some((h * nw / nh, h)),
+                _ => Some((nw, nh)),
+            }
+        }
+    }
+}
+
+/// The file an `\includegraphics` names, beside the document that named it.
+///
+/// A book writes `\includegraphics{figures/plot.png}` and is built from
+/// another directory; the path is the document's, not the caller's. An
+/// absolute path is taken as it stands.
+fn image_file(path: &str, near: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let named = std::path::Path::new(path);
+    if named.is_absolute() && named.is_file() {
+        return Some(named.to_path_buf());
+    }
+    if let Some(dir) = near {
+        let beside = dir.join(named);
+        if beside.is_file() {
+            return Some(beside);
+        }
+    }
+    named.is_file().then(|| named.to_path_buf())
+}
+
+/// An image line with its lengths resolved to points against the layout and
+/// the file, so the fitter and the drawing pass read one number rather than
+/// each working it out. A file that cannot be read leaves the line empty: it
+/// reserves nothing and draws nothing.
+fn image_remeasured(line: String, layout: &Layout, near: Option<&std::path::Path>) -> String {
+    let Some((width, height, path)) = image_parts(&line) else {
+        return line;
+    };
+    let centred = is_centred(&line);
+    let Some(file) = image_file(&path, near) else {
+        return String::new();
+    };
+    let Some((w, h)) = image_size(&width, &height, &file, layout) else {
+        return String::new();
+    };
+    let span = image_span(&w.to_string(), &h.to_string(), &path);
+    match centred {
+        true => format!("{CENTRE}{span}"),
+        false => span,
+    }
+}
+
 /// The marker span for a picture, as its own paragraph.
 ///
 /// The paragraph breaks are part of it: a picture is a block on the page and
@@ -4953,6 +5178,16 @@ fn picture_parts(line: &str) -> Option<(f64, String, String)> {
 }
 
 /// Whether a paragraph of the text stream is a picture and nothing else.
+fn is_image_para(para: &str) -> bool {
+    image_parts(para).is_some()
+}
+
+/// Whether a paragraph is a picture, or an image, which the breaker and the
+/// fitter treat alike: one line, drawn rather than set.
+fn is_block_para(para: &str) -> bool {
+    is_picture_para(para) || is_image_para(para)
+}
+
 fn is_picture_para(para: &str) -> bool {
     picture_parts(para).is_some()
 }
@@ -5058,6 +5293,8 @@ pub const MARKERS: &[(char, bool)] = &[
     // code does; the walk toggles on it instead, as it does for `PICTURE`.
     (SIZE_PUSH, false),
     (SIZE_POP, false),
+    // The image span, bracketed by its own marker the way a picture is.
+    (IMAGE, false),
     (TABLE_CELL, false),
     (TABLE_ROW, false),
     // The list indent carries an argument too: the digit saying how deep the

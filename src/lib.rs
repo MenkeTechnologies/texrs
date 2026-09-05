@@ -132,6 +132,8 @@ fn without_marks(text: &str) -> String {
     // Whether the walk stands inside a picture span, which is the same shape:
     // one marker opens it and the next one closes it.
     let mut in_picture = false;
+    // And inside an image span, which is bracketed the same way.
+    let mut in_image = false;
     // Whether the walk stands inside a size marker's spec, which the marker
     // brackets at both ends the way a picture span is bracketed.
     let mut in_size_spec = false;
@@ -158,6 +160,12 @@ fn without_marks(text: &str) -> String {
             // characters of base64 where the diagram was.
             crate::typeset::PICTURE => in_picture = !in_picture,
             _ if in_picture => {}
+            // An image span: the marker, the room it takes, the file, and the
+            // marker again. A picture has no words and neither has this, so a
+            // reader asking for the document's TEXT gets nothing from it --
+            // and certainly not the base64 of a path where the figure was.
+            crate::typeset::IMAGE => in_image = !in_image,
+            _ if in_image => {}
             '\u{1}' => in_spec = true,
             '\u{2}' => in_spec = false,
             '\u{3}' => {}
