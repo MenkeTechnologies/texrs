@@ -2380,11 +2380,21 @@ impl Engine {
 
     // ── assignments ──────────────────────────────────────────────────────
 
+    /// The character one of the six code tables is being asked about.
+    ///
+    /// `tex.web` §434's `scan_char_num`: a number, read as a character. One
+    /// copy because six callers want it -- the two writers, `\the`, and §413's
+    /// reader in `scan_number`.
+    fn scan_char_code(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+        let ch = self.scan_number(lx, pending_only)?;
+        char::from_u32(ch as u32).ok_or_else(|| TexError("Invalid code".into()))
+    }
+
     fn do_catcode(&mut self, lx: &mut Lexer) -> R<()> {
-        let ch = self.scan_number(lx, false)?;
+        let c = self.scan_char_code(lx, false)?;
         self.skip_equals(lx)?;
         let val = self.scan_number(lx, false)?;
-        let (Some(c), Some(cat)) = (char::from_u32(ch as u32), cat_from_i64(val)) else {
+        let Some(cat) = cat_from_i64(val) else {
             return Err(TexError("Invalid code".into()));
         };
         self.set_cat(c, cat);
@@ -2394,12 +2404,9 @@ impl Engine {
     /// `\mathcode`\x=N` and its three siblings, which read and write exactly as
     /// `\catcode` does and are scoped by a group the same way.
     fn do_charcode(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<()> {
-        let ch = self.scan_number(lx, false)?;
+        let c = self.scan_char_code(lx, false)?;
         self.skip_equals(lx)?;
         let val = self.scan_number(lx, false)?;
-        let Some(c) = char::from_u32(ch as u32) else {
-            return Err(TexError("Invalid code".into()));
-        };
         self.save(Save::CharCode(table, c, self.charcodes.get(table, c)));
         self.charcodes
             .set(table, c, val)
@@ -2417,10 +2424,7 @@ impl Engine {
 
     /// What one of the tables says about a character, for `\the`.
     pub fn charcode_value(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<i64> {
-        let ch = self.scan_number(lx, false)?;
-        let Some(c) = char::from_u32(ch as u32) else {
-            return Err(TexError("Invalid code".into()));
-        };
+        let c = self.scan_char_code(lx, false)?;
         Ok(self.charcodes.get(table, c))
     }
 
@@ -2532,6 +2536,31 @@ impl Engine {
             if name.name() == "count" {
                 let reg = self.scan_number(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
+            }
+            // `tex.web` §413: each of the six code tables is an INTERNAL
+            // INTEGER, so `\catcode`\@' stands wherever a number is scanned and
+            // not only on the left of an assignment. It is the whole of what
+            // stopped `ltxcmds.sty' -- and so `bookmark', `kvoptions' and every
+            // other package that requires it -- which opens
+            //
+            //     \begingroup\catcode61\catcode48\catcode32=10\relax
+            //
+            // `=' is given whatever catcode `0' has BEFORE the space is made a
+            // space, so the line reads correctly under any catcode regime the
+            // caller left behind. Without this the second \catcode was a
+            // command where a number was wanted: `! Missing number, found
+            // \catcode.'
+            //
+            // The table is the engine's own -- catcodes are frontend state
+            // here, which is why `compile_time_catcode' exists -- so the answer
+            // is known while lowering, exactly as a `\chardef' constant is.
+            if name.name() == "catcode" {
+                let c = self.scan_char_code(lx, pending_only)?;
+                return Ok(sign * self.cats.get(c) as i64);
+            }
+            if let Some(table) = crate::charcodes::Table::from_name(name.name()) {
+                let c = self.scan_char_code(lx, pending_only)?;
+                return Ok(sign * self.charcodes.get(table, c));
             }
             // A `\chardef` constant IS a number here, and a `\countdef` name is
             // the register it stands for -- which is the whole reason plain.tex

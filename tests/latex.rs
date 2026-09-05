@@ -482,6 +482,32 @@ fn the_newcount_family_gives_each_name_a_register_of_its_own() {
     assert_eq!(out(src), "[8][9][3.0pt][4.0pt]");
 }
 
+/// The four display glue parameters every standard class assigns to.
+///
+/// `tex.web` §247 makes `\abovedisplayskip` and its three neighbours GLUE
+/// PARAMETERS of the engine, so `latex.ltx` never declares them and every size
+/// option of every standard class writes to them as though they were always
+/// there -- `size10.clo`'s `\normalsize` opens with all four. Undeclared, the
+/// simplest possible document answered `package article needs
+/// \abovedisplayskip` on stderr on every run. `kernel.tex` declares them as the
+/// glue REGISTERS this engine really has, which has to mean each one is
+/// assignable, readable, and its own rather than shared with its neighbour.
+#[test]
+fn the_display_glue_parameters_are_registers_of_their_own() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\abovedisplayskip=10pt plus 2pt minus 5pt\n\
+               \\belowdisplayskip=11pt\n\
+               \\abovedisplayshortskip=0pt plus 3pt\n\
+               \\belowdisplayshortskip=6pt\n\
+               \\message{[\\the\\abovedisplayskip][\\the\\belowdisplayskip]}\n\
+               \\message{[\\the\\abovedisplayshortskip][\\the\\belowdisplayshortskip]}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(
+        out(src),
+        "[10.0pt plus 2.0pt minus 5.0pt][11.0pt] [0.0pt plus 3.0pt][6.0pt]"
+    );
+}
+
 /// `\newtoks` reaches the token registers, and `\newbox` is a number the way
 /// plain TeX's `\chardef` allocator makes it.
 #[test]

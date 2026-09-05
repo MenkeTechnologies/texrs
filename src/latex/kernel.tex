@@ -1212,6 +1212,26 @@
 \newtoks\everypar
 \newtoks\everymath
 \newtoks\everydisplay
+% tex.web §247 makes these four GLUE parameters of the engine, so latex.ltx
+% never declares them and every class assigns to them as though they were
+% always there -- size10.clo's \normalsize opens
+%
+%     \abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@
+%
+% and every size option of every standard class writes the same four lines.
+% texrs has no glue parameters and it does have glue registers, so the four are
+% declared here exactly as \everypar above is: the store the engine really has,
+% under the name every file assumes. INITEX starts them at zero and the class
+% file is what sets them, so no value is written here either.
+%
+% Undeclared, they were the FIRST thing between article.cls and a load:
+% `texrs: package article needs \abovedisplayskip' on the simplest document
+% there is. What is left after them is BUGS.md's `<factor><internal unit>' --
+% the `10\p@' above -- which is a scanner gap and not a missing name.
+\newskip\abovedisplayskip
+\newskip\belowdisplayskip
+\newskip\abovedisplayshortskip
+\newskip\belowdisplayshortskip
 % latex.ltx:8790-8800. The scratch registers every package helps itself to.
 \newcount\@tempcnta
 \newcount\@tempcntb

@@ -1,0 +1,24 @@
+% tex.web §413: each of the six code tables is an INTERNAL INTEGER, so
+% `\catcode`\A' stands wherever a number is scanned and not only on the left of
+% an assignment. The \begingroup line below is ltxcmds.sty:45 verbatim -- `='
+% is given whatever catcode `0' has, and only THEN is the space made a space,
+% so the file reads correctly under whatever catcode regime called it. Every
+% package that requires ltxcmds opens with it.
+% \the\catcode is deliberately not asked for: it is not carried yet, and a
+% count register reads the same table through the same door.
+\catcode`\{=1 \catcode`\}=2
+\begingroup\catcode61\catcode48\catcode32=10\relax%
+\count1=\catcode61 \count2=\catcode32 %
+\message{[\the\count1][\the\count2]}%
+\endgroup
+% A table that is NOT at its default, so a reader that answered with the
+% default would still be wrong here.
+\catcode`\Q=13
+\count3=\catcode`\Q
+\catcode`\Q=11
+\count4=\catcode`\Q \count5=\catcode`\A
+\message{[\the\count3][\the\count4][\the\count5]}
+\count6=\lccode`\A \count7=\uccode`\a \count8=\sfcode`\A \count9=\delcode`.
+\message{[\the\count6][\the\count7][\the\count8][\the\count9]}
+\ifnum\catcode`\A=11 \message{[letter]}\else\message{[other]}\fi
+\end
