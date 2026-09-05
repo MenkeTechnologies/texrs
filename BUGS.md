@@ -246,6 +246,18 @@ So an unexplained delta is a reason to find a sharper instrument, not a verdict.
 Judged on page count alone, that fix reads as a regression and the correct move
 looks like reverting it.
 
+A sharp instrument can still be calibrated from the wrong place. The scale
+factor was pinned by a test asserting 0.907 within 0.01, and it passed —
+because 0.907 is what lualatex's rounded output for one book DIVIDES to, while
+the code computes 0.9109 from Arimo's `sxHeight` over Orbitron's, 1082/2048 over
+580/1000. A third of a percent apart, and the tolerance was wider than the gap,
+so the test would have kept passing while the arithmetic drifted. Pinned at
+0.9109 within 0.001 now.
+
+The expected value has to come from what the implementation should compute, not
+from what the reference happened to print. A test anchored on a reference's
+rounded emission is measuring the reference.
+
 - **`package article is not loadable: Illegal unit of measure (pt inserted)`**
   on stderr, for a document as simple as `\documentclass{article}` with one word
   in it. The output is correct; the line is not suppressible and it is the first

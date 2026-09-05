@@ -455,11 +455,13 @@ and three of the things a document controls survive the trip:
   ```
   Scale=0.5                       10 pt -> 5 pt
   \setsansfont{Orbitron}          {\sffamily\Huge} = 24.787 pt
-  the same with MatchLowercase    22.578 pt, a factor of 0.911
+  the same with MatchLowercase    22.578 pt, a factor of 0.9109
   ```
 
-  A face whose `sxHeight` is absent — the versions of OS/2 predating the field —
-  is left unscaled rather than scaled by a guess. Bold and italic are cuts of
+  0.9109 is Arimo's `sxHeight` over Orbitron's, 1082/2048 over 580/1000 — the
+  ratio the code computes, not the 0.9076 that lualatex's own rounded output
+  divides to. A face whose `sxHeight` is absent — the versions of OS/2 predating
+  the field — is left unscaled rather than scaled by a guess. Bold and italic are cuts of
   the main family and take its scale.
   `pdffonts` is how you tell: a document that meant to ship its own face
   and reports `Helvetica Type 1 no` got the fallback. The difference matters
