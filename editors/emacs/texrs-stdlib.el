@@ -162,6 +162,7 @@
     "\\color"
     "\\textcolor"
     "\\pagecolor"
+    "\\includegraphics"
     "\\setmainfont"
     "\\setromanfont"
     "\\setsansfont"
@@ -328,6 +329,7 @@
     (puthash "\\color" "\\color  —  Switch the colour of everything that follows, until the group holding it closes -- a switch rather than a wrapper, which is why `{\\color{red}...}` colours only what is inside the braces. [LaTeX]" table)
     (puthash "\\textcolor" "\\textcolor  —  Colour exactly one argument: `\\textcolor{neonCyan}{words}`. [LaTeX]" table)
     (puthash "\\pagecolor" "\\pagecolor  —  Paint the page. [LaTeX]" table)
+    (puthash "\\includegraphics" "\\includegraphics  —  Place an image, and reserve the room it takes. [LaTeX]" table)
     (puthash "\\setmainfont" "\\setmainfont  —  Record the document's body typeface, and keep the name rather than dropping it. [LaTeX]" table)
     (puthash "\\setromanfont" "\\setromanfont  —  The older fontspec spelling of `\\setmainfont`, and the same thing here: it fills the same slot, so whichever of the two the preamble writes last is the family the PDF backend embeds or maps. [LaTeX]" table)
     (puthash "\\setsansfont" "\\setsansfont  —  Record the document's sans-serif family. [LaTeX]" table)
