@@ -2909,11 +2909,11 @@ fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
         (flush - 72.2).abs() < 0.01,
         "flush left at the margin: {flush}"
     );
-    // A 3cm picture on the default 469.75pt measure: half the room left over,
+    // A 3cm picture on plain.tex's own measure: half the room left over,
     // in from the margin, plus the bounding box's own 0.2pt of half line
     // width at TikZ's default `line width=0.4pt`.
     let width = 3.0 * 72.27 / 2.54 + 0.4;
-    let expected = 72.0 + (469.75 - width) / 2.0 + 0.2;
+    let expected = 72.0 + (texrs::typeset::Layout::default().measure - width) / 2.0 + 0.2;
     assert!(
         (centred - expected).abs() < 0.5,
         "centred on the measure: got {centred} against {expected}"
@@ -3162,8 +3162,10 @@ fn a_width_given_as_a_fraction_of_the_measure_keeps_the_files_proportions() {
     let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
     // `q w 0 0 h x y cm` is how an image is placed: the matrix carries its size.
     let placed = regex_lite_cm(&text).expect("the image is placed with a cm matrix");
-    // Letter, one-inch margins by default in this class: the measure is 469.75.
-    let want = 469.75 / 2.0;
+    // The measure is plain.tex's own \hsize, which is what `Layout::default`
+    // states -- NOT the page width less two margins, which would be 468. Read
+    // from the layout rather than copied, so the two cannot drift apart.
+    let want = texrs::typeset::Layout::default().measure / 2.0;
     assert!(
         (placed.0 - want).abs() < 1.0,
         "half the measure is {want:.2}, the image was placed at {:.2}",
@@ -3235,7 +3237,7 @@ fn an_image_too_big_for_the_page_is_brought_down_to_it() {
     let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
     let (w, h) = regex_lite_cm(&text).expect("the image is placed");
     assert!(
-        w <= 469.75 + 0.5,
+        w <= texrs::typeset::Layout::default().measure + 0.5,
         "the image must not be set wider than the measure, was {w:.2}"
     );
     assert!(
