@@ -210,19 +210,24 @@ SOURCE bytes and leaves the font to map them. `pdftotext -enc UTF-8` goes
 through the ToUnicode table and shows what a reader gets. The content stream is
 not the rendering.
 
-- **`\titleformat`'s format argument is discarded.** The `titlesec` stubs in
-  `src/latex/prelude.tex:229-234` consume their arguments and produce nothing,
-  so a heading styled through them is set at the class's default for its level
-  in the class's default face. `{\Huge …}` written directly gives 24.79pt;
-  the same `\Huge` inside a `\titleformat{\section}{\sffamily\Huge}{}{0pt}{}`
-  gives 14.35pt, which is `article`'s own `\section` size, with no sans face
-  embedded at all.
+- **A face is one slot; NFSS has three axes.** LaTeX carries family, series and
+  shape independently and combines them; texrs carries one face, so the last
+  switch replaces the previous one instead of joining it:
 
-  Not to be confused with the family gap that used to sit beside it:
-  `\setsansfont` is honoured now and `\sffamily` reaches it in running text.
-  A document whose every `\sffamily` is inside a `\titleformat` argument
-  therefore gained nothing when that landed — two gaps stacked, and fixing one
-  leaves the other.
+  ```
+  {\sffamily\Huge X}            Orbitron-VF
+  {\sffamily\bfseries\Huge X}   Helvetica-Bold
+  ```
+
+  The size and the colour arrive either way; the family is what is lost. Note
+  also that `\bfseries` alone gives base-14 Helvetica-Bold rather than a bold
+  cut of the main face.
+
+  This sits UNDER `\titleformat`, which was itself a gap until it began applying
+  its format: `\Huge` through `\titleformat{\section}` now gives 24.79pt and
+  embeds the sans face. A format written the ordinary way,
+  `{\sffamily\bfseries\Huge}`, still arrives bold and not sans, so a document
+  styling its headings that way sees the size and not the family.
 
 - **fontspec's `Scale=` is parsed and not acted on.** `Scale=0.5` on a
   `\setmainfont` produces a byte-identical PDF and the same `Tf` size; lualatex
