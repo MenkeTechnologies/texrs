@@ -527,6 +527,22 @@ and three of the things a document controls survive the trip:
   the line where it stands and this gives it lines of its own. `--dvi` and
   `--text` draw no picture at all: DVI would need a `\special` every driver
   reads differently, and a picture has no words.
+- **`\titleformat` discards the format it is given.** `titlesec` is a prelude
+  stub (`src/latex/prelude.tex:229-234`): the arguments are consumed and thrown
+  away. So a document that styles its headings through it gets the class's
+  default for that level, not what it asked for — and neither half of the ask
+  arrives. Measured, on a `\titleformat{\section}{\sffamily\Huge}{}{0pt}{}`:
+
+  ```
+  {\Huge …} written directly      24.79 pt, and the sans face if asked
+  the same through \titleformat   14.35 pt, CMR10 only — no Orbitron embedded
+  ```
+
+  14.35 is `article`'s own `\section` size. Worth separating from the family
+  gap it is easy to confuse with: `\setsansfont` IS honoured and `\sffamily`
+  DOES reach it — a document that writes `{\sffamily …}` in running text gets
+  `MICUKK+Orbitron-VF` embedded. It is only headings routed through `titlesec`
+  that see neither the face nor the size.
 - **Ligatures and type sizes were here and are not.** Both were listed as
   limitations in this section until v0.6.0. `\section`, `{\huge …}` and
   `{\Large …}` in one file now emit three distinct `Tf` sizes rather than one,

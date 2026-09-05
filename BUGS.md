@@ -210,6 +210,20 @@ SOURCE bytes and leaves the font to map them. `pdftotext -enc UTF-8` goes
 through the ToUnicode table and shows what a reader gets. The content stream is
 not the rendering.
 
+- **`\titleformat`'s format argument is discarded.** The `titlesec` stubs in
+  `src/latex/prelude.tex:229-234` consume their arguments and produce nothing,
+  so a heading styled through them is set at the class's default for its level
+  in the class's default face. `{\Huge …}` written directly gives 24.79pt;
+  the same `\Huge` inside a `\titleformat{\section}{\sffamily\Huge}{}{0pt}{}`
+  gives 14.35pt, which is `article`'s own `\section` size, with no sans face
+  embedded at all.
+
+  Not to be confused with the family gap that used to sit beside it:
+  `\setsansfont` is honoured now and `\sffamily` reaches it in running text.
+  A document whose every `\sffamily` is inside a `\titleformat` argument
+  therefore gained nothing when that landed — two gaps stacked, and fixing one
+  leaves the other.
+
 - **fontspec's `Scale=` is parsed and not acted on.** `Scale=0.5` on a
   `\setmainfont` produces a byte-identical PDF and the same `Tf` size; lualatex
   halves it (9.96264 -> 4.98132). Four lines reproduce it, no corpus needed.
