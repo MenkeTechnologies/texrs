@@ -3375,3 +3375,53 @@ fn a_sans_family_with_no_file_falls_back_to_a_sans_and_not_to_the_body_face() {
         "a sans request must not resolve to the body face, got {faces:?}"
     );
 }
+
+/// A `\titleformat` reaches the heading it names.
+///
+/// titlesec is how every book in the corpus styles its headings, and the
+/// prelude consumed the format argument and discarded it -- so a chapter title
+/// got the class default face at the class default size, two things wrong at
+/// once and neither visible as an error.
+#[test]
+fn a_titleformat_sets_the_heading_it_names() {
+    let big = 24.88 * 72.0 / 72.27;
+    let larger = 17.28 * 72.0 / 72.27;
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\
+         \\titleformat{\\chapter}[hang]{\\Huge}{}{0pt}{}\n\
+         \\titleformat*{\\section}{\\LARGE}\n\\begin{document}\n\
+         \\chapter{Chapter}\nbody\n\\section{Section}\nmore body\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let sizes: Vec<f64> = set_text(&pdf).iter().map(|(s, _, _)| *s).collect();
+    assert!(
+        sizes.iter().any(|s| (s - big).abs() < 0.01),
+        "the chapter takes the \\Huge its format names, saw {sizes:?}"
+    );
+    assert!(
+        sizes.iter().any(|s| (s - larger).abs() < 0.01),
+        "the section takes the \\LARGE its starred format names, saw {sizes:?}"
+    );
+    assert!(
+        sizes.iter().any(|s| (s - 10.0).abs() < 0.01),
+        "and the body is still the body size, saw {sizes:?}"
+    );
+}
+
+/// A format that names no size leaves the heading at the body size, which is
+/// what titlesec does: the format REPLACES the class default rather than
+/// adding to it.
+#[test]
+fn a_titleformat_naming_no_size_leaves_the_heading_at_the_body_size() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\titleformat*{\\section}{\\bfseries}\n\
+         \\begin{document}\n\\section{Section}\nbody\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let big = 14.4 * 72.0 / 72.27;
+    let sizes: Vec<f64> = set_text(&pdf).iter().map(|(s, _, _)| *s).collect();
+    assert!(
+        !sizes.iter().any(|s| (s - big).abs() < 0.01),
+        "the class default \\Large must not survive the format, saw {sizes:?}"
+    );
+}

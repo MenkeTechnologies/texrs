@@ -156,6 +156,15 @@ pub struct Lowerer {
     /// `\\` mean -- a cell boundary and a row end inside a table, a space and
     /// a line break outside one.
     table_depth: usize,
+    /// What `\titleformat` said each sectioning command is set with.
+    ///
+    /// titlesec is how every book in the corpus styles its headings, and the
+    /// prelude consumed the format argument and discarded it -- so a document
+    /// that asked for `{\sffamily\bfseries\Huge}` got the class default face
+    /// and the class default size. The tokens are kept whole and lowered with
+    /// the title, so every declaration in them reaches the page through the
+    /// arms that already read one.
+    title_formats: std::collections::HashMap<String, Vec<Token>>,
     /// The face markers open in the text run, innermost last, each recording
     /// whether it is the mono face.
     ///
@@ -242,6 +251,7 @@ impl Lowerer {
             depth: 0,
             lists: Vec::new(),
             table_depth: 0,
+            title_formats: std::collections::HashMap::new(),
             faces: Vec::new(),
             listing_depth: 0,
             lig: None,
@@ -1558,6 +1568,39 @@ impl Lowerer {
                 self.push_text(out, &crate::typeset::PAGE_BREAK.to_string());
                 Ok(true)
             }
+            // titlesec, caught here rather than left to the prelude's stub,
+            // which consumed the format argument and discarded it.
+            //
+            // Every book in the corpus styles its headings this way --
+            // `\titleformat{\chapter}[hang]{\sffamily\bfseries\Huge\color{..}}`
+            // -- and with the format thrown away a chapter title got the class
+            // default face at the class default size. Both are wrong at once
+            // and neither is visible as an error.
+            //
+            // The two spellings differ in shape: the starred one is
+            // `\titleformat*{\cmd}{fmt}`, and the plain one carries an
+            // OPTIONAL argument after its first mandatory one --
+            // `\titleformat{\cmd}[shape]{fmt}{label}{sep}{before}`. The format
+            // is the one argument worth anything here; the label, separator
+            // and before-code are titlesec's own layout and are dropped as
+            // they were.
+            "titleformat" => {
+                let starred = self.eng.skip_optional_star(lx);
+                let command = self.eng.read_group_text_pub(lx)?;
+                if !starred {
+                    let _ = self.eng.read_optional_bracket(lx)?;
+                }
+                let format = self.eng.read_balanced_group(lx)?;
+                if !starred {
+                    for _ in 0..3 {
+                        let _ = self.eng.read_balanced_group(lx)?;
+                    }
+                }
+                // `{\section}` arrives with its backslash on.
+                let name = command.trim().trim_start_matches('\\').to_string();
+                self.title_formats.insert(name, format);
+                Ok(true)
+            }
             // A figure, caught here rather than left to the prelude's stub.
             // Stubbed, the image was dropped AND reserved no room, so a
             // document with a figure and one without produced byte-identical
@@ -1750,7 +1793,21 @@ impl Lowerer {
             2 => "large",
             _ => "normalsize",
         };
-        let sized = crate::typeset::size_step(step, self.layout.size);
+        // What `\titleformat` said this level is set with, if the document
+        // said anything. It REPLACES the class default rather than adding to
+        // it, which is what titlesec does: a format naming no size leaves the
+        // heading at the body size, exactly as it would under LaTeX.
+        let named = match level {
+            0 => "chapter",
+            1 => "section",
+            2 => "subsection",
+            _ => "subsubsection",
+        };
+        let format = self.title_formats.get(named).cloned();
+        let sized = match format.is_some() {
+            true => None,
+            false => crate::typeset::size_step(step, self.layout.size),
+        };
         if let Some(size) = sized {
             self.push_text(
                 out,
@@ -1764,7 +1821,18 @@ impl Lowerer {
             );
         }
         let raw = self.eng.read_balanced_group(lx)?;
-        self.lower_into(&raw, out)?;
+        // The format and the title go down in ONE call, so the group that
+        // `lower_into` opens closes the format's declarations after the title
+        // rather than before it. Lowered separately, a `\sffamily` in the
+        // format would end at the end of the format.
+        match format {
+            Some(format) => {
+                let mut both = format;
+                both.extend_from_slice(&raw);
+                self.lower_into(&both, out)?;
+            }
+            None => self.lower_into(&raw, out)?,
+        }
         if sized.is_some() {
             self.push_text(out, &crate::typeset::SIZE_POP.to_string());
         }

@@ -957,6 +957,12 @@ pub const CORPUS: &[Entry] = &[
         "\\pagecolor{NAME}\n\\definecolor{bgPrimary}{HTML}{05050A}\n\\pagecolor{bgPrimary}",
     ),
     (
+        "\\titleformat",
+        "LaTeX",
+        "titlesec's heading format, applied rather than discarded. Both spellings are read — the starred `\\titleformat*{\\section}{FORMAT}` and the plain `\\titleformat{\\chapter}[SHAPE]{FORMAT}{LABEL}{SEP}{BEFORE}`, whose optional argument follows a mandatory one. The FORMAT is lowered with the title, so the sizes, colours and family in it reach the heading and end with it; it REPLACES the class default for that level, which is what titlesec does, so a format naming no size leaves the heading at the body size. The shape, label, separator and before-code are titlesec's own layout and are still dropped. NOTE what a format combining two font switches does: a face here is one slot where LaTeX's NFSS has independent family, series and shape axes, so `{\\sffamily\\bfseries\\Huge}` reaches the page BOLD and not sans — the second switch replaces the first rather than joining it. The size and the colour still arrive.",
+        "\\titleformat{COMMAND}[SHAPE]{FORMAT}{LABEL}{SEP}{BEFORE}\n\\titleformat{\\chapter}[hang]{\\sffamily\\bfseries\\Huge}{}{0pt}{}\n\\titleformat*{\\section}{\\sffamily\\Large}",
+    ),
+    (
         "\\pandocbounded",
         "LaTeX",
         "Set the argument, scaled down if it would overflow the page. Pandoc wraps every figure it emits in this, and a pandoc document also DEFINES it — as a box, a `\\Gscale@div` against the box's height, and a `\\scalebox` — and the document's definition wins over the preamble's. None of that is on this path, so the figure went into a box that was never set and vanished silently, the caption being outside the wrapper and surviving to look right. It is read here instead of expanded, so the argument is set. The bounding is real: an image with no stated size is brought down to the measure and the text height, keeping its proportions, which is what the wrapper's own comment says it is for. Scaling up never happens, which is also what it does.",

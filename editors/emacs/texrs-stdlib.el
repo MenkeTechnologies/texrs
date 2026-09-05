@@ -162,6 +162,7 @@
     "\\color"
     "\\textcolor"
     "\\pagecolor"
+    "\\titleformat"
     "\\pandocbounded"
     "\\includegraphics"
     "\\setmainfont"
@@ -330,6 +331,7 @@
     (puthash "\\color" "\\color  —  Switch the colour of everything that follows, until the group holding it closes -- a switch rather than a wrapper, which is why `{\\color{red}...}` colours only what is inside the braces. [LaTeX]" table)
     (puthash "\\textcolor" "\\textcolor  —  Colour exactly one argument: `\\textcolor{neonCyan}{words}`. [LaTeX]" table)
     (puthash "\\pagecolor" "\\pagecolor  —  Paint the page. [LaTeX]" table)
+    (puthash "\\titleformat" "\\titleformat  —  titlesec's heading format, applied rather than discarded. [LaTeX]" table)
     (puthash "\\pandocbounded" "\\pandocbounded  —  Set the argument, scaled down if it would overflow the page. [LaTeX]" table)
     (puthash "\\includegraphics" "\\includegraphics  —  Place an image, and reserve the room it takes. [LaTeX]" table)
     (puthash "\\setmainfont" "\\setmainfont  —  Record the document's body typeface, and keep the name rather than dropping it. [LaTeX]" table)
