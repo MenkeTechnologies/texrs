@@ -3258,3 +3258,46 @@ fn an_image_that_fits_the_page_is_left_at_its_own_size() {
         "a pixel is a big point and a small image is left alone, was {w:.2}x{h:.2}"
     );
 }
+
+/// A size an environment's begin-code sets dies with that environment.
+///
+/// The prelude spells the pair `\def\begin#1{\csname #1\endcsname}` and
+/// `\def\end#1{\csname end#1\endcsname}`, and neither opens a group where
+/// LaTeX's own `\begin` does a `\begingroup`. So a declaration in an
+/// environment's begin-code outlived it.
+///
+/// This is not hypothetical: pandoc's template ends
+/// `\renewenvironment{Shaded}{...\ttfamily\small}`, so the FIRST code listing
+/// put the whole rest of the book in `\small`. cli-fleet came out with 76.7%
+/// of its glyphs at 8.97pt from a source holding two `\small` in total, and 20
+/// pages shorter for it.
+#[test]
+fn a_size_an_environment_opens_does_not_outlive_it() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\newenvironment{Boxed}{\\small}{}\n\\begin{document}\n\
+         BEFORE the environment.\n\n\\begin{Boxed}\nINSIDE the environment.\n\\end{Boxed}\n\n\
+         AFTER the environment.\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let runs = placed(&pdf);
+    let size_at = |want: &str| {
+        let (_, y) = at(&runs, want);
+        set_text(&pdf)
+            .iter()
+            .find(|(_, _, at_y)| (at_y - y).abs() < 0.01)
+            .map(|(size, _, _)| *size)
+            .unwrap_or_else(|| panic!("no size for {want}"))
+    };
+    let small = 9.0 * 72.0 / 72.27;
+    assert!(
+        (size_at("INSIDE") - small).abs() < 0.01,
+        "the environment's own text is small, was {}",
+        size_at("INSIDE")
+    );
+    assert!(
+        (size_at("BEFORE") - 10.0).abs() < 0.01 && (size_at("AFTER") - 10.0).abs() < 0.01,
+        "the text either side is the body size, was {} and {}",
+        size_at("BEFORE"),
+        size_at("AFTER")
+    );
+}

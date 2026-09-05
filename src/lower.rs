@@ -682,6 +682,28 @@ impl Lowerer {
                     }
                 }
             }
+            // An environment is a GROUP, and a size its begin-code opened dies
+            // with it. The prelude spells the pair `\def\begin#1{\csname
+            // #1\endcsname}` and `\def\end#1{\csname end#1\endcsname}`, and
+            // neither opens one -- LaTeX's own `\begin` does a `\begingroup`
+            // (ltmiscen), which is what scopes a declaration to its
+            // environment.
+            //
+            // Without this, pandoc's template -- which ends
+            // `\renewenvironment{Shaded}{...\ttfamily\small}` -- puts the rest
+            // of the book in `\small` after its FIRST code listing. cli-fleet
+            // came out with 76.7% of its glyphs at 8.97pt from a source
+            // holding two `\small`, against a reference that has no 8.97 in it
+            // anywhere.
+            //
+            // Only the size is scoped here. The face has always leaked the
+            // same way and is left alone: with no `\setmonofont` the mono face
+            // IS the main face, so nothing shows it, and changing what every
+            // `\ttfamily` in the corpus reaches is not a thing to do in the
+            // same commit as this.
+            if self.text_output && name.name() == "end" {
+                self.close_size(&mut out, &mut size_open);
+            }
             // Colour, before the prelude's own definitions can swallow it. The
             // prelude defines these to consume their arguments and emit
             // nothing, which is why a book full of `\color{neonCyan}` came out
