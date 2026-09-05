@@ -3479,11 +3479,17 @@ fn match_lowercase_scales_a_family_to_the_main_faces_x_height() {
         "Orbitron's x-height is larger than Arimo's, so it must scale DOWN: \
          {scaled} against {unscaled}"
     );
-    // Orbitron beside Arimo comes to 0.907, which is what lualatex sets `arb`'s
-    // chapter titles at: 24.88pt of \Huge reaching the page as 22.58.
+    // Arimo's sxHeight is 1082/2048 and Orbitron's is 580/1000, so the pair
+    // comes to 0.9109 and the tolerance is tight enough to pin the arithmetic
+    // rather than merely its neighbourhood.
+    //
+    // lualatex's `arb` implies 0.9076 (22.58 from 24.88), which is a THIRD of
+    // a percent away and is not this number: it is what one engine's rounded
+    // output divides to. Anchoring here on the reference's quotient would be
+    // asserting a value this code does not compute and cannot be asked to.
     let ratio = scaled / unscaled;
     assert!(
-        (ratio - 0.907).abs() < 0.01,
-        "the x-height ratio is 0.907, computed {ratio:.4}"
+        (ratio - 0.9109).abs() < 0.001,
+        "Arimo over Orbitron is 0.9109, computed {ratio:.4}"
     );
 }
