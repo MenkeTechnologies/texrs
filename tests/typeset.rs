@@ -3301,3 +3301,77 @@ fn a_size_an_environment_opens_does_not_outlive_it() {
         size_at("AFTER")
     );
 }
+
+/// `\sffamily` reaches the family `\setsansfont` named.
+///
+/// `\setsansfont` was parsed into `Families` and read nowhere, and
+/// `\sffamily` answered with `Face::Main`. A book sets its headings in the
+/// sans family -- `\titleformat{\chapter}{\sffamily\bfseries\Huge}` is what
+/// the corpus writes -- so every heading in every book came out in the body
+/// typeface. lualatex embeds Orbitron twice for `arb`; texrs embedded none.
+#[test]
+fn the_sans_family_a_document_names_is_the_one_sffamily_sets() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = format!(
+        "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+         \\setsansfont{{Orbitron}}[Path={dir}/,Extension=.ttf,UprightFont=Orbitron-VF]\n\
+         \\begin{{document}}\nbody in the main face\n\n{{\\sffamily sans face here}}\n\
+         \\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&doc).expect("pdf");
+    let text = read_back(&pdf);
+    assert!(
+        text.contains("Orbitron"),
+        "the sans family the document named must be embedded"
+    );
+    assert!(
+        text.contains("Arimo"),
+        "and the main family must still be there for the body"
+    );
+    // The two runs are set from DIFFERENT font resources.
+    let faces: Vec<String> = placed_faces(&pdf)
+        .into_iter()
+        .filter(|(_, _, _, t)| t.contains("body") || t.contains("sans"))
+        .map(|(_, _, f, _)| f)
+        .collect();
+    assert!(
+        faces.len() >= 2 && faces[0] != faces[1],
+        "body and sans must be set from different fonts, got {faces:?}"
+    );
+}
+
+/// The corpus's shipped font directory, if this machine has it.
+fn corpus_fonts() -> Option<String> {
+    let dir = std::path::Path::new(
+        "/Users/wizard/RustroverProjects/MenkeTechnologiesMeta/MenkeTechnologiesPublications/arb/docs/.fonts",
+    );
+    (dir.join("Orbitron-VF.ttf").is_file() && dir.join("Arimo-VF.ttf").is_file())
+        .then(|| dir.display().to_string())
+}
+
+/// With no file to embed, a sans request still reaches a SANS face.
+///
+/// This one needs nothing installed, so it runs everywhere the suite does:
+/// Helvetica is the sans of the fourteen faces every reader has, and a
+/// document that asked for a sans family wants that rather than its own serif
+/// a second time.
+#[test]
+fn a_sans_family_with_no_file_falls_back_to_a_sans_and_not_to_the_body_face() {
+    let pdf = texrs::run_pdf(
+        "\\documentclass{book}\n\\setmainfont{Times New Roman}\n\
+         \\setsansfont{Helvetica Neue}\n\\begin{document}\n\
+         body in the main face\n\n{\\sffamily sans face here}\n\\end{document}\n",
+    )
+    .expect("pdf");
+    let faces: Vec<String> = placed_faces(&pdf)
+        .into_iter()
+        .filter(|(_, _, _, t)| t.contains("body") || t.contains("sans"))
+        .map(|(_, _, f, _)| f)
+        .collect();
+    assert!(faces.len() >= 2, "both runs must be drawn, got {faces:?}");
+    assert!(
+        faces[0] != faces[1],
+        "a sans request must not resolve to the body face, got {faces:?}"
+    );
+}

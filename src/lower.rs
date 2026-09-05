@@ -1156,8 +1156,7 @@ impl Lowerer {
                         // `\texttt` falls back to the body font it was meant to
                         // escape.
                         "setmonofont" => self.fonts.mono_file = file,
-                        // `\setsansfont` has no file slot because nothing reads
-                        // a sans family yet; the stem below is what it keeps.
+                        "setsansfont" => self.fonts.sans_file = file,
                         _ => {}
                     }
                     let slot = match k {
@@ -2170,7 +2169,11 @@ impl Lowerer {
             // Back to the body face. `\normalfont` is the one a heading writes
             // to undo everything, and the two family switches are what a
             // document says to leave the mono face inside a group that set it.
-            "rmfamily" | "sffamily" | "normalfont" => Face::Main,
+            "sffamily" => Face::Sans,
+            // Back to the body face. `\normalfont` is the one a heading writes
+            // to undo everything, and `\rmfamily` is what a document says to
+            // leave a display family inside a group that set it.
+            "rmfamily" | "normalfont" => Face::Main,
             _ => return false,
         };
         // A second switch in one group REPLACES the first, as a second `\color`

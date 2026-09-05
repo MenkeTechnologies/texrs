@@ -2141,6 +2141,9 @@ pub struct Families {
     /// own font rather than naming an installed one.
     pub main_file: FontFile,
     pub sans: Option<String>,
+    /// And the file `\setsansfont` named, which the corpus books ship beside
+    /// themselves exactly as they ship the other two.
+    pub sans_file: FontFile,
     pub mono: Option<String>,
     /// The same for `\setmonofont`: every corpus book ships its monospace face
     /// beside itself, so the family name alone resolves to nothing and
@@ -2215,6 +2218,11 @@ pub enum Face {
     Bold,
     /// `\itshape`, which is what `\emph` and `\textit` are.
     Italic,
+    /// `\sffamily`, which is what `\textsf` is -- and what a book sets its
+    /// headings in. `\setsansfont` was parsed into `Families` and read
+    /// nowhere, and `\sffamily` answered with the MAIN face, so a document
+    /// that shipped a display family got its body face at every heading.
+    Sans,
 }
 
 impl Face {
@@ -2222,7 +2230,7 @@ impl Face {
     /// of them iterates: whether a character needs fetching from outside is one
     /// such question, and it is asked once for the document rather than once a
     /// line.
-    pub const ALL: [Face; 4] = [Face::Main, Face::Mono, Face::Bold, Face::Italic];
+    pub const ALL: [Face; 5] = [Face::Main, Face::Mono, Face::Bold, Face::Italic, Face::Sans];
 
     /// The one character that names this face inside a marker.
     pub fn code(self) -> char {
@@ -2231,6 +2239,7 @@ impl Face {
             Face::Mono => 'm',
             Face::Bold => 'b',
             Face::Italic => 'i',
+            Face::Sans => 's',
         }
     }
 
@@ -2241,17 +2250,19 @@ impl Face {
             'm' => Face::Mono,
             'b' => Face::Bold,
             'i' => Face::Italic,
+            's' => Face::Sans,
             _ => Face::Main,
         }
     }
 
-    /// Where this face's font sits in the four the page is set from.
+    /// Where this face's font sits in the five the page is set from.
     fn index(self) -> usize {
         match self {
             Face::Main => 0,
             Face::Mono => 1,
             Face::Bold => 2,
             Face::Italic => 3,
+            Face::Sans => 4,
         }
     }
 }
@@ -2462,6 +2473,10 @@ pub fn base14_face(base: &str, face: Face) -> String {
     match face {
         Face::Main => base.to_string(),
         Face::Mono => "Courier".to_string(),
+        // Helvetica IS the sans of the fourteen, whatever the body face is:
+        // a document that asked for a sans family and shipped no file wants a
+        // sans, not its own serif again.
+        Face::Sans => "Helvetica".to_string(),
         Face::Bold if base == "Times-Roman" => "Times-Bold".to_string(),
         Face::Italic if base == "Times-Roman" => "Times-Italic".to_string(),
         Face::Bold => format!("{base}-Bold"),
@@ -2547,7 +2562,24 @@ pub fn to_pdf(
         face_file(Face::Bold).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Bold)));
     let italic =
         face_file(Face::Italic).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Italic)));
-    let fonts = [main.clone(), mono, bold, italic];
+    // The sans family, resolved exactly as the mono one is. A book sets its
+    // headings in this -- `\titleformat{\chapter}{\sffamily\bfseries\Huge}` --
+    // and with `\sffamily` answering the main face, every heading in every
+    // book came out in the body typeface. lualatex embeds Orbitron twice for
+    // `arb`; texrs embedded no Orbitron at all.
+    let sans = families
+        .sans_file
+        .resolve(near)
+        .and_then(|file| embed_file(&file))
+        .or_else(|| families.sans.as_deref().and_then(embed_family))
+        .or_else(|| {
+            families
+                .sans
+                .as_deref()
+                .map(|f| Font::Base14(base14_for(f).to_string()))
+        })
+        .unwrap_or_else(|| main.clone());
+    let fonts = [main.clone(), mono, bold, italic, sans];
 
     // Measure in the face that will be printed. An embedded font carries its
     // own widths; without one, cmr10's are the closest thing installed, and a
