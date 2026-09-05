@@ -447,19 +447,20 @@ and three of the things a document controls survive the trip:
   mandatory argument ending in `.ttf`, `.otf`, `.ttc` or `.otc` — in any case —
   names the FILE, relative to `Path=`, which is what lualatex does with it. An
   explicit `UprightFont=`/`Extension=` still wins where the document writes
-  both. What is NOT acted on is `Scale=`: it parses and does nothing, so a
-  family scaled to match the body face is set at full size. The same file
-  through both engines, differing only by `Scale=0.5`:
+  both. `Scale=` is applied, including `Scale=MatchLowercase`, which is the form
+  a document actually writes: the factor is the ratio of the main face's
+  x-height to this family's, read from OS/2's `sxHeight`. Measured, with the
+  same file differing only by the option:
 
   ```
-  lualatex   9.96264 pt  ->  4.98132 pt
-  texrs        10.0  pt  ->    10.0  pt   (byte-identical PDFs)
+  Scale=0.5                       10 pt -> 5 pt
+  \setsansfont{Orbitron}          {\sffamily\Huge} = 24.787 pt
+  the same with MatchLowercase    22.578 pt, a factor of 0.911
   ```
 
-  `Scale=MatchLowercase` is the form that matters in practice, because it is
-  what a document writes to bring a display face down to its body face's
-  x-height — and a sans family whose x-height is larger than the body's is then
-  set too large here, in every heading that uses it.
+  A face whose `sxHeight` is absent — the versions of OS/2 predating the field —
+  is left unscaled rather than scaled by a guess. Bold and italic are cuts of
+  the main family and take its scale.
   `pdffonts` is how you tell: a document that meant to ship its own face
   and reports `Helvetica Type 1 no` got the fallback. The difference matters
   because `fc-match` ALWAYS answers — asked for a font nobody has installed it

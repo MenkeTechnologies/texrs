@@ -229,16 +229,22 @@ not the rendering.
   `{\sffamily\bfseries\Huge}`, still arrives bold and not sans, so a document
   styling its headings that way sees the size and not the family.
 
-- **fontspec's `Scale=` is parsed and not acted on.** `Scale=0.5` on a
-  `\setmainfont` produces a byte-identical PDF and the same `Tf` size; lualatex
-  halves it (9.96264 -> 4.98132). Four lines reproduce it, no corpus needed.
+fontspec's `Scale=` was on this list and is no longer: it is applied, including
+`Scale=MatchLowercase`, whose factor is the ratio of the main face's x-height to
+the scaled family's out of OS/2's `sxHeight`. `Scale=0.5` halves; Orbitron under
+`MatchLowercase` beside Arimo goes 24.787pt to 22.578pt.
 
-  `Scale=MatchLowercase` is the case with consequences. A document that loads a
-  display or sans family writes it to bring that family's x-height down to the
-  body face's, and typically also writes `\defaultfontfeatures{Scale=MatchLowercase}`
-  once for everything. Ignoring it sets every such family at full size, so
-  headings in a sans face with a large x-height come out too big — which makes
-  pages hold less, in the opposite direction from the deficits recorded above.
+Kept from that entry, because it is the more useful half: **a mechanism should
+say which instrument shows it.** When `Scale=` landed, the corpus book it was
+supposed to help moved FURTHER from its reference — 333 pages to 341 against
+311 — while its size histogram moved TOWARD it, from no glyphs at 10.53pt to
+36.9% against the reference's 41.0%. The typography got more correct and the
+page count got worse, because page count aggregates every remaining gap and that
+book still has the one-slot face wrong.
+
+So an unexplained delta is a reason to find a sharper instrument, not a verdict.
+Judged on page count alone, that fix reads as a regression and the correct move
+looks like reverting it.
 
 - **`package article is not loadable: Illegal unit of measure (pt inserted)`**
   on stderr, for a document as simple as `\documentclass{article}` with one word
