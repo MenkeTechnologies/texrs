@@ -445,3 +445,148 @@ fn a_picture_contributes_no_words_and_leaves_no_marker() {
         "control characters reached the reader: {leaked:?}"
     );
 }
+
+#[test]
+fn a_pair_of_backticks_and_a_pair_of_apostrophes_are_the_curly_quotes() {
+    // TeX's own spelling of the quotation marks, and the reason it is a
+    // ligature rather than a font's business: the two characters are joined
+    // into one BEFORE anything measures the line. A literal pair of backticks
+    // is 6.660pt in Arimo at 10pt against 3.330pt for the quote it stands for,
+    // so a quoted line measured from the literal is set too wide.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               ``hello there''\n\\end{document}\n";
+    let got = text(src);
+    assert!(
+        got.contains("\u{201c}hello there\u{201d}"),
+        "the pairs are one character each: {got:?}"
+    );
+    assert!(!got.contains("``"), "no literal backticks left: {got:?}");
+    assert!(!got.contains("''"), "no literal apostrophes left: {got:?}");
+}
+
+#[test]
+fn two_hyphens_are_an_en_dash_and_three_are_an_em_dash() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               pages 1--10, and then--- a break.\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("1\u{2013}10"), "an en dash between: {got:?}");
+    assert!(got.contains("then\u{2014} a"), "and an em dash: {got:?}");
+    assert!(!got.contains("--"), "no literal run survives: {got:?}");
+}
+
+#[test]
+fn a_lone_hyphen_or_quote_forms_no_ligature() {
+    // A PAIR is what the ligature program joins. What a lone quote is drawn as
+    // is the FONT's encoding -- cmr draws an apostrophe as a right single
+    // quote -- which is a different question and not decided here, so nothing
+    // in this document may come out as one of the four characters the program
+    // makes.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               a well-known don't `x'\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("well-known"), "the hyphen stays: {got:?}");
+    assert!(
+        !got.contains(['\u{2013}', '\u{2014}', '\u{201c}', '\u{201d}']),
+        "and no pair was joined: {got:?}"
+    );
+}
+
+#[test]
+fn four_hyphens_are_an_em_dash_and_a_hyphen_the_way_tex_sets_them() {
+    // The pairs are applied left to right and nothing joins an em dash to a
+    // hyphen, so a longer run falls out of them: four are `---' and `-', five
+    // are `---' and `--'. Documented here because the run has to mean
+    // something rather than be undefined.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               a---- b----- c\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("a\u{2014}- "), "em dash then hyphen: {got:?}");
+    assert!(
+        got.contains("b\u{2014}\u{2013} "),
+        "em dash then en dash: {got:?}"
+    );
+}
+
+#[test]
+fn a_group_between_two_hyphens_keeps_them_apart() {
+    // `-{}-' is how a LaTeX document has always asked for two hyphens where
+    // two hyphens are meant, so the group has to break the pair.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               a-{}-b\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("a--b"), "both hyphens survive: {got:?}");
+    assert!(!got.contains('\u{2013}'), "and no en dash: {got:?}");
+}
+
+#[test]
+fn a_flag_inside_texttt_keeps_both_of_its_hyphens() {
+    // `\texttt' is a text command, not an environment: the prelude expands it
+    // to face markers and its ARGUMENT's characters flow through the same
+    // funnel prose does. Joining the pair would rename the flag.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               run \\texttt{grep --color=auto} now, 1--2\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("grep --color=auto"), "code is code: {got:?}");
+    assert!(
+        got.contains("1\u{2013}2"),
+        "and prose after it is still prose: {got:?}"
+    );
+}
+
+#[test]
+fn a_declared_mono_face_keeps_the_hyphens_inside_its_group() {
+    // The declaration form of the same thing: `{\ttfamily ...}' is what every
+    // book in the corpus redefines `\texttt' to reach.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               {\\ttfamily make --jobs} and 1--2\n\\end{document}\n";
+    let got = text(src);
+    assert!(got.contains("make --jobs"), "code is code: {got:?}");
+    assert!(got.contains("1\u{2013}2"), "prose is prose: {got:?}");
+}
+
+#[test]
+fn a_pandoc_listing_keeps_the_dashes_and_quotes_of_its_source() {
+    // Highlighting is deliberately not verbatim -- its lines are re-lexed so
+    // that \NormalTok and the colour it carries still expand -- so a program's
+    // characters reach the funnel exactly as prose does.
+    let src = "\\documentclass{article}\n\\newcommand{\\NormalTok}[1]{#1}\n\
+               \\newenvironment{Highlighting}{}{}\n\\begin{document}\n\
+               \\begin{Highlighting}\n\\NormalTok{curl --silent ``u'' -- x}\n\
+               \\end{Highlighting}\n1--2\n\\end{document}\n";
+    let got = text(src);
+    assert!(
+        got.contains("curl --silent ``u'' -- x"),
+        "the program is untouched: {got:?}"
+    );
+    let line = got
+        .lines()
+        .find(|l| l.contains("curl"))
+        .expect("the listing's line");
+    assert!(
+        !line.contains(['\u{2013}', '\u{2014}', '\u{201c}', '\u{201d}']),
+        "nothing in it was joined: {line:?}"
+    );
+    assert!(
+        got.contains("1\u{2013}2"),
+        "and prose after the listing is still prose: {got:?}"
+    );
+}
+
+#[test]
+fn a_verbatim_body_keeps_the_dashes_and_quotes_it_wrote() {
+    // A verbatim body is pushed whole and never reaches the funnel, and the
+    // character before `\begin{verbatim}' must not pair with the first of it
+    // either.
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               -\\begin{verbatim}\n-- ``x'' ---\n\\end{verbatim}\nafter 1--2\n\
+               \\end{document}\n";
+    let got = text(src);
+    assert!(
+        got.contains("-- ``x'' ---"),
+        "the body is characters: {got:?}"
+    );
+    assert!(
+        got.contains("1\u{2013}2"),
+        "and prose after it is still prose: {got:?}"
+    );
+}
