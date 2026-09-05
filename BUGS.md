@@ -183,33 +183,32 @@ for `\thesection`.
 
 ## Divergences from tex
 
-- **One type size.** The size-selecting commands are defined as empty in
-  `src/latex/prelude.tex` and `Layout::size` is a single document-wide `f64`, so
-  every heading is set at body size. A document containing `\section`,
-  `{\huge …}` and `{\Large …}` emits ONE distinct `Tf` size. The fix is not a
-  prelude change: giving `\Large` a body would change nothing while there is no
-  per-run size on the measure, break, pagination and draw paths for it to set.
+One type size and the ligature program were both on this list and are no longer,
+as of v0.6.0. Every size-selecting command was empty in the prelude and
+`Layout::size` was one document-wide `f64`; size is a property of a run now, and
+`\section` + `{\huge …}` + `{\Large …}` emits three distinct `Tf` sizes where it
+emitted one. `` `` ``, `` '' ``, `--` and `---` now set “ ” – —, with the
+exclusions that make that safe: `\texttt` and verbatim keep their hyphens,
+`-{}-` stays two, `----` is an em dash and a hyphen.
 
-- **The ligature program does not run on pairs.** The encoding is right and the
-  ligatures are not. A lone `` ` `` sets ‘ and a lone `` ' `` sets ’, which is
-  correct; what does not happen is the TFM ligature program joining two of them
-  into a single `“` or `”`, or building `--` and `---` into the dashes. The same
-  source through both engines, extracted with `pdftotext -enc UTF-8`:
+Two things kept from those entries because they outlive the bugs:
 
-  ```
-  lualatex   en – dash, em — dash, open “ close ”, single ‘ and ’
-  texrs      en -- dash, em --- dash, open ‘‘ close ’’, single ‘ and ’
-  ```
+  * A claim was DERIVED from the size limitation -- that headings set at body
+    size were why a book came out with fewer lines and more lines per page than
+    lualatex sets it. That reasoning is void now. It is worth remembering that a
+    documented mechanism had a documented consequence, and fixing the mechanism
+    silently invalidated the consequence somewhere else in the file.
+  * The direction on ligatures, which is easy to get backwards in either
+    direction: two glyphs where one belongs is WIDER, wider lines hold fewer
+    words, and that produces MORE lines. It was never a cause of short pages.
 
-  An earlier version of this entry said the marks are set "as the ASCII
-  characters themselves". That was wrong: ` and ' ARE mapped, and reading the
-  raw content stream is what makes it look otherwise, because the stream carries
-  the source bytes and the font maps them. Extraction through the ToUnicode
-  table is what shows the real result.
-
-  The direction, since it is easy to get backwards: two glyphs where one belongs
-  is WIDER, wider lines hold fewer words, and that produces MORE lines. This
-  cannot contribute to a document coming out short.
+And one method note, because the mistake was mine and it generalises: an earlier
+version of the ligature entry said the marks were set "as the ASCII characters
+themselves". They were not -- ` and ' were always mapped. Reading the PDF's raw
+content stream is what makes it look otherwise, because the stream carries the
+SOURCE bytes and leaves the font to map them. `pdftotext -enc UTF-8` goes
+through the ToUnicode table and shows what a reader gets. The content stream is
+not the rendering.
 
 - **Characters above U+00FF are one Letter token.** TeX82 reads BYTES, so `é` in
   a UTF-8 file is two `Other` tokens there and one `Letter` here. That changes

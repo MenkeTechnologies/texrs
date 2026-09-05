@@ -514,38 +514,27 @@ and three of the things a document controls survive the trip:
   the line where it stands and this gives it lines of its own. `--dvi` and
   `--text` draw no picture at all: DVI would need a `\special` every driver
   reads differently, and a picture has no words.
-- **There is exactly one type size.** `\normalsize`, `\small`, `\large`,
-  `\Large`, `\LARGE`, `\huge` and `\Huge` are all defined as empty in
-  `src/latex/prelude.tex`, and `Layout::size` is a single document-wide `f64`
-  with no per-run size anywhere on the measure, break, pagination or draw path.
-  A document with a `\section`, a `{\huge …}` and a `{\Large …}` in it emits
-  one distinct `Tf` size for the whole file. Every heading, chapter title and
-  title page is set at body size.
-
-  Two consequences, both in the same direction, and they are why the deficit is
-  in structural material rather than in prose: a heading that would have wrapped
-  to two lines at 15.7pt fits on one at 10pt, and a heading that would have
-  occupied a larger box occupies one 12pt body line. So a book comes out with
-  fewer lines AND more lines per page than the same book set by lualatex.
-  Defining the size commands in the prelude would not fix it — there is no
-  per-run size underneath for them to set.
-- **The ligature program does not run on PAIRS.** A single `` ` `` and a single
-  `` ' `` come out right — the encoding gives ‘ and ’ — but the TFM ligature
-  program that joins two of them into one glyph does not, and neither does the
-  one that builds the dashes. Set the same file with both engines and extract
-  it:
+- **Ligatures and type sizes were here and are not.** Both were listed as
+  limitations in this section until v0.6.0. `\section`, `{\huge …}` and
+  `{\Large …}` in one file now emit three distinct `Tf` sizes rather than one,
+  and `` `` ``/`` '' ``/`--`/`---` now set “ ” – — where they used to set the
+  marks doubled. Extracting the same source through both engines gives the same
+  line:
 
   ```
   lualatex   en – dash, em — dash, open “ close ”, single ‘ and ’
-  texrs      en -- dash, em --- dash, open ‘‘ close ’’, single ‘ and ’
+  texrs      en – dash, em — dash, open “ close ”, single ‘ and ’
   ```
 
-  So a document that quotes gets two single quotes where one double belongs, and
-  `--`/`---` stay as repeated hyphens. This is a visible defect but it cannot be
-  a cause of short pages, and the direction is worth stating because the
-  inference runs the other way naturally: a pair set where one glyph belongs is
-  WIDER, wider lines hold fewer words, and fewer words per line produce MORE
-  lines, not fewer.
+  The exclusions are right too: `\texttt{--flag}` keeps both hyphens, `-{}-`
+  stays two, and `----` is an em dash followed by a hyphen.
+
+  Recorded rather than deleted because a claim was derived from the size
+  limitation and does not survive it: this README argued that headings set at
+  body size were why a book came out with fewer lines AND more lines per page
+  than lualatex sets it. With per-run sizes that reasoning is void, and no page
+  ratio was ever published here — see the note under the corpus figure about
+  which numbers are facts about the engine and which are facts about a run.
 - **Images do NOT survive.** `\includegraphics` is
   `\newcommand{\includegraphics}[2][]{}` in the prelude: the file is dropped and
   contributes NO VERTICAL SPACE, while the `\caption` beside it survives. The
