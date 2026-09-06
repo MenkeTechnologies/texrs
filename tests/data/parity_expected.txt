@@ -26,6 +26,8 @@ AT
 ! Bad character code (256).l.6 \chardef\x=256                  [0] )(see the transcript file for additional information
 #==# chardef_constant.tex
 [13][13]
+#==# code_tables_as_numbers.tex
+[12][10] [13][11][11] [97][65][999][0] [letter]
 #==# cond_ifcase.tex
 TWO
 #==# cond_ifcase_negative.tex
