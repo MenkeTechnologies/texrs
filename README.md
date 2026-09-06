@@ -640,6 +640,12 @@ cargo run --bin parity -- case.tex   # one file or directory
 cargo test                      # the same comparison, as a gate
 ```
 
+No expectation is written by hand in the other direction either: the freeze
+that records them, `cargo run --bin parity -- --freeze`, re-records from `tex`
+and not from texrs. A reader who assumed it captured texrs's own output would
+have the whole gate backwards — it would then be asserting that texrs still
+agrees with itself.
+
 Both harnesses read the engine version they were measured against out of
 `BUGS.md` and refuse to run against a different `tex`: a mismatched oracle does
 not fail loudly, it reports a different set of divergences, which reads exactly

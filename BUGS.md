@@ -223,21 +223,31 @@ each necessary and none sufficient, and the stack was only ever visible from the
 bottom — the lost family could not be seen before a sans family existed to lose,
 and that could not be seen before `\titleformat` delivered anything at all.
 
-- **`package article is not loadable: Illegal unit of measure (pt inserted)`**
-  on stderr, for a document as simple as `\documentclass{article}` with one word
-  in it. The output is correct; the line is not suppressible and it is the first
-  thing anyone trying the engine sees.
+- **`package article needs \@settopoint`** on stderr, for a document as simple
+  as `\documentclass{article}` with one word in it. The output is correct; the
+  line is not suppressible and it is the first thing anyone trying the engine
+  sees.
 
-  The failure is `size10.clo`'s `\abovedisplayskip 10\p@`. `10\p@` is §453's
-  `<factor><internal unit>`: `\p@` is `\dimendef\p@=3`, its value lives in a VM
-  slot, and `scan_dimen` answers with an `i64` that has nowhere to put a slot
-  read. Representing factor-times-register needs a new variant on the IR's `Num`,
-  which is matched in roughly forty places — an additive fix would not do it.
+  This message is the THIRD on the same line of `size10.clo`, and the first that
+  is not a scanner gap:
 
-  The message used to read `package article needs \abovedisplayskip`, and the
-  §247 display glue parameters it was asking for now exist. The symptom did not
-  go away when they landed; it moved one step later in the same line. Worth
-  keeping in mind when this one is fixed too.
+  ```
+  package article needs \abovedisplayskip          the §247 glue parameters
+  Illegal unit of measure (pt inserted)            §453's <factor><internal unit>
+  package article needs \@settopoint               a missing kernel macro
+  ```
+
+  Both earlier reasons are fixed. `10\p@` is read now, and the arithmetic is
+  tex's: `1.2\dimen0` with `\dimen0=12.5pt` gives **14.99995pt**, not 15pt,
+  because §107's `xn_over_d` truncates toward zero — verified against the real
+  `tex` binary, which prints the same. What stops it now is `\@settopoint`, and
+  one step past that `size10.clo` divides by `\baselineskip`, which is modelled
+  as an empty macro rather than as a TeX dimension parameter.
+
+  So the chain has reached the kernel. Each fix moved the failure one step
+  further along the same line rather than clearing it — three times now, which
+  is the strongest evidence in this file for reading an error message as the
+  first thing that stopped rather than the only thing wrong.
 
   Worth knowing before measuring it: **the script cache masks it.** It prints on
   a first run and not on a second, because the second never re-reads the
