@@ -8,6 +8,32 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `tex.web` §453's `<factor><internal unit>`. `10\p@` is ten of whatever the
+  register `\p@` holds, and a register's value lives in a VM slot -- so the
+  product is not a number the scanner can finish, and the dimension scanner
+  reported §454's `Illegal unit of measure (pt inserted)` rather than carrying
+  it. A scanned dimension is now either a constant or a factor and the register
+  it scales, the lowerer turns the second into a `Num` of its own, and §455's
+  arithmetic is taken at run time: §107 truncates, so `1.2\p@` with `\p@` at
+  12.5pt is `14.99995pt` and not `15pt`, which is the number tex prints. §449
+  comes with it -- a bare internal dimension where the number goes is a factor
+  of exactly one, so `\@plus\p@` is one `\p@` rather than none of it. The
+  spelt-out `\dimen<n>` and `\skip<n>` and any `\dimendef`/`\skipdef` name all
+  stand as the unit, in all three components of a glue. `3em` and `3ex` are
+  still not units: they are the current font's, and the mouth has no font.
+- Keyword scanning through a macro (§407). A keyword is read with
+  `get_x_token`, so `plus`, `minus` and `true` may arrive expanded rather than
+  as letters in the source. latex.ltx defines `\@plus` and `\@minus` and every
+  standard class writes every one of its glues that way; unexpanded, the
+  keyword was never seen, the stretch and shrink were silently dropped, and the
+  rest of the line was left in the document to be set as text.
+- Counting nested conditionals inside skipped text (§494). `pass_text` matches
+  `cur_cmd`, so a `\let` alias of `\iffalse` is an `if_test` wherever a
+  spelt-out one is. Matching the SPELLING counted no `\newif` switch, and LaTeX
+  builds every one of its conditionals as such an alias: an `\if` nested in a
+  skipped branch went uncounted, its `\else` was taken for the outer one's, and
+  the outer `\else` was then reported as `Extra \else`.
+
 - fontspec's filename spelling. `\setmainfont{Arimo-VF.ttf}[Path=…]` names the
   FILE, not a family, and lualatex honours it; texrs read the braces as a family
   name, resolved nothing under it and fell back to base-14 Helvetica without

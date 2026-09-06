@@ -722,6 +722,11 @@ fn fold_registers(cmds: &[Cmd], into: &mut HashMap<i64, i64>) {
     let value = |n: &Num, seen: &HashMap<i64, i64>| match n {
         Num::Literal(v) => Some(*v),
         Num::Count(r) => seen.get(r).copied(),
+        // The factor is known while lowering; the register it scales is known
+        // only if some earlier straight-line assignment settled it.
+        Num::Scaled { int, frac, reg } => seen
+            .get(reg)
+            .map(|v| crate::dimen::scale_by_factor(*int, *frac, *v)),
         Num::Rust { .. } => None,
     };
     for cmd in cmds {

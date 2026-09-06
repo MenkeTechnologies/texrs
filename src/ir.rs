@@ -15,6 +15,22 @@ pub enum Num {
     Literal(i64),
     /// `\count<n>` — a register read.
     Count(i64),
+    /// `tex.web` §453's `<factor><internal unit>` — size10.clo's `10\p@`.
+    ///
+    /// The unit is a REGISTER, so the product cannot be taken while lowering:
+    /// `\p@` is a slot whose value the program decides. A variant rather than a
+    /// scratch-register `Cmd::Arith` sequence because a `Num` stands where an
+    /// expression does -- an `\ifdim` condition and a `\message` body have
+    /// nowhere to put a statement, and a scratch register would clobber one the
+    /// document can see.
+    Scaled {
+        /// The factor's integer part, carrying §453's sign.
+        int: i64,
+        /// The factor's fraction in 65536ths, carrying the same sign.
+        frac: i64,
+        /// The slot the internal dimension lives in.
+        reg: i64,
+    },
     /// `\rustcall <name> <args>\endrust` — a call into a compiled `\rust{ … }`
     /// block. It is a `Num` rather than a command of its own because that is
     /// where a value is useful: anywhere TeX reads a number, which is a register
@@ -336,6 +352,11 @@ fn num_text(num: &Num) -> String {
     match num {
         Num::Literal(v) => v.to_string(),
         Num::Count(n) => format!("\\count{n}"),
+        // The factor as the document wrote it, then the register it scales.
+        Num::Scaled { int, frac, reg } => format!(
+            "{}\\count{reg}",
+            crate::dimen::print_scaled(int * crate::dimen::UNITY + frac)
+        ),
         Num::Rust { name, args } => {
             let args: Vec<String> = args.iter().map(num_text).collect();
             format!("\\rustcall {name} {}", args.join(" "))

@@ -140,7 +140,8 @@ fn table<'scope, 'env: 'scope>(
         scope.create_function(move |_, word: String| {
             let mut c = c.borrow_mut();
             let Ctx { eng, lx } = &mut *c;
-            Ok(eng.scan_keyword(lx, &word, false))
+            eng.scan_keyword(lx, &word, false)
+                .map_err(|e| mlua::Error::runtime(e.0))
         })?,
     )?;
     let c = Rc::clone(ctx);

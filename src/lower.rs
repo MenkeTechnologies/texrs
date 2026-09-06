@@ -2717,15 +2717,24 @@ impl Lowerer {
                 .map(|i| Cmd::SetCount(base + i, Num::Count(from + i)))
                 .collect());
         }
-        let (nat, st, sto, sh, sho) = match mu {
-            true => self.eng.scan_muglue(lx)?,
-            false => self.eng.scan_glue(lx)?,
+        let g = match mu {
+            true => self.eng.scan_muglue_parts(lx)?,
+            false => self.eng.scan_glue_parts(lx)?,
         };
-        Ok([nat, st, sh, sto * 4 + sho]
-            .into_iter()
-            .enumerate()
-            .map(|(i, v)| Cmd::SetCount(base + i as i64, Num::Literal(v)))
-            .collect())
+        // Any of the three components can be `tex.web` §453's `<factor><internal
+        // unit>` -- size10.clo's `\abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@`
+        // is all three at once -- so each slot takes a `Num` rather than a
+        // number. The fourth slot packs the two ORDERS, which are always known.
+        Ok([
+            scaled_num(g.natural),
+            scaled_num(g.stretch),
+            scaled_num(g.shrink),
+            Num::Literal(g.stretch_order * 4 + g.shrink_order),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| Cmd::SetCount(base + i as i64, v))
+        .collect())
     }
 
     /// The base slot of a glue register standing where a glue is wanted, if
@@ -2790,7 +2799,7 @@ impl Lowerer {
             }
             let Token::Cs(n) = &t else {
                 lx.push_back(&[t]);
-                return Ok(Num::Literal(self.eng.scan_dimen_any(lx, pending)?));
+                return Ok(scaled_num(self.eng.scan_dimen_parts(lx, pending)?));
             };
             let n = *n;
             match n.name() {
@@ -2816,7 +2825,7 @@ impl Lowerer {
                 }
             }
             lx.push_back(&[t]);
-            return Ok(Num::Literal(self.eng.scan_dimen_any(lx, pending)?));
+            return Ok(scaled_num(self.eng.scan_dimen_parts(lx, pending)?));
         }
     }
 
@@ -3589,6 +3598,20 @@ impl Lowerer {
                 self.globals.push(*reg);
             }
         }
+    }
+}
+
+/// One scanned `<dimen>` as the operand the VM will read.
+///
+/// `tex.web` §453 has two shapes: a constant the scanner finished, and a factor
+/// times an INTERNAL dimension it could not, because the internal dimension is
+/// a register whose value the program decides. The second becomes the product
+/// itself rather than a number -- which is the whole reason `Num::Scaled`
+/// exists, and the only place a `ScannedDimen` turns into one.
+fn scaled_num(d: crate::dimen::ScannedDimen) -> Num {
+    match d {
+        crate::dimen::ScannedDimen::Constant(v) => Num::Literal(v),
+        crate::dimen::ScannedDimen::Scaled { int, frac, reg } => Num::Scaled { int, frac, reg },
     }
 }
 

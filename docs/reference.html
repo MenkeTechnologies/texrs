@@ -643,6 +643,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>ERR_SITE</code></td><td><code>4012</code></td><td>Record where the command about to run would be reported from: one argument, `tex.web` §311's context display for that point in the source.</td></tr>
             <tr><td><code>TRANSCRIPT_NOTICE</code></td><td><code>4013</code></td><td>§1335's `(see the transcript file for additional information)`, written only if something was reported during the run. No arguments.</td></tr>
             <tr><td><code>MSG_MUGLUE</code></td><td><code>4014</code></td><td>Append a MATH glue, written as TeX writes one: the same four arguments `MSG_GLUE` takes, with `mu` for the unit.</td></tr>
+            <tr><td><code>SCALE_DIMEN</code></td><td><code>4015</code></td><td>`tex.web` §453's `&lt;factor&gt;&lt;internal unit&gt;`: the register's value, the factor's integer part, and its fraction in 65536ths. A builtin rather than a run of arithmetic ops because §107's truncation and §460's clamp are the port, and one Rust function is where they stay readable.</td></tr>
           </tbody>
         </table>
       </section>

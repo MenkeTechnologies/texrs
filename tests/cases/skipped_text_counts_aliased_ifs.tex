@@ -1,0 +1,27 @@
+% tex.web 494's pass_text counts nested conditionals while it skips, and it
+% matches cur_cmd -- the MEANING -- so a \let alias of \iffalse is an if_test
+% exactly where a spelt-out one is. \newif builds every LaTeX switch as such an
+% alias, so a skip that matched the SPELLING counted no nested conditional:
+% size10.clo's `\if@compatibility \if@twocolumn ... \else ... \fi \else' took
+% the INNER \else for the outer one's, and the outer \else was then `Extra'.
+\catcode`\{=1 \catcode`\}=2
+\let\ifOUTER\iffalse
+\let\ifINNER\iffalse
+\ifOUTER
+  \ifINNER \message{[A]}\else \message{[B]}\fi
+\else
+  \message{[C]}
+\fi
+% The same nesting with the outer test TRUE, so the inner one really runs.
+\let\ifOUTER\iftrue
+\ifOUTER
+  \ifINNER \message{[D]}\else \message{[E]}\fi
+\else
+  \message{[F]}
+\fi
+% An aliased \fi has to close the conditional it was reached in, too.
+\let\myfi\fi
+\let\ifOUTER\iffalse
+\ifOUTER \message{[G]}\else \message{[H]}\myfi
+\message{[END]}
+\end

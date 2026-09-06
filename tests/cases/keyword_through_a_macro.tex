@@ -1,0 +1,16 @@
+% tex.web 407 reads each letter of a keyword with get_x_token, so `plus',
+% `minus' and `true' may arrive through a MACRO rather than as letters in the
+% source. latex.ltx defines \@plus and \@minus and every standard class writes
+% every one of its glues that way, so a keyword scan that did not expand read
+% no stretch at all and left the rest of the line in the document as text.
+\catcode`\{=1 \catcode`\}=2
+\def\PLUS{plus}
+\def\MINUS{minus}
+\def\TRUE{true}
+\skip200=3pt \PLUS 1pt \MINUS 2pt
+\dimen0=1\TRUE pt
+% A keyword that is not there still consumes nothing, whether the token that
+% ends the scan is a macro or a letter.
+\skip201=4pt \MINUS 1pt
+\message{[\the\skip200][\the\dimen0][\the\skip201]}
+\end

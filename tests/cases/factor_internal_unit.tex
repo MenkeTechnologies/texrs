@@ -1,0 +1,31 @@
+% tex.web 453: a <factor> followed by an <internal unit> is that factor times
+% the register's value. The register is what makes it interesting -- its value
+% is not known until the program runs, so the product cannot be folded while
+% the dimension is scanned.
+%
+% 455 takes the FRACTION as that many 65536ths OF the register and 107
+% truncates, so 1.2 times 12.5pt is 14.99995pt and not 15pt. 449 makes a bare
+% internal dimension a dimension in its own right, which is a factor of one.
+% 430 coerces a glue standing where a dimension is wanted to its natural width.
+\catcode`\{=1 \catcode`\}=2
+\dimendef\unit=200
+\unit=1pt
+\dimen0=10\unit
+\dimen1=0.5\unit
+\dimen2=-2.25\unit
+\unit=12.5pt
+\dimen3=1.2\unit
+\unit=-3pt
+\dimen4=2.5\unit
+\dimen5=-\unit
+\skip200=7pt plus 3pt minus 1pt
+\dimen6=3\skip200
+\message{[\the\dimen0][\the\dimen1][\the\dimen2][\the\dimen3][\the\dimen4]}
+\message{[\the\dimen5][\the\dimen6]}
+% All three components of a glue take one, which is the shape every standard
+% LaTeX class writes: `\abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@'.
+\unit=2pt
+\skip201=1\unit plus 2\unit minus 5\unit
+\skip202=\unit plus\unit minus 3\unit
+\message{[\the\skip201][\the\skip202]}
+\end

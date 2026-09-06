@@ -446,10 +446,10 @@ impl Scanner<'_> {
     /// One `<muglue>`: a `<mudimen>` and the optional `plus` and `minus` parts.
     fn mu_glue(&mut self, lx: &mut Lexer) -> R<MuGlue> {
         let mut glue = self.mu_glue_amount(lx)?;
-        if self.eng.scan_keyword(lx, "plus", false) {
+        if self.eng.scan_keyword(lx, "plus", false)? {
             glue.stretch = self.mu_glue_amount(lx)?.natural;
         }
-        if self.eng.scan_keyword(lx, "minus", false) {
+        if self.eng.scan_keyword(lx, "minus", false)? {
             glue.shrink = self.mu_glue_amount(lx)?.natural;
         }
         Ok(glue)
@@ -511,7 +511,7 @@ impl Scanner<'_> {
                 }
             }
         }
-        if !self.eng.scan_keyword(lx, "mu", false) {
+        if !self.eng.scan_keyword(lx, "mu", false)? {
             return Err(TexError("Illegal unit of measure (mu inserted)".into()));
         }
         let whole: i64 = digits.iter().fold(0i64, |a, d| a * 10 + *d as i64);

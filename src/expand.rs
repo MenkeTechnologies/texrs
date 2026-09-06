@@ -75,6 +75,23 @@ pub enum NumericCs {
     Register(i64),
 }
 
+/// A glue as `tex.web` §461 read it, before its three `<dimen>` positions are
+/// collapsed to numbers.
+///
+/// Each of the three can be §453's `<factor><internal unit>` -- size10.clo's
+/// `\abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@` is all three at once -- and
+/// a product of a register is not a number the scanner can produce. The two
+/// ORDERS are always known: an infinite component is spelt in letters, which no
+/// internal unit is.
+#[derive(Clone, Copy, Debug)]
+pub struct GlueParts {
+    pub natural: crate::dimen::ScannedDimen,
+    pub stretch: crate::dimen::ScannedDimen,
+    pub stretch_order: i64,
+    pub shrink: crate::dimen::ScannedDimen,
+    pub shrink_order: i64,
+}
+
 /// One undo record. TeX's save stack restores individual changes at group end
 /// rather than snapshotting the whole state, which is what makes deep grouping
 /// affordable; the same choice is made here.
@@ -608,6 +625,21 @@ impl Engine {
 
     // ── the expandable primitives ────────────────────────────────────────
 
+    /// The primitive `name` MEANS, for a match on the meaning rather than the
+    /// spelling.
+    ///
+    /// A `\let` alias means the primitive it was given, and tex matches
+    /// `cur_cmd` everywhere: `\let\ifdim=\iffalse` reached the `\ifdim` arm and
+    /// was refused, which is exactly how a document says "take the other
+    /// branch". §494's `pass_text` needs the same resolution to count a nested
+    /// conditional it is skipping over.
+    fn primitive_meaning(&self, name: CsId) -> CsId {
+        match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) if *p != name => *p,
+            _ => name,
+        }
+    }
+
     /// Handle `name` if it is expandable, returning whether it was.
     ///
     /// This is the gullet. Both the executor and `expand_to_text` route through
@@ -619,16 +651,7 @@ impl Engine {
             self.expand_macro(lx, name, pending_only)?;
             return Ok(true);
         }
-        // A `\let` alias MEANS the primitive it was given, so it must act like
-        // one here too. The dispatch below is by NAME, so without this an alias
-        // is matched as itself: `\let\ifdim=\iffalse` still reached the
-        // \ifdim arm and reported an unsupported conditional, which is how a
-        // document says "I know this engine has no dimensions, take the other
-        // branch" and was refused anyway.
-        let name = match self.meanings.get(&name) {
-            Some(Meaning::Primitive(p)) if *p != name => *p,
-            _ => name,
-        };
+        let name = self.primitive_meaning(name);
         match name.name() {
             // The advice markers: they carry the "inside advice" depth through
             // the token stream, and expand to nothing.
@@ -924,6 +947,13 @@ impl Engine {
                 return Err(TexError("Incomplete \\if; all text was ignored".into()));
             };
             let Token::Cs(n) = &t else { continue };
+            // §494 matches `cur_cmd`, which is the MEANING: `\let\ifx\iffalse`
+            // is an `if_test` everywhere a spelt-out `\iffalse` is. Matching the
+            // SPELLING counted no `\newif` switch, and LaTeX writes every one of
+            // its own conditionals that way -- so `\if@compatibility \if@twocolumn
+            // ... \else ... \fi \else` in size10.clo took the INNER `\else` as
+            // the outer one's, and the outer `\else` was then `Extra \else`.
+            let n = self.primitive_meaning(*n);
             match n.name() {
                 n if CONDITIONALS.contains(&n) => depth += 1,
                 "fi" => match depth {
@@ -1012,29 +1042,35 @@ impl Engine {
 
     // ── definitions ──────────────────────────────────────────────────────
 
-    /// `\def`, `\gdef`, `\edef`, `\xdef` — the last two expand the body now.
-    /// A dimension: an optional sign, a decimal number, and a unit
-    /// (`tex.web` §448-453). The result is scaled points, which is the only
-    /// form a dimension ever has -- `pt` is not privileged, it is just the unit
-    /// whose ratio is one.
-    /// The number in front of a unit: a sign, an integer part, and a fraction
-    /// already scaled to 65536ths. Shared by the finite scanner and the one
-    /// that also accepts `fil`, so the two cannot drift.
-    fn scan_dimen_number(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64, i64)> {
+    /// `tex.web` §448's leading signs: any number of `+` and `-` in any order,
+    /// spaces between them, and an odd count of minus signs is a negative.
+    ///
+    /// Split from the digits because §449 looks for an INTERNAL dimension
+    /// between the two -- `-\p@` is a sign and a whole dimension with no digits
+    /// anywhere in it. The token that ends the run goes back.
+    fn scan_optional_signs(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
         let mut sign = 1i64;
-        let mut cur = loop {
+        loop {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
                 t if t.is_space() => continue,
-                Token::Char('-', _) => {
-                    sign = -sign;
-                    continue;
+                Token::Char('-', _) => sign = -sign,
+                Token::Char('+', _) => {}
+                other => {
+                    lx.push_back(std::slice::from_ref(other));
+                    return Ok(sign);
                 }
-                Token::Char('+', _) => continue,
-                other => break *other,
             }
+        }
+    }
+
+    /// §452's `<factor>`: an integer part and a fraction already scaled to
+    /// 65536ths, with the sign already off the stream.
+    fn scan_factor(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64)> {
+        let Some(mut cur) = self.take(lx, pending_only) else {
+            return Ok((0, 0));
         };
         // The integer part, then an optional fraction after `.` or `,`.
         let mut whole = String::new();
@@ -1058,7 +1094,7 @@ impl Engine {
             }
         }
         let int: i64 = whole.parse().unwrap_or(0);
-        Ok((sign, int, crate::dimen::round_decimals(&fraction)))
+        Ok((int, crate::dimen::round_decimals(&fraction)))
     }
 
     /// A finite unit's value in scaled points, under the mode the scanner is in.
@@ -1085,25 +1121,130 @@ impl Engine {
         }
     }
 
+    /// `tex.web` §455's `<internal unit>`: the register a factor scales, if a
+    /// register is what stands where the unit would.
+    ///
+    /// Nothing is consumed when it is not, so the unit scan that follows sees an
+    /// untouched stream -- `10pt` must still read as ten points after this has
+    /// looked at the `p`. `lower.rs`'s `peek_glue_register` is the same
+    /// save-and-restore, one position further out.
+    ///
+    /// §455 reads the internal value at the level the scanner is in: a `mu`
+    /// scan takes a math glue and a dimension scan takes a dimension or the
+    /// natural width of a glue (§430's coercion). Mixing them is `mu_error` in
+    /// tex, and is simply not a unit here -- the caller then reports §454's
+    /// illegal unit, which is what tex's recovery leaves behind anyway.
+    fn peek_internal_unit(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<i64>> {
+        let mut eaten = Vec::new();
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                lx.push_back(&eaten);
+                return Ok(None);
+            };
+            if t.is_space() {
+                eaten.push(t);
+                continue;
+            }
+            if let Token::Cs(n) = &t {
+                let spelt = match n.name() {
+                    "dimen" => Some(crate::compiler::DIMEN_BASE),
+                    "skip" => Some(crate::compiler::SKIP_BASE),
+                    "muskip" => Some(crate::compiler::MUSKIP_BASE),
+                    _ => None,
+                };
+                let reg = match spelt {
+                    Some(base) => {
+                        let stride = match base >= crate::compiler::SKIP_BASE {
+                            true => crate::compiler::SKIP_STRIDE,
+                            false => 1,
+                        };
+                        Some(base + self.scan_number(lx, pending_only)? * stride)
+                    }
+                    // A `\dimendef`, `\skipdef` or `\muskipdef` name is the
+                    // register it was given, in every position the spelt-out
+                    // form works -- and `10\p@` is that position.
+                    None => match self.numeric_cs(*n) {
+                        Some(NumericCs::Register(r)) if r >= crate::compiler::DIMEN_BASE => Some(r),
+                        _ => None,
+                    },
+                };
+                if let Some(reg) = reg {
+                    let is_mu = reg >= crate::compiler::MUSKIP_BASE;
+                    if is_mu == self.mu_units {
+                        return Ok(Some(reg));
+                    }
+                }
+            }
+            eaten.push(t);
+            lx.push_back(&eaten);
+            return Ok(None);
+        }
+    }
+
     /// A dimension: the number, then a unit (`tex.web` §448-453). The result is
     /// scaled points, which is the only form a dimension ever has.
+    ///
+    /// A caller that reads an `i64` has nowhere to put §453's other shape, so
+    /// `10\p@` is §454's illegal unit here exactly as it was before the shape
+    /// existed. `scan_dimen_parts` is the same scan for a caller that can carry
+    /// the product.
     pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        match self.scan_dimen_parts(lx, pending_only)? {
+            crate::dimen::ScannedDimen::Constant(v) => Ok(v),
+            crate::dimen::ScannedDimen::Scaled { .. } => Err(self.illegal_unit()),
+        }
+    }
+
+    /// `scan_dimen`, with §453's `<factor><internal unit>` carried out whole
+    /// rather than collapsed to a number.
+    pub fn scan_dimen_parts(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+    ) -> R<crate::dimen::ScannedDimen> {
+        use crate::dimen::ScannedDimen;
         // `\dimexpr ...\relax` stands where a dimension does.
         if let Some(t) = self.take(lx, pending_only) {
             let is_expr = matches!(&t, Token::Cs(n) if n.name() == "dimexpr");
             lx.push_back(std::slice::from_ref(&t));
             if is_expr {
                 let _ = self.take(lx, pending_only);
-                return self.scan_expr(lx, pending_only, true);
+                return self
+                    .scan_expr(lx, pending_only, true)
+                    .map(ScannedDimen::Constant);
             }
         }
-        let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
+        let sign = self.scan_optional_signs(lx, pending_only)?;
+        // §449: an internal dimension standing where the NUMBER goes is the
+        // whole dimension. `\@plus\p@` in size10.clo is one `\p@` and not none
+        // of it, which is a factor of exactly one.
+        if let Some(reg) = self.peek_internal_unit(lx, pending_only)? {
+            return Ok(ScannedDimen::Scaled {
+                int: sign,
+                frac: 0,
+                reg,
+            });
+        }
+        let (int, frac) = self.scan_factor(lx, pending_only)?;
+        // §453 looks for an internal dimension BEFORE `true` and before any
+        // spelt-out unit: `10\p@` is ten of whatever `\p@` holds, and no letter
+        // of a unit has been read yet when it is found.
+        if let Some(reg) = self.peek_internal_unit(lx, pending_only)? {
+            // The sign rides on both halves of the factor. §453 negates the
+            // whole product at `attach_sign` and §107 truncates toward zero, so
+            // negating the factor instead gives the same integer.
+            return Ok(ScannedDimen::Scaled {
+                int: sign * int,
+                frac: sign * frac,
+                reg,
+            });
+        }
         // `tex.web` §453 takes an optional `true` in front of the unit and
         // divides by the magnification ratio. `\mag` is 1000 here and there is
         // no way to change it, so a true unit IS the unit -- but the keyword
         // still has to be eaten, or `1truept` reads as the unit `tr` and the
         // document stops on an illegal unit of measure.
-        let _true_prefix = self.scan_keyword(lx, "true", pending_only);
+        let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
         let mut unit = String::new();
         while unit.len() < 2 {
             let Some(t) = self.take(lx, pending_only) else {
@@ -1127,7 +1268,9 @@ impl Engine {
                 lx.push_back(std::slice::from_ref(&t));
             }
         }
-        Ok((sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN))
+        Ok(ScannedDimen::Constant(
+            (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+        ))
     }
 
     /// `\uppercase{...}` / `\lowercase{...}` — `tex.web` §1288.
@@ -1445,11 +1588,52 @@ impl Engine {
     /// `fill` or `filll` accepted as its unit. Returns the value and its order,
     /// 0 being an ordinary finite dimension.
     pub fn scan_dimen_or_fil(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64)> {
-        let (sign, int, frac) = self.scan_dimen_number(lx, pending_only)?;
+        match self.scan_dimen_or_fil_parts(lx, pending_only)? {
+            (crate::dimen::ScannedDimen::Constant(v), order) => Ok((v, order)),
+            (crate::dimen::ScannedDimen::Scaled { .. }, _) => Err(self.illegal_unit()),
+        }
+    }
+
+    /// The same, with §453's `<factor><internal unit>` carried out whole.
+    ///
+    /// An infinite component is never scaled by a register: `fil` is spelt in
+    /// letters and an internal unit is a control sequence, so the two shapes
+    /// cannot both match and the order that comes back with a `Scaled` is
+    /// always the finite one.
+    pub fn scan_dimen_or_fil_parts(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+    ) -> R<(crate::dimen::ScannedDimen, i64)> {
+        use crate::dimen::ScannedDimen;
+        let sign = self.scan_optional_signs(lx, pending_only)?;
+        // §449, as in `scan_dimen_parts`: `\@plus\p@` is one `\p@`, and an
+        // internal dimension is always finite.
+        if let Some(reg) = self.peek_internal_unit(lx, pending_only)? {
+            return Ok((
+                ScannedDimen::Scaled {
+                    int: sign,
+                    frac: 0,
+                    reg,
+                },
+                0,
+            ));
+        }
+        let (int, frac) = self.scan_factor(lx, pending_only)?;
+        if let Some(reg) = self.peek_internal_unit(lx, pending_only)? {
+            return Ok((
+                ScannedDimen::Scaled {
+                    int: sign * int,
+                    frac: sign * frac,
+                    reg,
+                },
+                0,
+            ));
+        }
         // §453's optional `true`, eaten here for the same reason it is eaten in
         // `scan_dimen`: with `\mag` fixed at 1000 a true unit is the unit, but
         // the word still has to come off the stream.
-        let _true_prefix = self.scan_keyword(lx, "true", pending_only);
+        let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
         // Up to five letters, because `filll` is five; whatever is not part of
         // the unit goes back, so `1pt x` still leaves the `x` in the document.
         let mut letters = String::new();
@@ -1510,7 +1694,9 @@ impl Engine {
             }
         }
         Ok((
-            (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+            ScannedDimen::Constant(
+                (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+            ),
             order,
         ))
     }
@@ -1519,7 +1705,7 @@ impl Engine {
     ///
     /// TeX's keyword scan (`tex.web` §407): letters match either case, and
     /// nothing is consumed when the word is not there.
-    pub fn scan_keyword(&mut self, lx: &mut Lexer, word: &str, pending_only: bool) -> bool {
+    pub fn scan_keyword(&mut self, lx: &mut Lexer, word: &str, pending_only: bool) -> R<bool> {
         let mut seen = Vec::new();
         for want in word.chars() {
             loop {
@@ -1527,10 +1713,22 @@ impl Engine {
                     for t in seen.iter().rev() {
                         lx.push_back(std::slice::from_ref(t));
                     }
-                    return false;
+                    return Ok(false);
                 };
                 if t.is_space() && seen.is_empty() {
                     continue;
+                }
+                // §407 reads each letter with `get_x_token`, so a keyword may
+                // arrive through a MACRO. latex.ltx spells its glue
+                // `\@plus2\p@` with `\def\@plus{plus}`, and every standard
+                // class writes every glue that way -- unexpanded, the `plus`
+                // was never seen, the stretch was silently dropped, and the
+                // rest of the line was left in the document to be read as text.
+                if let Token::Cs(n) = &t {
+                    let n = *n;
+                    if self.try_expand(lx, n, pending_only)? {
+                        continue;
+                    }
                 }
                 let matched = matches!(&t, Token::Char(c, _)
                     if c.eq_ignore_ascii_case(&want));
@@ -1539,12 +1737,12 @@ impl Engine {
                     for t in seen.iter().rev() {
                         lx.push_back(std::slice::from_ref(t));
                     }
-                    return false;
+                    return Ok(false);
                 }
                 break;
             }
         }
-        true
+        Ok(true)
     }
 
     /// `\glueexpr ...\relax` — the same expression grammar over glue.
@@ -1637,8 +1835,34 @@ impl Engine {
         got
     }
 
+    /// `scan_muglue`, with §453's `<factor><internal unit>` carried out whole.
+    pub fn scan_muglue_parts(&mut self, lx: &mut Lexer) -> R<GlueParts> {
+        self.mu_units = true;
+        let got = self.scan_glue_parts(lx);
+        self.mu_units = false;
+        got
+    }
+
     /// `<dimen> [plus <dimen|fil>] [minus <dimen|fil>]` — a glue.
+    ///
+    /// A caller that reads numbers gets §454's illegal unit for a component
+    /// only the VM can compute, exactly as it did before that shape was
+    /// scannable; `scan_glue_parts` is the same scan for a caller that can
+    /// carry a product.
     pub fn scan_glue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
+        let g = self.scan_glue_parts(lx)?;
+        let flat = |d: crate::dimen::ScannedDimen| match d {
+            crate::dimen::ScannedDimen::Constant(v) => Some(v),
+            crate::dimen::ScannedDimen::Scaled { .. } => None,
+        };
+        match (flat(g.natural), flat(g.stretch), flat(g.shrink)) {
+            (Some(n), Some(st), Some(sh)) => Ok((n, st, g.stretch_order, sh, g.shrink_order)),
+            _ => Err(self.illegal_unit()),
+        }
+    }
+
+    /// The same, with each of the three `<dimen>` positions carried out whole.
+    pub fn scan_glue_parts(&mut self, lx: &mut Lexer) -> R<GlueParts> {
         // `\glueexpr ...\relax` stands where a glue does, and `\muexpr` where a
         // math glue does -- eTeX gives each unit its own expression primitive
         // so that the operands cannot be mixed, and the mode the scanner is in
@@ -1651,25 +1875,32 @@ impl Engine {
             if is_expr {
                 let _ = self.take(lx, false);
                 let g = self.scan_glue_expr(lx)?;
-                return Ok((
-                    g.natural,
-                    g.stretch,
-                    g.stretch_order,
-                    g.shrink,
-                    g.shrink_order,
-                ));
+                return Ok(GlueParts {
+                    natural: crate::dimen::ScannedDimen::Constant(g.natural),
+                    stretch: crate::dimen::ScannedDimen::Constant(g.stretch),
+                    stretch_order: g.stretch_order,
+                    shrink: crate::dimen::ScannedDimen::Constant(g.shrink),
+                    shrink_order: g.shrink_order,
+                });
             }
         }
-        let natural = self.scan_dimen(lx, false)?;
-        let (stretch, stretch_order) = match self.scan_keyword(lx, "plus", false) {
-            true => self.scan_dimen_or_fil(lx, false)?,
-            false => (0, 0),
+        let zero = (crate::dimen::ScannedDimen::Constant(0), 0);
+        let natural = self.scan_dimen_parts(lx, false)?;
+        let (stretch, stretch_order) = match self.scan_keyword(lx, "plus", false)? {
+            true => self.scan_dimen_or_fil_parts(lx, false)?,
+            false => zero,
         };
-        let (shrink, shrink_order) = match self.scan_keyword(lx, "minus", false) {
-            true => self.scan_dimen_or_fil(lx, false)?,
-            false => (0, 0),
+        let (shrink, shrink_order) = match self.scan_keyword(lx, "minus", false)? {
+            true => self.scan_dimen_or_fil_parts(lx, false)?,
+            false => zero,
         };
-        Ok((natural, stretch, stretch_order, shrink, shrink_order))
+        Ok(GlueParts {
+            natural,
+            stretch,
+            stretch_order,
+            shrink,
+            shrink_order,
+        })
     }
 
     /// The same, for a caller that is lowering.

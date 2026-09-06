@@ -234,6 +234,18 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     }
 }
 
+/// `tex.web` §453's `<factor><internal unit>`: the internal dimension, the
+/// factor's integer part, and its fraction in 65536ths.
+///
+/// Cannot fail: §460 clamps an out-of-range product to the largest dimension
+/// rather than raising, so there is nothing to report from here.
+fn b_scale_dimen(vm: &mut VM, _argc: u8) -> Value {
+    let frac = vm.pop().to_int();
+    let int = vm.pop().to_int();
+    let v = vm.pop().to_int();
+    Value::Int(crate::dimen::scale_by_factor(int, frac, v))
+}
+
 /// Close an `\input` file: append `)` to the message already written.
 ///
 /// Not a message of its own, because the stream is joined with spaces and tex
@@ -294,6 +306,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
     vm.register_builtin(ops::MSG_GLUE, b_msg_glue);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
+    vm.register_builtin(ops::SCALE_DIMEN, b_scale_dimen);
     vm.register_builtin(ops::MSG_MUGLUE, b_msg_muglue);
     vm.register_builtin(ops::ERR_SITE, b_err_site);
     vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);

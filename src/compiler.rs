@@ -61,6 +61,11 @@ pub mod ops {
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
     pub const DBG_LINE: u16 = 4002;
+    /// `tex.web` §453's `<factor><internal unit>`: the register's value, the
+    /// factor's integer part, and its fraction in 65536ths. A builtin rather
+    /// than a run of arithmetic ops because §107's truncation and §460's clamp
+    /// are the port, and one Rust function is where they stay readable.
+    pub const SCALE_DIMEN: u16 = 4015;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -463,6 +468,14 @@ impl Compiler {
             }
             Num::Count(reg) => {
                 self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+            }
+            // The register first, then the two halves of the factor: the
+            // builtin pops them back in that order and takes §453's product.
+            Num::Scaled { int, frac, reg } => {
+                self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+                self.b.emit(Op::LoadInt(*int), self.line);
+                self.b.emit(Op::LoadInt(*frac), self.line);
+                self.b.emit(Op::CallBuiltin(ops::SCALE_DIMEN, 3), self.line);
             }
             Num::Rust { name, args } => {
                 // The name first, then the arguments: the builtin pops the
