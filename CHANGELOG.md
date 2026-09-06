@@ -6,7 +6,61 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Type size is a property of a RUN rather than of the document. Every
+  size-selecting command was empty in the prelude and `Layout::size` was one
+  document-wide `f64`, so every heading was set at body size; `\section`,
+  `{\huge …}` and `{\Large …}` in one file now emit three distinct `Tf` sizes
+  where they emitted one.
+- `\setsansfont` and `\setmonofont` reach the page. `\setsansfont` was parsed
+  and read nowhere and `\sffamily` answered with the main face, so a document
+  that shipped a display family got its body face wherever it asked for the
+  other one. `{\sffamily …}` embeds the named family now.
+- Family, series and shape are three axes rather than one slot, as NFSS has
+  them. `{\sffamily\bfseries\Huge}` — the ordinary way to write a heading
+  format — kept only the last switch and arrived bold and not sans; it keeps
+  both. A family that declares no bold cut still answers `\bfseries` with
+  base-14 Helvetica-Bold rather than with a bold of itself.
+- fontspec's `Scale=`, `Scale=MatchLowercase` included. The factor is the ratio
+  of the main face's x-height to the scaled family's, out of OS/2's `sxHeight`:
+  Arimo over Orbitron is 1082/2048 over 580/1000 = 0.9109, so `{\sffamily\Huge}`
+  goes 24.787pt to 22.578pt. A face predating that OS/2 field is left unscaled
+  rather than scaled by a guess, and bold and italic take the main family's
+  scale.
+- `\titleformat` applies the format it is handed instead of discarding it, in
+  both spellings, with the format's declarations closing after the title rather
+  than before it. It REPLACES the class default as titlesec does, so a format
+  naming no size leaves the heading at body size.
+- Images. `\includegraphics` embedded nothing and reserved no room, so a
+  document with a figure and one without produced identical PDFs. The file is
+  embedded and the room reserved: a figure moves the text below it down by the
+  height it takes. An image given no size is bounded to the measure and the
+  text height rather than set at the file's own — a diagram exported at 1600
+  pixels is 1600 big points wide — and a name this reader cannot rasterise falls
+  back to a sibling of the same name.
+- The quote and dash ligatures the fonts perform. `` `` ``, `` '' ``, `--` and
+  `---` set “ ” – — where they set the marks doubled; `\texttt` and verbatim
+  keep their hyphens, `-{}-` stays two, and `----` is an em dash and a hyphen.
+- The six per-character code tables read as numbers wherever a number is
+  scanned (`tex.web` §413), which is what `ltxcmds.sty` needs to open
+  `\begingroup\catcode61\catcode48\catcode32=10\relax`, and behind it
+  `bookmark`, `kvoptions`, `kvsetkeys`, `pdftexcmds`, `infwarerr` and
+  `etexcmds`. The four §247 display glue parameters exist with them.
+- LaTeX's own classes are known without a `.cls` to read. `class_declares_chapters`
+  read the file `kpsewhich` points at, so a machine with no TeX installation read
+  every class as `report`'s and an article's first section wrote
+  `\newlabel{sec:a}{{0.1}{0}}`.
+
 ### Fixed
+
+- A size or a face opened by an environment dies with that environment. The
+  prelude spells `\def\begin#1{\csname #1\endcsname}`, which opens no group
+  where LaTeX's `\begin` does a `\begingroup`, so a declaration in an
+  environment's begin-code outlived it. Pandoc's template ends
+  `\renewenvironment{Shaded}{...\ttfamily\small}`, so the first code listing
+  put the rest of the book in `\small`. The face leaked the same way and was
+  invisible until `\setmonofont` was real enough to show it.
 
 - `tex.web` §453's `<factor><internal unit>`. `10\p@` is ten of whatever the
   register `\p@` holds, and a register's value lives in a VM slot -- so the
