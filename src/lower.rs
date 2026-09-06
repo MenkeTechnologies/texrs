@@ -515,9 +515,12 @@ impl Lowerer {
         // of its group, which is what `{\ttfamily code}` -- the body every book
         // redefines `\texttt` to -- depends on.
         let mut face_open = 0usize;
+        // Where each open environment's declarations began, so its `\end`
+        // closes its own and not those of an environment around it.
+        let mut env_marks: Vec<(usize, usize)> = Vec::new();
         // A size declaration is scoped to its group exactly as a face is, and
         // is closed everywhere a face is closed.
-        let mut size_open = false;
+        let mut size_open = 0usize;
         // The line the last directive named, so one is emitted per line rather
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
@@ -659,6 +662,17 @@ impl Lowerer {
                         self.picture_environment(lx, &env, &mut out)?;
                         continue;
                     }
+                    // Where this environment's declarations start. Closing
+                    // every open face at every `\end` is wrong the moment
+                    // environments nest, and pandoc nests them as a matter of
+                    // course: `\begin{Shaded}\begin{Highlighting}...` closed
+                    // Shaded's `\ttfamily` at the INNER end and set the rest
+                    // of the listing in the body face.
+                    //
+                    // Recorded for the general case only. A picture, a listing
+                    // and a verbatim body all read their own `\end` out of the
+                    // stream above, so none of them reaches the close below.
+                    env_marks.push((face_open, size_open));
                     // A listing is read raw for a DIFFERENT reason: its body is
                     // TeX and must expand, but the LINES in it are the author's
                     // and only the raw body still has them. See `lower_listing`.
@@ -706,13 +720,27 @@ impl Lowerer {
             // holding two `\small`, against a reference that has no 8.97 in it
             // anywhere.
             //
-            // Only the size is scoped here. The face has always leaked the
-            // same way and is left alone: with no `\setmonofont` the mono face
-            // IS the main face, so nothing shows it, and changing what every
-            // `\ttfamily` in the corpus reaches is not a thing to do in the
-            // same commit as this.
+            // The FACE is scoped here for the same reason and by the same
+            // rule. It leaked identically all along, and was left alone while
+            // nothing could show it: with no `\setmonofont` the mono face IS
+            // the main face, so the leak drew the same glyphs.
+            //
+            // A document that names a monospace family shows it immediately.
+            // pandoc's `\renewenvironment{Shaded}{\ttfamily\small}` put the
+            // prose after every code listing in the MONO face -- and at the
+            // mono family's `Scale=MatchLowercase`, so `arb` set body text at
+            // 10.566pt in ShareTechMono where 10pt of Arimo belonged.
             if self.text_output && name.name() == "end" {
-                self.close_size(&mut out, &mut size_open);
+                // Down to where this environment opened, and no further: the
+                // declarations of an environment still running outside it are
+                // not this one's to close.
+                let (faces, sizes) = env_marks.pop().unwrap_or((0, 0));
+                while size_open > sizes {
+                    self.close_size_one(&mut out, &mut size_open);
+                }
+                while face_open > faces {
+                    self.close_face_one(&mut out, &mut face_open);
+                }
             }
             // Colour, before the prelude's own definitions can swallow it. The
             // prelude defines these to consume their arguments and emit
@@ -2271,13 +2299,13 @@ impl Lowerer {
         &self,
         name: crate::token::CsId,
         out: &mut Vec<Cmd>,
-        size_open: &mut bool,
+        size_open: &mut usize,
     ) -> bool {
         let Some(size) = crate::typeset::size_step(name.name(), self.layout.size) else {
             return false;
         };
-        // A second size in one group REPLACES the first, as a second face
-        // does: there is one size in force, not a stack of them per group.
+        // A second size in one group replaces the first -- one size is in
+        // force, not a stack of them -- so the previous one closes here.
         self.close_size(out, size_open);
         self.push_text(
             out,
@@ -2289,13 +2317,13 @@ impl Lowerer {
                 crate::typeset::SIZE_PUSH
             ),
         );
-        *size_open = true;
+        *size_open += 1;
         true
     }
 
     /// End a size declaration that is still in force, if there is one.
-    fn close_size(&self, out: &mut Vec<Cmd>, size_open: &mut bool) {
-        if std::mem::take(size_open) {
+    fn close_size(&self, out: &mut Vec<Cmd>, size_open: &mut usize) {
+        for _ in 0..std::mem::take(size_open) {
             self.push_text(out, &crate::typeset::SIZE_POP.to_string());
         }
     }
@@ -3700,5 +3728,24 @@ fn mono_after(code: char, current: Option<bool>) -> bool {
             _ => false,
         },
         _ => current,
+    }
+}
+
+impl Lowerer {
+    /// Close one open face declaration.
+    fn close_face_one(&mut self, out: &mut Vec<Cmd>, face_open: &mut usize) {
+        if *face_open > 0 {
+            *face_open -= 1;
+            self.faces.pop();
+            self.push_text(out, &crate::typeset::FACE_POP.to_string());
+        }
+    }
+
+    /// Close one open size declaration.
+    fn close_size_one(&mut self, out: &mut Vec<Cmd>, size_open: &mut usize) {
+        if *size_open > 0 {
+            *size_open -= 1;
+            self.push_text(out, &crate::typeset::SIZE_POP.to_string());
+        }
     }
 }

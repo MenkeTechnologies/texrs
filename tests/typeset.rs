@@ -3604,3 +3604,81 @@ fn the_prelude_and_the_decoder_agree_about_the_face_letters() {
         );
     }
 }
+
+/// A FACE an environment's begin-code sets dies with that environment.
+///
+/// The size was scoped when this was found; the face was left, because with no
+/// `\setmonofont` the mono face IS the main face and the leak drew the same
+/// glyphs. A document naming a monospace family shows it at once: pandoc's
+/// `\renewenvironment{Shaded}{\ttfamily\small}` put the prose after every code
+/// listing in the MONO face, and at the mono family's own scale -- `arb` set
+/// body text at 10.566pt of ShareTechMono where 10pt of Arimo belonged.
+#[test]
+fn a_face_an_environment_opens_does_not_outlive_it() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = format!(
+        "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+         \\setmonofont{{ShareTechMono-Regular}}[Path={dir}/,Extension=.ttf,\
+UprightFont=ShareTechMono-Regular]\n\
+         \\newenvironment{{Shaded}}{{\\ttfamily}}{{}}\n\\begin{{document}}\n\
+         BODYTEXT here\n\\begin{{Shaded}}\nCODELINE here\n\\end{{Shaded}}\n\
+         AFTERTEXT here\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&doc).expect("pdf");
+    let drawn_in = faces(&pdf);
+    let body = face_of(&drawn_in, "BODYTEXT");
+    let code = face_of(&drawn_in, "CODELINE");
+    let after = face_of(&drawn_in, "AFTERTEXT");
+    assert!(
+        code.contains("ShareTechMono"),
+        "the environment's own text is mono, got {code}"
+    );
+    assert_eq!(
+        body, after,
+        "the prose after the environment must be set in the face before it"
+    );
+    assert!(
+        !after.contains("ShareTechMono"),
+        "the mono face outlived its environment: {after}"
+    );
+}
+
+/// An inner environment's `\end` closes its OWN declarations, not the ones of
+/// the environment around it.
+///
+/// Closing every open face at every `\end` is wrong the moment environments
+/// nest, and pandoc nests them as a matter of course:
+/// `\begin{Shaded}\begin{Highlighting}...\end{Highlighting}\end{Shaded}` would
+/// close Shaded's `\ttfamily` at the INNER end and set the rest of the listing
+/// in the body face.
+#[test]
+fn a_nested_environment_does_not_close_the_face_of_the_one_around_it() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = format!(
+        "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+         \\setmonofont{{ShareTechMono-Regular}}[Path={dir}/,Extension=.ttf,\
+UprightFont=ShareTechMono-Regular]\n\
+         \\newenvironment{{Shaded}}{{\\ttfamily}}{{}}\n\
+         \\newenvironment{{Inner}}{{}}{{}}\n\\begin{{document}}\n\
+         BODYTEXT here\n\\begin{{Shaded}}\nFIRSTLINE inside\n\
+         \\begin{{Inner}}\nNESTED deeper\n\\end{{Inner}}\n\
+         LASTLINE still inside\n\\end{{Shaded}}\nAFTERTEXT here\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&doc).expect("pdf");
+    let drawn_in = faces(&pdf);
+    assert!(
+        face_of(&drawn_in, "FIRSTLINE").contains("ShareTechMono"),
+        "the environment's own text is mono"
+    );
+    assert!(
+        face_of(&drawn_in, "LASTLINE").contains("ShareTechMono"),
+        "text after a NESTED environment is still inside the outer one: {}",
+        face_of(&drawn_in, "LASTLINE")
+    );
+    assert!(
+        !face_of(&drawn_in, "AFTERTEXT").contains("ShareTechMono"),
+        "and the outer environment still ends where it ends"
+    );
+}
