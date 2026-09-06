@@ -543,22 +543,20 @@ and three of the things a document controls survive the trip:
   the line where it stands and this gives it lines of its own. `--dvi` and
   `--text` draw no picture at all: DVI would need a `\special` every driver
   reads differently, and a picture has no words.
-- **A face is one slot, where NFSS has three axes.** LaTeX tracks family, series
-  and shape independently; texrs tracks one face, so the last switch wins and
-  the earlier one is lost. Four lines, no corpus, with `\setsansfont` pointed at
-  Orbitron:
+- **The face axes compose now, and one fallback is left.** Family, series and
+  shape were a single slot until v0.6.0, so the last switch won and the earlier
+  one was lost. They are three axes, as NFSS has them:
 
   ```
-  {\sffamily\Huge X}            Orbitron-VF        family survives alone
-  {\sffamily\bfseries\Huge X}   Helvetica-Bold     family lost to the series
-  {\bfseries\Huge X}            Helvetica-Bold
+  {\sffamily\Huge X}            Orbitron-VF     was Orbitron-VF
+  {\sffamily\bfseries\Huge X}   Orbitron-VF     was Helvetica-Bold
+  {\bfseries\Huge X}            Helvetica-Bold  unchanged
   ```
 
-  The size arrives in all three; it is the family that is dropped. This is the
-  layer under `\titleformat`, which applies its format now rather than
-  discarding it (`\Huge` through `\titleformat{\section}` gives 24.79pt and
-  embeds Orbitron) — but a format written `{\sffamily\bfseries\Huge}`, which is
-  the ordinary way to write one, still reaches the page bold and not sans.
+  The middle row is the fix: `{\sffamily\bfseries\Huge}` is the ordinary way to
+  write a heading format, and the family used to be lost to the series. What the
+  third row shows is what is left — asking for bold in a family that declares no
+  bold cut gets base-14 Helvetica-Bold rather than a bold of that family.
 - **Ligatures and type sizes were here and are not.** Both were listed as
   limitations in this section until v0.6.0. `\section`, `{\huge …}` and
   `{\Large …}` in one file now emit three distinct `Tf` sizes rather than one,

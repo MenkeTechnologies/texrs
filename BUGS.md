@@ -210,53 +210,18 @@ SOURCE bytes and leaves the font to map them. `pdftotext -enc UTF-8` goes
 through the ToUnicode table and shows what a reader gets. The content stream is
 not the rendering.
 
-- **A face is one slot; NFSS has three axes.** LaTeX carries family, series and
-  shape independently and combines them; texrs carries one face, so the last
-  switch replaces the previous one instead of joining it:
+The single-slot face was on this list and is no longer: family, series and shape
+compose as NFSS has them, so `{\sffamily\bfseries\Huge}` keeps the family it
+used to lose to the series. What remains is narrower — a family that declares no
+bold cut answers `\bfseries` with base-14 Helvetica-Bold rather than with a bold
+of itself.
 
-  ```
-  {\sffamily\Huge X}            Orbitron-VF
-  {\sffamily\bfseries\Huge X}   Helvetica-Bold
-  ```
-
-  The size and the colour arrive either way; the family is what is lost. Note
-  also that `\bfseries` alone gives base-14 Helvetica-Bold rather than a bold
-  cut of the main face.
-
-  This sits UNDER `\titleformat`, which was itself a gap until it began applying
-  its format: `\Huge` through `\titleformat{\section}` now gives 24.79pt and
-  embeds the sans face. A format written the ordinary way,
-  `{\sffamily\bfseries\Huge}`, still arrives bold and not sans, so a document
-  styling its headings that way sees the size and not the family.
-
-fontspec's `Scale=` was on this list and is no longer: it is applied, including
-`Scale=MatchLowercase`, whose factor is the ratio of the main face's x-height to
-the scaled family's out of OS/2's `sxHeight`. `Scale=0.5` halves; Orbitron under
-`MatchLowercase` beside Arimo goes 24.787pt to 22.578pt.
-
-Kept from that entry, because it is the more useful half: **a mechanism should
-say which instrument shows it.** When `Scale=` landed, the corpus book it was
-supposed to help moved FURTHER from its reference — 333 pages to 341 against
-311 — while its size histogram moved TOWARD it, from no glyphs at 10.53pt to
-36.9% against the reference's 41.0%. The typography got more correct and the
-page count got worse, because page count aggregates every remaining gap and that
-book still has the one-slot face wrong.
-
-So an unexplained delta is a reason to find a sharper instrument, not a verdict.
-Judged on page count alone, that fix reads as a regression and the correct move
-looks like reverting it.
-
-A sharp instrument can still be calibrated from the wrong place. The scale
-factor was pinned by a test asserting 0.907 within 0.01, and it passed —
-because 0.907 is what lualatex's rounded output for one book DIVIDES to, while
-the code computes 0.9109 from Arimo's `sxHeight` over Orbitron's, 1082/2048 over
-580/1000. A third of a percent apart, and the tolerance was wider than the gap,
-so the test would have kept passing while the arithmetic drifted. Pinned at
-0.9109 within 0.001 now.
-
-The expected value has to come from what the implementation should compute, not
-from what the reference happened to print. A test anchored on a reference's
-rounded emission is measuring the reference.
+That entry closed as the last link of a chain rather than on its own, which is
+worth keeping: the sans family had to exist, `\titleformat` had to deliver its
+format, `Scale=` had to apply, and then the axes had to compose. Four changes,
+each necessary and none sufficient, and the stack was only ever visible from the
+bottom — the lost family could not be seen before a sans family existed to lose,
+and that could not be seen before `\titleformat` delivered anything at all.
 
 - **`package article is not loadable: Illegal unit of measure (pt inserted)`**
   on stderr, for a document as simple as `\documentclass{article}` with one word

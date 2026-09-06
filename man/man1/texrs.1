@@ -80,8 +80,10 @@ breaks it into lines with the first break that fits, and ships a page a driver
 will open.  It is
 .B not
 .IR tex.web 's
-stomach \(em no maths, no boxes a document can nest.  How the lines and the
-pages are broken depends on the output:
+stomach \(em there is no
+.BR \esetbox ,
+so no boxes a document can nest.  Maths, pictures, colour and images do reach
+the page.  How the lines and the pages are broken depends on the output:
 .B \-\-pdf
 minimises the total demerits of a whole paragraph over every feasible set of
 breakpoints and hyphenates with Liang patterns
