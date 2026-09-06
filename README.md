@@ -197,6 +197,7 @@ texrs -X pfb FILE.pfb [C]  # read a Type 1 font: its glyphs and their widths
 texrs -X map FILE.map      # read a font map: what a TeX font name means
 texrs -X enc FILE.enc      # read an encoding: what each code is called
 texrs -X itar FILE.tar     # index a tar bundle, or read one file out of it
+texrs -X special TEXT      # say what a \special means to a driver
 ```
 
 Two places the grammar departs from `tex`, both because texrs takes several
@@ -233,7 +234,11 @@ than none.
 - Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\ifcase`
   with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.
 - Groups, which scope the macro table AND the count registers they write.
-- `\count` registers, `` `x `` character codes, `\advance`/`\multiply`/`\divide`.
+- Registers: `\count`, `\dimen`, `\skip`, `\toks` and `\muskip`, with `` `x ``
+  character codes and `\advance`/`\multiply`/`\divide`. `\dimen0=10pt \advance\dimen0
+  by 5pt` reads back `15.0pt`; `\skip0=3pt plus 1fil` reads back with its stretch.
+  Box registers are the exception — there is no `\setbox`, so every one is
+  void, which is what `\ifvoid`, `\ifhbox` and `\ifvbox` answer.
 - `\message`.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's.
@@ -418,6 +423,15 @@ unread. `lualatex` refuses those same files too (`! LaTeX Error: \usepackage
 before \documentclass`), so the drop is the engine reading what it used to skip
 rather than a capability lost. Of the remaining four, three are texrs's own DVI
 fixtures needing `\hsize` and one is written to fail.
+
+Two things decide that count besides the engine, and a re-run that ignores them
+reports failures texrs did not cause. The sweep defaults to `target/debug/texrs`
+and to a 120-second limit per document; a debug build is several times slower
+than a release one, and 120s is short for a 16,000-line book. A run of mine over
+the 167-file publications tree put 35 documents over that limit — and the first
+of them, given 600s, finished and produced 780,253 bytes of text. Those are
+`rc=124`, the harness killing the run, and the script now says so and prints the
+re-run that settles it rather than listing them beside real refusals.
 
 That is a measurement, so it is re-measurable rather than remembered:
 

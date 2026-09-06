@@ -5,6 +5,8 @@
 #   bash scripts/publications.sh /path/to/corpus    # somewhere else
 #   bash scripts/publications.sh --gate             # exit non-zero if any document failed
 #   TEXRS_JOBS=8 bash scripts/publications.sh       # how many at once (default: one per core)
+#   TEXRS_TIMEOUT=600 bash scripts/publications.sh  # per document (default 120s)
+#   TEXRS_BIN=target/release/texrs bash ...         # the debug build is much slower
 #
 # The tests in `tests/` pin behaviour a sentence at a time and the corpus in
 # `tests/cases` pins byte-for-byte parity with real tex. Neither says whether a
@@ -97,6 +99,19 @@ echo "  $LOG"
 
 if [ "$ok" != "$total" ]; then
   echo
+  # rc=124 is `timeout` killing the run, not the engine refusing the document.
+  # Both the binary and the limit decide how many of those there are: a debug
+  # build is several times slower than a release one, and the default 120s is
+  # short for a 16,000-line book. Counting them as failures reads as a
+  # capability the engine lacks when it is a limit the harness imposed.
+  killed=$(awk -F'\t' '$2 == 124' "$LOG" | wc -l | tr -d ' ')
+  if [ "$killed" != "0" ]; then
+    printf '%s of the %s were killed at %ss by this harness, not by texrs.\n' \
+      "$killed" "$((total - ok))" "$TEXRS_TIMEOUT"
+    printf 'Re-run those with TEXRS_TIMEOUT=600, or against a release build:\n'
+    printf '  TEXRS_BIN=target/release/texrs TEXRS_TIMEOUT=600 bash %s\n' "$0"
+    echo
+  fi
   echo "did not finish:"
   # The prefix goes before the padding, or the column does not line up.
   perl -pe "s{\Q$CORPUS\E/}{}" "$LOG" \
