@@ -29,6 +29,14 @@ Homebrew tap.
 
 ### Added
 
+- Reading a PDF (`pdfread`), ported from `pdfparse.c` and the reading half of
+  `pdfobj.c` in `xdvipdfmx`: the lexer, both forms of cross-reference -- the
+  table of twenty-byte lines and the compressed stream PDF 1.5 brought -- and
+  object streams, which is where pdftex puts most of a file's objects. The
+  object model is the writer's own `pdf::Object`, so a page read out of one
+  file can be written into another rather than translated. Read against three
+  producers that agree about nothing else: pdftex, Ghostscript, and this
+  crate's own writer.
 - Maths. `$…$`, `$$…$$`, `\(`, `\[` and the display environments are read into
   an mlist and converted by `tex.web`'s own `mlist_to_hlist` (§680-§767), with
   §764's 64-digit spacing table ported verbatim because that table IS the spec,
