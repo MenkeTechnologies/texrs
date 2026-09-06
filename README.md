@@ -471,23 +471,22 @@ and three of the things a document controls survive the trip:
   and is regularly a directory that no longer exists, so a stale one is retried
   against the directory the document was read from, where the fonts are.
   The file is carried in the PDF as `/FontFile2` — `pdffonts` reports
-  `GLGNCA+Arimo-VF TrueType yes yes`, embedded AND subset — once, and referred
+  `KAZDEO+Arimo-VF TrueType yes yes`, embedded AND subset — once, and referred
   to from every page; lines are
   broken on that font's own advance widths, out of its `hmtx` through its
   `cmap`. A family nothing can be found for falls back to whichever of the
   fourteen carries the same metrics, not to Computer Modern. The face is
   SUBSET: only the glyphs the document actually set are kept, with `cmap`,
   `glyf`, `loca`, `hmtx`, `maxp` and `head` rebuilt rather than copied, and each
-  subset carries its own six-letter tag. A 5.6MB book comes out with
-  `GLGNCA+Arimo-VF`, `TQIODW+Arimo-Italic-VF`, `HHQUFN+ShareTechMono-Regular`
-  and `MAZEDP+ArialUnicode`, and the four embedded programs come to **177,248
-  bytes** where the three bundled faces alone are 1,082,736 on disk and the
-  fourth is a system face borrowed for glyphs the others lack. That pair is the
-  claim about subsetting.
+  subset carries its own six-letter tag. A 5.6MB book comes out with five faces —
+  `Arimo-VF`, `Arimo-Italic-VF`, `Orbitron-VF`, `ShareTechMono-Regular` and a
+  system `ArialUnicode` borrowed for glyphs the others lack — and the five
+  embedded programs come to **183,944 bytes** where the four bundled faces alone
+  are 1,121,312 on disk. That pair is the claim about subsetting.
   The whole-file totals are a DIFFERENT claim and worth not confusing with it:
-  this book is 2.5MB against lualatex's 968,737, but the file also carries a
-  contents, folios, and four faces where lualatex embeds one subsetted Latin
-  Modern. Read as a subsetting result it says the subsetter is poor; it is
+  this book is 2.6MB against lualatex's 968,737, but the file also carries a
+  contents, folios, pictures, and five faces where lualatex embeds one subsetted
+  Latin Modern. Read as a subsetting result it says the subsetter is poor; it is
   comparing two font sets.
   The descriptor states what the METRICS file states rather than the bounding
   box's extremes — `/Ascent 694 /CapHeight 683 /Descent -194 /XHeight 431` for
@@ -572,11 +571,13 @@ and three of the things a document controls survive the trip:
   a figure, one without, a real PNG present:
 
   ```
-  with a figure     24,329 bytes, /Subtype /Image present, "After." baseline y=523.2
-  without           16,183 bytes, no image,                "After." baseline y=703.2
+  with a figure     /Subtype /Image present, "After." baseline y = 523.2
+  without           no image,                "After." baseline y = 703.2
   ```
 
-  180pt of room reserved, and the text below moves down for it. An image given
+  180pt of room reserved, and the text below moves down for it. The baselines
+  are the evidence rather than the file sizes: a byte count moves with every
+  feature the writer gains, where the offset is the thing being claimed. An image given
   no size is bounded to the measure and the text height rather than set at the
   file's own — a diagram exported at 1600 pixels is 1600 big points wide, which
   is wider than the page. A file the reader cannot rasterise (a `.pdf` named
