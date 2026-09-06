@@ -628,8 +628,11 @@ output parity alone would not distinguish a frontend from a tree-walker.
 
 ## [0x08] Parity
 
-The contract is the `\message` stream, compared byte-for-byte against the real
-`tex` binary. No expectation is written by hand:
+There are three contracts, against two oracles, and only the first is a byte
+comparison that already holds.
+
+The `\message` stream is compared byte-for-byte against the real `tex` binary.
+No expectation is written by hand:
 
 ```sh
 cargo run --bin parity          # the committed corpus
@@ -649,6 +652,28 @@ swallowing, conditionals nested inside a `\message` body, `\ifcase`,
 group. Every case is in parity except the ones `tests/known_gaps.txt` names,
 and the gate fails both on an unlisted divergence and on a listed case that has
 started passing, so the list cannot go stale.
+
+The page is not compared that way, because nothing reaches byte equality yet.
+`tests/dvi_parity.rs` and `tests/pdf_parity.rs` are RATCHETS instead: each
+document has a rung it last reached, recorded in `tests/dvi_floor.txt` and
+`tests/pdf_floor.txt`, and the gate fails when one drops rather than asserting
+agreement it does not have.
+
+```
+DVI   NONE < PARSES < PAGES < TEXT < STRUCTURE < BYTES
+PDF   NONE < PRODUCED < PAGES < PAGESIZE < TEXT < LINES < FONTS < BYTES
+```
+
+Fourteen documents on each. Today the DVI floor stands at PAGES for nine of
+them, and the PDF floor at LINES for seven — the rung where line breaking and
+glue setting start to show — with `empty_document.tex` the only case at BYTES,
+and the only one at NONE on the other axis. The oracle differs too: DVI is
+against `tex`, PDF against `luatex`, and both skip loudly rather than passing
+when their oracle or the tools that read the output are missing.
+
+Byte equality is a reachable goal for DVI, which carries no fonts and no
+compression, and a distant one for PDF: `Hello world.` is 224 bytes from `tex`
+against 260 from texrs, where the same document in PDF is 11,729 against 615.
 
 ## [0x09] Fuzzing
 
