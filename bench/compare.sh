@@ -19,8 +19,8 @@
 #
 #   * tex loads the plain format and texrs loads nothing, so part of any
 #     difference is format loading rather than engine speed.
-#   * texrs implements the mouth and the expander only. A document that would
-#     make tex build pages is not being compared like for like.
+#   * the two engines no longer do the same work. texrs typesets and writes a
+#     PDF by default; tex writes DVI. Which way that cuts depends on the file.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -90,6 +90,7 @@ cat <<'NOTE'
 Read the ratio with two things in mind:
   * tex loads the plain format on every run and texrs loads nothing, so part of
     the difference is format loading rather than engine speed.
-  * texrs implements the mouth and the expander only; a document that would make
-    tex build pages is not a like-for-like comparison.
+  * the two engines no longer do the same work: texrs typesets and writes a PDF
+    by default, tex writes DVI. This is not a like-for-like comparison, and
+    which way it cuts depends on the document.
 NOTE

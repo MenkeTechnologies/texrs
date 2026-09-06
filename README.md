@@ -678,17 +678,27 @@ caught a line-number lookup that was O(n) per token, and fixing it took an
 
 `bench/compare.sh` is the comparison that says whether the engine is fast
 rather than where its time goes, and prints the two caveats with the numbers:
-`tex` loads the plain format on every run while texrs loads nothing, and texrs
-implements the mouth and expander only.
+`tex` loads the plain format on every run while texrs loads nothing, and the two
+no longer do the same work — texrs typesets and writes a PDF by default where
+`tex` writes DVI.
 
-### Measured
+### Measured, at v0.3.0
+
+**These numbers are from v0.3.0 and have not been re-taken.** They were measured
+when texrs implemented the mouth and the expander and shipped no page at all —
+before the line breaker, the page builder, fonts, images, maths, TikZ and the
+PDF writer. Every one of those does work per run that was not being done when
+these were recorded, so the ratios below describe an engine that no longer
+exists. They are kept, dated, rather than deleted or quietly refreshed: the
+shape of the finding — where the time goes, and that a batch parallelises where
+`tex` cannot — is what the section is for, and a number presented as current is
+worse than one presented as historical.
 
 Against `tex` 3.141592653 (TeX Live 2026) on a 10-core machine. Every figure
 below is a median of repeated interleaved runs rather than a best-of, because
-the machine was under other load while they were taken; a quiet machine gives
-larger margins, not smaller. Read them with the two caveats above: `tex` is
-doing format loading that texrs does not do, and texrs is not doing the
-typesetting that `tex` does.
+the machine was under other load while they were taken. Read them with the
+caveats above, and with the one that has since changed: at the time texrs was
+NOT typesetting and `tex` was.
 
 **One document** (5.6 MB, 120k statements, 691k tokens):
 
