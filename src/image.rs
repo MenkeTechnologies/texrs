@@ -291,7 +291,7 @@ fn split_alpha(
         let at = y * (row + 1);
         let filter = pixels[at];
         current.copy_from_slice(&pixels[at + 1..at + 1 + row]);
-        unfilter(filter, &mut current, &previous, pixel)?;
+        unfilter_row(filter, &mut current, &previous, pixel)?;
 
         // Filtered with nothing, so what follows each of these bytes is the
         // pixels themselves.
@@ -318,7 +318,12 @@ fn split_alpha(
 /// §9.2 of the PNG specification: `a` is the byte one pixel to the left, `b`
 /// the one above, `c` the one above and to the left, and a byte before the
 /// start of the picture is zero.
-fn unfilter(filter: u8, row: &mut [u8], previous: &[u8], pixel: usize) -> Result<(), String> {
+pub fn unfilter_row(
+    filter: u8,
+    row: &mut [u8],
+    previous: &[u8],
+    pixel: usize,
+) -> Result<(), String> {
     for i in 0..row.len() {
         let a = match i >= pixel {
             true => row[i - pixel] as i32,
@@ -514,24 +519,24 @@ mod tests {
     fn the_paeth_predictor_chooses_the_neighbour_the_gradient_is_nearest() {
         let previous = [200u8, 0];
         let mut row = [0u8, 0];
-        unfilter(4, &mut row, &previous, 1).expect("a filter");
+        unfilter_row(4, &mut row, &previous, 1).expect("a filter");
         assert_eq!(row, [200, 0]);
 
         // And the three simple ones, which are addition and nothing else.
         let mut row = [5u8, 5];
-        unfilter(1, &mut row, &[0, 0], 1).expect("sub");
+        unfilter_row(1, &mut row, &[0, 0], 1).expect("sub");
         assert_eq!(row, [5, 10], "each byte adds the one to its left");
 
         let mut row = [5u8, 5];
-        unfilter(2, &mut row, &[10, 20], 1).expect("up");
+        unfilter_row(2, &mut row, &[10, 20], 1).expect("up");
         assert_eq!(row, [15, 25], "each byte adds the one above");
 
         let mut row = [5u8, 5];
-        unfilter(3, &mut row, &[10, 20], 1).expect("average");
+        unfilter_row(3, &mut row, &[10, 20], 1).expect("average");
         assert_eq!(row, [10, 20], "and the average of the two");
 
         // A filter that does not exist is refused rather than guessed at.
-        assert!(unfilter(9, &mut row, &[0, 0], 1).is_err());
+        assert!(unfilter_row(9, &mut row, &[0, 0], 1).is_err());
     }
 
     /// A PNG from the installation: chunks, header, pixels.

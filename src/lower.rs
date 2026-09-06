@@ -440,7 +440,7 @@ impl Lowerer {
         if c == crate::typeset::FACE_POP {
             self.faces.pop();
         } else if tail.is_some_and(|t| t.ends_with(crate::typeset::FACE_PUSH)) {
-            self.faces.push(c == crate::typeset::Face::Mono.code());
+            self.faces.push(mono_after(c, self.faces.last().copied()));
         }
         // The pair a ligature joins is ONE character, so the first of it comes
         // back out of the run before the character they form goes in. `prev`
@@ -514,7 +514,7 @@ impl Lowerer {
         // the same place: a face declaration is a switch that runs to the end
         // of its group, which is what `{\ttfamily code}` -- the body every book
         // redefines `\texttt` to -- depends on.
-        let mut face_open = false;
+        let mut face_open = 0usize;
         // A size declaration is scoped to its group exactly as a face is, and
         // is closed everywhere a face is closed.
         let mut size_open = false;
@@ -2079,11 +2079,7 @@ impl Lowerer {
                     // A description's term is the mark, and every description
                     // list sets it bold.
                     (ListKind::Term, Some(term)) => {
-                        let bold = crate::typeset::Face::Bold;
-                        self.push_text(
-                            out,
-                            &format!("{}{}", crate::typeset::FACE_PUSH, bold.code()),
-                        );
+                        self.push_text(out, &format!("{}b", crate::typeset::FACE_PUSH));
                         self.lower_into(&term, out)?;
                         self.push_text(out, &format!("{} ", crate::typeset::FACE_POP));
                     }
@@ -2227,38 +2223,36 @@ impl Lowerer {
         &mut self,
         name: crate::token::CsId,
         out: &mut Vec<Cmd>,
-        face_open: &mut bool,
+        face_open: &mut usize,
     ) -> bool {
-        use crate::typeset::Face;
-        let face = match name.name() {
-            "ttfamily" => Face::Mono,
-            "bfseries" => Face::Bold,
-            "itshape" => Face::Italic,
-            // Back to the body face. `\normalfont` is the one a heading writes
-            // to undo everything, and the two family switches are what a
-            // document says to leave the mono face inside a group that set it.
-            "sffamily" => Face::Sans,
-            // Back to the body face. `\normalfont` is the one a heading writes
-            // to undo everything, and `\rmfamily` is what a document says to
-            // leave a display family inside a group that set it.
-            "rmfamily" | "normalfont" => Face::Main,
+        // Each of these sets ONE axis and says nothing about the other two,
+        // which is what LaTeX's declarations do. The marker carries the same
+        // letter, read as a modifier of the face already in force -- see
+        // `Face::from_code`.
+        let code = match name.name() {
+            "ttfamily" => 'm',
+            "sffamily" => 's',
+            "rmfamily" => 'r',
+            "bfseries" => 'b',
+            "itshape" | "slshape" => 'i',
+            // The one a heading writes to undo all three at once.
+            "normalfont" => 'n',
             _ => return false,
         };
-        // A second switch in one group REPLACES the first, as a second `\color`
-        // does: there is one face in force, not a stack of them per group.
-        self.close_face(out, face_open);
-        self.faces.push(matches!(face, Face::Mono));
-        self.push_text(
-            out,
-            &format!("{}{}", crate::typeset::FACE_PUSH, face.code()),
-        );
-        *face_open = true;
+        // A second switch in one group JOINS the first rather than replacing
+        // it. Replacing is what made `{\sffamily\bfseries\Huge}` -- how every
+        // book in the corpus writes a heading -- come out bold and not sans.
+        // Each push is its own pop, so the count is what the group closes.
+        self.faces
+            .push(mono_after(code, self.faces.last().copied()));
+        self.push_text(out, &format!("{}{}", crate::typeset::FACE_PUSH, code));
+        *face_open += 1;
         true
     }
 
-    /// End a face declaration that is still in force, if there is one.
-    fn close_face(&mut self, out: &mut Vec<Cmd>, face_open: &mut bool) {
-        if std::mem::take(face_open) {
+    /// End every face declaration still in force in this group.
+    fn close_face(&mut self, out: &mut Vec<Cmd>, face_open: &mut usize) {
+        for _ in 0..std::mem::take(face_open) {
             self.faces.pop();
             self.push_text(out, &crate::typeset::FACE_POP.to_string());
         }
@@ -3687,3 +3681,24 @@ impl Default for Lowerer {
 pub type MacroDef = Macro;
 /// Kept for the catcode table's benefit.
 pub type CatKind = Cat;
+
+/// Whether the mono family is in force after a face code, given whether it was
+/// before.
+///
+/// The lowerer tracks this for one reason: a `--` inside a monospace run is
+/// two hyphens the author wrote and must not become an en dash. A face code is
+/// a MODIFIER, so `\bfseries` inside a `\ttfamily` group leaves the family
+/// alone and the run stays mono -- reading the code as a whole face here is
+/// what would silently ligature a flag in bold code.
+fn mono_after(code: char, current: Option<bool>) -> bool {
+    let current = current.unwrap_or(false);
+    match code {
+        'm' | 'k' | 'M' | 'K' => true,
+        'r' | 's' | 'n' | 'i' | 'b' | 'B' | 'j' | 'S' | 'J' => match code {
+            // The series and the shape say nothing about the family.
+            'i' | 'b' => current,
+            _ => false,
+        },
+        _ => current,
+    }
+}

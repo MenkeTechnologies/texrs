@@ -2023,7 +2023,7 @@ impl FontFile {
     /// document, so a path that has gone stale is retried by its last
     /// component against the document's own directory.
     pub fn resolve(&self, near: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-        self.resolve_face(Face::Main, near)
+        self.resolve_face(Face::MAIN, near)
     }
 
     /// The file for one face, looked for in the same two places.
@@ -2037,11 +2037,19 @@ impl FontFile {
         face: Face,
         near: Option<&std::path::Path>,
     ) -> Option<std::path::PathBuf> {
-        let named = match face {
-            Face::Bold => self.bold.as_deref(),
-            Face::Italic => self.italic.as_deref(),
-            _ => self.upright.as_deref(),
-        }?;
+        // The series and the shape choose the file; the FAMILY chose which
+        // `FontFile` this is, before the call. A document that ships a bold
+        // cut of only one family gets it for that family alone.
+        //
+        // There is no `BoldItalicFont=` field, so a face wanting both takes
+        // the italic file -- the shape is the one a reader notices missing.
+        // Falling back to upright would set an emphasis as ordinary text.
+        let named = match (face.bold, face.italic) {
+            (_, true) => self.italic.as_deref().or(self.bold.as_deref()),
+            (true, false) => self.bold.as_deref(),
+            (false, false) => self.upright.as_deref(),
+        }
+        .or(self.upright.as_deref())?;
         let extension = self.extension.as_deref().unwrap_or(".ttf");
         let file = format!("{named}{extension}");
         if let Some(path) = &self.path {
@@ -2214,63 +2222,168 @@ pub fn fallback_chain(chunk: &str) -> Vec<String> {
 /// and the page carried WHICH face was asked for, so a PDF came out with one
 /// font resource and one `Tf` operator, and every code identifier in every book
 /// was set in the prose font.
+/// Which of the three families a face is set from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Face {
-    /// What `\setmainfont` named: the document's prose.
+pub enum Family {
+    /// `\rmfamily` -- what `\setmainfont` named, and the document's prose.
     #[default]
-    Main,
-    /// `\ttfamily`, which is what `\texttt` is.
-    Mono,
-    /// `\bfseries`, which is what `\textbf` is.
-    Bold,
-    /// `\itshape`, which is what `\emph` and `\textit` are.
-    Italic,
-    /// `\sffamily`, which is what `\textsf` is -- and what a book sets its
-    /// headings in. `\setsansfont` was parsed into `Families` and read
-    /// nowhere, and `\sffamily` answered with the MAIN face, so a document
-    /// that shipped a display family got its body face at every heading.
+    Roman,
+    /// `\sffamily` -- what `\setsansfont` named, and what a book sets its
+    /// headings in.
     Sans,
+    /// `\ttfamily` -- what `\setmonofont` named, and what `\texttt` is.
+    Mono,
+}
+
+/// The face a stretch of text is set in: a family, a series and a shape,
+/// independently.
+///
+/// It was one slot, and NFSS has three axes. `{\sffamily\bfseries\Huge}` --
+/// which is how every book in the corpus writes a heading -- came out BOLD and
+/// not sans, because the second switch replaced the first instead of joining
+/// it. There was no slot for a bold cut of the sans family, so no marker could
+/// have named one even if the lowerer had emitted it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Face {
+    pub family: Family,
+    /// `\bfseries`, which is what `\textbf` is.
+    pub bold: bool,
+    /// `\itshape`, which is what `\emph` and `\textit` are.
+    pub italic: bool,
 }
 
 impl Face {
-    /// Every face a page can be set in, which is what a question asked of all
-    /// of them iterates: whether a character needs fetching from outside is one
-    /// such question, and it is asked once for the document rather than once a
-    /// line.
-    pub const ALL: [Face; 5] = [Face::Main, Face::Mono, Face::Bold, Face::Italic, Face::Sans];
+    /// The document's prose: roman, medium, upright.
+    pub const MAIN: Face = Face {
+        family: Family::Roman,
+        bold: false,
+        italic: false,
+    };
+
+    /// Every face a page can be set in -- three families by two series by two
+    /// shapes. Iterated once for the document rather than once a line, to ask
+    /// each whether a character needs fetching from outside it.
+    pub const ALL: [Face; 12] = {
+        let mut all = [Face::MAIN; 12];
+        let mut i = 0;
+        while i < 12 {
+            all[i] = Face {
+                family: match i / 4 {
+                    0 => Family::Roman,
+                    1 => Family::Sans,
+                    _ => Family::Mono,
+                },
+                bold: i % 4 >= 2,
+                italic: i % 2 == 1,
+            };
+            i += 1;
+        }
+        all
+    };
 
     /// The one character that names this face inside a marker.
+    ///
+    /// Twelve faces and one character, because widening the payload would move
+    /// six readers that each consume exactly one -- `printing_chars`,
+    /// `without_marks`, `absorb`, `styled_runs`, the DVI `line_hlist`, and the
+    /// lowerer re-reading its own output -- plus the `MARKERS` registry, whose
+    /// second field is a BOOLEAN rather than a count.
     pub fn code(self) -> char {
-        match self {
-            Face::Main => 'r',
-            Face::Mono => 'm',
-            Face::Bold => 'b',
-            Face::Italic => 'i',
-            Face::Sans => 's',
-        }
+        const CODES: [char; 12] = [
+            'r', 'i', 'b', 'B', // roman
+            's', 'j', 'S', 'J', // sans
+            'm', 'k', 'M', 'K', // mono
+        ];
+        CODES[self.index()]
     }
 
-    /// The face a marker names. Anything else is the main face: a marker that
+    /// The face a marker names, applied to the face already in force.
+    ///
+    /// The code is a MODIFIER and not a whole face, which is what LaTeX's own
+    /// declarations are: `\bfseries` sets the series and leaves the family
+    /// alone, `\sffamily` sets the family and leaves the series alone. That is
+    /// what lets the prelude keep emitting one letter per command and still
+    /// compose -- `\textbf` inside a `\sffamily` group reaches the page as the
+    /// sans bold face rather than replacing the family.
+    ///
+    /// A code that names nothing leaves the face as it stands: a marker that
     /// arrives damaged must not take the rest of the document with it.
-    pub fn from_code(code: char) -> Face {
+    pub fn from_code(code: char, current: Face) -> Face {
         match code {
-            'm' => Face::Mono,
-            'b' => Face::Bold,
-            'i' => Face::Italic,
-            's' => Face::Sans,
-            _ => Face::Main,
+            // The families, which say nothing about series or shape.
+            'r' => Face {
+                family: Family::Roman,
+                ..current
+            },
+            's' => Face {
+                family: Family::Sans,
+                ..current
+            },
+            'm' => Face {
+                family: Family::Mono,
+                ..current
+            },
+            // The series and the shape, which say nothing about the family.
+            'b' => Face {
+                bold: true,
+                ..current
+            },
+            'i' => Face {
+                italic: true,
+                ..current
+            },
+            // `\normalfont` and `\textnormal`, which undo all three at once.
+            'n' => Face::MAIN,
+            // The whole-face codes, which `Face::code` writes so a face can be
+            // restated in one character -- `absorb` reopens a run this way
+            // across a line break inside a table cell.
+            'B' => Face {
+                family: Family::Roman,
+                bold: true,
+                italic: true,
+            },
+            'j' => Face {
+                family: Family::Sans,
+                bold: false,
+                italic: true,
+            },
+            'S' => Face {
+                family: Family::Sans,
+                bold: true,
+                italic: false,
+            },
+            'J' => Face {
+                family: Family::Sans,
+                bold: true,
+                italic: true,
+            },
+            'k' => Face {
+                family: Family::Mono,
+                bold: false,
+                italic: true,
+            },
+            'M' => Face {
+                family: Family::Mono,
+                bold: true,
+                italic: false,
+            },
+            'K' => Face {
+                family: Family::Mono,
+                bold: true,
+                italic: true,
+            },
+            _ => current,
         }
     }
 
-    /// Where this face's font sits in the five the page is set from.
+    /// Where this face's font sits in the twelve the page is set from.
     fn index(self) -> usize {
-        match self {
-            Face::Main => 0,
-            Face::Mono => 1,
-            Face::Bold => 2,
-            Face::Italic => 3,
-            Face::Sans => 4,
-        }
+        let family = match self.family {
+            Family::Roman => 0,
+            Family::Sans => 1,
+            Family::Mono => 2,
+        };
+        family * 4 + usize::from(self.bold) * 2 + usize::from(self.italic)
     }
 }
 
@@ -2477,17 +2590,34 @@ pub fn base14_for(family: &str) -> &'static str {
 /// `Times-Bold` and `Times-Italic`. Getting that wrong names a font no reader
 /// has and the substitution is silent.
 pub fn base14_face(base: &str, face: Face) -> String {
-    match face {
-        Face::Main => base.to_string(),
-        Face::Mono => "Courier".to_string(),
-        // Helvetica IS the sans of the fourteen, whatever the body face is:
-        // a document that asked for a sans family and shipped no file wants a
-        // sans, not its own serif again.
-        Face::Sans => "Helvetica".to_string(),
-        Face::Bold if base == "Times-Roman" => "Times-Bold".to_string(),
-        Face::Italic if base == "Times-Roman" => "Times-Italic".to_string(),
-        Face::Bold => format!("{base}-Bold"),
-        Face::Italic => format!("{base}-Oblique"),
+    // The family first, INDEPENDENTLY of the series and the shape. Reading the
+    // family last is what made `Helvetica-Bold` unreachable as a request: a
+    // sans face answered "Helvetica" before any bold arm was tried, so no path
+    // could name a bold cut of it.
+    //
+    // Courier IS the mono of the fourteen and Helvetica the sans, whatever the
+    // body face is: a document that asked for one of them and shipped no file
+    // wants that family, not its own serif again.
+    let stem = match face.family {
+        Family::Mono => "Courier",
+        Family::Sans => "Helvetica",
+        Family::Roman => base,
+    };
+    // Times-Roman's siblings drop the `Roman`; Helvetica's and Courier's take
+    // the suffix whole. Getting that wrong names a font no reader has and the
+    // substitution is silent.
+    let (bold, italic, both) = match stem {
+        "Times-Roman" => ("Times-Bold", "Times-Italic", "Times-BoldItalic"),
+        _ => ("-Bold", "-Oblique", "-BoldOblique"),
+    };
+    match (face.bold, face.italic) {
+        (false, false) => stem.to_string(),
+        (true, false) if stem == "Times-Roman" => bold.to_string(),
+        (false, true) if stem == "Times-Roman" => italic.to_string(),
+        (true, true) if stem == "Times-Roman" => both.to_string(),
+        (true, false) => format!("{stem}{bold}"),
+        (false, true) => format!("{stem}{italic}"),
+        (true, true) => format!("{stem}{both}"),
     }
 }
 
@@ -2559,16 +2689,20 @@ pub fn to_pdf(
     // is the same font, `Page::text_in` recognises it as one and the page is
     // set in the main face -- which is the honest outcome, since a variable
     // font's weight axis is not something this can instantiate.
+    // Which `FontFile` a family's files come from. `\setsansfont{X}[BoldFont=Y]`
+    // populated `sans_file.bold` and NOTHING read it: every face resolved
+    // against `main_file`, so a bold cut of the sans family had no file to
+    // come from and no slot to sit in.
+    let file_for = |family: Family| match family {
+        Family::Roman => &families.main_file,
+        Family::Sans => &families.sans_file,
+        Family::Mono => &families.mono_file,
+    };
     let face_file = |face: Face| {
-        families
-            .main_file
+        file_for(face.family)
             .resolve_face(face, near)
             .and_then(|file| embed_file(&file))
     };
-    let bold =
-        face_file(Face::Bold).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Bold)));
-    let italic =
-        face_file(Face::Italic).unwrap_or_else(|| Font::Base14(base14_face(&base, Face::Italic)));
     // The sans family, resolved exactly as the mono one is. A book sets its
     // headings in this -- `\titleformat{\chapter}{\sffamily\bfseries\Huge}` --
     // and with `\sffamily` answering the main face, every heading in every
@@ -2586,7 +2720,36 @@ pub fn to_pdf(
                 .map(|f| Font::Base14(base14_for(f).to_string()))
         })
         .unwrap_or_else(|| main.clone());
-    let fonts = [main.clone(), mono, bold, italic, sans];
+    // The upright, medium face of each family -- what the rest of that family
+    // falls back to when the document shipped no file for a bold or italic cut
+    // of it.
+    let upright = |family: Family| match family {
+        Family::Roman => main.clone(),
+        Family::Sans => sans.clone(),
+        Family::Mono => mono.clone(),
+    };
+    // Twelve faces, in `Face::index` order. Each is the file the document
+    // named for that family and that cut, then the member of the fourteen
+    // carrying it, then the family's own upright face -- so a `\textbf` in a
+    // document that shipped no bold still sets rather than vanishing.
+    let fonts: Vec<Font> = Face::ALL
+        .iter()
+        .map(|face| {
+            // The upright, medium face of a family is the one resolved above,
+            // and it must be USED rather than rebuilt: a document naming no
+            // family at all is set in Computer Modern, which no amount of
+            // base-14 reasoning reconstructs.
+            if !face.bold && !face.italic {
+                return upright(face.family);
+            }
+            // A cut the document shipped a file for; failing that, the member
+            // of the fourteen carrying that cut of that family -- all twelve
+            // exist. A DIFFERENT typeface that is really bold beats the same
+            // typeface that is not: a description term set in the face of its
+            // own meaning has lost the only thing the markup was for.
+            face_file(*face).unwrap_or_else(|| Font::Base14(base14_face(&base, *face)))
+        })
+        .collect();
     // What each family is scaled by. A document writes `Scale=MatchLowercase`
     // so a display family sits beside its text family rather than looming over
     // it, usually once through `\defaultfontfeatures` for everything it loads
@@ -2601,14 +2764,13 @@ pub fn to_pdf(
             main_path.as_deref(),
         )
     };
-    let main_scale = scale_for(&families.main_file);
-    let scales = [
-        main_scale,
-        scale_for(&families.mono_file),
-        main_scale,
-        main_scale,
-        scale_for(&families.sans_file),
-    ];
+    // Per FAMILY, and every cut of a family takes its family's scale. The old
+    // five-slot array gave bold and italic the MAIN family's scale, so a bold
+    // cut of the sans family had no scale slot at all.
+    let scales: Vec<f64> = Face::ALL
+        .iter()
+        .map(|face| scale_for(file_for(face.family)))
+        .collect();
 
     // Measure in the face that will be printed. An embedded font carries its
     // own widths; without one, cmr10's are the closest thing installed, and a
@@ -2781,7 +2943,7 @@ pub fn to_pdf(
     )];
     // The face stack, for the same reason: `\ttfamily` holds until its group
     // closes, and a group can hold a paragraph.
-    let mut faces: Vec<Face> = vec![Face::Main];
+    let mut faces: Vec<Face> = vec![Face::MAIN];
     // Seeded with the document's own size, which is the entry never popped:
     // an unbalanced size marker leaves the body size in force.
     let mut sizes: Vec<TypeSize> = vec![TypeSize {
@@ -3104,7 +3266,7 @@ pub fn to_pdf(
             folio = 1;
         }
         let shown = folio.to_string();
-        let width = width_of(&shown, Face::Main, layout.size);
+        let width = width_of(&shown, Face::MAIN, layout.size);
         page.text_in(
             main.clone(),
             layout.size,
@@ -3136,7 +3298,7 @@ impl crate::tikz::Metrics for FaceMetrics<'_> {
     /// A node is set in the body face -- `\node[font=\ttfamily]` is a font
     /// option this does not read -- and a font's widths scale with its size.
     fn width_of(&self, text: &str, size: f64) -> f64 {
-        (self.measure)(text, Face::Main, self.size) * size / self.size
+        (self.measure)(text, Face::MAIN, self.size) * size / self.size
     }
 }
 
@@ -3254,7 +3416,7 @@ fn break_lines_measured(
     // markers are interleaved in one stream, so the same splitter reads both
     // and the colour half goes on a stack nothing here looks at.
     let mut colours: Vec<Spec> = Vec::new();
-    let mut faces: Vec<Face> = vec![Face::Main];
+    let mut faces: Vec<Face> = vec![Face::MAIN];
     // Seeded with the document's own size, which is the entry never popped:
     // an unbalanced size marker leaves the body size in force.
     let mut sizes: Vec<TypeSize> = vec![TypeSize {
@@ -4506,7 +4668,7 @@ fn entry_lines(
     layout: &Layout,
     width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> Vec<String> {
-    let face = Face::Main;
+    let face = Face::MAIN;
     let number = page.to_string();
     let indent = list_indent(level, layout);
     let space = width_of(" ", face, layout.size);
@@ -6021,7 +6183,7 @@ fn absorb(word: &str, open: &mut Vec<(String, char)>) {
             }
             '\u{3}' => close(open, '\u{3}'),
             FACE_PUSH => {
-                let code = chars.next().unwrap_or_else(|| Face::Main.code());
+                let code = chars.next().unwrap_or_else(|| Face::MAIN.code());
                 open.push((format!("{FACE_PUSH}{code}"), FACE_POP));
             }
             FACE_POP => close(open, FACE_POP),
@@ -6139,8 +6301,11 @@ fn styled_runs(
                 }
                 // The code character belongs to the marker whatever it is: a
                 // marker read as one character would set the other as a glyph.
-                let code = chars.next().unwrap_or_else(|| Face::Main.code());
-                faces.push(Face::from_code(code));
+                let code = chars.next().unwrap_or_else(|| Face::MAIN.code());
+                // Applied to the face already in force, so `\textbf` inside a
+                // `\sffamily` group reaches the page as the sans BOLD face
+                // rather than replacing the family.
+                faces.push(Face::from_code(code, current_face(faces)));
             }
             FACE_POP => {
                 if !text.is_empty() {
@@ -6485,7 +6650,16 @@ mod font_file_tests {
         // A face the document named no file for resolves to nothing, whatever
         // is beside the document, so the caller falls back to the main face
         // rather than setting the italic in some file that happens to be there.
-        assert_eq!(both.resolve_face(super::Face::Bold, None), None);
+        assert_eq!(
+            both.resolve_face(
+                super::Face {
+                    bold: true,
+                    ..super::Face::MAIN
+                },
+                None
+            ),
+            None
+        );
     }
 
     #[test]

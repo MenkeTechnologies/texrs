@@ -959,7 +959,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\titleformat",
         "LaTeX",
-        "titlesec's heading format, applied rather than discarded. Both spellings are read — the starred `\\titleformat*{\\section}{FORMAT}` and the plain `\\titleformat{\\chapter}[SHAPE]{FORMAT}{LABEL}{SEP}{BEFORE}`, whose optional argument follows a mandatory one. The FORMAT is lowered with the title, so the sizes, colours and family in it reach the heading and end with it; it REPLACES the class default for that level, which is what titlesec does, so a format naming no size leaves the heading at the body size. The shape, label, separator and before-code are titlesec's own layout and are still dropped. NOTE what a format combining two font switches does: a face here is one slot where LaTeX's NFSS has independent family, series and shape axes, so `{\\sffamily\\bfseries\\Huge}` reaches the page BOLD and not sans — the second switch replaces the first rather than joining it. The size and the colour still arrive.",
+        "titlesec's heading format, applied rather than discarded. Both spellings are read — the starred `\\titleformat*{\\section}{FORMAT}` and the plain `\\titleformat{\\chapter}[SHAPE]{FORMAT}{LABEL}{SEP}{BEFORE}`, whose optional argument follows a mandatory one. The FORMAT is lowered with the title, so the sizes, colours and family in it reach the heading and end with it; it REPLACES the class default for that level, which is what titlesec does, so a format naming no size leaves the heading at the body size. The shape, label, separator and before-code are titlesec's own layout and are still dropped. A format combining switches composes: `{\\sffamily\\bfseries\\Huge}` reaches the page as the bold cut of the SANS family at `\\Huge`, because family, series and shape are independent axes and each declaration sets only its own.",
         "\\titleformat{COMMAND}[SHAPE]{FORMAT}{LABEL}{SEP}{BEFORE}\n\\titleformat{\\chapter}[hang]{\\sffamily\\bfseries\\Huge}{}{0pt}{}\n\\titleformat*{\\section}{\\sffamily\\Large}",
     ),
     (
@@ -1011,9 +1011,15 @@ pub const CORPUS: &[Entry] = &[
         "{\\ttfamily fixed pitch}\n\\texttt{fixed pitch}",
     ),
     (
+        "\\slshape",
+        "LaTeX",
+        "Set slanted, until the group holding the declaration closes. There is no separate slanted cut here, so it is the italic one — which is what `\\textsl` has always expanded to. Like every other font declaration it sets ONE axis: `{\\sffamily\\slshape}` is the slanted cut of the sans family, not a replacement of it.",
+        "{\\slshape leaning}\n\\textsl{leaning}",
+    ),
+    (
         "\\bfseries",
         "LaTeX",
-        "Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. The face is the file `BoldFont=` named in the main family's options, or the bold member of the fourteen — `Helvetica-Bold`, `Times-Bold` — and the main face where the document supplies neither. A variable font whose bold is the upright file at another weight is the SAME file, so it comes out as the main face: instantiating a weight axis is not something this does.",
+        "Set in the bold series, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. It sets the SERIES only and leaves the family and the shape as they stand, so `{\\sffamily\\bfseries}` is the bold cut of the sans family rather than a replacement of it. The face is the file `BoldFont=` named in THAT family's options — the sans family's for a sans context, the mono family's for a mono one — or the bold member of the fourteen carrying that family (`Helvetica-Bold`, `Courier-Bold`, `Times-Bold`) where the document named no file. A variable font whose bold is the upright file at another weight is the SAME file, so it comes out as the upright face: instantiating a weight axis is not something this does.",
         "{\\bfseries heavy}\n\\textbf{heavy}",
     ),
     (

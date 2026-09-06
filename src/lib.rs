@@ -58,6 +58,7 @@ pub mod parallel;
 pub mod parity;
 pub mod pdf;
 pub mod pdf_parity;
+pub mod pdfread;
 pub mod pk;
 pub mod postline;
 pub mod repl;

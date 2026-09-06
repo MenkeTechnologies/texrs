@@ -171,6 +171,7 @@
     "\\setmonofont"
     "\\directlua"
     "\\ttfamily"
+    "\\slshape"
     "\\bfseries"
     "\\itshape"
     "\\rmfamily"
@@ -340,7 +341,8 @@
     (puthash "\\setmonofont" "\\setmonofont  —  Record the document's monospace family, the counterpart of `\\setsansfont`, and the face `\\ttfamily` selects. [LaTeX]" table)
     (puthash "\\directlua" "\\directlua  —  Hand a chunk to an embedded Lua interpreter, and RUN it: PUC-Lua 5.3, the version LuaTeX itself embeds. [LaTeX]" table)
     (puthash "\\ttfamily" "\\ttfamily  —  Set in the monospace face, until the group holding the declaration closes. [LaTeX]" table)
-    (puthash "\\bfseries" "\\bfseries  —  Set in the bold face, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. [LaTeX]" table)
+    (puthash "\\slshape" "\\slshape  —  Set slanted, until the group holding the declaration closes. [LaTeX]" table)
+    (puthash "\\bfseries" "\\bfseries  —  Set in the bold series, until the group holding the declaration closes; `\\textbf{...}` is `{\\bfseries ...}`. [LaTeX]" table)
     (puthash "\\itshape" "\\itshape  —  Set in the italic face, until the group holding the declaration closes; `\\textit{...}` and `\\emph{...}` are both `{\\itshape ...}`. [LaTeX]" table)
     (puthash "\\rmfamily" "\\rmfamily  —  Back to the body face, until the group holding the declaration closes. [LaTeX]" table)
     (puthash "\\sffamily" "\\sffamily  —  Select the sans-serif family. [LaTeX]" table)

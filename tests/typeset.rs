@@ -3495,3 +3495,112 @@ fn match_lowercase_scales_a_family_to_the_main_faces_x_height() {
         "Arimo over Orbitron is 0.9109, computed {ratio:.4}"
     );
 }
+
+/// Family, series and shape are independent: a second switch JOINS the first.
+///
+/// `Face` was one slot where NFSS has three axes, so `{\sffamily\bfseries}`
+/// came out bold and NOT sans -- the second switch replaced the first. That is
+/// how every book in the corpus writes a heading, and there was no slot for a
+/// bold cut of the sans family for a marker to have named even if one had been
+/// emitted.
+#[test]
+fn a_family_switch_and_a_series_switch_compose_rather_than_replacing() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = format!(
+        "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+         \\setsansfont{{Orbitron}}[Path={dir}/,Extension=.ttf,UprightFont=Orbitron-VF]\n\
+         \\begin{{document}}\nBODY plain\n\n{{\\sffamily SANS alone}}\n\n\
+         {{\\sffamily\\bfseries SANSBOLD both}}\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&doc).expect("pdf");
+    let drawn_in = faces(&pdf);
+    let sans = face_of(&drawn_in, "SANS alone");
+    let both = face_of(&drawn_in, "SANSBOLD");
+    let body = face_of(&drawn_in, "BODY");
+    assert!(
+        sans.contains("Orbitron"),
+        "the sans family alone must reach Orbitron, got {sans}"
+    );
+    assert!(
+        both.contains("Orbitron"),
+        "a series switch must not cost the family: {both} for sans+bold"
+    );
+    assert!(
+        !body.contains("Orbitron"),
+        "and the body must stay in the main family, got {body}"
+    );
+}
+
+/// The prelude's face letters and `Face::from_code` agree.
+///
+/// `\texttt`, `\textbf`, `\textit` and their siblings write the marker letter
+/// TEXTUALLY in prelude.tex, and nothing checked those letters against the
+/// Rust that decodes them. `from_code` returns the face unchanged for a letter
+/// it does not know, so a drifted letter sets the wrong face in silence rather
+/// than failing.
+#[test]
+fn the_prelude_and_the_decoder_agree_about_the_face_letters() {
+    use texrs::typeset::{Face, Family};
+    let doc = |markup: &str| {
+        format!("\\documentclass{{article}}\n\\begin{{document}}\n{markup}\n\\end{{document}}\n")
+    };
+    for (markup, want) in [
+        (
+            "\\texttt{X}",
+            Face {
+                family: Family::Mono,
+                bold: false,
+                italic: false,
+            },
+        ),
+        (
+            "\\textsf{X}",
+            Face {
+                family: Family::Sans,
+                bold: false,
+                italic: false,
+            },
+        ),
+        (
+            "\\textbf{X}",
+            Face {
+                bold: true,
+                ..Face::MAIN
+            },
+        ),
+        (
+            "\\textit{X}",
+            Face {
+                italic: true,
+                ..Face::MAIN
+            },
+        ),
+        (
+            "\\emph{X}",
+            Face {
+                italic: true,
+                ..Face::MAIN
+            },
+        ),
+        (
+            "\\textsl{X}",
+            Face {
+                italic: true,
+                ..Face::MAIN
+            },
+        ),
+    ] {
+        let raw = texrs::run_text_marked(&doc(markup)).expect("marked text");
+        let code = raw
+            .chars()
+            .skip_while(|c| *c != '\u{11}')
+            .nth(1)
+            .unwrap_or_else(|| panic!("{markup} wrote no face marker: {raw:?}"));
+        assert_eq!(
+            Face::from_code(code, Face::MAIN),
+            want,
+            "{markup} wrote {code:?}, which decodes to the wrong face"
+        );
+    }
+}
