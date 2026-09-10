@@ -798,9 +798,10 @@ bash scripts/bump.sh patch          # 0.4.0 -> 0.4.1, everywhere
 bash scripts/bump.sh 1.2.3 --dry-run
 ```
 
-The version lives in six tracked files — the manifest, two hand-written docs
+The version lives in seven tracked files — the manifest, two hand-written docs
 pages, the generated reference page, two man pages, and the IntelliJ plugin's
-`gradle.properties`. Nothing in a build or a test run notices when they
+`gradle.properties`. (`tests/version_sync.rs` reads all seven; the count in this
+sentence said six while the list beside it named seven.) Nothing in a build or a test run notices when they
 disagree, which is how v0.1.0 once sat in the docs through v0.3.0. So
 `tests/version_sync.rs` fails when any of them drifts, and `scripts/bump.sh` is
 the one command that stamps all six, regenerates the two that are derived from

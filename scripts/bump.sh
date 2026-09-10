@@ -13,7 +13,7 @@
 # fell three versions behind. `tests/version_sync.rs` is the gate that makes the
 # drift a failure; this is the one command that avoids causing it.
 #
-# Two of the six are GENERATED rather than stamped — docs/reference.html and the
+# Seven files carry it. Two are GENERATED rather than stamped — docs/reference.html and the
 # Emacs primitive table — so they are rebuilt from the corpus here rather than
 # text-substituted, which also picks up any primitive added since the last bump.
 set -euo pipefail
