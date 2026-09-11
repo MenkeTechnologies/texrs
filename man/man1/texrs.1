@@ -40,7 +40,7 @@ and
 .B pythonrs
 run on that engine.
 .PP
-TeX is two machines.  The
+TeX is three machines.  The
 .I mouth
 turns bytes into tokens; the
 .I expander
@@ -48,10 +48,11 @@ turns tokens into other tokens \(em
 .BR \edef ,
 .BR \ecsname ,
 .BR \ethe ,
-the conditionals.  Only after that does the
+the conditionals; the
 .I stomach
-build boxes and ship DVI.  texrs implements the first two, which is the half a
-macro\-heavy document spends its time in, and a deliberately small third:
+builds boxes out of what is left and ships them.  texrs compiles the first two
+to bytecode, which is the half a macro\-heavy document spends its time in, and
+carries a stomach with two outputs:
 .B \-\-pdf
 Typeset to
 .I FILE.pdf
@@ -59,39 +60,40 @@ beside the source, honouring the typeface the document asked for. A DVI can
 only name a
 .I .tfm
 font, so the \fB\-\-dvi\fR path sets everything in Computer Modern however
-loudly a document says \fB\\setmainfont\fR; a PDF can name the fourteen faces
-every reader has, so the request is honoured here. The mapping is by what the
-face IS rather than by its name -- Arimo carries Arial's metrics and Arial
-carries Helvetica's, so all three set at the same widths -- and a monospace
-request goes to Courier whatever it was called.
+loudly a document says \fB\\setmainfont\fR; a PDF carries the face itself. A
+family the machine has installed is resolved through \fBfc\-match\fR, and a
+document that ships its own font names the FILE with fontspec's \fBPath=\fR,
+\fBUprightFont=\fR and \fBExtension=\fR. The face is embedded and SUBSET --
+only the glyphs the document set are kept -- and lines are broken on its own
+advance widths. A family nothing can be found for falls back to whichever of
+the fourteen faces every reader has carries the same metrics -- Arimo carries
+Arial's and Arial carries Helvetica's.
 .IP
 Colour is honoured too: \fB\\textcolor\fR becomes PDF's own colour operator
 around the words it covers.
-.IP
-The fourteen faces are named rather than embedded, so the file is small and
-opens anywhere, and the document is NOT set in the font file it names. Line
-breaking still measures in Computer Modern's widths, so a line may run a little
-long or short of the measure.
 .TP
 .B \-\-dvi
 measures the text in a real
 .IR .tfm ,
-breaks it into lines with the first break that fits, and ships a page a driver
-will open.  It is
+breaks it into lines, packs them into boxes and ships a page a driver will
+open.  It is
 .B not
+all of
 .IR tex.web 's
 stomach \(em there is no
 .BR \esetbox ,
-so no boxes a document can nest.  Maths, pictures, colour and images do reach
-the page.  How the lines and the pages are broken depends on the output:
+so no boxes a document can nest.  Maths, pictures and images reach a
+.B \-\-pdf
+page; colour reaches both.  How the lines and the pages are broken depends on
+the output:
 .B \-\-pdf
 minimises the total demerits of a whole paragraph over every feasible set of
 breakpoints and hyphenates with Liang patterns
 .RI ( tex.web
-\(sc813\(en\(sc891), while
+\(sc813\(en\(sc891), and
 .B \-\-dvi
-takes the first break that fits and does not hyphenate, because a DVI driver
-cannot set a run to a width.  Without either flag
+uses the same breaker, its lines packed by \fBhpack\fR and shipped at the width
+that set them (\fItex.web\fR \(sc625).  Without either flag
 .B \eend
 stops the run rather than shipping a page.
 .PP
@@ -197,18 +199,14 @@ page with its
 .BR \ecount0 ,
 the fonts it defines, its specials, and the characters it sets.
 .PP
-texrs has no stomach yet \(em it stops where the boxes would begin \(em so
-nothing in it produces a page today, and this reads what another engine wrote.
-The library writes the format as well as reads it, which is what the stomach
-will call when there is one; a DVI file is a linked list read backwards, and
-its pointers can only be filled in while writing, so
+This reads what another engine wrote. The library writes the format as well as
+reads it, which is what the stomach calls; a DVI file is a linked list read
+backwards, and its pointers can only be filled in while writing, so
 .BR dvitype (1)
-is held against what texrs writes.  The parity contract stops in the same
-place: today it compares the
+is held against what texrs writes.  The byte\-for\-byte parity contract is the
 .B \emessage
-stream, and the moment texrs sets a character the reference to compare against
-is what tex shipped. This is the reading half of that comparison, written while
-the format can still be checked against a document whose output is known.
+stream; a page is compared on a ladder against what tex shipped, and this is the
+reading half of that comparison.
 XeTeX's extensions (opcodes 252\(en254) are named rather than decoded: pointing
 this at an
 .I .xdv
@@ -865,24 +863,23 @@ and broken into lines that fit plain TeX's measure, then stacked down plain
 TeX's page. What comes out is a real DVI file: \fBdvitype\fR reads it and
 \fBdvipdfmx\fR turns it into a PDF.
 .IP
-It is not \fBtex\fR's typesetting. On THIS path lines are broken first-fit --
-the first break that fits -- and are not hyphenated, because a DVI driver cannot
-set a run to a width, so a breaker that prices glue has nothing to hand its
-answer to. \fB--pdf\fR does consider every feasible set of breakpoints for a
-whole paragraph and minimises the total demerits (\fItex.web\fR \(sc813), and
-hyphenates, and breaks its PAGES by LaTeX's widow, orphan, broken\-line and
-heading penalties over the whole document; this path stacks a fixed number of
-lines on each page. Neither has maths, and this one sets one font. A paragraph
-set here and the same paragraph set by \fBtex\fR will not agree line for line.
+It is not all of \fBtex\fR's typesetting. Lines are broken as \fB--pdf\fR
+breaks them -- every feasible set of breakpoints for a whole paragraph, the
+total demerits minimised (\fItex.web\fR \(sc813), hyphenated -- then packed by
+\fBhpack\fR and shipped as a box tree through \fBhlist_out\fR/\fBvlist_out\fR
+(\(sc619\(en\(sc640). But \fB--pdf\fR breaks its PAGES by LaTeX's widow,
+orphan, broken\-line and heading penalties over the whole document, where this
+path stacks a fixed number of lines on each page; and this path sets no maths.
+A paragraph set here and the same paragraph set by \fBtex\fR will not agree
+byte for byte.
 .TP
 .B \-\-text
 Print what the document SAYS -- its own words, after every macro has been
 expanded -- rather than only the
 .B \\message
 stream. This is not a typeset page: there is no line breaking, no page and no
-font, because those are the stomach's and texrs has none. It is the text, in
-order, which is what an engine with a mouth and an expander can honestly
-produce.
+font, because those are the stomach's and \fB--text\fR does not run it. It is
+the text, in order, which is what the mouth and the expander produce.
 .TP
 .B \-\-no\-cache
 Compile this run rather than reading the bytecode cache.  The result is the

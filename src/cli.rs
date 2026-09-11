@@ -341,7 +341,7 @@ pub const USAGE: &str = "\
   --text
           // Print the document text, not only the message stream
   --dvi
-          // Typeset to FILE.dvi -- first-fit lines, no hyphenation
+          // Typeset to FILE.dvi -- total-fit lines, hyphenated
   --pdf
           // Typeset to FILE.pdf, in the font the document asked for
   --no-cache

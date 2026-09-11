@@ -57,7 +57,7 @@ texrs FILE.tex          run it, print the \emessage stream
 texrs A.tex B.tex       compile a batch, one document per core
 texrs '\emessage{hi}\eend'  the arguments ARE the input, as in tex
 texrs \-\-text F          print the document's text, not only its messages
-texrs \-\-dvi F           typeset it: FILE.dvi, first\-fit lines
+texrs \-\-dvi F           typeset it: FILE.dvi, total\-fit lines, hyphenated
 texrs \-\-dump\-tokens F   print the mouth's token stream, then exit
 texrs \-\-dump\-ast F      print the lowered command stream, then exit
 texrs \-\-disasm F        print the lowered fusevm bytecode, then exit
@@ -313,28 +313,30 @@ breaks it into lines and ships a page.
 minimises the total demerits of a whole paragraph over every feasible set of
 breakpoints and hyphenates with Liang patterns
 .RI ( tex.web
-\(sc813\(en\(sc891);
+\(sc813\(en\(sc891), and
 .B \-\-dvi
-takes the first break that fits and does not hyphenate, because a DVI driver
-cannot set a run to a width.
+uses the same breaker and ships the lines as a box tree.
 .B \-\-pdf
 breaks its pages by penalty as well \(em widows, orphans, hyphenated lines and
 headings, priced over the whole document \(em where
 .B \-\-dvi
-stacks a fixed number of lines on each.  Neither has maths or boxes a document
-can nest, and the tolerances and demerit weights are constants
-rather than registers a document sets \(em so byte\-identical DVI parity is not
-approached.  No registers other than
-.BR \ecount .
+stacks a fixed number of lines on each and sets no maths.  Neither has boxes a
+document can nest \(em there is no
+.B \esetbox
+\(em and the tolerances and demerit weights are constants rather than
+registers a document sets, so byte\-identical DVI parity is not reached.
 No format is preloaded, so every register starts at zero as INITEX leaves them,
 while the reference
 .B tex
-has plain's values.  An undefined control sequence prints its name instead of
-raising an error.
-.B \eedef
-does not decide a conditional in its body at definition time.
+has plain's values.  An undefined control sequence inside a
+.B \emessage
+prints its name instead of raising an error; in running text it raises and
+stops the run, where tex recovers.  A
 .B #{
-parameter text is refused.  Each of these is pinned by a case in
+macro whose body names
+.B #1
+is accepted where tex reports an illegal parameter number.  The last three are
+each pinned by a case in
 .I tests/cases
 and written down in
 .I tests/known_gaps.txt

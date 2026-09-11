@@ -23,7 +23,7 @@ cost, this milestone is dead and should be recorded as dead.
 grouping and the save stack, so assignments are undone at group end. Needed
 before any real macro package will load.
 
-## Milestone 4 — the stomach (begun, and deliberately small)
+## Milestone 4 — the stomach (in progress)
 
 Boxes, glue, the paragraph breaker, fonts, DVI. This is where TeX's reputation
 for exactness lives and where the parity bar is byte-identical DVI.
@@ -42,11 +42,11 @@ The breaker that was named here as the next piece has been written.
 `src/linebreak.rs` minimises the total demerits of a whole paragraph over every
 feasible set of breakpoints (§813-§890) and hyphenates with Liang patterns
 (§891), and `--pdf` uses it: a full line is set to the measure with PDF's `Tw`,
-which is what makes pricing glue usable at all. `--dvi` does not, and the reason
-is worth recording rather than fixing twice — a DVI driver cannot set a run to a
-width, so a breaker that decides some lines should be SHRUNK has nowhere to put
-that answer. An earlier attempt was reverted for exactly this: every shrunk line
-drew out past the measure.
+which is what makes pricing glue usable at all. `--dvi` uses it too, but only
+since the shipper below landed — a DVI driver cannot set a run to a width, so a
+breaker that decides some lines should be SHRUNK needs `hpack` to set the glue
+and `ship_out` to write it at that width. An earlier attempt without them was
+reverted for exactly this: every shrunk line drew out past the measure.
 
 `--pdf` breaks its pages by penalty too, and over the whole document rather
 than page by page: `\widowpenalty`, `\clubpenalty` and `\brokenpenalty` at
@@ -82,8 +82,9 @@ takes rather than the path itself — `--dvi` still stacks a fixed number of lin
 on each page where `--pdf` prices the whole document. `\tolerance`,
 `\pretolerance` and the demerit weights are constants rather than registers a
 document sets. STRUCTURE to BYTES is now positional plus the encoding: the
-writer does not choose tex's compact `w`/`x`/`y`/`z` movement reuse (§607-§615)
-and writes the `fnt_def` checksum as zero.
+writer does not choose tex's compact `w`/`x`/`y`/`z` movement reuse (§607-§615).
+The typesetter writes each font's `.tfm` checksum into `fnt_def`; only the round
+trip's rewrite writes zero, for a font it never read.
 
 The subsetter's own untested edge is nesting. `tests/glyf.rs`'s
 `an_accented_letter_brings_the_letter_with_it` pins one level — asking for

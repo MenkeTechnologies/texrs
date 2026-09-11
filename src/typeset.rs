@@ -3506,7 +3506,7 @@ fn break_lines_measured(
     lines
 }
 
-/// Fill one stretch of text into lines at the measure, first-fit, marking each
+/// Fill one stretch of text into lines at the measure, total-fit, marking each
 /// line the centring markers put it inside.
 ///
 /// The markers are cut out BEFORE words are counted because a region opens

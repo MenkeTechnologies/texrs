@@ -7,7 +7,7 @@
 #   bash scripts/bump.sh 1.2.3    # exactly that
 #   bash scripts/bump.sh patch --dry-run    # say what would change, change nothing
 #
-# The version lives in six tracked files, and nothing in a build or a test run
+# The version lives in seven tracked files, and nothing in a build or a test run
 # notices when they disagree: the code compiles, the pages render, the man page
 # formats. That is how v0.1.0 sat in the docs through v0.3.0 and the man pages
 # fell three versions behind. `tests/version_sync.rs` is the gate that makes the
@@ -91,7 +91,7 @@ echo "  editors/intellij/gradle.properties: $NEW"
 echo "  docs/reference.html, editors/emacs/texrs-stdlib.el: regenerated"
 
 # A bump that ships a broken tree is worse than a bump that never happened, and
-# tests/version_sync.rs is in here: it fails if any of the six was missed.
+# tests/version_sync.rs is in here: it fails if any of the seven was missed.
 echo ""
 echo "verifying..."
 cargo fmt --all --check

@@ -311,13 +311,11 @@ writes it back through `Dvi::rewrite`. Nothing to do with typesetting: it asks
 only whether what was read can be written. None of the nine documents survives,
 in two distinct ways.
 
-The corpus is fourteen documents: the ten the ladder uses, three in
-`tests/dvi_cases` carrying shapes the others lack -- a second font, rules, two
-pages, a `\special` -- and Knuth's `story.tex` where TeX Live is installed.
-None survives unchanged, and the richer shapes fail the same way the simple
-ones do, which says the cause is the encoding rather than any one construct.
+The corpus is the ten documents the ladder uses, nine of which `tex` writes a
+DVI for. The three shapes in `tests/dvi_cases` -- a second font, rules, two
+pages, a `\special` -- are not in it: nothing reads that directory.
 
-Ten come back LONGER -- 380 bytes in, 456 out; 680 in, 784 out -- because the
+Six come back LONGER -- 380 bytes in, 456 out; 684 in, 872 out -- because the
 writer does not choose the compact operand widths tex chose, so a movement tex
 wrote in two bytes is written back in four.
 
@@ -326,25 +324,29 @@ Three come back the same length with bytes changed, and those are precise: byte
 read, and postamble+21 is the maximum page width, recomputed rather than
 carried. `tests/dvi_trip_floor.txt` records where each file stands.
 
-## DVI output is not tex's, in three specific ways
+## DVI output is not tex's byte for byte
 
 `cargo run --bin dvi-parity` compares against real `tex`, and DVI is the
-attainable axis: no fonts inside the file and no compression, 224 bytes against
-260 for `Hello world.` where the same document in PDF is 11,729 against 615.
+attainable axis: no fonts inside the file and no compression, 224 bytes from
+`tex` against 192 from texrs for `Hello world.`, where the same document in PDF
+is 11,729 from `luatex` against 15,435.
 
-Every document stops at PAGES, and the reasons are three real typesetting
-decisions rather than one:
+Nine of the ten documents reach STRUCTURE -- the same pages, characters, fonts,
+rules and specials -- and none reaches BYTES. The three typesetting differences
+this entry used to list are closed, and `tests/dvi_parity.rs` pins each from the
+other side:
 
-- **Spaces.** A gap between words is a MOVEMENT in tex's DVI, not a character,
-  so tex's text reads `Helloworld.`. texrs sets a space glyph instead.
-- **Ligatures.** tex reaches for `fi` in cmr10 -- `The\u{c}rst` -- and texrs
-  sets `f` and `i` separately.
-- **The folio.** tex ships a page number and texrs does not, which is the same
-  difference the PDF ladder reports.
+- **Spaces.** A gap between words is glue, shipped as a MOVEMENT the way tex
+  ships it, not a space glyph.
+- **Ligatures.** The `.tfm`'s ligature program runs over each word, so
+  `The first` is `The\u{c}rst` in both files.
+- **The folio.** Both ship the page number; the two files set the same
+  characters, character for character.
 
-`tests/dvi_parity.rs` pins all three as facts, so they are findings rather than
-a rung number whose meaning nobody remembers. An empty document is the fourth
-case: tex writes no DVI, texrs writes one.
+What stands between STRUCTURE and BYTES is position and encoding: the writer
+moves with `right`/`down` only, never tex's `w`/`x`/`y`/`z` reuse (§607-§615).
+An empty document is the one case below STRUCTURE: tex writes no DVI, texrs
+writes one.
 
 ## A typesetting run does not use the bytecode cache
 

@@ -44,22 +44,22 @@ shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
 
 ---
 
-A TeX engine in Rust: Knuth's **mouth** and **expander**, built to be lowered
-onto a bytecode VM.
+A TeX engine in Rust: Knuth's **mouth** and **expander** lowered onto a bytecode
+VM, and a stomach that typesets to DVI and PDF.
 
 ## [0x00] What it is
 
-TeX is two machines. The *mouth* turns bytes into tokens under a mutable
+TeX is three machines. The *mouth* turns bytes into tokens under a mutable
 category-code table; the *expander* turns tokens into other tokens — `\def`,
-`\csname`, `\the`, the conditionals. Only after that does the *stomach* build
-boxes and ship DVI.
+`\csname`, `\the`, the conditionals; the *stomach* builds boxes out of what is
+left and ships them.
 
-texrs implements the first two. That is the half a macro-heavy document spends
-its time in, and the half where a compiled implementation has something to prove:
-every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends from `tex.web` through
-web2c and *interprets* the expander.
+texrs compiles the first two to bytecode. That is the half a macro-heavy
+document spends its time in, and the half where a compiled implementation has
+something to prove: every mainstream engine (pdfTeX, XeTeX, LuaTeX) descends
+from `tex.web` through web2c and *interprets* the expander.
 
-There is now a third piece. Both outputs break a paragraph the way `tex.web`
+The stomach is there too. Both outputs break a paragraph the way `tex.web`
 §813 does — minimising the total demerits of the whole paragraph over every
 feasible set of breakpoints, with Liang hyphenation to widen the places a line
 may end. `--pdf` writes the PDF itself; `--dvi` ships a box tree through
@@ -258,8 +258,10 @@ than none.
   verbatim.
 - Lua. `\directlua` runs its chunk in PUC-Lua 5.3, with `tex`, `token`,
   `texio`, `status` and `luatexbase` reaching the engine's real state.
-- `--dvi`: a page. Text measured in a real font (`.tfm`), first-fit lines at a
-  measure, stacked at a leading, shipped as DVI that `dvitype` reads.
+- `--dvi`: a page. Text measured in a real font (`.tfm`), broken into total-fit
+  lines by the same breaker as `--pdf`, packed into boxes and shipped through
+  `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
+  to a page, and no maths (a formula's scripts are dropped; `--pdf` sets them).
 - `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
   pages — `\ref` gives the sectioning number, `\pageref` the page it fell on.
   Worth knowing what this is NOT evidence of: the corpus has 88,341 `\label{`
@@ -356,15 +358,13 @@ converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
 `fontdimen`s (`src/math.rs`).
 
 What that leaves: `\tolerance`, `\pretolerance` and the demerit weights are
-constants rather than registers the document can set, and the shipper still
-writes runs of strings rather than a box tree, so `src/postline.rs` and
-`src/page.rs` are a library beside the path a run takes rather than the path
-itself.
+constants rather than registers the document can set, and the shipper is handed
+line boxes built from already-broken strings rather than a node list, so
+`src/postline.rs` and `src/page.rs` are a library beside the path a run takes
+rather than the path itself.
 
-What is still missing is the ligature and kern program on the DVI path: `tex`
-writes the `fi` ligature (character 0x0C) where texrs writes `f` and `i`, and
-that is the whole of the remaining text difference on the two DVI cases that
-have one. Seven of the ten now reach STRUCTURE — see `BUGS.md`.
+On the DVI ladder nine of the ten documents reach STRUCTURE: the text and its
+structure agree with `tex`, the bytes do not — see `BUGS.md`.
 
 **Some LaTeX, and Lua.** texrs carries the part of LaTeX that lives in the mouth
 and the expander, as TeX rather than as Rust, in two files compiled into the
@@ -403,8 +403,9 @@ is the half that does not need the document: a chunk builds a list and
 `node.hpack` measures it with §649's arithmetic, agreeing with luatex on the
 width, the badness, the glue ratio and both orders. `tex.skip` and the `\muskip`
 family hand over the `glue_spec` node the manual describes. What is absent is
-the other half, and not for want of a data structure: texrs sets a page from
-runs of strings, so there is no CURRENT node list — `tex.getbox`, `node.write`
+the other half, and not for want of a data structure: texrs builds a page's
+boxes from already-broken strings rather than from a node list, so there is no
+CURRENT node list — `tex.getbox`, `node.write`
 and every callback that would pass Lua the list TeX is building refuse by name,
 and a document that walks the document's own list is refused rather than quietly
 wrong.
@@ -600,7 +601,7 @@ and three of the things a document controls survive the trip:
   to nothing, `\pandocbounded` boxed every figure without setting the box, and
   once figures did reach the page they were placed at the file's own size.
 
-What `--dvi` still does not do is draw a picture or break its pages by penalty:
+What `--dvi` still does not do is set maths, draw a picture or break its pages by penalty:
 it stacks a fixed number of lines on each, where `--pdf` prices the whole
 document. A draft reads correctly either way; a book being sold on its
 typography should still be set by an engine that has been doing it for forty
@@ -670,16 +671,17 @@ DVI   NONE < PARSES < PAGES < TEXT < STRUCTURE < BYTES
 PDF   NONE < PRODUCED < PAGES < PAGESIZE < TEXT < LINES < FONTS < BYTES
 ```
 
-Fourteen documents on each. Today the DVI floor stands at PAGES for nine of
-them, and the PDF floor at LINES for seven — the rung where line breaking and
-glue setting start to show — with `empty_document.tex` the only case at BYTES,
-and the only one at NONE on the other axis. The oracle differs too: DVI is
+Ten documents on each. Today the DVI floor stands at STRUCTURE for nine of
+them, and the PDF floor at FONTS for seven and TEXT for two, with
+`empty_document.tex` the only case at BYTES, and the only one at NONE on the
+other axis. The oracle differs too: DVI is
 against `tex`, PDF against `luatex`, and both skip loudly rather than passing
 when their oracle or the tools that read the output are missing.
 
 Byte equality is a reachable goal for DVI, which carries no fonts and no
 compression, and a distant one for PDF: `Hello world.` is 224 bytes from `tex`
-against 260 from texrs, where the same document in PDF is 11,729 against 615.
+against 192 from texrs, where the same document in PDF is 11,729 from `luatex`
+against 15,435.
 
 ## [0x09] Fuzzing
 
@@ -814,7 +816,7 @@ publishes.
 - **Engineering report** — architecture, what lowering forces, parity posture, dependencies (`docs/report.html`)
 - **Primitive reference** — every primitive texrs carries and where it happens (`docs/reference.html`, generated from `src/corpus.rs` with `cargo run --bin gen-docs`)
 - **Known gaps** — the ledger, each entry pinned by a case the suite gates on (`BUGS.md`)
-- **Roadmap** — what the stomach would take (`docs/ROADMAP.md`)
+- **Roadmap** — the milestones, and what the stomach still lacks (`docs/ROADMAP.md`)
 
 ## [0xFF] Licence
 
