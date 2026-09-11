@@ -2,13 +2,13 @@
 # Rungs: NONE < PARSES < PAGES < TEXT < STRUCTURE < BYTES.
 # BYTES is the goal and a reachable one: DVI carries no fonts and
 # no compression. Re-record with `cargo run --bin dvi-parity -- --record`.
-PAGES a_paragraph.tex
-PAGES digits_and_case.tex
+STRUCTURE a_paragraph.tex
+STRUCTURE digits_and_case.tex
 NONE empty_document.tex
-PAGES groups_and_registers.tex
-PAGES long_paragraph.tex
-PAGES macro_expansion.tex
-PAGES nested_macros.tex
-PAGES punctuation.tex
-PAGES two_paragraphs.tex
-PAGES two_words.tex
+STRUCTURE groups_and_registers.tex
+STRUCTURE long_paragraph.tex
+STRUCTURE macro_expansion.tex
+STRUCTURE nested_macros.tex
+STRUCTURE punctuation.tex
+STRUCTURE two_paragraphs.tex
+STRUCTURE two_words.tex

@@ -2,8 +2,8 @@
 //!
 //! The attainable axis. A DVI carries no fonts and no compression, so byte
 //! equality is a goal rather than an aspiration — for `Hello world.` tex writes
-//! 224 bytes and texrs 260, where the same document in PDF is 11,729 against
-//! 615. `tests/dvi_floor.txt` records where each document stands.
+//! 224 bytes and texrs 192, where the same document in PDF is 11,729 from luatex
+//! against 15,435. `tests/dvi_floor.txt` records where each document stands.
 //!
 //! Skipped, loudly, without a pinned `tex` and without `cmr10.tfm`, since
 //! texrs's DVI path needs a real font metric file to set anything.
