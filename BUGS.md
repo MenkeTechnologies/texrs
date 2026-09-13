@@ -65,21 +65,24 @@ passing, so the list is a claim the harness enforces rather than a note.
   by `tests/etex.rs`. `\newbox`, `\newread`, `\newwrite` and `\newinsert` are
   `\chardef`s exactly as plain TeX makes them, so the NAME is a number and it is
   the missing store rather than the missing name that stops a use.
-- **`em` and `ex` are not units.** §453's `<factor><internal unit>` IS
-  implemented — `\dimendef\pp=3 \pp=1pt` then `\dimen5=10\pp` gives `10.0pt`
-  — but `\dimen5=3em` is still `! Illegal unit of measure (pt inserted).` They
-  are the current font's, and a dimension is scanned in the mouth, which has no
-  font. This is what `\setlength{\parindent}{2em}` wants.
 
-  Two things this bullet used to say and should not. It said `15\p@` is
-  unimplemented: the arithmetic is there. And it said this was "the whole of
-  what stands between `article.cls` and a load" — it is not, and was not even
-  when written. The class stops five reasons further on (see the stderr entry
-  below), and `\p@` itself is unreachable from a document body for a different
-  reason again: the class load stops before the kernel's `\p@=1pt` is in scope,
-  so `10\p@` in a document is `Illegal unit of measure` where `10\pp` on a
-  register the document set is `10.0pt`. A bullet that names one blocker for a
-  chain of them will be wrong at the first fix and read as right for months.
+`em` and `ex` were on this list and are not: they are `\fontdimen6` and
+`\fontdimen5` of the installed `cmr10.tfm`, and they agree with tex to the
+scaled point — `[em=10.00002pt][ex=4.30554pt]` from both engines on the same
+file.
+
+The arithmetic is the part to keep. cmr10's quad is 1048579/2^20; at ten points
+that product is 655361.875, so TRUNCATING gives 655361 — 10.00002pt, what tex
+prints — and rounding gives 655362. One scaled point wrong on the number every
+`em` in a class file is a multiple of, and a float implementation looks right in
+every test that prints two decimals.
+
+What it does NOT do, which is worth more than "em works now":
+`\documentclass[12pt]` gets cmr12 in real LaTeX and cmr10 here, and a fontspec
+document would need a current font in the mouth, which does not exist. Neither
+reaches `article.cls`, because `\setmainfont` comes after `\documentclass`
+there too.
+
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
@@ -266,13 +269,13 @@ and that could not be seen before `\titleformat` delivered anything at all.
   `\usepackage{fontspec}` — which is how every book in the corpus sets its
   fonts. The fonts still resolve; it is the package's own load that stops.
 
-- **`package article needs \@settopoint`** on stderr, for a document as simple
-  as `\documentclass{article}` with one word in it. The output is correct; the
-  line is not suppressible and it is the first thing anyone trying the engine
-  sees.
+- **`package article is not loadable: Illegal unit of measure (pt inserted)`**
+  on stderr, for a document as simple as `\documentclass{article}` with one word
+  in it. The output is correct; the line is not suppressible and it is the
+  first thing anyone trying the engine sees.
 
-  This message is the THIRD on the same line of `size10.clo`, and the first that
-  is not a scanner gap:
+  It is the ninth message this one document has stopped on, and they are not all
+  from one line or even one file:
 
   ```
   package article needs \abovedisplayskip          the §247 glue parameters
@@ -282,7 +285,8 @@ and that could not be seen before `\titleformat` delivered anything at all.
   package article needs \@lowpenalty
   Missing number, found \@mpfootins
   package article needs \raggedbottom
-  package article needs \onecolumn                 article.cls's second-to-last line
+  package article needs \onecolumn                 article.cls line 640 of 644
+  Illegal unit of measure (pt inserted)            a factor arriving from a MACRO
   ```
 
   Every reason above the last is fixed, and the arithmetic under the second is
@@ -290,12 +294,24 @@ and that could not be seen before `\titleformat` delivered anything at all.
   because §107's `xn_over_d` truncates toward zero — verified against the real
   `tex` binary, which prints the same.
 
-  Eight reasons, one line of one file, each visible only from the one before it.
-  That is the strongest evidence in this file for reading an error message as
-  the first thing that stopped rather than the only thing wrong — and for
-  expecting a ninth rather than an end. `\onecolumn` is `article.cls`'s
-  second-to-last line, so the class is nearly read; what follows it is
-  `size10.clo`, which has not been reached yet.
+  Nine reasons now, each visible only from the one before it. That is the
+  strongest evidence in this file for reading an error message as the first
+  thing that stopped rather than the only thing wrong — and for expecting a
+  tenth rather than an end.
+
+  The ninth is `\@floatplacement`'s `\topfraction\@colht`: a factor arriving
+  from a MACRO, which `scan_factor` takes without expanding. Note what it
+  prints. `Illegal unit of measure` is now the output of THREE distinct faults
+  in this file's history — the missing `<factor><internal unit>` arithmetic, a
+  `\p@` the class never set, and this. A message that cannot distinguish its
+  causes makes any explanation of it unfalsifiable by observation, which is how
+  a dead reason went on predicting correctly for two rounds.
+
+  An earlier version of this entry said `\onecolumn` is near the end and that
+  `size10.clo` "has not been reached yet". Both wrong, and checkable in the file
+  itself: `article.cls:113` is `\input{size1\@ptsize.clo}` and `\onecolumn` is
+  at line 640 of 644, so `size10.clo` was read 527 lines EARLIER. Being late in
+  a file says nothing about what a `\input` on line 113 already pulled in.
 
   One of those fixes is worth its own note, because it made an EARLIER fix
   reachable rather than fixing anything a reader could see. `Lowerer::preload`

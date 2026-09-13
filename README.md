@@ -401,15 +401,17 @@ xcolor is not loadable: Unsupported \edef body`. Eleven files load all the way
 through — `minimal.cls`, and `ifthen`, `textcomp`, `inputenc`, `keyval`,
 `upquote`, `multirow`, `float`, `footnote`, `fontenc` and `lmodern` — and a
 package's own `\RequirePackage`s are followed, so `keyval` is read before the
-`graphicx` that asks for it. `article.cls` gets to its second-to-last line and
-stops there, on `\onecolumn` — the eighth reason it has stopped on, each one
-visible only from the one before (BUGS.md lists them). `10\p@` in a document
-still prints `! Illegal unit of measure (pt inserted).`, but no longer for the
-reason this paragraph used to give: §453's `<factor><internal unit>` IS
-implemented — `\dimendef\pp=3 \pp=1pt` then `\dimen5=10\pp` gives `10.0pt` —
-and what a document hits is the class aborting before the kernel's `\p@=1pt` is
-in scope. `em` and `ex` really are absent, being the current font's where a
-dimension is scanned in the mouth. A package that loads and then breaks what the
+`graphicx` that asks for it. `article.cls` is read to its last line and
+stops one token into it, in `\@floatplacement` — the ninth reason it has
+stopped on, each visible only from the one before (BUGS.md lists all nine).
+`10\p@` in a document still prints `! Illegal unit of measure (pt inserted).`,
+but for none of the reasons this paragraph has given it over three rewrites:
+§453's `<factor><internal unit>` is implemented (`\dimendef\pp=3 \pp=1pt`
+then `\dimen5=10\pp` gives `10.0pt`), and so are `em` and `ex`, which are the
+font's `\fontdimen6` and `\fontdimen5` out of `cmr10.tfm` and agree with tex to
+the scaled point — `[em=10.00002pt][ex=4.30554pt]` from both engines. What stops
+a document now is a factor arriving from a macro, which the factor scanner takes
+without expanding. Three unrelated faults, one string. A package that loads and then breaks what the
 preamble already promised is reported rather than committed — measured, letting
 `calc` through took the corpus sweep from 229 documents to 145. For everything
 still refused, the report is the list of what each one wants. What is kept
