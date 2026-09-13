@@ -2771,7 +2771,9 @@ impl Lowerer {
     /// coercion spelt out -- `\@tempcnta=\@tempdima`, a count register assigned
     /// from a dimension one -- and latex.ltx:10261 is the other half:
     ///
-    ///     \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+    /// ```text
+    /// \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+    /// ```
     ///
     /// where `\p@` is a `\dimendef` name in INTEGER position, so the divisor is
     /// 65536 and the dimension comes back truncated to whole points.
