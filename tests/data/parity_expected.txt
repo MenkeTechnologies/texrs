@@ -70,10 +70,16 @@ VALUE
 ! Arithmetic overflow.l.8 \divide\count1 by 0                       [7] [3] )(see the transcript file for additional information
 #==# edef_expands_now.tex
 4-9
+#==# edef_freezes_a_catcode.tex
+[11][12]
 #==# edef_freezes_a_macro.tex
 [Q][Z] [<a>] [5][9]
+#==# edef_freezes_a_token_register.tex
+[ab-cd][\inner -x-yy][OUT-x]
 #==# edef_freezes_conditional.tex
 ZERO
+#==# edef_over_a_dimension.tex
+[3.0pt][9.0pt]
 #==# edef_with_parameters.tex
 [A|B|7]
 #==# error_context_trimmed.tex
@@ -128,6 +134,8 @@ one two
 <zz>
 #==# number_prim.tex
 42--17
+#==# number_stands_where_a_number_is_scanned.tex
+[11][11]
 #==# number_too_big.tex
 ! Number too big.l.6 \count1=9999999999                      9[2147483647] )(see the transcript file for additional information
 #==# optional_by_is_put_back.tex

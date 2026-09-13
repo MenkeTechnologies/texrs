@@ -1,0 +1,13 @@
+% S470's \number and S478's \the are EXPANDABLE primitives, so they stand
+% wherever a number is scanned -- S440's scan_int reads through get_x_token,
+% which expands. texrs answered them only where a token list was being built,
+% so `\catcode\number`\!=12' was `! Missing number, found \number.'
+%
+% amsmath.sty:32 is `\def\do#1{\catcode\number`#1=\number\catcode`#1}' and its
+% line 39 calls it eleven times, which is what the package opens with.
+\catcode`\{=1 \catcode`\}=2
+\catcode`\*=11
+\catcode\number`\!=\number\catcode`\*
+\count7=\the\catcode`\!
+\message{[\the\catcode`\!][\the\count7]}
+\end

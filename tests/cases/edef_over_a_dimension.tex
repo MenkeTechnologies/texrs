@@ -1,0 +1,19 @@
+% The one \edef body texrs still refuses, recorded against the oracle so the
+% day it starts working the harness says so.
+%
+% S478 writes a DIMENSION as `3.0pt', not as a count of scaled points, and
+% S366 freezes those characters into the body. texrs holds a dimen register in
+% a VM slot rather than in the table the lowerer reads, so there is no value to
+% write while lowering: `src/lower.rs::edef_snapshot' answers
+% `Unsupported \edef body: \the\dimen'.
+%
+% It is what \strip@pt wants -- latex.ltx spells it
+% `\def\strip@pt{\expandafter\rem@pt\the}' and \rem@pt matches `#1.#2PT'
+% against the characters -- so \edef\f@size{\strip@pt\@tempdimb} in
+% amsgen.sty:85 needs this and nothing else.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=3pt
+\edef\frozen{\the\dimen0}
+\dimen0=9pt
+\message{[\frozen][\the\dimen0]}
+\end

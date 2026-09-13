@@ -65,3 +65,15 @@ param_brace_illegal_number.tex
 #                  and once it stopped panicking tests/fuzz_smoke.rs reported it
 #                  as a seed that now compiles cleanly. Renamed to
 #                  fuzz/corpus/lower/param_brace_zero_params.tex.
+edef_over_a_dimension.tex
+#                  `\edef\x{\the\dimen0}' -- tex freezes S478's characters,
+#                  `3.0pt', into the body; texrs answers
+#                  `Unsupported \edef body: \the\dimen' and stops. The VALUE is
+#                  the reason: a dimen register lives in a VM slot at run time,
+#                  not in the table `src/lower.rs::edef_snapshot' reads, so
+#                  there is nothing to write while lowering. An INTEGER quantity
+#                  -- a catcode, a \chardef constant, \numexpr -- freezes, and
+#                  so does a token register, which is why this case is about the
+#                  one shape that does not. It is also the whole of what
+#                  \strip@pt needs, so amsgen.sty:85's
+#                  `\edef\f@size{\strip@pt\@tempdimb}' waits on it.

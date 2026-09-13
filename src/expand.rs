@@ -2958,6 +2958,16 @@ impl Engine {
         Ok(self.charcodes.get(table, c))
     }
 
+    /// What the CATCODE table says about a character, for `\the`.
+    ///
+    /// Separate from `charcode_value` only because the catcode table is not one
+    /// of `charcodes`'s five: it is `cats`, which the lexer reads on every
+    /// token. §413 lists it beside the other five all the same.
+    pub fn catcode_value(&mut self, lx: &mut Lexer) -> R<i64> {
+        let c = self.scan_char_code(lx, false)?;
+        Ok(self.cats.get(c) as i64)
+    }
+
     fn do_count_assign(&mut self, lx: &mut Lexer) -> R<()> {
         let reg = self.scan_number(lx, false)?;
         self.skip_equals(lx)?;
@@ -3122,6 +3132,21 @@ impl Engine {
             }
             // A macro in numeric position expands and the scan resumes.
             if self.try_expand(lx, name, pending_only)? {
+                return Ok(sign * self.scan_number(lx, pending_only)?);
+            }
+            // §470's `\number` and §478's `\the` are EXPANDABLE primitives, so
+            // they stand wherever a number is scanned -- §440's `scan_int`
+            // reads through `get_x_token`, which expands. They are not in
+            // `try_expand` because the two token-producing callers answer them
+            // themselves, before the gullet sees them; here the characters they
+            // produce are pushed back and the scan resumes on the digits.
+            //
+            // `amsmath.sty:32` is `\def\do#1{\catcode\number`#1=\number\catcode`#1}`
+            // and its `\do\"` on line 39 is what the package opens with.
+            if name.name() == "number" || name.name() == "the" {
+                let text = self.read_the(lx, name.name() == "number", pending_only)?;
+                let toks: Vec<Token> = text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
+                lx.push_back(&toks);
                 return Ok(sign * self.scan_number(lx, pending_only)?);
             }
             return Err(TexError(format!("Missing number, found \\{}", name.name())));
@@ -3382,7 +3407,16 @@ impl Engine {
             // §478's `the_toks`, which is what `\the` means inside an \edef:
             // the value as characters, not the reading it stands for.
             if name.name() == "the" || name.name() == "number" {
-                let text = self.read_the(&mut lx, name.name() == "number")?;
+                // §478's token-list arm produces TOKENS, and §366 puts them in
+                // the body without expanding them again. Characters would be a
+                // different macro: see `the_token_list`.
+                if name.name() == "the" {
+                    if let Some(list) = self.the_token_list(&mut lx, true)? {
+                        out.extend(list);
+                        continue;
+                    }
+                }
+                let text = self.read_the(&mut lx, name.name() == "number", true)?;
                 out.extend(text.chars().map(|c| Token::Char(c, Cat::Other)));
                 continue;
             }
@@ -3413,7 +3447,7 @@ impl Engine {
             }
             match &t {
                 Token::Cs(name) if name.name() == "the" || name.name() == "number" => {
-                    let n = self.read_the(lx, name.name() == "number")?;
+                    let n = self.read_the(lx, name.name() == "number", true)?;
                     out.push_str(&n);
                 }
                 Token::Cs(name) if name.name() == "string" => {
@@ -3439,19 +3473,100 @@ impl Engine {
         Ok(out)
     }
 
-    /// `\the\count<n>`, and `\number<n>` which takes a bare number.
-    fn read_the(&mut self, lx: &mut Lexer, bare: bool) -> R<String> {
+    /// §478's `token_list` arm: `\the` of a TOKEN register produces the list
+    /// itself. `None` -- with the stream left exactly as it was -- when what
+    /// follows is any other quantity.
+    ///
+    /// Separate from `read_the` because the SHAPE of the answer differs, and
+    /// §366 is why that matters: the tokens are inserted into the `\edef` body
+    /// without being expanded again, so a macro inside the register survives as
+    /// a call. Rendering them as characters instead froze the SPELLING --
+    /// `\edef\x{\the\toks0}` over `\toks0={\inner-x}` gave `\x` the eight
+    /// characters `\inner -x` where tex gives it the macro and a later `\x`
+    /// prints what `\inner` means then.
+    fn the_token_list(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<Vec<Token>>> {
+        let Some(t) = self.take(lx, pending_only) else {
+            return Ok(None);
+        };
+        let Token::Cs(what) = t else {
+            lx.push_back(&[t]);
+            return Ok(None);
+        };
+        let reg = match what.name() {
+            "toks" => self.scan_number(lx, pending_only)?,
+            _ => match self.toks_cs(what) {
+                Some(r) => r,
+                None => {
+                    lx.push_back(&[Token::Cs(what)]);
+                    return Ok(None);
+                }
+            },
+        };
+        Ok(Some(self.toks.get(&reg).cloned().unwrap_or_default()))
+    }
+
+    /// `tex.web` §478's `the_toks`, and `\number<n>` which takes a bare number.
+    ///
+    /// §478 asks `\the` what SHAPE its operand has and writes the value in that
+    /// shape: an internal integer becomes its digits, a token register becomes
+    /// the tokens themselves. Only `\the\count<n>` was written here, which is
+    /// one internal integer out of the several §413 lists -- and the missing
+    /// ones are what three packages open with. `graphics.sty:34` writes
+    /// `\the\catcode`, `amstext.sty:62` writes `\the\toks@`.
+    ///
+    /// So the integer case is handed to `scan_number`, which is already the
+    /// authority on §413's internal integers everywhere else a number is
+    /// scanned: the six code tables, a `\chardef` or `\countdef` name,
+    /// `\numexpr`, and `\count` itself. That is not a widening of what texrs
+    /// KNOWS, only of where it is willing to look it up.
+    ///
+    /// A quantity `scan_number` cannot evaluate errors here, which is the
+    /// honest answer: a dimension, a glue or a box lives in a VM slot at run
+    /// time rather than in this table, so there is no value to write. Every
+    /// caller treats the error as "not frozen" and falls back.
+    fn read_the(&mut self, lx: &mut Lexer, bare: bool, pending_only: bool) -> R<String> {
         if bare {
-            return Ok(self.scan_number(lx, true)?.to_string());
+            return Ok(self.scan_number(lx, pending_only)?.to_string());
         }
-        let Some(Token::Cs(what)) = lx.pending.pop() else {
+        let Some(Token::Cs(what)) = self.take(lx, pending_only) else {
             return Err(TexError("You can't use \\the here".into()));
         };
-        if what.name() != "count" {
+        // §478's `token_list` arm: the tokens, not a number. A token register
+        // is frontend state like a macro body -- see the `toks` field -- so it
+        // is as knowable here as a catcode is.
+        if what.name() == "toks" {
+            let reg = self.scan_number(lx, pending_only)?;
+            return Ok(self.toks_text(reg));
+        }
+        if let Some(reg) = self.toks_cs(what) {
+            return Ok(self.toks_text(reg));
+        }
+        // A DIMENSION, a glue or a mu glue is refused here and not read as an
+        // integer. Its value is a VM slot rather than a table this side holds,
+        // so `scan_number` would answer the zero a missing entry reads as --
+        // and §478 writes a dimension as `0.0pt' anyway, never as `0'. Wrong
+        // characters are worse than no characters: the caller falls back on the
+        // error and keeps what it had.
+        let is_dimen = match what.name() {
+            "dimen" | "skip" | "muskip" => true,
+            _ => matches!(
+                self.numeric_cs(what),
+                Some(NumericCs::Register(r)) if r >= crate::compiler::DIMEN_BASE
+            ),
+        };
+        if is_dimen {
             return Err(TexError(format!("Unsupported \\the\\{}", what.name())));
         }
-        let reg = self.scan_number(lx, true)?;
-        Ok(self.count.get(&reg).unwrap_or(&0).to_string())
+        // §478's `int_val` arm. The name goes back so `scan_number` reads the
+        // whole quantity, `\catcode`\* and `\numexpr...\relax` included.
+        lx.push_back(&[Token::Cs(what)]);
+        match self.scan_number(lx, pending_only) {
+            Ok(v) => Ok(v.to_string()),
+            // Say WHICH quantity has no value here rather than passing on the
+            // scanner's "missing number": the name is the whole of what a
+            // reader needs to know to port the next one.
+            Err(_) => Err(TexError(format!("Unsupported \\the\\{}", what.name()))),
+        }
     }
 
     fn read_csname(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {

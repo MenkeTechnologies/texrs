@@ -1220,10 +1220,18 @@
 %
 %   * \f@size and \f@baselineskip, two \edef'd STRINGS. Nothing here reads
 %     either -- they name the font \pickup@font would load, and there is no
-%     \pickup@font -- and `src/lower.rs::edef_snapshot' freezes `\the\count<n>'
-%     and nothing else, so `\edef\f@size{\strip@pt\@tempdimb}' stops the load
-%     with `Unsupported \edef body'. Measured, on this document. \strip@pt is
-%     not ported for the same reason: its only caller would be that line.
+%     \pickup@font -- and `src/lower.rs::edef_snapshot' cannot freeze a
+%     DIMENSION, so `\edef\f@size{\strip@pt\@tempdimb}' stops the load with
+%     `Unsupported \edef body: \the\@tempdimb'. Measured, on this document.
+%     \strip@pt is not ported for the same reason: its only caller would be
+%     that line.
+%
+%     The refusal is now only about dimensions. \the of an internal INTEGER
+%     freezes (a catcode, a \chardef constant, \numexpr) and so does \the of a
+%     token register; what is missing for this one is that a dimension's value
+%     is a VM slot at run time rather than a table the lowerer holds, and
+%     \strip@pt wants the CHARACTERS `12.0pt' at definition time so its
+%     \rem@pt can match `#1.#2PT' against them.
 %   * \size@update's DEFERRAL, whose point is that a size change inside a group
 %     assigns \baselineskip once, when \selectfont finally runs. \selectfont is
 %     a stand-in (`prelude.tex'), so there is no later point to defer to and
@@ -1498,6 +1506,13 @@
 \newcount\@lowpenalty
 \newcount\@medpenalty
 \newcount\@highpenalty
+% latex.ltx:15748-15749. The glue \eqnarray sets \tabskip to, which is what
+% centres a column: infinitely stretchable either side of it. amsmath.sty:66
+% is `\@mathmargin\@centering', six lines into the package, and without the
+% declaration the skip it copies from is not a register at all -- the scan
+% reaches a name where a unit belongs and answers `! Illegal unit of measure'.
+\newskip\@centering
+\@centering = 0pt plus 1000pt
 \def\@listI{}
 \let\@listi\@listI
 \def\@listii{}

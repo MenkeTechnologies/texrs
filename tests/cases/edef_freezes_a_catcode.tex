@@ -1,0 +1,15 @@
+% `tex.web' S366 expands an \edef body the whole way WHILE READING it, and
+% S478's \the writes the value of an internal quantity as CHARACTERS. A catcode
+% is one of S413's internal integers, so `\the\catcode`\*' inside an \edef is
+% frozen at definition time: changing the catcode afterwards cannot move what
+% the macro produces.
+%
+% texrs read only `\the\count<n>' there and refused everything else with
+% `Unsupported \edef body'. That one refusal stopped graphics.sty at its line
+% 34, which opens with five of these in a row.
+\catcode`\{=1 \catcode`\}=2
+\catcode`\*=11
+\edef\was{\the\catcode`\*}
+\catcode`\*=12
+\message{[\was][\the\catcode`\*]}
+\end

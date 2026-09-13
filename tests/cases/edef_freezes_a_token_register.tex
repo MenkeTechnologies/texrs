@@ -1,0 +1,25 @@
+% S478's other shape: \the of a TOKEN register produces the token LIST, not a
+% number and not its spelling. S366 puts that list into the \edef body without
+% expanding it again, so a macro inside the register survives as a call -- it
+% is the register that is frozen, not what the register's macros mean.
+%
+% So \two below freezes \inner as a CALL and answers OUT, while the plain
+% characters either side of it are frozen as characters. Reading the register
+% as text instead would have answered `\inner -x'.
+%
+% Both spellings are read, the register and a \toksdef name for it, because
+% amstext.sty:62 writes the second one -- `\edef\GenericInfo{\the\toks@ ...}',
+% over a \toks@ holding two control sequences.
+\catcode`\{=1 \catcode`\}=2
+\toksdef\mine=3
+\toks0={ab}
+\mine={cd}
+\edef\one{\the\toks0-\the\mine}
+\toks0={zz}
+\mine={yy}
+\def\inner{IN}
+\toks0={\inner-x}
+\edef\two{\the\toks0}
+\def\inner{OUT}
+\message{[\one][\the\toks0-\the\mine][\two]}
+\end

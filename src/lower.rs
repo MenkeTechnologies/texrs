@@ -1527,6 +1527,14 @@ impl Lowerer {
     /// written to a scratch register at this point in the program and the macro
     /// is defined to read THAT, which is what makes a later use see the frozen
     /// value rather than the live one.
+    ///
+    /// The snapshot is the FALLBACK. What §478's `\the` reads out of a table
+    /// this side holds -- a catcode, one of the five code tables, a `\chardef`
+    /// constant, a token register -- is frozen whole by `expand_edef_body`
+    /// below, and never reaches here. One quantity reaches here and cannot be
+    /// frozen either way: a DIMENSION, whose value is a slot and whose §478
+    /// spelling is `12.0pt` rather than a count of scaled points. That is what
+    /// the refusal names.
     fn edef_snapshot(&mut self, lx: &mut Lexer) -> R<Option<Cmd>> {
         let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
@@ -1577,7 +1585,20 @@ impl Lowerer {
                 Token::Cs(n) if n.name() == "the" => {
                     match work.pending.pop() {
                         Some(Token::Cs(w)) if w.name() == "count" => {}
-                        _ => return Err(TexError("Unsupported \\edef body".into())),
+                        // Name the quantity rather than the construct: a
+                        // report saying only `Unsupported \edef body' left
+                        // every reader bisecting a .sty to find out which
+                        // `\the' it meant.
+                        other => {
+                            return Err(TexError(format!(
+                                "Unsupported \\edef body: \\the{}",
+                                match other {
+                                    Some(Token::Cs(w)) => format!("\\{}", w.name()),
+                                    Some(t) => t.to_text(self.eng.escape),
+                                    None => String::new(),
+                                }
+                            )))
+                        }
                     }
                     let reg = self.eng.scan_number_pending(&mut work)?;
                     let scratch = self.next_scratch;
@@ -3075,6 +3096,17 @@ impl Lowerer {
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "count" => {}
+                            // `\the\catcode`\x` reads the catcode table, which
+                            // is frontend state here -- `compile_time_catcode`
+                            // writes it -- so the answer is known now, exactly
+                            // as the five code tables below are. It is the one
+                            // of §413's tables a package is likeliest to ask
+                            // about: `graphics.sty:34` opens with five of them.
+                            Some(Token::Cs(w)) if w.name() == "catcode" => {
+                                let v = self.eng.catcode_value(work)?;
+                                text.push_str(&v.to_string());
+                                continue;
+                            }
                             // `\the\pageno` reads the register the name stands
                             // for, and `\the\active` is the constant itself --
                             // known already, so it is rendered here rather than
