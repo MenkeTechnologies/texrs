@@ -3191,7 +3191,17 @@ pub fn to_pdf(
                                 natural: 0.0,
                                 width: 0.0,
                             };
-                            page.text_set(font, size, x + gx, y + gy, &piece.codes, at);
+                            // At the family's own scale, as the text path is.
+                            // Without this a formula inside a `\ttfamily` run
+                            // is drawn at the UNSCALED body size while the
+                            // text around it is scaled -- and since a scaled
+                            // family's body size is a different number, a size
+                            // histogram counts those glyphs as body text.
+                            let drawn_at = match piece.from {
+                                Source::Face => size * scales[face.index()],
+                                _ => size,
+                            };
+                            page.text_set(font, drawn_at, x + gx, y + gy, &piece.codes, at);
                         }
                     }
                     for (rx, ry, rw, rh) in crate::math::rules(&set) {
