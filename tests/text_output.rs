@@ -590,3 +590,57 @@ fn a_verbatim_body_keeps_the_dashes_and_quotes_it_wrote() {
         "and prose after it is still prose: {got:?}"
     );
 }
+
+/// A dollar in a listing is a dollar, not the start of a formula.
+///
+/// pandoc writes `\DefineVerbatimEnvironment{Highlighting}{Verbatim}
+/// {commandchars=\\\{\}}`, and under fancyvrb every character except those
+/// three is catcode 12. texrs honoured the backslash and the braces -- they
+/// are special anyway -- and left the rest, so a shell prompt opened MATH
+/// MODE: `$ awk '/^fn/{f=1}'` lost its `$`, took `^` as a superscript and `_`
+/// as a subscript, and set the remains in the roman face.
+///
+/// arb has 597 of these blocks and 397 contain a literal `$`, 259 of them an
+/// ODD number so the formula runs to the end of the block.
+#[test]
+fn a_dollar_in_a_listing_is_a_dollar_and_not_a_formula() {
+    let doc = "\\documentclass{article}\n\\usepackage{fancyvrb}\n\
+               \\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\\\\{\\}}\n\
+               \\newcommand{\\NormalTok}[1]{#1}\n\\begin{document}\n\
+               \\begin{Highlighting}[]\n\\NormalTok{$ a_b^c 100$}\n\
+               \\end{Highlighting}\n\\end{document}\n";
+    let text = texrs::run_text(doc).expect("text");
+    for want in ['$', '_', '^'] {
+        assert!(
+            text.contains(want),
+            "{want:?} was eaten by the listing: {text:?}"
+        );
+    }
+    // And the order is the source's, not a formula's.
+    let code: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains("$a_b^c100$"),
+        "the listing was re-ordered as a formula: {code:?}"
+    );
+}
+
+/// The other characters fancyvrb makes ordinary stay ordinary too.
+#[test]
+fn a_listing_keeps_the_characters_tex_would_otherwise_act_on() {
+    let doc = "\\documentclass{article}\n\\usepackage{fancyvrb}\n\
+               \\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\\\\{\\}}\n\
+               \\newcommand{\\NormalTok}[1]{#1}\n\\begin{document}\n\
+               \\begin{Highlighting}[]\n\\NormalTok{a & b # c ~ d % e}\n\
+               \\end{Highlighting}\n\\end{document}\n";
+    let text = texrs::run_text(doc).expect("text");
+    for want in ['&', '#', '~', '%'] {
+        assert!(
+            text.contains(want),
+            "{want:?} was acted on rather than set: {text:?}"
+        );
+    }
+    assert!(
+        text.contains('e'),
+        "a percent commented out the rest of the line: {text:?}"
+    );
+}

@@ -2380,11 +2380,39 @@ impl Lowerer {
         // the `--` in a flag and the `''` in a string literal are what the
         // program says.
         self.listing_depth += 1;
-        for line in body.lines() {
-            let mut lx = Lexer::new(line);
-            self.lower_lexer_into(&mut lx, out)?;
-            self.push_text(out, &crate::typeset::LISTING_BREAK.to_string());
+        // fancyvrb's `commandchars=\\\{\}`, which is what pandoc writes:
+        //
+        //   \DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+        //
+        // Inside such an environment EVERY character except the three named is
+        // catcode 12. texrs honoured the backslash and the braces -- they are
+        // special anyway -- and left the rest alone, so a shell prompt opened
+        // MATH MODE: `$ awk '/^fn/{f=1}'` lost its `$`, took `^` as a
+        // superscript and `_` as a subscript, and set the remains in the
+        // roman face at the body size.
+        //
+        // arb has 597 of these blocks and 397 of them contain a literal `$`,
+        // 259 with an odd count so the math span runs to the end of the block.
+        const VERBATIM: [char; 7] = ['$', '_', '^', '&', '#', '~', '%'];
+        let saved: Vec<_> = VERBATIM
+            .iter()
+            .map(|c| (*c, self.eng.cats.get(*c)))
+            .collect();
+        for c in VERBATIM {
+            self.eng.cats.set(c, crate::catcode::Cat::Other);
         }
+        let lowered = (|| -> R<()> {
+            for line in body.lines() {
+                let mut lx = Lexer::new(line);
+                self.lower_lexer_into(&mut lx, out)?;
+                self.push_text(out, &crate::typeset::LISTING_BREAK.to_string());
+            }
+            Ok(())
+        })();
+        for (c, cat) in saved {
+            self.eng.cats.set(c, cat);
+        }
+        lowered?;
         self.listing_depth -= 1;
         self.push_text(out, "\n\n");
         Ok(())
