@@ -8,6 +8,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- Including a page of one PDF in another (`include`), ported from
+  `pdf_include_page` in `xdvipdfmx`. This is what the PDF reader was for: the
+  commonest figure in a LaTeX document is another PDF. A page cannot be copied
+  on its own -- its content names fonts and pictures through its resources, and
+  those name objects by numbers that mean something else here -- so what is
+  copied is the object graph, with every reference rewritten and every object
+  brought across once. What comes out is a Form XObject, which a document can
+  put where it likes and at what size it likes.
 - Type size is a property of a RUN rather than of the document. Every
   size-selecting command was empty in the prelude and `Layout::size` was one
   document-wide `f64`, so every heading was set at body size; `\section`,

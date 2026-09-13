@@ -40,6 +40,7 @@ pub mod geturl;
 pub mod glue;
 pub mod glyf;
 pub mod image;
+pub mod include;
 pub mod intercepts;
 pub mod io;
 pub mod ir;
