@@ -154,10 +154,52 @@ inputs = ["macros.tex", "body.tex"]
 [[output]]
 name = "default"
 type = "messages"
+
+[[output]]
+name = "code"
+type = "disasm"
 .fi
 .RE
 .PP
+An output's
+.B type
+is one of
+.BR messages ,
+.B tokens
+or
+.BR disasm :
+the
+.B \emessage
+stream, the mouth's token stream before anything expands, and the fusevm
+bytecode the document lowers to.  Each writes
+.IR build/<name>.txt ,
+.I .tokens
+or
+.I .disasm
+respectively, and
+.B \-X build \-\-profile
+picks one by NAME rather than by type, so a document may carry several of the
+same kind.  There is no page output here: an output type exists because the
+binary can produce it, and
+.B \-\-pdf
+and
+.B \-\-dvi
+are flags on a file rather than profiles on a document.
+.PP
 A
+.B preamble
+key lists files read before the inputs and dumped as a format, so a macro file
+compiles once and every later build starts from what it left.  A preamble may
+only DEFINE: if lowering one produces a run-time command \(em a
+.BR \emessage ,
+a
+.B \ecount
+assignment \(em there is nothing in a format to put it in, so the build
+compiles the whole document instead and says so.
+.PP
+An
+.B extra_paths
+key lists directories searched for an input after the document's own.  A
 .B bundle
 key names a zip of support files, searched after the document's own directory
 and its extra paths: what a document carries with it when it is shared as one

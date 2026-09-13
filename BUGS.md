@@ -269,13 +269,37 @@ and that could not be seen before `\titleformat` delivered anything at all.
   `\usepackage{fontspec}` — which is how every book in the corpus sets its
   fonts. The fonts still resolve; it is the package's own load that stops.
 
-- **`package article is not loadable: Illegal unit of measure (pt inserted)`**
-  on stderr, for a document as simple as `\documentclass{article}` with one word
-  in it. The output is correct; the line is not suppressible and it is the
-  first thing anyone trying the engine sees.
+- **`\textwidth` is 469.0pt where LaTeX makes it 345.0pt.** Measured on the
+  same `\documentclass{article}` document through both engines:
 
-  It is the ninth message this one document has stopped on, and they are not all
-  from one line or even one file:
+  ```
+  texrs   [\parindent 20.00003pt] [\textwidth 469.0pt]
+  latex   [\parindent 20.00003pt] [\textwidth 345.0pt]
+  ```
+
+  `\parindent` and nine other registers agree; this one does not. The cause is
+  `src/latex/prelude.tex:322`, `\def\ifdim{\iffalse}` — a stand-in that makes
+  every `\ifdim` take its else arm, and `size10.clo:118` chooses the text width
+  in one. So the number is not a rounding difference or a missing unit: it is
+  the else branch of a test that never runs.
+
+  Worth knowing why the stand-in is still there. Removing it gives 345.0pt and
+  every dimension matching LaTeX — but `tests/latex.rs:109` pins `\ifdim` to
+  false, so the fix fails a test that asserts the stand-in. The prelude's own
+  comment says a real `\ifdim` broke 54 corpus documents through
+  `\pandocbounded`; that claim predates `\pandocbounded` being fixed outright,
+  so it is stale-by-consequence — true when written, premise since repaired —
+  and wants re-measuring rather than believing.
+
+- **A class loads silently now, and this entry is kept as history.** Measured:
+  `\documentclass{article}` with one word in it prints `hi` on stdout and ZERO
+  bytes on stderr, exit 0 — and the same for `report`, `book` and `letter`.
+  Nothing below is a gap a reader can hit; what follows is the record of how it
+  got there, because the SHAPE is the useful part and it is not a claim about
+  the engine's current state.
+
+  Ten messages, each a real fix, each visible only from the one before, and not
+  all from one line or even one file:
 
   ```
   package article needs \abovedisplayskip          the §247 glue parameters
@@ -287,17 +311,18 @@ and that could not be seen before `\titleformat` delivered anything at all.
   package article needs \raggedbottom
   package article needs \onecolumn                 article.cls line 640 of 644
   Illegal unit of measure (pt inserted)            a factor arriving from a MACRO
+  (silence)                                        \setlength, \@setfontsize, em/ex
   ```
 
-  Every reason above the last is fixed, and the arithmetic under the second is
-  tex's: `1.2\dimen0` with `\dimen0=12.5pt` gives **14.99995pt**, not 15pt,
+  All nine are fixed, and the arithmetic under the second is tex's: `1.2\dimen0` with `\dimen0=12.5pt` gives **14.99995pt**, not 15pt,
   because §107's `xn_over_d` truncates toward zero — verified against the real
   `tex` binary, which prints the same.
 
-  Nine reasons now, each visible only from the one before it. That is the
-  strongest evidence in this file for reading an error message as the first
-  thing that stopped rather than the only thing wrong — and for expecting a
-  tenth rather than an end.
+  Ten states, nine of them errors. That is the strongest evidence in this file
+  for reading an error message as the first thing that stopped rather than the
+  only thing wrong — and the tenth is why the entry stays: at every one of the
+  nine, "expect another" was the right prediction, and there was no way to tell
+  from inside which move would be the last.
 
   The ninth is `\@floatplacement`'s `\topfraction\@colht`: a factor arriving
   from a MACRO, which `scan_factor` takes without expanding. Note what it
@@ -323,7 +348,8 @@ and that could not be seen before `\titleformat` delivered anything at all.
   the case sets its own register. Nothing in the suite multiplied by one the
   KERNEL had set.
 
-  Worth knowing before measuring it: **the script cache masks it.** It prints on
+  One thing to carry forward from measuring it, since it applied at every one
+  of the nine: **the script cache masks a load diagnostic.** It printed on
   a first run and not on a second, because the second never re-reads the
   package. `TEXRS_CACHE=0` shows it every time. A diagnostic that vanishes on
   re-run looks exactly like a diagnostic somebody fixed.

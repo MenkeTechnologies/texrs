@@ -207,6 +207,15 @@ texrs -X itar FILE.tar     # index a tar bundle, or read one file out of it
 texrs -X special TEXT      # say what a \special means to a driver
 ```
 
+A document is a `Texrs.toml` naming its inputs and one or more outputs. The
+output `type` is `messages`, `tokens` or `disasm` — the `\message` stream, the
+mouth's token stream, or the lowered bytecode — and `-X build --profile` picks
+one by NAME, so a document may carry several of the same kind. A page is not
+among them: `--pdf` and `--dvi` are flags on a file, not profiles on a document.
+`texrs(1)` has the whole schema, including `preamble` (files dumped as a format
+so a macro file compiles once) and `bundle` (a zip searched after the
+document's own directory).
+
 The environment it reads is on the generated reference page in full. One of
 them is worth knowing before you compare two files: a PDF carries the time it
 was written, so two runs of one document differ in their dates and nothing
