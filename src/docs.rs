@@ -560,7 +560,29 @@ const ENVIRONMENT: &[(&str, &str)] = &[
         "TEXRS_STATICLIB",
         "The <code>libtexrs.a</code> that <code>--aot</code> links against, when the installed copy is not the one you want.",
     ),
+    (
+        "SOURCE_DATE_EPOCH",
+        "A Unix time to stamp a PDF with instead of the wall clock (reproducible-builds.org's specification, which LuaTeX honours too). Two runs of one document otherwise differ in their dates and nothing else, so this is what makes byte equality with LuaTeX a question that can be asked at all.",
+    ),
+    (
+        "TEXINPUTS",
+        "Where <code>\\input</code> looks after the working directory. texrs does NOT shell out to <code>kpsewhich</code>, so this and the directory the document sits in are the whole search path.",
+    ),
+    (
+        "TEX_ORACLE",
+        "The <code>tex</code> binary the parity harnesses compare against, when it is not the one on <code>PATH</code>.",
+    ),
+    (
+        "TEX_VERSION_EXPECT",
+        "The oracle version the harnesses insist on, overriding the one pinned in <code>BUGS.md</code>. A deliberate cross-version run, and nothing else, wants this.",
+    ),
 ];
+
+// NOTE ON THE GATE ABOVE THIS TABLE. `tests/docs_reference_sections.rs` fails
+// when a `TEXRS_*` name appears in `src/` and not here -- so it protects the
+// prefix rather than the property. The four entries below TEXRS_STATICLIB are
+// all read by `env::var` in this crate and none of them matches that prefix,
+// which is why they sat undocumented while the gate stayed green.
 
 /// The environment table.
 fn environment() -> String {

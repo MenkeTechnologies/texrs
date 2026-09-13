@@ -207,6 +207,20 @@ texrs -X itar FILE.tar     # index a tar bundle, or read one file out of it
 texrs -X special TEXT      # say what a \special means to a driver
 ```
 
+The environment it reads is on the generated reference page in full. One of
+them is worth knowing before you compare two files: a PDF carries the time it
+was written, so two runs of one document differ in their dates and nothing
+else. `SOURCE_DATE_EPOCH` (reproducible-builds.org's specification, which
+LuaTeX honours too) replaces the wall clock with a fixed time, and with it set
+the same document twice gives the same bytes:
+
+```sh
+$ SOURCE_DATE_EPOCH=1000000000 texrs --pdf doc.tex && md5 doc.pdf
+d03b89054b9baadcf040211a10a842e6
+$ SOURCE_DATE_EPOCH=1000000000 texrs --pdf doc.tex && md5 doc.pdf
+d03b89054b9baadcf040211a10a842e6      # without it, a different sum each run
+```
+
 Two places the grammar departs from `tex`, both because texrs takes several
 files where tex takes one: a non-option argument is a FILE unless it begins
 with `\`, and options are recognised anywhere rather than only before the

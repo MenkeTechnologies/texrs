@@ -815,6 +815,10 @@ back at the margin</pre></td></tr>
             <tr><td><code>TEXRS_PARALLEL</code></td><td>Set to <code>1</code> to lex a document on several threads. Off by default: the mouth is 22% of the time on the documents measured, so the win did not pay for the coordination.</td></tr>
             <tr><td><code>TEXRS_PRELEX_STATS</code></td><td>Set to anything to print the pre-lexer's hit and miss counts when the run ends.</td></tr>
             <tr><td><code>TEXRS_STATICLIB</code></td><td>The <code>libtexrs.a</code> that <code>--aot</code> links against, when the installed copy is not the one you want.</td></tr>
+            <tr><td><code>SOURCE_DATE_EPOCH</code></td><td>A Unix time to stamp a PDF with instead of the wall clock (reproducible-builds.org's specification, which LuaTeX honours too). Two runs of one document otherwise differ in their dates and nothing else, so this is what makes byte equality with LuaTeX a question that can be asked at all.</td></tr>
+            <tr><td><code>TEXINPUTS</code></td><td>Where <code>\input</code> looks after the working directory. texrs does NOT shell out to <code>kpsewhich</code>, so this and the directory the document sits in are the whole search path.</td></tr>
+            <tr><td><code>TEX_ORACLE</code></td><td>The <code>tex</code> binary the parity harnesses compare against, when it is not the one on <code>PATH</code>.</td></tr>
+            <tr><td><code>TEX_VERSION_EXPECT</code></td><td>The oracle version the harnesses insist on, overriding the one pinned in <code>BUGS.md</code>. A deliberate cross-version run, and nothing else, wants this.</td></tr>
           </tbody>
         </table>
       </section>
