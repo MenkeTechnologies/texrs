@@ -223,6 +223,24 @@ each necessary and none sufficient, and the stack was only ever visible from the
 bottom — the lost family could not be seen before a sans family existed to lose,
 and that could not be seen before `\titleformat` delivered anything at all.
 
+- **`\char` is not implemented.** `A\char65 B` in a document body stops the run
+  with `! Undefined control sequence \char.`, where tex sets an `A`. §434's
+  `\char` is how a document reaches a glyph by number, and it is what
+  `\symbol` and much of a package's character handling are built on.
+
+  Worth knowing how it hides: inside a `\message` the two engines AGREE.
+  `\message{[\char65]}` prints `[\char 65]` from tex and `[\char 65]` from
+  texrs, because `\char` is unexpandable there and both write its name. The
+  parity corpus compares `\message` streams, so no case in it can see this —
+  the probe cannot reach the place the primitive acts.
+
+- **A document that loads `fontspec` prints a second diagnostic**:
+  `package fontspec is not loadable: Missing number, found \luatexversion`,
+  after the `\@settopoint` line above. Both go to stderr, both appear on a
+  document as ordinary as `\documentclass{article}` plus
+  `\usepackage{fontspec}` — which is how every book in the corpus sets its
+  fonts. The fonts still resolve; it is the package's own load that stops.
+
 - **`package article needs \@settopoint`** on stderr, for a document as simple
   as `\documentclass{article}` with one word in it. The output is correct; the
   line is not suppressible and it is the first thing anyone trying the engine

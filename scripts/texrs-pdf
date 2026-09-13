@@ -13,11 +13,12 @@
 # the build at this instead of the second pandoc call and it does one
 # markdown->LaTeX pass rather than two.
 #
-# WHAT YOU GIVE UP by building a publication this way. Pages break by height
-# and not by penalties, so a paragraph does not sit where tex puts it. There is
-# no per-glyph font fallback, so a character the chosen face lacks does not get
-# fetched from another one. A draft reads correctly; a book being SOLD on its
-# typography should still be built by an engine with a stomach.
+# WHAT YOU GIVE UP by building a publication this way. Not page breaking any
+# more -- this runs --pdf, which prices widow, club, broken-line and heading
+# penalties over the whole document -- but the gaps BUGS.md lists: no \char, no
+# \setbox, maths without the fonts tex reaches for, and a fontspec that stops
+# on its own load. A draft reads correctly; a book being SOLD on its typography
+# should still be built by an engine with a stomach.
 #
 # What you do NOT give up any more: the face the document asked for is embedded
 # rather than substituted, including a font shipped beside the document with
