@@ -401,11 +401,15 @@ xcolor is not loadable: Unsupported \edef body`. Eleven files load all the way
 through — `minimal.cls`, and `ifthen`, `textcomp`, `inputenc`, `keyval`,
 `upquote`, `multirow`, `float`, `footnote`, `fontenc` and `lmodern` — and a
 package's own `\RequirePackage`s are followed, so `keyval` is read before the
-`graphicx` that asks for it. `article.cls` reaches its last line and reads
-`size10.clo`; what stops it there is the dimen scanner rather than the class,
-because `tex.web` §453's `<factor><internal unit>` is not implemented, so
-`10\p@` is `! Illegal unit of measure (pt inserted).` and `em` and `ex` are
-absent for the same reason. A package that loads and then breaks what the
+`graphicx` that asks for it. `article.cls` gets to its second-to-last line and
+stops there, on `\onecolumn` — the eighth reason it has stopped on, each one
+visible only from the one before (BUGS.md lists them). `10\p@` in a document
+still prints `! Illegal unit of measure (pt inserted).`, but no longer for the
+reason this paragraph used to give: §453's `<factor><internal unit>` IS
+implemented — `\dimendef\pp=3 \pp=1pt` then `\dimen5=10\pp` gives `10.0pt` —
+and what a document hits is the class aborting before the kernel's `\p@=1pt` is
+in scope. `em` and `ex` really are absent, being the current font's where a
+dimension is scanned in the mouth. A package that loads and then breaks what the
 preamble already promised is reported rather than committed — measured, letting
 `calc` through took the corpus sweep from 229 documents to 145. For everything
 still refused, the report is the list of what each one wants. What is kept

@@ -70,14 +70,18 @@ All notable changes to texrs are recorded here. The format follows
   put the rest of the book in `\small`. The face leaked the same way and was
   invisible until `\setmonofont` was real enough to show it.
 
-- `tex.web` §453's `<factor><internal unit>`. `10\p@` is ten of whatever the
-  register `\p@` holds, and a register's value lives in a VM slot -- so the
-  product is not a number the scanner can finish, and the dimension scanner
-  reported §454's `Illegal unit of measure (pt inserted)` rather than carrying
-  it. A scanned dimension is now either a constant or a factor and the register
+- `tex.web` §453's `<factor><internal unit>`. `10\pp` for a `\dimendef`'d `\pp`
+  is ten of whatever that register holds, and a register's value lives in a VM
+  slot -- so the product is not a number the scanner can finish, and the
+  dimension scanner reported §454's `Illegal unit of measure (pt inserted)`
+  rather than carrying it. (`10\p@` is the form a LaTeX preamble writes, and it
+  is NOT the one to test this with: a document still fails there, because the
+  class load stops before the kernel's `\p@=1pt` is in scope. A register the
+  document sets itself shows the arithmetic without that dependency.) A scanned dimension is now either a constant or a factor and the register
   it scales, the lowerer turns the second into a `Num` of its own, and §455's
-  arithmetic is taken at run time: §107 truncates, so `1.2\p@` with `\p@` at
-  12.5pt is `14.99995pt` and not `15pt`, which is the number tex prints. §449
+  arithmetic is taken at run time: §107 truncates, so `1.2\dimen0` with
+  `\dimen0` at 12.5pt is `14.99995pt` and not `15pt`, which is the number tex
+  prints. §449
   comes with it -- a bare internal dimension where the number goes is a factor
   of exactly one, so `\@plus\p@` is one `\p@` rather than none of it. The
   spelt-out `\dimen<n>` and `\skip<n>` and any `\dimendef`/`\skipdef` name all
