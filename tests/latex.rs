@@ -689,3 +689,64 @@ fn every_tikz_path_command_is_answered_and_stops_at_its_semicolon() {
         assert_eq!(out(&src), "[after]", "{command}");
     }
 }
+
+/// `tex.web` §455's `em` and `ex` through the whole LaTeX path, which is the
+/// one that wanted them.
+///
+/// `article.cls` writes six -- `\setlength\labelsep{.5em}`,
+/// `\setlength\leftmargini{2.5em}` and four more -- and the class stops on the
+/// first of them the moment `\setlength` is a real assignment rather than a
+/// stand-in. Nothing here names a font, and that is the test: the quad has to
+/// come from the engine's own current font and not from a value the case set.
+///
+/// The numbers are `latex`'s. Measured on `\documentclass{article}`, where
+/// `\the\font` in the preamble is `\OT1/cmr/m/n/10`, `\the\fontdimen6\font` is
+/// `10.00002pt` and `\the\fontdimen5\font` is `4.30554pt` -- so `2.5em` is
+/// `25.00003pt`, which is what `\the\leftmargini` prints there.
+#[test]
+fn the_font_units_reach_a_document_that_loads_a_class() {
+    let src = "\\documentclass{article}\n\\newdimen\\zz\n\
+               \\zz=2.5em \\message{[\\the\\zz]}\n\
+               \\zz=.5em \\message{[\\the\\zz]}\n\
+               \\zz=1ex \\message{[\\the\\zz]}\n\\end\n";
+    assert_eq!(out(src), "[25.00003pt] [5.0pt] [4.30554pt]");
+}
+
+/// The same units on the path a CLASS FILE takes, which is not the one above.
+///
+/// `src/latex/load.rs` reads `article.cls` through `Lowerer::preload`, and a
+/// preload runs before the document's own tokens are lowered at all -- before
+/// `\documentclass` has been seen, before `\setmainfont` could have said
+/// anything. A unit resolved out of state the document sets would be zero here
+/// and right in the test above, which is the shape the `\p@` work was caught
+/// in. So this drives `preload` twice the way `load.rs` does -- the support
+/// text and the class first, then the file's own lines -- with the two
+/// definitions `latex.ltx:10253-10254` really carries, and reads the register
+/// back after.
+///
+/// The lines are article.cls's own, with `\setlength` written out as
+/// `latex.ltx:10253` writes it -- and the two numbers are what `latex` leaves
+/// in those two registers after `\documentclass{article}`: `\the\labelsep` is
+/// `5.0pt` and `\the\leftmargini` is `25.00003pt`.
+#[test]
+fn the_font_units_resolve_while_a_class_file_is_being_preloaded() {
+    let mut lowerer = texrs::lower::Lowerer::new();
+    lowerer
+        .preload(&texrs::latex::preamble("\\documentclass{article}\n"))
+        .expect("the class");
+    lowerer
+        .preload(
+            "\\def\\setlength#1#2{#1 #2\\relax}\n\
+             \\setlength{\\labelsep}{.5em}\n\
+             \\setlength{\\leftmargini}{2.5em}\n",
+        )
+        .expect("the file's own lines");
+    let cmds = lowerer
+        .lower("\\message{[\\the\\labelsep][\\the\\leftmargini]}\n\\end\n")
+        .expect("lower");
+    let chunk = texrs::compiler::Compiler::new()
+        .compile(&cmds)
+        .expect("compile");
+    let messages = texrs::runtime::run(chunk).expect("run");
+    assert_eq!(messages.join(" "), "[5.0pt][25.00003pt]");
+}

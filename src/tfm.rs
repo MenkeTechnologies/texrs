@@ -138,6 +138,89 @@ fn pop_lig_stack(
     };
 }
 
+/// `tex.web` §571's `store_scaled`: a `fix_word` at a font's size, in scaled
+/// points.
+///
+/// Ported rather than replaced by `v * at`, because the two do not agree. The
+/// `.tfm` number is a 32-bit integer with 20 bits of fraction and Knuth's rule
+/// is a chain of TRUNCATING integer divisions:
+///
+/// ```text
+/// sw:=(((((d*z)div@'400)+(c*z))div@'400)+(b*z))div beta;
+/// if a=0 then #:=sw else if a=255 then #:=sw-alpha
+/// ```
+///
+/// Measured on cmr10's own quad: the file holds 1048579/2^20 and `tex` answers
+/// `10.00002pt` for `1em`. §571 computes 655361 scaled points; the product
+/// rounded in floating point is 655361.875, which rounds to 655362 and prints
+/// `10.00003pt`. One scaled point, on the number every `em` in a document is a
+/// multiple of.
+///
+/// `v` comes back through `fix_word`, which is exact — a 32-bit integer over
+/// 2^20 has 32 significant bits and an `f64` has 53 — so the four bytes Knuth
+/// reads off the file are recovered here rather than re-read.
+pub fn store_scaled(v: f64, at: i64) -> i64 {
+    if at <= 0 {
+        return 0;
+    }
+    // §572: halve `z` until it is small enough that `alpha*z` stays in a word,
+    // doubling `alpha` to match. `beta` is what is divided out at the end.
+    let (mut z, mut alpha) = (at, 16i64);
+    while z >= 0o4000_0000 {
+        z /= 2;
+        alpha += alpha;
+    }
+    let beta = 256 / alpha;
+    let alpha = alpha * z;
+    // The four bytes of the `fix_word`, as the file holds them: a negative one
+    // is written in two's complement, so `a` is 255 and not a sign bit.
+    let raw = (v * f64::from(1 << 20)).round() as i64 as u32;
+    let [a, b, c, d] = raw.to_be_bytes().map(i64::from);
+    let sw = ((((d * z) / 256) + (c * z)) / 256) + (b * z);
+    let sw = sw / beta;
+    match a {
+        0 => sw,
+        // §571's other legal byte. Anything else is a corrupt `fix_word`; tex
+        // calls `abort` on the whole file, and a font already parsed cannot be
+        // abandoned here, so the parameter reads as zero.
+        255 => sw - alpha,
+        _ => 0,
+    }
+}
+
+/// `tex.web` §455's two font-dependent units, in scaled points.
+///
+/// `em` is the quad (`\fontdimen6`) and `ex` is the x-height (`\fontdimen5`) of
+/// the font IN FORCE where the dimension is scanned — which is the whole
+/// difference between these and every other unit: `pt` and `in` are exact
+/// ratios to each other and these are numbers a font file states.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FontUnits {
+    /// `\fontdimen6`, which `em` is.
+    pub quad: i64,
+    /// `\fontdimen5`, which `ex` is.
+    pub x_height: i64,
+}
+
+impl FontUnits {
+    /// `tex.web` §552's `null_font`: every parameter zero. What TeX measures
+    /// with when no font could be loaded, so `1em` is `0.0pt` there.
+    pub const NULL: FontUnits = FontUnits {
+        quad: 0,
+        x_height: 0,
+    };
+
+    /// The two parameters of the `.tfm` named `font`, loaded at `at` scaled
+    /// points, or `None` when the installation has not got the file.
+    pub fn of_tfm(font: &str, at: i64) -> Option<FontUnits> {
+        let tfm = Tfm::open(crate::typeset::find_font(font)?).ok()?;
+        Some(FontUnits {
+            quad: tfm.param_at(6, at),
+            x_height: tfm.param_at(5, at),
+        })
+    }
+}
+
 /// The `fontdimen` parameters, by the names `tex.web` §547 gives them.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Params {
@@ -667,6 +750,23 @@ impl Tfm {
             .sum()
     }
 
+    /// `\fontdimen n` of this font loaded at `at` scaled points, in scaled
+    /// points, with `n` numbered from one as TeX numbers it.
+    ///
+    /// A parameter short of the seventh that the file does not carry is zero,
+    /// which is §575's own `for k:=np+1 to 7 do font_info[...]:=0` and is why
+    /// `1ex` in a font that states no x-height is `0.0pt` and not an error.
+    /// Past the seventh the two differ: §578 makes `\fontdimen22` of a text
+    /// font `! Font x has only 7 fontdimen parameters`, and this answers zero,
+    /// because nothing here reads a parameter a document named — only the two
+    /// §455 reads, which every font has.
+    pub fn param_at(&self, n: usize, at: i64) -> i64 {
+        match n.checked_sub(1).and_then(|i| self.raw_params.get(i)) {
+            Some(v) => store_scaled(*v, at),
+            None => 0,
+        }
+    }
+
     /// A summary a person reads, in the units `tftopl` prints.
     pub fn summary(&self) -> String {
         let mut out = String::new();
@@ -905,5 +1005,67 @@ mod tests {
             "{}",
             tfm.summary()
         );
+    }
+
+    /// `tex.web` §455's two units out of the font `tex` itself measures them
+    /// in, against the numbers `tex` prints.
+    ///
+    /// Read off `tex` 3.141592653 on a file that sets no font at all, so the
+    /// current font is plain's own cmr10:
+    ///
+    /// ```text
+    /// \dimen0=1em \dimen1=1ex \message{[\the\dimen0][\the\dimen1]}
+    /// → [10.00002pt][4.30554pt]
+    /// ```
+    ///
+    /// which is 655361 and 282168 scaled points. Both are one unit away from
+    /// what a floating-point product gives: cmr10's quad is 1048579/2^20, and
+    /// `1048579/2^20 × 10 × 65536` is 655361.875, which rounds UP to 655362 and
+    /// prints `10.00003pt`. §571 divides in integers and truncates, so the
+    /// last division is what throws the .875 away.
+    #[test]
+    fn the_font_units_are_the_scaled_points_tex_measures_them_as() {
+        let Some(bytes) = installed("cmr10.tfm") else {
+            return;
+        };
+        let tfm = Tfm::parse(&bytes).expect("cmr10 reads");
+        let at = 10 * 65536;
+        assert_eq!(tfm.param_at(6, at), 655361, "1em");
+        assert_eq!(tfm.param_at(5, at), 282168, "1ex");
+        // A parameter past the end of the file is zero (§580), not a panic.
+        assert_eq!(tfm.param_at(22, at), 0);
+        assert_eq!(tfm.param_at(0, at), 0);
+    }
+
+    /// §571's arithmetic on its own, including the two branches the font files
+    /// above never take.
+    ///
+    /// A `fix_word` of exactly 1.0 is the size it is loaded at, whatever that
+    /// size is, which is the whole meaning of a design-size unit.
+    ///
+    /// The negative branch is §571's `a=255`: a `fix_word` below zero is held
+    /// in two's complement, so its top byte is 255 rather than a sign bit and
+    /// `alpha` comes back off the end. Every parameter of every `cm` font is
+    /// positive, so it is exercised here on the first negative number cmr10
+    /// really holds — the kern it states between a space and an `l`, which
+    /// `tftopl` prints as `-0.277779` and the file holds as -291272/2^20.
+    #[test]
+    fn store_scaled_is_knuths_integer_arithmetic_and_not_a_product() {
+        let ten = 10 * 65536;
+        assert_eq!(store_scaled(1.0, ten), ten);
+        assert_eq!(store_scaled(1.0, 12 * 65536), 12 * 65536);
+        assert_eq!(store_scaled(0.5, ten), ten / 2);
+        assert_eq!(store_scaled(0.0, ten), 0);
+        // The quad of cmr10, as the file holds it, at two sizes.
+        let quad = 1048579.0 / f64::from(1 << 20);
+        assert_eq!(store_scaled(quad, ten), 655361);
+        assert_eq!(store_scaled(quad, 12 * 65536), 786434);
+        // A size of nothing cannot divide by zero.
+        assert_eq!(store_scaled(quad, 0), 0);
+        // §571's `a=255` branch, and its symmetry with the positive value: the
+        // same bytes meet the same truncation either side of zero.
+        let kern = -291272.0 / f64::from(1 << 20);
+        assert_eq!(store_scaled(kern, ten), -182045);
+        assert_eq!(store_scaled(-kern, ten), 182045);
     }
 }

@@ -189,6 +189,13 @@ pub struct Engine {
     /// through `scan_glue` into `scan_dimen_or_fil`, and threading it would
     /// change five signatures that are already public.
     mu_units: bool,
+    /// `tex.web` §455's `em` and `ex`, in scaled points, once they have been
+    /// read off a font.
+    ///
+    /// `None` until a dimension actually spells one of the two: resolving them
+    /// opens a `.tfm`, and a run that never writes `em` must not pay for a font
+    /// it never measures with. See `font_units`.
+    font_units: Option<crate::tfm::FontUnits>,
     /// Errors REPORTED rather than raised, in the order they happened.
     ///
     /// `tex.web` §82's `error` prints the message and carries on; only a few
@@ -215,6 +222,16 @@ fn wrapped(body: &[Token]) -> Vec<Token> {
 /// the mouth cannot produce one.
 pub const ADVICE_IN: &str = "\u{0}advice-in";
 pub const ADVICE_OUT: &str = "\u{0}advice-out";
+
+/// The font `em` and `ex` are measured in, and the size it is loaded at.
+///
+/// Named here rather than passed in because it is not a choice the caller gets
+/// to make: `typeset::FontChain::load("cmr10", ..)` is what every path in this
+/// engine sets a document in, and plain tex's own current font after
+/// `\input plain` is the same `cmr10` at ten points. `Engine::font_units` says
+/// what that costs where a document would have had another font.
+const TEXT_FONT: &str = "cmr10";
+const TEXT_FONT_AT: i64 = 10 * crate::dimen::UNITY;
 
 /// Which of the three conditional boundaries a skip stopped at
 /// (`tex.web` §489's `or_code`, `else_code`, `fi_code`).
@@ -321,6 +338,7 @@ impl Engine {
             advice_depth: 0,
             unless: false,
             mu_units: false,
+            font_units: None,
             errors: Vec::new(),
             after_group_tokens: Vec::new(),
             after_assignment: None,
@@ -1103,11 +1121,108 @@ impl Engine {
     /// `mu` is not a unit at all. A mu scales exactly as a point does -- both
     /// are 65536ths -- so the conversion is the identity and the whole content
     /// of the rule is which spellings are accepted where.
+    ///
+    /// `em` and `ex` are NOT here, and the reason is the order §453 reads its
+    /// units in: `scan_font_unit` is §455 and runs ahead of `true` and of every
+    /// spelling this table holds.
     fn finite_unit(&self, int: i64, frac: i64, unit: &str) -> Option<i64> {
         match self.mu_units {
             true => (unit == "mu").then(|| int * crate::dimen::UNITY + frac),
             false => crate::dimen::to_scaled(int, frac, unit),
         }
+    }
+
+    /// `tex.web` §455's second half: `em` and `ex`, and the optional space
+    /// after one. `None`, with nothing consumed, when neither is there.
+    ///
+    /// Its POSITION is as load-bearing as its arithmetic. §455 runs before
+    /// §453 reaches `true`, and before `pt`, so `1true em` is not a dimension
+    /// at all: `true` comes off the stream and then the physical units are
+    /// tried against `em`, none matches, and the scan stops. Measured, on
+    /// `tex` 3.141592653 --
+    ///
+    /// ```text
+    /// ! Illegal unit of measure (pt inserted).
+    /// l.16 \dimen0=1true e
+    ///                     m
+    /// ```
+    ///
+    /// -- so putting this after the `true` keyword would accept a dimension the
+    /// reference engine refuses. `mu` mode skips it outright, which is §455's
+    /// own `if mu then goto not_found`.
+    ///
+    /// Unlike every other unit the factor is not CONVERTED but multiplied:
+    /// §455 finishes with `nx_plus_y(save_cur_val,v,xn_over_d(v,f,0200000))`,
+    /// which is `dimen::scale_by_factor` and is the same product §453 forms
+    /// with an internal dimension. That is why `.5em` is half a quad and not
+    /// half a scaled point.
+    fn scan_font_unit(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<i64>> {
+        if self.mu_units {
+            return Ok(None);
+        }
+        let v = match self.scan_keyword(lx, "em", pending_only)? {
+            true => self.font_units(lx).quad,
+            false => match self.scan_keyword(lx, "ex", pending_only)? {
+                true => self.font_units(lx).x_height,
+                false => return Ok(None),
+            },
+        };
+        // §455's own "Scan an optional space", which every finite unit gets.
+        if let Some(t) = self.take(lx, pending_only) {
+            if !t.is_space() {
+                lx.push_back(std::slice::from_ref(&t));
+            }
+        }
+        Ok(Some(v))
+    }
+
+    /// The two parameters §455 reads out of `font_info`, for the font in force.
+    ///
+    /// The font in force is `cmr10` at its design size, and that is a statement
+    /// about this engine rather than a default: the mouth has no font-selection
+    /// primitive at all -- there is no `\font`, no `\fontdimen`, no
+    /// `\selectfont` -- so one font is in force for the whole run, and
+    /// `typeset.rs` sets every document in `cmr10` whatever its class options
+    /// said. Nothing is invented: both numbers come out of the installed
+    /// `cmr10.tfm` through §571's own arithmetic.
+    ///
+    /// It is also the right font for the case this was built for. Measured with
+    /// `latex` on `\documentclass{article}`: `\the\font` in the preamble is
+    /// `\OT1/cmr/m/n/10`, `\the\fontdimen6\font` is `10.00002pt` and
+    /// `\the\fontdimen5\font` is `4.30554pt` -- so every `em` article.cls
+    /// writes is cmr10's, and so is every `em` in a fontspec document's class
+    /// file, because `\setmainfont` comes after `\documentclass`.
+    ///
+    /// Where it is NOT right, and both are measured rather than guessed:
+    ///   * `\documentclass[12pt]` puts cmr12 in force by the end of the class,
+    ///     where `\the\fontdimen6\font` is `11.74988pt`. Reaching that would
+    ///     take a type size the preamble is preloaded before this engine knows
+    ///     (`\documentclass` is lowered after `latex::preamble` has already
+    ///     run) AND a typesetter that sets in cmr12, which this one does not.
+    ///   * `\setmainfont{Helvetica}` makes `1em` `10.0pt` and `1ex` `5.20996pt`
+    ///     in xelatex -- the at-size, and OS/2's `sxHeight` over the head
+    ///     table's `unitsPerEm`. That needs a current font in the mouth, which
+    ///     is the thing this engine has not got.
+    fn font_units(&mut self, lx: &Lexer) -> crate::tfm::FontUnits {
+        if let Some(f) = self.font_units {
+            return f;
+        }
+        let f = crate::tfm::FontUnits::of_tfm(TEXT_FONT, TEXT_FONT_AT);
+        if f.is_none() {
+            // §561's message for a font that will not load, reported once and
+            // not once per `em`, because tex reports it where the font is
+            // loaded and then measures with `null_font` (§552) for the rest of
+            // the run. The control sequence tex names in front of it is left
+            // out: this engine binds no name to the font, and writing one would
+            // be reporting a `\font` command that was never given.
+            self.report(
+                lx,
+                &format!("Font {TEXT_FONT} not loadable: Metric (TFM) file not found"),
+            );
+        }
+        let f = f.unwrap_or(crate::tfm::FontUnits::NULL);
+        self.font_units = Some(f);
+        f
     }
 
     /// §454's complaint, which names the unit it would have inserted: `pt`
@@ -1238,6 +1353,16 @@ impl Engine {
                 frac: sign * frac,
                 reg,
             });
+        }
+        // §455's other half, in §455's own place: `em` and `ex` are settled
+        // here, ahead of `true` and of every physical unit. Unlike an internal
+        // dimension the value IS known -- it is a number a font file states, not
+        // a VM slot -- so the product is formed now and a constant comes back.
+        if let Some(v) = self.scan_font_unit(lx, pending_only)? {
+            return Ok(ScannedDimen::Constant(
+                crate::dimen::scale_by_factor(sign * int, sign * frac, v)
+                    .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+            ));
         }
         // `tex.web` §453 takes an optional `true` in front of the unit and
         // divides by the magnification ratio. `\mag` is 1000 here and there is
@@ -1627,6 +1752,17 @@ impl Engine {
                     frac: sign * frac,
                     reg,
                 },
+                0,
+            ));
+        }
+        // §455's `em` and `ex`, which are finite by construction: a quad is a
+        // number, so the order that comes back with one is always zero.
+        if let Some(v) = self.scan_font_unit(lx, pending_only)? {
+            return Ok((
+                ScannedDimen::Constant(
+                    crate::dimen::scale_by_factor(sign * int, sign * frac, v)
+                        .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+                ),
                 0,
             ));
         }

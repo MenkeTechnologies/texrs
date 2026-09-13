@@ -1,0 +1,37 @@
+% tex.web §455's two font-dependent units. `em' is \fontdimen6 of the font in
+% force and `ex' is \fontdimen5, so neither is a ratio to a point: the factor
+% multiplies a number the FONT states, exactly as §453's factor multiplies an
+% internal dimension. Nothing here selects a font, which is the point -- the
+% current font after \input plain is cmr10, whose quad is 10.00002pt and whose
+% x-height is 4.30554pt, and those are the numbers a document gets without
+% asking for anything. A test that set its own font would prove the arithmetic
+% and not the font.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=1em \dimen1=1ex \dimen2=.5em \dimen3=2.5ex
+\message{[\the\dimen0][\the\dimen1][\the\dimen2][\the\dimen3]}
+% The sign rides on the whole product, and §107 truncates it toward zero.
+\dimen0=-1.5ex \dimen1=0em \dimen2=3em
+\message{[\the\dimen0][\the\dimen1][\number\dimen2]}
+% §407's keyword scan: letters match either case, and a space in front of the
+% unit is skipped.
+\dimen0=1 em \dimen1=1EM \dimen2=1Ex
+\message{[\the\dimen0][\the\dimen1][\the\dimen2]}
+% All three components of a glue, and an infinite one beside a finite one --
+% `fil' is five letters and `em' is two, so the longest match has to pick the
+% right one of the two.
+\skip0=1em plus .5em minus 1ex
+\skip1=2ex plus 1fill
+\message{[\the\skip0][\the\skip1]}
+% A quad is a dimension like any other once it is scanned: it compares, it
+% advances, and it coerces to its count of scaled points where a number is
+% wanted (§430).
+\dimen0=1em \advance\dimen0 by 1ex \multiply\dimen0 by 2
+\count1=\dimen0
+\message{[\the\dimen0][\the\count1]}
+\ifdim 1em>1ex \message{[quad wider]}\else\message{[no]}\fi
+% §455 runs before §453 reaches `true', so the letters after it are matched
+% against the PHYSICAL units only and `em' is not one of them. Scanning the
+% font units after the keyword would accept this line.
+\dimen0=1true pt
+\message{[\the\dimen0]}
+\end

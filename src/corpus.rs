@@ -437,7 +437,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\dimen",
         "Registers",
-        "A dimension register. A dimension is an integer count of scaled points, 65536 to the printer's point, and a unit is an exact integer ratio to a point (tex.web \u{a7}458) rather than a float -- which is why `1in` is 72.26999pt. The units are pt, in, pc, cm, mm, bp, dd, cc and sp. `\\the` writes one back by Knuth's print_scaled (\u{a7}103), the fewest digits that read back as the same integer, and `\\number` gives the scaled points instead.",
+        "A dimension register. A dimension is an integer count of scaled points, 65536 to the printer's point, and a unit is an exact integer ratio to a point (tex.web \u{a7}458) rather than a float -- which is why `1in` is 72.26999pt. The units are pt, in, pc, cm, mm, bp, dd, cc and sp, plus \u{a7}455's two font-dependent ones: `em` is the current font's quad (\\fontdimen6) and `ex` its x-height (\\fontdimen5), so a factor multiplies them rather than being converted -- `1em` is 10.00002pt and `1ex` is 4.30554pt in cmr10, the font this engine sets in. `\\the` writes one back by Knuth's print_scaled (\u{a7}103), the fewest digits that read back as the same integer, and `\\number` gives the scaled points instead.",
         "\\dimen0=1in\n\\message{\\the\\dimen0}   % => 72.26999pt",
     ),
     (

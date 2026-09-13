@@ -62,6 +62,8 @@ VALUE
 [2.0pt][2.0pt]
 #==# dimension_conditional.tex
 [BIG] [GE] [EQ] [LT] [RATIO] [NATURAL] [INCH]
+#==# dimension_font_units.tex
+[10.00002pt][4.30554pt][5.0pt][10.76385pt] [-6.45831pt][0.0pt][1966083] [10.00002pt][10.00002pt][4.30554pt] [10.00002pt plus 5.0pt minus 4.30554pt][8.61108pt plus 1.0fill] [28.61111pt][1875058] [quad wider] [1.0pt]
 #==# dimension_units.tex
 [1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
 #==# divide_by_zero.tex
