@@ -446,11 +446,17 @@ and every callback that would pass Lua the list TeX is building refuse by name,
 and a document that walks the document's own list is refused rather than quietly
 wrong.
 
-The number, run against the 274 `.tex` files of a real LaTeX/LuaLaTeX corpus
-(Pandoc-generated books of 16,000 lines and up, fontspec, TikZ, `\directlua`,
-`--include-in-header` fragments, and texrs's own fixtures, including the ones
-written to be refused): **229 of 274 run to completion**, and say 75,627,678
-bytes of text.
+The number, run against 274 `.tex` files — a real LaTeX/LuaLaTeX corpus of
+Pandoc-generated books of 16,000 lines and up, with fontspec, TikZ,
+`\directlua` and `--include-in-header` fragments, plus texrs's own fixtures
+including the ones written to be refused: **229 of 274 run to completion**, and
+say 75,627,678 bytes of text.
+
+Which 274, so the figure can be reproduced rather than believed: 167 from the
+publications tree `scripts/publications.sh` defaults to, 81 in `tests/cases`, 13
+in `examples/`, 10 in `tests/pdf_cases` and 3 in `tests/dvi_cases`. Point the
+sweep at a parent of both trees to get that set; point it at the default and you
+are measuring the 167 alone, which is a different number and a different claim.
 
 That number went DOWN when Lua started running: the same corpus was 266 of 274
 before it. 42 of the 46 failures are one family of header fragments carrying an
