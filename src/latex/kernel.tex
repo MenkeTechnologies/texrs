@@ -1170,6 +1170,101 @@
 \DeclareRobustCommand\flushbottom{%
   \let\@textbottom\relax \let\@texttop\relax}
 %
+% ---- \onecolumn, \twocolumn and where floats may go -----------------------
+% latex.ltx:20430-20437 and 20454-20465, carried word for word:
+%
+%     \def\onecolumn{%
+%       \clearpage
+%       \global\columnwidth\textwidth
+%       \global\hsize\columnwidth
+%       \global\linewidth\columnwidth
+%       \global\@twocolumnfalse
+%       \col@number \@ne
+%       \@floatplacement}
+%
+% article.cls's LAST line of code is one of these two, chosen by \if@twocolumn,
+% and \onecolumn was the name every document that loaded article stopped on.
+% All seven steps are assignments to registers and switches this file declares,
+% except two.
+%
+% \clearpage is the first. It is `prelude.tex's stand-in, because the real one
+% (latex.ltx:20414-20426) ends a page: \newpage, then \@@write, then \penalty
+% -\@Mi into a vertical list, and the page builder that would read them is what
+% `src/page.rs' does from the finished paragraph list rather than from a
+% \penalty a macro contributed. Nothing \onecolumn does depends on the page
+% having been flushed, so the stand-in costs this call nothing.
+%
+% \@floatplacement is the second, latex.ltx:17557-17564, and it is carried
+% whole below.
+%
+% \twocolumn is here with it because the pair is one decision and the register
+% values only mean anything against each other -- \onecolumn's \columnwidth is
+% \textwidth, \twocolumn's is half of what is left after \columnsep. Its last
+% line reads ahead for an optional argument: with a `[' it hands the argument
+% to \@topnewpage, which is float machinery this engine has none of, and
+% without one it ends on \@floatplacement exactly as \onecolumn does.
+% article.cls's own call writes no bracket, so `\documentclass[twocolumn]' and
+% plain `\documentclass' reach the same last step -- measured, both stop at
+% `package article is not loadable: Illegal unit of measure (pt inserted)'.
+% A document that writes \twocolumn[...] itself would stop on \@topnewpage BY
+% NAME, which is the right way to find a missing macro.
+\def\onecolumn{%
+  \clearpage
+  \global\columnwidth\textwidth
+  \global\hsize\columnwidth
+  \global\linewidth\columnwidth
+  \global\@twocolumnfalse
+  \col@number \@ne
+  \@floatplacement}
+\def\twocolumn{%
+  \clearpage
+  \global\columnwidth\textwidth
+  \global\advance\columnwidth-\columnsep
+  \global\divide\columnwidth\tw@
+  \global\hsize\columnwidth
+  \global\linewidth\columnwidth
+  \global\@twocolumntrue
+  \global\@firstcolumntrue
+  \col@number \tw@
+  \@ifnextchar [\@topnewpage\@floatplacement
+}
+% latex.ltx:17557-17573. How many floats a column may take and how much room
+% they may have, recomputed whenever the column count changes. Both are carried
+% word for word.
+%
+% Every line is `<register> <factor><register>' or `<count> <counter>': the
+% fractions are the macros article.cls:122-130 renews -- \topfraction is `.7',
+% \floatpagefraction is `.5' -- and \c@topnumber and its three fellows are the
+% count registers article.cls:121-128 would set. \@colht is zero here (see its
+% declaration below), so the three room registers are zero whatever fraction is
+% taken of them; the four counts are the numbers latex.ltx and article.cls both
+% ask for, and `\global\@topnum\c@topnumber' really writes 2.
+%
+% This is as far as the article load goes today, and the second line is where
+% it stops: `\topfraction\@colht' is tex.web S455's `<factor><internal unit>'
+% with the factor arriving from a MACRO, and `Engine::scan_factor'
+% (`src/expand.rs') reads the coefficient without expanding, so the control
+% sequence reaches the unit scan and is answered `! Illegal unit of measure (pt
+% inserted).' Written out -- `\@toproom .7\@colht' -- the same line scans. The
+% six lines are left as latex.ltx writes them rather than being forced through
+% \expandafter, because the gap is the scanner's and every
+% `\setlength{\a}{\somefraction\b}' in LaTeX has it.
+\def\@floatplacement{\global\@topnum\c@topnumber
+   \global\@toproom \topfraction\@colht
+   \global\@botnum  \c@bottomnumber
+   \global\@botroom \bottomfraction\@colht
+   \global\@colnum  \c@totalnumber
+   \@fpmin   \floatpagefraction\@colht}
+\def\@dblfloatplacement{\global\@dbltopnum\c@dbltopnumber
+   \global\@dbltoproom \dbltopfraction\@colht
+   \@textmin \@colht
+   \advance \@textmin -\@dbltoproom
+   \@fpmin \dblfloatpagefraction\textheight
+   \@fptop \@dblfptop
+   \@fpsep \@dblfpsep
+   \@fpbot \@dblfpbot
+   \def\f@depth{1sp}}
+%
 % ---- \pagenumbering -------------------------------------------------------
 % latex.ltx (ltpage):
 %
@@ -1311,12 +1406,23 @@
 % and `\setlength\maxdepth{.5\topskip}' -- article.cls:87 sets \overfullrule from
 % its draft option, and \lineskiplimit is what plain's \normalbaselines restores.
 % \hoffset and \voffset are here because a document sets them itself.
+%
+% \hsize is the same kind of name and is here for the same reason. It is the
+% measure a paragraph is broken to (tex.web §247), latex.ltx never declares it
+% because INITEX already has it, and \onecolumn and \twocolumn both assign to
+% it on article.cls's last lines -- `\global\hsize\columnwidth'. texrs decides
+% the measure in `src/typeset.rs::Layout' from the class options rather than
+% from this register, so what is carried here is the STORE and not the effect:
+% the assignment succeeds and \the\hsize answers what was written, and the
+% paragraph is still broken to the layout's measure. BUGS.md's note about one
+% type size covers the same ground.
 \newdimen\parindent
 \newdimen\maxdepth
 \newdimen\overfullrule
 \newdimen\lineskiplimit
 \newdimen\hoffset
 \newdimen\voffset
+\newdimen\hsize
 % plain.tex:378-383. The skip amounts \smallskip, \medskip and \bigskip are
 % named for, and the three \normalbaselines restores from.
 \newskip\smallskipamount
@@ -1371,6 +1477,79 @@
 \newskip\@dblfptop
 \newskip\@dblfpsep
 \newskip\@dblfpbot
+% latex.ltx:20392-20408. The column count and the float placement registers.
+%
+% article.cls's last two lines reach all of them: \onecolumn writes the column
+% count, and the \@floatplacement it ends on writes six more. They are page
+% registers like the block above and are declared with it.
+%
+% They all start at zero, as INITEX leaves them and as latex.ltx leaves them,
+% except the column count: latex.ltx sets it to one on the line below its
+% declaration, because a document is one column until \twocolumn says
+% otherwise. That one line is NOT here -- it is written as \col@number \@ne
+% and \@ne is a \chardef this file makes further down, where plain.tex's
+% constants are, so it is carried with them instead. latex.ltx has plain's
+% constants long before this block and does not have to choose.
+%
+% \@colht and \@colroom are the height of the current column, which the output
+% routine sets and this engine has no output routine to set -- so what
+% \@floatplacement takes a fraction of is zero here, and every room register it
+% writes comes out zero with it.
+\newcount\col@number
+\newcount\@topnum
+\newdimen\@toproom
+\newcount\@dbltopnum
+\newdimen\@dbltoproom
+\newcount\@botnum
+\newdimen\@botroom
+\newcount\@colnum
+\newdimen\@textmin
+\newdimen\@fpmin
+\newdimen\@colht
+\newdimen\@colroom
+\newdimen\@pageht
+\newdimen\@pagedp
+\newdimen\@mparbottom
+\@mparbottom\z@
+\newcount\@currtype
+% latex.ltx:21541-21554. How many floats a column may hold and what fraction of
+% it they may fill -- the four numbers and the six fractions \@floatplacement
+% and \@dblfloatplacement read.
+%
+% latex.ltx declares the four as COUNT REGISTERS, not as counters: it writes
+% the \newcount for \c@topnumber itself rather than \newcounter{topnumber}, so
+% there is no \the-form, no reset list and no \p@ prefix for any of them. That
+% is carried as written, and it means the register lives in the pool
+% `src/latex/allocate.rs' hands out rather than in the counter block above.
+%
+% SUBSTITUTION, in the line that follows each declaration. latex.ltx sets the
+% value with \setcounter, and this layer's \setcounter reaches a counter BY
+% NAME through \ctr@NAME (see the counters section above) -- which these four
+% have not got, because they were never made counters. So each is set as the
+% register assignment \setcounter would have performed.
+%
+% What that costs is narrow and worth naming: a class that wanted DIFFERENT
+% numbers here would not be followed, because its own \setcounter{topnumber}
+% reaches nothing either. article.cls:121-128 and every other standard class
+% re-state latex.ltx's own defaults -- 2, 1, 3, 2 -- so the values below are
+% what a standard class leaves behind in any case.
+%
+% The fractions are plain macros in latex.ltx and are plain macros here; a
+% class renews them by name and that works unchanged.
+\newcount\c@topnumber
+\c@topnumber 2
+\newcommand\topfraction{.7}
+\newcount\c@bottomnumber
+\c@bottomnumber 1
+\newcommand\bottomfraction{.3}
+\newcount\c@totalnumber
+\c@totalnumber 3
+\newcommand\textfraction{.2}
+\newcommand\floatpagefraction{.5}
+\newcount\c@dbltopnumber
+\c@dbltopnumber 2
+\newcommand\dbltopfraction{.7}
+\newcommand\dblfloatpagefraction{.5}
 % latex.ltx:8790-8800. The scratch registers every package helps itself to.
 \newcount\@tempcnta
 \newcount\@tempcntb
@@ -1415,6 +1594,10 @@
 \mathchardef\@m=1000
 \mathchardef\@M=10000
 \mathchardef\@MM=20000
+% latex.ltx:20393, held back from its own block above until \@ne exists. The
+% column count is one until \twocolumn says otherwise, and this is latex.ltx's
+% line for saying so, token for token.
+\col@number \@ne
 % plain.tex: \newcount\m@ne \m@ne=-1.
 %
 % SUBSTITUTION, and a small one: a \chardef cannot hold a negative, and a

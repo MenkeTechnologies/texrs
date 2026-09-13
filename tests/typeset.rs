@@ -627,7 +627,9 @@ fn the_lowerer_keeps_the_font_file_the_preamble_named() {
         "\\begin{document}\nwords\n\\end{document}\n"
     );
     let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
-    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer
+        .preload(&texrs::latex::support(src))
+        .expect("prelude");
     lowerer.lower(src).expect("lower");
     assert_eq!(lowerer.fonts.main.as_deref(), Some("Arimo"));
     assert_eq!(
@@ -740,7 +742,9 @@ fn a_filename_in_the_braces_reaches_the_file_slot_for_every_font_command() {
         "\\begin{document}\nwords\n\\end{document}\n"
     );
     let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
-    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer
+        .preload(&texrs::latex::support(src))
+        .expect("prelude");
     lowerer.lower(src).expect("lower");
     assert_eq!(lowerer.fonts.main_file.upright.as_deref(), Some("Arimo-VF"));
     assert_eq!(lowerer.fonts.main_file.extension.as_deref(), Some(".ttf"));
@@ -1650,7 +1654,9 @@ fn the_lowerer_keeps_the_files_the_preamble_named_for_every_face() {
         "\\begin{document}\nwords\n\\end{document}\n"
     );
     let mut lowerer = texrs::lower::Lowerer::new().with_text_output();
-    lowerer.preload(texrs::latex::PRELUDE).expect("prelude");
+    lowerer
+        .preload(&texrs::latex::support(src))
+        .expect("prelude");
     lowerer.lower(src).expect("lower");
     assert_eq!(lowerer.fonts.main_file.bold.as_deref(), Some("Arimo-VF"));
     assert_eq!(
