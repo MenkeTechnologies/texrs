@@ -477,6 +477,23 @@ impl Compiler {
                 self.b.emit(Op::LoadInt(*frac), self.line);
                 self.b.emit(Op::CallBuiltin(ops::SCALE_DIMEN, 3), self.line);
             }
+            // The same builtin, with the factor's integer part read from a slot
+            // instead of loaded as a constant: §453's product is `v*(n+f/2^16)`
+            // and `f` is zero, because an internal integer has no fraction.
+            // §453 attaches the sign to the factor, which is one multiplication
+            // more and only when there was a minus.
+            Num::ByCount { factor, sign, unit } => {
+                self.num(unit)?;
+                self.b.emit(Op::GetSlot(slot(*factor)), self.line);
+                if *sign < 0 {
+                    self.b.emit(Op::LoadInt(-1), self.line);
+                    self.b.emit(Op::LoadInt(0), self.line);
+                    self.b
+                        .emit(Op::CallBuiltin(ops::ARITH_CHECKED, 3), self.line);
+                }
+                self.b.emit(Op::LoadInt(0), self.line);
+                self.b.emit(Op::CallBuiltin(ops::SCALE_DIMEN, 3), self.line);
+            }
             Num::Rust { name, args } => {
                 // The name first, then the arguments: the builtin pops the
                 // whole run and the name is what it dispatches on.

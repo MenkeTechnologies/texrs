@@ -426,6 +426,28 @@
 % The starred form takes no number, so no counter is stepped: latex.ltx sends it
 % to \@ssect, which is \@sect without the \refstepcounter.
 \def\@sect@#1{\@ifstar\@firstofone{\@sect@plain{#1}}}
+% \@startsection itself, latex.ltx:17231-17246, routed into the same
+% substitution. Its six arguments are the name, the level, the indent, the skip
+% above, the skip below and the font -- and article.cls:361 writes
+%
+%     \newcommand\section{\@startsection {section}{1}{\z@}%
+%        {-3.5ex \@plus -1ex \@minus -.2ex}%
+%        {2.3ex \@plus.2ex}{\normalfont\Large\bfseries}}
+%
+% so the class's own \section is what a document calls once the class really
+% loads. Only the first argument survives here: the other five describe the
+% BOX -- \addvspace, \everypar, \leavevmode, the penalties -- and the star, the
+% optional contents entry and the title are all \@sect@'s already.
+%
+% Without it the class's definition reached an undefined \@startsection and
+% stopped the document; \section's own definition above is what a plain file
+% with no class still gets.
+\def\@startsection#1#2#3#4#5#6{\@sect@{#1}}
+% latex.ltx:18305-18307. \@mkboth writes the running heads, and the initial
+% page style is \ps@empty, which lets it be \@gobbletwo -- so LaTeX's own
+% starting value is the right one for an engine with no running heads at all.
+% article.cls:505 calls it from \tableofcontents and \thebibliography.
+\let\@mkboth\@gobbletwo
 %
 % ---- the bibliography: ltbibl.dtx -----------------------------------------
 % latex.ltx:
@@ -453,7 +475,17 @@
 % latex.ltx's list opens `\usecounter{enumiv}' with `\def\@listctr{enumiv}' and
 % `\let\p@enumiv\@empty', and it is where \theenumiv stops being the enumerate
 % form (\Alph) and becomes the entry number.
-\def\thebibliography#1{\setcounter{enumiv}{0}\def\theenumiv{\arabic{enumiv}}}
+%
+% Defined under a name of its own as well, because a CLASS defines this
+% environment too and a class is read after the kernel. article.cls:717 opens it
+% with `\list{\@biblabel{\@arabic\c@enumiv}}{\settowidth\labelwidth...}', which
+% is a list box and everything in its second argument -- the \usecounter, the
+% \renewcommand\theenumiv -- is inside that box. There is no \list here and no
+% stomach to put one in, so `src/latex.rs' \let's the name back to this one once
+% the class has been read. Before it did, `\begin{thebibliography}{9}' stopped
+% the document at `! Undefined control sequence \list.'
+\def\@texrs@thebibliography#1{\setcounter{enumiv}{0}\def\theenumiv{\arabic{enumiv}}}
+\let\thebibliography\@texrs@thebibliography
 \def\endthebibliography{}
 \def\bibitem{\@ifnextchar[\@lbibitem\@bibitem}
 \def\@lbibitem[#1]#2{\@biblabel{#1} }
@@ -587,8 +619,26 @@
 \def\@captype{figure}
 \def\figurename{Figure}
 \def\tablename{Table}
-\def\fnum@figure{\figurename\ \@ctrtotext{figure}}
-\def\fnum@table{\tablename\ \@ctrtotext{table}}
+% latex.ltx:9411-9412 is
+%
+%     \DeclareRobustCommand{\nobreakspace}{\leavevmode\nobreak\ }
+%
+% -- a space that a line may not break at. There is no penalty list in the
+% mouth and \leavevmode is the stomach's, so what is left is the space itself.
+% It is what `~' means, and book.cls:542 writes it between a figure's name and
+% its number: `\def\fnum@figure{\figurename\nobreakspace\thefigure}'. Undefined,
+% that definition stopped every document with a \caption in it the moment the
+% class began loading far enough to make it.
+\def\nobreakspace{\ }
+% The two the kernel makes, under names of their own as well: article.cls:492
+% and book.cls:542 define both, and their version reads the counter through
+% \thefigure -- which is \@arabic, which is \number, which a --text run cannot
+% carry (see `src/latex.rs'). \@ctrtotext is the door that run has, so
+% `src/latex.rs::RECLAIMED' takes these back once the class has been read.
+\def\@texrs@fnum@figure{\figurename\ \@ctrtotext{figure}}
+\def\@texrs@fnum@table{\tablename\ \@ctrtotext{table}}
+\let\fnum@figure\@texrs@fnum@figure
+\let\fnum@table\@texrs@fnum@table
 \def\caption{\refstepcounter\@captype\@ifnextchar[{\@caption\@captype}{\@caption\@captype[]}}
 \long\def\@caption#1[#2]#3{\csname fnum@#1\endcsname: #3}
 %
@@ -1091,25 +1141,116 @@
 % thing. Everywhere else \endinput is still undefined, so a file that needs the
 % real primitive is REPORTED rather than misread.
 %
+% ---- \@defaultunits -------------------------------------------------------
+% latex.ltx:10537 and 12678, both carried word for word:
+%
+%     \def\@defaultunits{\afterassignment\remove@to@nnil}
+%     \def\remove@to@nnil#1\@nnil{}
+%
+% It reads an assignment whose right-hand side may or may not carry a unit
+% already. The caller writes the default unit AFTER the value and closes with
+% `\relax\@nnil', so `\@defaultunits\@tempdimb 12pt\relax\@nnil' scans `12pt',
+% stops at the `\relax', and \remove@to@nnil -- pushed back by
+% \afterassignment the moment the assignment finishes (tex.web §1269) --
+% swallows `pt\relax' as its undelimited argument and the \@nnil as its
+% delimiter. Given `10' instead, the same line scans `10pt' and the gobbler
+% takes only the `\relax'.
+%
+% \@nnil is already here (line 36), as \@for's end marker.
+\def\remove@to@nnil#1\@nnil{}
+\def\@defaultunits{\afterassignment\remove@to@nnil}
+%
+% ---- the point sizes ------------------------------------------------------
+% latex.ltx:10818-10829, carried word for word. Each is the numeric part of a
+% size with no unit on it, which is what \@setfontsize's second and third
+% arguments are and what \@defaultunits then puts a `pt' after. size10.clo
+% writes `\@setfontsize\normalsize\@xpt\@xiipt' on its first line; without
+% these two the argument is an undefined control sequence and not the numbers
+% 10 and 12.
+\def\@vpt{5}
+\def\@vipt{6}
+\def\@viipt{7}
+\def\@viiipt{8}
+\def\@ixpt{9}
+\def\@xpt{10}
+\def\@xipt{10.95}
+\def\@xiipt{12}
+\def\@xivpt{14.4}
+\def\@xviipt{17.28}
+\def\@xxpt{20.74}
+\def\@xxvpt{24.88}
+%
+% ---- \baselinestretch -----------------------------------------------------
+% latex.ltx:12619. The factor every baselineskip is multiplied by, and the
+% first argument \fontsize hands \set@fontsize. article.cls:116 renews it to
+% EMPTY once size10.clo has been read, which is not a factor of zero but no
+% factor at all: `\baselineskip\baselinestretch\baselineskip' is then the
+% identity tex.web §449 makes of an internal dimension standing alone.
+\def\baselinestretch{1}
+%
 % ---- \@setfontsize -------------------------------------------------------
-% latex.ltx:14295:
+% latex.ltx:14103-14108:
 %
 %     \def\@setfontsize#1#2#3{\@nomath#1%
-%       \ifx\protect\@typeset@protect \let\@currsize#1\fi
-%       \fontsize{#2}{#3}\selectfont}
+%         \ifx\protect\@typeset@protect
+%           \let\@currsize#1%
+%         \fi
+%         \fontsize{#2}{#3}\selectfont}
+%     \def\@setsize#1#2#3#4{\@setfontsize#1{#4}{#2}}
 %
-% SUBSTITUTION, over the whole of NFSS. \fontsize and \selectfont are already
-% stand-ins in `prelude.tex' -- BUGS.md records that Layout::size is one
-% document-wide number, so every heading is set at body size and giving these a
-% body would change nothing -- and \@nomath is a math-mode warning this engine
-% has no \ifmmode to test. What is left of the definition is the three
-% arguments, consumed.
+% The chain it opens is four macros long. \fontsize (10527) is
 %
-% It is the last thing between article.cls and a load: the class's own final
-% line reads size10.clo, and size10.clo's first definition is
-% `\renewcommand\normalsize{\@setfontsize\normalsize\@xpt\@xiipt ...}'.
-\def\@setfontsize#1#2#3{}
-\def\@setsize#1#2#3#4{}
+%     \DeclareRobustCommand\fontsize[2]{\set@fontsize\baselinestretch{#1}{#2}}
+%
+% \set@fontsize (12585-12601) reads the two sizes into \@tempdimb and
+% \@tempskipa, \edef's \f@size, \f@baselineskip and \f@linespread out of them,
+% and BUILDS \size@update rather than running it:
+%
+%     \def\size@update{%
+%       \baselineskip\f@baselineskip\relax
+%       \baselineskip\f@linespread\baselineskip
+%       \normalbaselineskip\baselineskip
+%       \setbox\strutbox\hbox{\vrule\@height.7\baselineskip
+%             \@depth.3\baselineskip \@width\z@}%
+%       \let\size@update\relax}
+%
+% \selectfont calls it at 12581, one line after the `selectfont' hook.
+%
+% COLLAPSED into \@setfontsize. What the three intervening links hold is:
+%
+%   * \f@size and \f@baselineskip, two \edef'd STRINGS. Nothing here reads
+%     either -- they name the font \pickup@font would load, and there is no
+%     \pickup@font -- and `src/lower.rs::edef_snapshot' freezes `\the\count<n>'
+%     and nothing else, so `\edef\f@size{\strip@pt\@tempdimb}' stops the load
+%     with `Unsupported \edef body'. Measured, on this document. \strip@pt is
+%     not ported for the same reason: its only caller would be that line.
+%   * \size@update's DEFERRAL, whose point is that a size change inside a group
+%     assigns \baselineskip once, when \selectfont finally runs. \selectfont is
+%     a stand-in (`prelude.tex'), so there is no later point to defer to and
+%     the assignment happens where the size is named.
+%   * \strutbox, which is a box; \@nomath, which is a math-mode warning this
+%     engine has no \ifmmode to raise; and \@currsize, which only \@setfontsize
+%     itself ever writes.
+%
+% The arithmetic is 12586-12595 word for word, reading the two registers
+% \@defaultunits has just filled in place of the strings \edef'd from them,
+% and \baselinestretch in place of \f@linespread -- which is the macro
+% \fontsize took that argument from to begin with. \@tempdimb is still
+% written, because \set@fontsize really does clobber it and size10.clo:110
+% assigns it again straight afterwards.
+%
+% It is the last thing between article.cls and a load. size10.clo's first
+% definition is `\renewcommand\normalsize{\@setfontsize\normalsize\@xpt\@xiipt
+% ...}', its line 54 calls it, and its line 134 is
+% `\divide\@tempdima\baselineskip'. With \@setfontsize empty that divisor
+% stayed at INITEX's zero and the class stopped on `Arithmetic overflow'.
+\def\@setfontsize#1#2#3{%
+  \@defaultunits\@tempdimb#2pt\relax\@nnil
+  \@defaultunits\@tempskipa#3pt\relax\@nnil
+  \baselineskip\@tempskipa\relax
+  \baselineskip\baselinestretch\baselineskip
+  \normalbaselineskip\baselineskip}
+\def\@setsize#1#2#3#4{\@setfontsize#1{#4}{#2}}
 %
 % ---- \@settopoint ---------------------------------------------------------
 % latex.ltx:10261, carried WORD FOR WORD:
@@ -1133,25 +1274,25 @@
 % \evensidemargin and \topmargin.
 \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
 %
-% ---- \setlength and \addtolength: NOT ported yet --------------------------
-% latex.ltx:10253-10254 are two lines and nothing else:
+% ---- \setlength and \addtolength ------------------------------------------
+% latex.ltx:10253-10254 are two lines and nothing else, carried word for word:
 %
 %     \def\setlength#1#2{#1 #2\relax}
 %     \def\addtolength#1#2{\advance#1 #2\relax}
 %
-% An assignment and an \advance through the register the argument names -- and
-% every length the standard classes name IS a register now, so the port was
-% tried. It is `prelude.tex's stand-in that is still here, and the reason is
-% the UNIT rather than the macro.
+% An assignment and an \advance through the register the argument names. Every
+% length the standard classes name IS a register now, declared below, so the
+% two lines say all they say in latex.ltx.
 %
-% `em' and `ex' are read off the CURRENT FONT: tex.web §455 takes the quad and
-% the x-height out of `font_info', this engine has no current font in the
-% expander, and `src/dimen.rs' carries neither unit. article.cls writes six --
+% What held them back was the UNIT and not the macro. `em' and `ex' are read
+% off the current font (tex.web §455 takes the quad and the x-height out of
+% `font_info'), `src/dimen.rs' carried neither, and article.cls writes six --
 % `\setlength\labelsep{.5em}', `\setlength\leftmargini{2.5em}' and four more --
-% and size10.clo:88 writes a seventh. With the real \setlength in place the
-% class stops at `package article is not loadable: Illegal unit of measure (pt
-% inserted)', which is EARLIER in the file than where the stub leaves it. So
-% the two lines wait on the unit; BUGS.md records `em'/`ex' as absent.
+% with a seventh at size10.clo:88. Both units now resolve against cmr10's real
+% \fontdimen6 and \fontdimen5, so the stand-in in `prelude.tex' is gone and
+% these are what a class file calls.
+\def\setlength#1#2{#1 #2\relax}
+\def\addtolength#1#2{\advance#1 #2\relax}
 %
 % ---- \raggedbottom and \flushbottom ---------------------------------------
 % latex.ltx:18328-18331, carried word for word:
@@ -1423,6 +1564,12 @@
 \newdimen\hoffset
 \newdimen\voffset
 \newdimen\hsize
+% tex.web §247's last dimension parameter here, and the one \setlength made
+% necessary: a Pandoc preamble writes `\setlength{\emergencystretch}{3em}' and
+% `src/latex/load.rs::AFTERWARDS' makes every package prove that line still
+% runs after it. The stand-in in `prelude.tex' was delimited on an `=' and had
+% nothing to match.
+\newdimen\emergencystretch
 % plain.tex:378-383. The skip amounts \smallskip, \medskip and \bigskip are
 % named for, and the three \normalbaselines restores from.
 \newskip\smallskipamount

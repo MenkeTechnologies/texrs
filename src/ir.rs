@@ -31,6 +31,18 @@ pub enum Num {
         /// The slot the internal dimension lives in.
         reg: i64,
     },
+    /// `tex.web` §449's other half, where the FACTOR is an internal integer:
+    /// size10.clo's `\setlength\textheight{\@tempcnta\baselineskip}`. Both
+    /// operands are slots, so the product waits for the program the same way
+    /// `Scaled`'s does.
+    ByCount {
+        /// The slot the integer factor lives in.
+        factor: i64,
+        /// §453's sign, which rides on the factor.
+        sign: i64,
+        /// What it multiplies: another slot, or a written unit's own value.
+        unit: Box<Num>,
+    },
     /// `\rustcall <name> <args>\endrust` — a call into a compiled `\rust{ … }`
     /// block. It is a `Num` rather than a command of its own because that is
     /// where a value is useful: anywhere TeX reads a number, which is a register
@@ -356,6 +368,15 @@ fn num_text(num: &Num) -> String {
         Num::Scaled { int, frac, reg } => format!(
             "{}\\count{reg}",
             crate::dimen::print_scaled(int * crate::dimen::UNITY + frac)
+        ),
+        // The factor is a register here, so it is written as one.
+        Num::ByCount { factor, sign, unit } => format!(
+            "{}\\count{factor}{}",
+            match sign {
+                s if *s < 0 => "-",
+                _ => "",
+            },
+            num_text(unit)
         ),
         Num::Rust { name, args } => {
             let args: Vec<String> = args.iter().map(num_text).collect();

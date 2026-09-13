@@ -112,6 +112,30 @@ pub enum ScannedDimen {
         /// The slot the internal dimension lives in.
         reg: i64,
     },
+    /// §449's other half: the FACTOR is an internal integer, which is a slot
+    /// too. `\textheight\@tempcnta\baselineskip` (size10.clo:136) is the shape,
+    /// and neither half of the product is decided until the program runs.
+    ByCount {
+        /// The slot the integer factor lives in.
+        factor: i64,
+        /// §453's sign, applied to the factor as it is for a written one.
+        sign: i64,
+        /// What the factor multiplies.
+        unit: CountUnit,
+    },
+}
+
+/// The unit a `ByCount` factor scales.
+///
+/// §453 lets the same factor take either kind: `\@tempcnta\baselineskip` is a
+/// register and `\@tempcnta pt` is a spelt-out unit, and both are integers the
+/// factor multiplies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CountUnit {
+    /// An internal dimension, in the slot it lives in.
+    Register(i64),
+    /// One of whatever unit was written, in scaled points.
+    Points(i64),
 }
 
 /// `tex.web` §107's `xn_over_d`: `x*n/d`, truncated toward zero.

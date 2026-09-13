@@ -125,6 +125,7 @@ fn preamble_in(src: &str, mode: Mode) -> String {
     out.reserve(packages.len() + 1024);
     out.push_str(&packages);
     out.push_str(numbering(src));
+    out.push_str(RECLAIMED);
     if mode == Mode::Text {
         // `\number` and `\the` are refused in the text stream -- measured:
         // `\count110=7 A\number\count110 B` under --text answers
@@ -179,6 +180,55 @@ pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String 
     out.push_str("\\catcode`\\@=12\n");
     out
 }
+
+/// The kernel definitions a CLASS overwrites with box machinery, taken back.
+///
+/// The kernel is read before the class and a standard class defines some of the
+/// same names -- `\thebibliography` is article.cls:717, and what it defines is a
+/// `\list`: a box, with the `\usecounter` and the `\renewcommand\theenumiv` the
+/// entries are numbered by INSIDE it. There is no `\list` here, so the class's
+/// definition stopped the document at `! Undefined control sequence \list.` the
+/// moment the class started loading all the way through.
+///
+/// `numbering` above is the same move for the same reason -- a definition the
+/// engine owns, re-stated after the file that would clobber it -- and the `\let`
+/// rather than a second copy of the body keeps `kernel.tex` the only place the
+/// definition is written.
+///
+/// Deliberately short. Every name here is one a class may no longer define for
+/// itself, so it holds only what the engine cannot run at all: the floats and
+/// the list environments, which are `\@float`, `\@dblfloat` and `\list` -- a
+/// box each, and none of the three exists here.
+///
+/// The `\relax` ones say exactly what `\begin` said about them before a class
+/// could reach its own definition: `\def\begin#1{\csname #1\endcsname}` makes
+/// an undefined name `\relax`, so the body between the two still sets and the
+/// environment itself does nothing. `\figure` and `\table` are `\newcommand`
+/// rather than `\let` because both take the optional placement argument --
+/// `\begin{figure}[htbp]` -- and `\let` copies a meaning without the optional
+/// argument that `\newcommand` recorded beside it.
+const RECLAIMED: &str = "\
+\\catcode`\\@=11\n\
+\\let\\thebibliography\\@texrs@thebibliography\n\
+\\def\\endthebibliography{}\n\
+\\let\\fnum@figure\\@texrs@fnum@figure\n\
+\\let\\fnum@table\\@texrs@fnum@table\n\
+\\newcommand{\\figure}[1][]{}\n\
+\\newcommand{\\endfigure}{}\n\
+\\newcommand{\\table}[1][]{}\n\
+\\newcommand{\\endtable}{}\n\
+\\expandafter\\let\\csname figure*\\endcsname\\relax\n\
+\\expandafter\\let\\csname endfigure*\\endcsname\\relax\n\
+\\expandafter\\let\\csname table*\\endcsname\\relax\n\
+\\expandafter\\let\\csname endtable*\\endcsname\\relax\n\
+\\let\\description\\relax \\let\\enddescription\\relax\n\
+\\let\\abstract\\relax \\let\\endabstract\\relax\n\
+\\let\\verse\\relax \\let\\endverse\\relax\n\
+\\let\\quotation\\relax \\let\\endquotation\\relax\n\
+\\let\\quote\\relax \\let\\endquote\\relax\n\
+\\let\\titlepage\\relax \\let\\endtitlepage\\relax\n\
+\\let\\theindex\\relax \\let\\endtheindex\\relax\n\
+\\catcode`\\@=12\n";
 
 /// The `\the<counter>` definitions that belong to a class with no chapters.
 ///

@@ -1101,6 +1101,23 @@ impl Engine {
                     false => whole.push(*c),
                 },
                 Token::Char('.' | ',', _) if !seen_point => seen_point = true,
+                // §455 reads the factor's tokens with `get_x_token`, so a
+                // control sequence EXPANDS here instead of surviving into the
+                // unit scan. With `\def\ff{.7}`, `\ff\bbb` is the same
+                // dimension `.7\bbb` is; without the expansion the `\ff`
+                // reaches the unit scan, which spells no letters out of a
+                // control sequence and reports §454's illegal unit.
+                //
+                // One that will NOT expand ends the factor exactly as any
+                // other non-digit does, and goes back untouched for §453's
+                // `<internal unit>` -- that is how `10\p@` still works.
+                Token::Cs(n) => {
+                    let n = *n;
+                    if !self.try_expand(lx, n, pending_only)? {
+                        lx.push_back(std::slice::from_ref(&cur));
+                        break;
+                    }
+                }
                 other => {
                     lx.push_back(std::slice::from_ref(other));
                     break;
@@ -1249,6 +1266,16 @@ impl Engine {
     /// natural width of a glue (§430's coercion). Mixing them is `mu_error` in
     /// tex, and is simply not a unit here -- the caller then reports §454's
     /// illegal unit, which is what tex's recovery leaves behind anyway.
+    ///
+    /// §455 asks for the next "non-blank non-call" token and §449 for the next
+    /// "non-blank non-sign" one, and both phrases mean `get_x_token`: a macro
+    /// standing here EXPANDS, and what it expands to is what is looked at. That
+    /// is what makes `\baselineskip\baselinestretch\baselineskip` the identity
+    /// LaTeX relies on -- article.cls:116 leaves `\baselinestretch` EMPTY, so
+    /// the register is the first thing the scan really sees and §449 takes it
+    /// as the whole dimension. Without the expansion the empty macro ended the
+    /// number instead, the factor was no digits at all, and the assignment
+    /// zeroed the very register it was copying.
     fn peek_internal_unit(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<i64>> {
         let mut eaten = Vec::new();
         loop {
@@ -1259,6 +1286,16 @@ impl Engine {
             if t.is_space() {
                 eaten.push(t);
                 continue;
+            }
+            // An expandable name is not the answer either way: what it expands
+            // to is read next, and an expansion that produced nothing leaves
+            // the scan looking straight past it. A register -- spelt `\dimen`
+            // or bound by `\dimendef` -- does not expand, so the test below
+            // still sees it.
+            if let Token::Cs(n) = &t {
+                if self.try_expand(lx, *n, pending_only)? {
+                    continue;
+                }
             }
             if let Token::Cs(n) = &t {
                 let spelt = match n.name() {
@@ -1306,7 +1343,8 @@ impl Engine {
     pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
         match self.scan_dimen_parts(lx, pending_only)? {
             crate::dimen::ScannedDimen::Constant(v) => Ok(v),
-            crate::dimen::ScannedDimen::Scaled { .. } => Err(self.illegal_unit()),
+            crate::dimen::ScannedDimen::Scaled { .. }
+            | crate::dimen::ScannedDimen::ByCount { .. } => Err(self.illegal_unit()),
         }
     }
 
@@ -1340,7 +1378,23 @@ impl Engine {
                 reg,
             });
         }
-        let (int, frac) = self.scan_factor(lx, pending_only)?;
+        // §449's `or fetch an internal integer': what stands where the factor
+        // goes may be an internal INTEGER, and then it IS the factor and the
+        // unit scan goes on behind it. A count register's value is a slot, so
+        // the product has to wait; a `\chardef`'d constant is a number and
+        // needs nothing new.
+        let internal = self.peek_internal_int(lx, pending_only)?;
+        let by_count = match internal {
+            Some(NumericCs::Register(r)) => Some(r),
+            _ => None,
+        };
+        let (int, frac) = match internal {
+            // A register's value is not here yet, so the written factor is left
+            // at one and the register carries the whole of it.
+            Some(NumericCs::Register(_)) => (1, 0),
+            Some(NumericCs::Value(v)) => (v, 0),
+            None => self.scan_factor(lx, pending_only)?,
+        };
         // §453 looks for an internal dimension BEFORE `true` and before any
         // spelt-out unit: `10\p@` is ten of whatever `\p@` holds, and no letter
         // of a unit has been read yet when it is found.
@@ -1348,10 +1402,17 @@ impl Engine {
             // The sign rides on both halves of the factor. §453 negates the
             // whole product at `attach_sign` and §107 truncates toward zero, so
             // negating the factor instead gives the same integer.
-            return Ok(ScannedDimen::Scaled {
-                int: sign * int,
-                frac: sign * frac,
-                reg,
+            return Ok(match by_count {
+                Some(factor) => ScannedDimen::ByCount {
+                    factor,
+                    sign,
+                    unit: crate::dimen::CountUnit::Register(reg),
+                },
+                None => ScannedDimen::Scaled {
+                    int: sign * int,
+                    frac: sign * frac,
+                    reg,
+                },
             });
         }
         // §455's other half, in §455's own place: `em` and `ex` are settled
@@ -1359,10 +1420,17 @@ impl Engine {
         // dimension the value IS known -- it is a number a font file states, not
         // a VM slot -- so the product is formed now and a constant comes back.
         if let Some(v) = self.scan_font_unit(lx, pending_only)? {
-            return Ok(ScannedDimen::Constant(
-                crate::dimen::scale_by_factor(sign * int, sign * frac, v)
-                    .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-            ));
+            return Ok(match by_count {
+                Some(factor) => ScannedDimen::ByCount {
+                    factor,
+                    sign,
+                    unit: crate::dimen::CountUnit::Points(v),
+                },
+                None => ScannedDimen::Constant(
+                    crate::dimen::scale_by_factor(sign * int, sign * frac, v)
+                        .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+                ),
+            });
         }
         // `tex.web` §453 takes an optional `true` in front of the unit and
         // divides by the magnification ratio. `\mag` is 1000 here and there is
@@ -1393,9 +1461,66 @@ impl Engine {
                 lx.push_back(std::slice::from_ref(&t));
             }
         }
-        Ok(ScannedDimen::Constant(
-            (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-        ))
+        Ok(match by_count {
+            // `sp` is ONE of the unit, because the factor stood in a register
+            // and `int` was left at one for it.
+            Some(factor) => ScannedDimen::ByCount {
+                factor,
+                sign,
+                unit: crate::dimen::CountUnit::Points(sp),
+            },
+            None => ScannedDimen::Constant(
+                (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+            ),
+        })
+    }
+
+    /// `tex.web` §449's internal INTEGER in the factor's place, if one is what
+    /// stands there. Nothing is consumed when it is not.
+    ///
+    /// Only the factor position calls this. §455's `<internal unit>` wants a
+    /// dimension or a glue and an integer is not one, which is why
+    /// `peek_internal_unit` keeps its own test: `10\count0` is §454's illegal
+    /// unit in tex too, measured.
+    fn peek_internal_int(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<NumericCs>> {
+        let mut eaten = Vec::new();
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                lx.push_back(&eaten);
+                return Ok(None);
+            };
+            if t.is_space() {
+                eaten.push(t);
+                continue;
+            }
+            if let Token::Cs(n) = &t {
+                let n = *n;
+                // §449 reads this position with `get_x_token`, as everywhere
+                // else in the scan.
+                if self.try_expand(lx, n, pending_only)? {
+                    continue;
+                }
+                let found = match n.name() {
+                    "count" => Some(NumericCs::Register(self.scan_number(lx, pending_only)?)),
+                    // A `\countdef` name is its register and a `\chardef` or
+                    // `\mathchardef` one is its number; both are internal
+                    // integers in §449's sense.
+                    _ => match self.numeric_cs(n) {
+                        Some(NumericCs::Register(r)) if r < crate::compiler::DIMEN_BASE => {
+                            Some(NumericCs::Register(r))
+                        }
+                        Some(NumericCs::Value(v)) => Some(NumericCs::Value(v)),
+                        _ => None,
+                    },
+                };
+                if let Some(found) = found {
+                    return Ok(Some(found));
+                }
+            }
+            eaten.push(t);
+            lx.push_back(&eaten);
+            return Ok(None);
+        }
     }
 
     /// `\uppercase{...}` / `\lowercase{...}` — `tex.web` §1288.
@@ -1715,7 +1840,11 @@ impl Engine {
     pub fn scan_dimen_or_fil(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(i64, i64)> {
         match self.scan_dimen_or_fil_parts(lx, pending_only)? {
             (crate::dimen::ScannedDimen::Constant(v), order) => Ok((v, order)),
-            (crate::dimen::ScannedDimen::Scaled { .. }, _) => Err(self.illegal_unit()),
+            (
+                crate::dimen::ScannedDimen::Scaled { .. }
+                | crate::dimen::ScannedDimen::ByCount { .. },
+                _,
+            ) => Err(self.illegal_unit()),
         }
     }
 
@@ -1744,13 +1873,32 @@ impl Engine {
                 0,
             ));
         }
-        let (int, frac) = self.scan_factor(lx, pending_only)?;
+        // §449's internal integer in the factor's place, as in
+        // `scan_dimen_parts`. An infinite component cannot be one: `fil` is
+        // spelt in letters, so the order that comes back is still zero.
+        let internal = self.peek_internal_int(lx, pending_only)?;
+        let by_count = match internal {
+            Some(NumericCs::Register(r)) => Some(r),
+            _ => None,
+        };
+        let (int, frac) = match internal {
+            Some(NumericCs::Register(_)) => (1, 0),
+            Some(NumericCs::Value(v)) => (v, 0),
+            None => self.scan_factor(lx, pending_only)?,
+        };
         if let Some(reg) = self.peek_internal_unit(lx, pending_only)? {
             return Ok((
-                ScannedDimen::Scaled {
-                    int: sign * int,
-                    frac: sign * frac,
-                    reg,
+                match by_count {
+                    Some(factor) => ScannedDimen::ByCount {
+                        factor,
+                        sign,
+                        unit: crate::dimen::CountUnit::Register(reg),
+                    },
+                    None => ScannedDimen::Scaled {
+                        int: sign * int,
+                        frac: sign * frac,
+                        reg,
+                    },
                 },
                 0,
             ));
@@ -1759,10 +1907,17 @@ impl Engine {
         // number, so the order that comes back with one is always zero.
         if let Some(v) = self.scan_font_unit(lx, pending_only)? {
             return Ok((
-                ScannedDimen::Constant(
-                    crate::dimen::scale_by_factor(sign * int, sign * frac, v)
-                        .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-                ),
+                match by_count {
+                    Some(factor) => ScannedDimen::ByCount {
+                        factor,
+                        sign,
+                        unit: crate::dimen::CountUnit::Points(v),
+                    },
+                    None => ScannedDimen::Constant(
+                        crate::dimen::scale_by_factor(sign * int, sign * frac, v)
+                            .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+                    ),
+                },
                 0,
             ));
         }
@@ -1830,9 +1985,16 @@ impl Engine {
             }
         }
         Ok((
-            ScannedDimen::Constant(
-                (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-            ),
+            match by_count {
+                Some(factor) => ScannedDimen::ByCount {
+                    factor,
+                    sign,
+                    unit: crate::dimen::CountUnit::Points(sp),
+                },
+                None => ScannedDimen::Constant(
+                    (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
+                ),
+            },
             order,
         ))
     }
@@ -1989,7 +2151,8 @@ impl Engine {
         let g = self.scan_glue_parts(lx)?;
         let flat = |d: crate::dimen::ScannedDimen| match d {
             crate::dimen::ScannedDimen::Constant(v) => Some(v),
-            crate::dimen::ScannedDimen::Scaled { .. } => None,
+            crate::dimen::ScannedDimen::Scaled { .. }
+            | crate::dimen::ScannedDimen::ByCount { .. } => None,
         };
         match (flat(g.natural), flat(g.stretch), flat(g.shrink)) {
             (Some(n), Some(st), Some(sh)) => Ok((n, st, g.stretch_order, sh, g.shrink_order)),

@@ -784,7 +784,18 @@ impl Lowerer {
                 continue;
             }
             if self.text_output && self.lower_size(name, &mut out, &mut size_open) {
-                continue;
+                // The marker is the SIZE, and the size is not all these names
+                // do. size10.clo defines every one of the ten (47-86) and each
+                // body assigns: `\@setfontsize` sets \baselineskip and
+                // \normalbaselineskip, and the four display skips follow it.
+                // size10.clo:134 divides by \baselineskip, so swallowing the
+                // call whole left that divisor at INITEX's zero. The definition
+                // runs as well when there is one, and the ten bodies set
+                // registers and define names -- none of them sets text, so the
+                // marker stays the only thing the size contributes here.
+                if !self.eng.is_macro(name) {
+                    continue;
+                }
             }
             // Page structure, for the same reason and in the same place.
             if self.text_output && self.lower_page_break(lx, name, &mut out)? {
@@ -3756,6 +3767,14 @@ fn scaled_num(d: crate::dimen::ScannedDimen) -> Num {
     match d {
         crate::dimen::ScannedDimen::Constant(v) => Num::Literal(v),
         crate::dimen::ScannedDimen::Scaled { int, frac, reg } => Num::Scaled { int, frac, reg },
+        crate::dimen::ScannedDimen::ByCount { factor, sign, unit } => Num::ByCount {
+            factor,
+            sign,
+            unit: Box::new(match unit {
+                crate::dimen::CountUnit::Register(r) => Num::Count(r),
+                crate::dimen::CountUnit::Points(sp) => Num::Literal(sp),
+            }),
+        },
     }
 }
 

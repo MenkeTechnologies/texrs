@@ -197,13 +197,10 @@
 \newcommand{\index}[1]{}
 \newcommand{\setcounter}[2]{}
 \newcommand{\addtocounter}[2]{}
-% \setlength and \addtolength consume their arguments and write nothing. The
-% lengths they name ARE registers now, and latex.ltx's own two lines are two
-% lines -- but they stop on `em', which article.cls writes six times and this
-% engine has no current font to measure. `kernel.tex' says so at length where
-% the port would go.
-\newcommand{\setlength}[2]{}
-\newcommand{\addtolength}[2]{}
+% \setlength and \addtolength are latex.ltx's own two lines now, in
+% `kernel.tex'. A \newcommand here would overwrite them -- the prelude is read
+% BEFORE the kernel -- so the names are gone rather than moved, exactly as the
+% dimension parameters below them are.
 \newcommand{\renewcommandx}[2]{}
 \newcommand{\hypersetup}[1]{}
 \newcommand{\definecolor}[4][]{}
@@ -393,10 +390,10 @@
 \newcommand{\endHighlighting}{}
 \newcommand{\minipage}[2][]{}
 \newcommand{\endminipage}{}
-\newcommand{\figure}[1][]{}
-\newcommand{\endfigure}{}
-\newcommand{\table}[1][]{}
-\newcommand{\endtable}{}
+% \figure and \table are NOT here. A class defines both -- article.cls:458 and
+% 470 -- as `\@float{figure}' and `\@dblfloat', and a class is read after this
+% file, so a stand-in written here is overwritten before a document can use it.
+% They are in `src/latex.rs::RECLAIMED', which is read after the class instead.
 \newcommand{\tabular}[2][]{}
 \newcommand{\endtabular}{}
 \newcommand{\tikzpicture}[1][]{}
@@ -415,7 +412,12 @@
 % is where such an assignment always ends in these documents.
 \def\tolerance=#1 {}
 \def\hbadness=#1 {}
-\def\emergencystretch=#1 {}
+% \emergencystretch is not one of them any more. It is tex.web §247's dimension
+% parameter and `kernel.tex' declares it as the register, because \setlength is
+% the real two lines now and `\setlength{\emergencystretch}{3em}' -- which
+% `src/latex/load.rs::AFTERWARDS' asks every package to survive -- writes no `='
+% at all. Against the delimited form that was `Use of macro doesn't match its
+% definition', and it refused every class in the corpus.
 % The dimension and glue parameters used to be named here and nothing else --
 % texrs had no dimen registers, so a stand-in carried no value and a `=3em'
 % after one was left in the text. It has them now, and `kernel.tex' declares

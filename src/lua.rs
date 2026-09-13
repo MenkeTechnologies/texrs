@@ -727,6 +727,8 @@ fn fold_registers(cmds: &[Cmd], into: &mut HashMap<i64, i64>) {
         Num::Scaled { int, frac, reg } => seen
             .get(reg)
             .map(|v| crate::dimen::scale_by_factor(*int, *frac, *v)),
+        // Both halves are registers, so both have to have been settled.
+        Num::ByCount { .. } => None,
         Num::Rust { .. } => None,
     };
     for cmd in cmds {
