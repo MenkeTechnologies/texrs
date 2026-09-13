@@ -709,6 +709,21 @@ fn the_font_units_reach_a_document_that_loads_a_class() {
                \\zz=2.5em \\message{[\\the\\zz]}\n\
                \\zz=.5em \\message{[\\the\\zz]}\n\
                \\zz=1ex \\message{[\\the\\zz]}\n\\end\n";
+    // `em` and `ex` are read out of an INSTALLATION's cmr10.tfm, which belongs
+    // to a TeX Live and not to this crate -- the same dependency
+    // `tests/dvi_parity.rs` guards on. A machine without one cannot be asked
+    // what cmr10's quad is.
+    //
+    // It skips rather than asserting what a fontless machine answers, and that
+    // is deliberate: this machine HAS a TeX Live, and the fallback in
+    // `find_font` scans `/usr/local/texlive` directly, so a bare runner cannot
+    // be reproduced here. Writing down what CI would print would be asserting
+    // a value nobody had measured -- which is the fault this test exists to
+    // pin, one level up.
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to read a quad from");
+        return;
+    }
     assert_eq!(out(src), "[25.00003pt] [5.0pt] [4.30554pt]");
 }
 
@@ -730,6 +745,11 @@ fn the_font_units_reach_a_document_that_loads_a_class() {
 /// `5.0pt` and `\the\leftmargini` is `25.00003pt`.
 #[test]
 fn the_font_units_resolve_while_a_class_file_is_being_preloaded() {
+    // An installation's cmr10, as in the test above.
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to read a quad from");
+        return;
+    }
     let mut lowerer = texrs::lower::Lowerer::new();
     lowerer
         .preload(&texrs::latex::preamble("\\documentclass{article}\n"))
