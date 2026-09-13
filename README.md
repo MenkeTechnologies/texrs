@@ -673,6 +673,20 @@ document has a rung it last reached, recorded in `tests/dvi_floor.txt` and
 `tests/pdf_floor.txt`, and the gate fails when one drops rather than asserting
 agreement it does not have.
 
+A rung is only half a ratchet: climbing one changes nothing until it is
+recorded, and the commands that do it are
+
+```sh
+cargo run --bin dvi-parity -- --record
+cargo run --bin pdf-parity -- --record
+```
+
+which is the opposite direction from `parity --freeze`. That one re-reads the
+ORACLE; these two re-read texrs, and what they write down is how close it got.
+Running either after a change that lost ground would lower the floor and retire
+the very regression the file exists to catch, so they are run deliberately after
+a climb rather than as part of a build.
+
 ```
 DVI   NONE < PARSES < PAGES < TEXT < STRUCTURE < BYTES
 PDF   NONE < PRODUCED < PAGES < PAGESIZE < TEXT < LINES < FONTS < BYTES
