@@ -59,6 +59,28 @@ fn the_corpus_still_prints_what_tex_printed() {
     for (name, want) in frozen() {
         let src = std::fs::read_to_string(repo().join("tests/cases").join(&name))
             .unwrap_or_else(|e| panic!("read {name}: {e}"));
+        // A case may declare a font it cannot be run without. The frozen
+        // corpus's contract is "texrs still prints what it printed", which
+        // holds only while a case's output is a function of TEXRS -- and
+        // `em`/`ex` are read out of an installation's `.tfm`, so on a machine
+        // with no TeX Live the same texrs prints `! Font cmr10 not loadable`
+        // and null_font's zeros. That is the environment answering
+        // differently, not a regression, and freezing either answer would
+        // make the corpus assert the machine it was frozen on.
+        //
+        // The same dependency is already guarded in `tests/dvi_parity.rs` and
+        // in `font_or_skip!`; this is that convention reaching the one harness
+        // that had no case needing it until now.
+        if let Some(font) = src
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("% requires: "))
+            .and_then(|l| l.split_whitespace().next())
+        {
+            if texrs::typeset::find_font(font).is_none() {
+                eprintln!("skipping {name}: no {font}.tfm");
+                continue;
+            }
+        }
         let got = texrs::parity::subject(&src);
         let listed = known.contains(&name);
         match (got == want, listed) {

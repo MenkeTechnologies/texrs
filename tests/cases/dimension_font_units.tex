@@ -6,6 +6,8 @@
 % x-height is 4.30554pt, and those are the numbers a document gets without
 % asking for anything. A test that set its own font would prove the arithmetic
 % and not the font.
+% requires: cmr10 -- the numbers below are an INSTALLATION's cmr10.tfm, so a
+% machine without one cannot be asked what they are. See tests/parity.rs.
 \catcode`\{=1 \catcode`\}=2
 \dimen0=1em \dimen1=1ex \dimen2=.5em \dimen3=2.5ex
 \message{[\the\dimen0][\the\dimen1][\the\dimen2][\the\dimen3]}
