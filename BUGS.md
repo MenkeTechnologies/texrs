@@ -223,6 +223,21 @@ each necessary and none sufficient, and the stack was only ever visible from the
 bottom — the lost family could not be seen before a sans family existed to lose,
 and that could not be seen before `\titleformat` delivered anything at all.
 
+- **The Emacs mode's own version is five releases behind.**
+  `editors/emacs/texrs-mode.el` declares `;; Version: 0.1.0` while the crate is
+  at 0.6.0. It is a tracked file carrying a version that nothing stamps and
+  nothing checks: `scripts/bump.sh` stamps seven files and `tests/version_sync.rs`
+  reads those same seven, and this is an eighth. The IntelliJ plugin's
+  `gradle.properties` IS in both, so the convention is that an editor plugin
+  tracks the crate — this one just falls outside the gate that enforces it.
+
+  Left as found rather than stamped here, because an Emacs package version is
+  what a package archive installs against and bumping it is a release decision
+  rather than a documentation one. Recorded so it is a decision someone takes
+  rather than a drift nobody sees. Note the shape: the gate that exists for
+  exactly this drift was written listing the files it knew about, and a file
+  added later inherits no protection from it.
+
 - **`\char` is not implemented.** `A\char65 B` in a document body stops the run
   with `! Undefined control sequence \char.`, where tex sets an `A`. §434's
   `\char` is how a document reaches a glyph by number, and it is what

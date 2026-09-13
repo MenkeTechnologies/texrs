@@ -102,7 +102,14 @@ editors/texrs.vim              # Vim / Neovim (native LSP on 0.8+)
 editors/texrs.lua              # the same, as a lua module
 editors/vscode-settings.json   # VS Code
 editors/intellij/              # the JetBrains plugin
+editors/emacs/                 # a major mode, with its primitive table
 ```
+
+`editors/emacs/` is the one that is more than configuration: `texrs-mode.el` is
+a major mode, and `texrs-stdlib.el` beside it is generated from the same corpus
+as `docs/reference.html` — `cargo run --bin gen-emacs-stdlib`, gated by
+`tests/emacs_stdlib.rs`, so completion and hover there cannot describe a
+primitive the engine does not carry.
 
 #### Man pages
 
