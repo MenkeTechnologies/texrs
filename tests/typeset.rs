@@ -3682,3 +3682,44 @@ UprightFont=ShareTechMono-Regular]\n\
         "and the outer environment still ends where it ends"
     );
 }
+
+/// A verbatim body keeps its own lines, in the monospace face.
+///
+/// It was pushed as one string with no marker of any kind, so it lost BOTH:
+/// the lines flowed into the surrounding paragraph as prose, and the
+/// characters were set in the body face. `\begin{verbatim}` is how a document
+/// says "this is not prose", and it came out as prose in the body typeface.
+///
+/// `--text` was never wrong -- a verbatim body reaches it with its newlines
+/// intact -- which is why this went unnoticed: the cheaper output was right.
+#[test]
+fn a_verbatim_body_keeps_its_lines_and_its_face() {
+    let Some(dir) = corpus_fonts() else { return };
+    let doc = format!(
+        "\\documentclass{{book}}\n\\usepackage{{fontspec}}\n\
+         \\setmainfont{{Arimo}}[Path={dir}/,Extension=.ttf,UprightFont=Arimo-VF]\n\
+         \\setmonofont{{ShareTechMono-Regular}}[Path={dir}/,Extension=.ttf,\
+UprightFont=ShareTechMono-Regular]\n\\begin{{document}}\n\
+         BODYTEXT here\n\\begin{{verbatim}}\nFIRSTCODE make --jobs\nSECONDCODE ok\n\
+         \\end{{verbatim}}\nAFTERTEXT here\n\\end{{document}}\n"
+    );
+    let pdf = texrs::run_pdf(&doc).expect("pdf");
+    let drawn_in = faces(&pdf);
+    assert!(
+        face_of(&drawn_in, "FIRSTCODE").contains("ShareTechMono"),
+        "a verbatim body is set in the mono face, got {}",
+        face_of(&drawn_in, "FIRSTCODE")
+    );
+    assert!(
+        !face_of(&drawn_in, "AFTERTEXT").contains("ShareTechMono"),
+        "and the face ends with the environment"
+    );
+    // Its two lines are two lines, not one flowed paragraph.
+    let placed_runs = placed(&pdf);
+    let first = at(&placed_runs, "FIRSTCODE").1;
+    let second = at(&placed_runs, "SECONDCODE").1;
+    assert!(
+        (first - second).abs() > 1.0,
+        "the two verbatim lines share a baseline: {first} and {second}"
+    );
+}

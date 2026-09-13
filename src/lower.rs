@@ -699,7 +699,7 @@ impl Lowerer {
                             self.lig = None;
                             match listing {
                                 true => self.lower_listing(&body, &mut out)?,
-                                false => out.push(Cmd::Text(body)),
+                                false => self.push_verbatim(&body, &mut out),
                             }
                         }
                         continue;
@@ -2388,6 +2388,34 @@ impl Lowerer {
         self.listing_depth -= 1;
         self.push_text(out, "\n\n");
         Ok(())
+    }
+
+    /// A verbatim body: its own lines, in the monospace face.
+    ///
+    /// It was pushed as one string with no marker of any kind, which cost it
+    /// BOTH -- the lines flowed into the surrounding paragraph as prose, and
+    /// the characters were set in the body face. `\begin{verbatim}` is how a
+    /// document says "this is not prose", and it came out as prose in the body
+    /// typeface.
+    ///
+    /// `--text` was never wrong here, because a verbatim body reaches it with
+    /// its newlines intact; only the PDF path flowed them. That is why it went
+    /// unnoticed -- the cheaper output was right.
+    ///
+    /// The lines are marked the way a listing's are and the face is pushed
+    /// once around the whole body, rather than lowering the text: a verbatim
+    /// body is CHARACTERS, and running it through the lowerer is exactly what
+    /// `\begin{verbatim}` exists to prevent.
+    fn push_verbatim(&mut self, body: &str, out: &mut Vec<Cmd>) {
+        let body = body.strip_prefix('\n').unwrap_or(body);
+        self.push_text(out, "\n\n");
+        self.push_text(out, &format!("{}m", crate::typeset::FACE_PUSH));
+        for line in body.lines() {
+            out.push(Cmd::Text(line.to_string()));
+            self.push_text(out, &crate::typeset::LISTING_BREAK.to_string());
+        }
+        self.push_text(out, &crate::typeset::FACE_POP.to_string());
+        self.push_text(out, "\n\n");
     }
 
     /// Append text to the run in progress, looking past line directives.
