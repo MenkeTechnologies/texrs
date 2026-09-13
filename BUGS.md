@@ -65,11 +65,21 @@ passing, so the list is a claim the harness enforces rather than a note.
   by `tests/etex.rs`. `\newbox`, `\newread`, `\newwrite` and `\newinsert` are
   `\chardef`s exactly as plain TeX makes them, so the NAME is a number and it is
   the missing store rather than the missing name that stops a use.
-- **`<factor><internal unit>`.** §453's `15\p@` and `3em` are not implemented:
-  a dimension may be a literal with a unit or an internal dimen, but not a
-  coefficient times one. That, and `em`/`ex` being absent for the same reason,
-  is the whole of what stands between `article.cls` and a load — it reaches its
-  own last line and stops inside `size10.clo`.
+- **`em` and `ex` are not units.** §453's `<factor><internal unit>` IS
+  implemented — `\dimendef\pp=3 \pp=1pt` then `\dimen5=10\pp` gives `10.0pt`
+  — but `\dimen5=3em` is still `! Illegal unit of measure (pt inserted).` They
+  are the current font's, and a dimension is scanned in the mouth, which has no
+  font. This is what `\setlength{\parindent}{2em}` wants.
+
+  Two things this bullet used to say and should not. It said `15\p@` is
+  unimplemented: the arithmetic is there. And it said this was "the whole of
+  what stands between `article.cls` and a load" — it is not, and was not even
+  when written. The class stops five reasons further on (see the stderr entry
+  below), and `\p@` itself is unreachable from a document body for a different
+  reason again: the class load stops before the kernel's `\p@=1pt` is in scope,
+  so `10\p@` in a document is `Illegal unit of measure` where `10\pp` on a
+  register the document set is `10.0pt`. A bullet that names one blocker for a
+  chain of them will be wrong at the first fix and read as right for months.
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.
@@ -268,19 +278,34 @@ and that could not be seen before `\titleformat` delivered anything at all.
   package article needs \abovedisplayskip          the §247 glue parameters
   Illegal unit of measure (pt inserted)            §453's <factor><internal unit>
   package article needs \@settopoint               a missing kernel macro
+  Unsupported register \textwidth
+  package article needs \@lowpenalty
+  Missing number, found \@mpfootins
+  package article needs \raggedbottom
+  package article needs \onecolumn                 article.cls's second-to-last line
   ```
 
-  Both earlier reasons are fixed. `10\p@` is read now, and the arithmetic is
+  Every reason above the last is fixed, and the arithmetic under the second is
   tex's: `1.2\dimen0` with `\dimen0=12.5pt` gives **14.99995pt**, not 15pt,
   because §107's `xn_over_d` truncates toward zero — verified against the real
-  `tex` binary, which prints the same. What stops it now is `\@settopoint`, and
-  one step past that `size10.clo` divides by `\baselineskip`, which is modelled
-  as an empty macro rather than as a TeX dimension parameter.
+  `tex` binary, which prints the same.
 
-  So the chain has reached the kernel. Each fix moved the failure one step
-  further along the same line rather than clearing it — three times now, which
-  is the strongest evidence in this file for reading an error message as the
-  first thing that stopped rather than the only thing wrong.
+  Eight reasons, one line of one file, each visible only from the one before it.
+  That is the strongest evidence in this file for reading an error message as
+  the first thing that stopped rather than the only thing wrong — and for
+  expecting a ninth rather than an end. `\onecolumn` is `article.cls`'s
+  second-to-last line, so the class is nearly read; what follows it is
+  `size10.clo`, which has not been reached yet.
+
+  One of those fixes is worth its own note, because it made an EARLIER fix
+  reachable rather than fixing anything a reader could see. `Lowerer::preload`
+  discarded the register writes a preamble made — macros survived, `SetCount`
+  did not — so the kernel's own `\p@=1pt` never ran and `\p@` was zero for the
+  whole run. `10\p@` was ten times nothing. The `<factor><internal unit>` work
+  that this file credited two rounds ago was computing correctly against a
+  register that no preamble could set, and its differential case passed because
+  the case sets its own register. Nothing in the suite multiplied by one the
+  KERNEL had set.
 
   Worth knowing before measuring it: **the script cache masks it.** It prints on
   a first run and not on a second, because the second never re-reads the
