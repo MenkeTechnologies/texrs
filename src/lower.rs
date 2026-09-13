@@ -67,6 +67,9 @@ pub struct Lowerer {
     /// globally-set value there and this keeps the local one. A per-assignment
     /// save stack is what that would take.
     globals: Vec<i64>,
+    /// The register writes a preloaded preamble made, waiting to be put in
+    /// front of the document's own commands. See [`Lowerer::preload`].
+    prologue: Vec<Cmd>,
     /// Errors the expander REPORTED rather than raised, waiting to be written
     /// into the message stream in front of whatever is printed next.
     ///
@@ -241,6 +244,7 @@ impl Lowerer {
             ended: false,
             next_scratch: 255,
             globals: Vec::new(),
+            prologue: Vec::new(),
             reports: Vec::new(),
             reported: false,
             fonts: crate::typeset::Families::default(),
@@ -299,23 +303,47 @@ impl Lowerer {
 
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
-        self.lower_located(src).map_err(|(e, _line)| e)
+        let mut cmds = self.lower_located(src).map_err(|(e, _line)| e)?;
+        // What a preloaded preamble WROTE to the registers runs first: see
+        // `preload`.
+        if !self.prologue.is_empty() {
+            let mut out = std::mem::take(&mut self.prologue);
+            out.append(&mut cmds);
+            return Ok(out);
+        }
+        Ok(cmds)
     }
 
     /// Run the LaTeX prelude through this lowerer, keeping its definitions and
-    /// discarding whatever commands it emitted.
+    /// the register values it established, and discarding its output.
     ///
-    /// The prelude is all definitions, so there is nothing to keep: what
-    /// matters is the macro table it leaves behind on `self.eng`, which the
-    /// document is then lowered against.
+    /// The prelude is nearly all definitions, and a definition is FRONTEND
+    /// state -- it lands on `self.eng` and the document is lowered against it,
+    /// which is why this returned nothing for as long as that was true. A
+    /// register value is not: it lives in a VM slot, so `\p@=1pt` lowers to a
+    /// `Cmd::SetCount` and dropping that command left `\p@` at INITEX's zero
+    /// for the whole run. `kernel.tex` writes plain TeX's named constants that
+    /// way -- `\p@=1pt`, `\z@=0pt`, `\z@skip=0pt plus0pt minus0pt` -- so
+    /// size10.clo's `\abovedisplayskip 10\p@` was ten times nothing, silently,
+    /// and `\@settopoint` divided by zero.
+    ///
+    /// So the SLOT WRITES are kept and everything the preamble printed is not.
+    /// `lower` puts them in front of the document's own commands, which is
+    /// where the preamble ran.
     pub fn preload(&mut self, src: &str) -> R<()> {
-        let out = self.lower_located(src).map(|_| ()).map_err(|(e, _)| e);
+        let out = self.lower_located(src);
         // The prelude's own diagnostics belong to the prelude, and the document
         // is what tex is reporting on: an error the prelude recovered from must
         // not put `(see the transcript file …)` on the end of a clean run.
         self.reports.clear();
         self.reported = false;
-        out
+        match out {
+            Ok(cmds) => {
+                state_only(&cmds, &mut self.prologue);
+                Ok(())
+            }
+            Err((e, _)) => Err(e),
+        }
     }
 
     /// The same, reporting the line the mouth had reached when it stopped.
@@ -2730,10 +2758,73 @@ impl Lowerer {
         Ok(Num::Rust { name, args })
     }
 
-    /// A number operand: a literal, `\count<n>` read at run time, or a call into
+    /// The slot of an INTERNAL QUANTITY standing where an integer is wanted, if
+    /// that is what comes next; nothing is consumed otherwise.
+    ///
+    /// `tex.web` §430 is the coercion: `scan_int` accepts an internal quantity
+    /// of any of the four levels and takes its value as a number, so a
+    /// dimension reads as its count of scaled points and a glue as the scaled
+    /// points of the natural width at the front of it. `\count` needs no
+    /// coercion and is here because the four are read the same way.
+    ///
+    /// Two lines of the standard classes turn on it. size10.clo:135 is the
+    /// coercion spelt out -- `\@tempcnta=\@tempdima`, a count register assigned
+    /// from a dimension one -- and latex.ltx:10261 is the other half:
+    ///
+    ///     \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+    ///
+    /// where `\p@` is a `\dimendef` name in INTEGER position, so the divisor is
+    /// 65536 and the dimension comes back truncated to whole points.
+    ///
+    /// What comes back is the SLOT and not the value: a register's value
+    /// belongs to the run, and only the slot number is known while lowering.
+    fn peek_int_register(&mut self, lx: &mut Lexer, pending: bool) -> R<Option<Num>> {
+        let mut eaten = Vec::new();
+        loop {
+            let Some(t) = self.eng.take_any(lx, pending) else {
+                lx.push_back(&eaten);
+                return Ok(None);
+            };
+            if t.is_space() {
+                eaten.push(t);
+                continue;
+            }
+            if let Token::Cs(n) = &t {
+                // Where the file starts, and how many slots one register of it
+                // takes: a glue is four and everything else is one.
+                let file = match n.name() {
+                    "count" => Some((0, 1)),
+                    "dimen" => Some((crate::compiler::DIMEN_BASE, 1)),
+                    "skip" => Some((crate::compiler::SKIP_BASE, crate::compiler::SKIP_STRIDE)),
+                    "muskip" => Some((crate::compiler::MUSKIP_BASE, crate::compiler::SKIP_STRIDE)),
+                    _ => None,
+                };
+                if let Some((base, stride)) = file {
+                    let reg = self.eng.scan_number_any(lx, pending)?;
+                    return Ok(Some(Num::Count(base + reg * stride)));
+                }
+                // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name
+                // is that register, in every position the spelt-out form works.
+                if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
+                    return Ok(Some(Num::Count(r)));
+                }
+            }
+            // Not a register: everything read goes back in the order it was
+            // read, so the scanner that follows sees an untouched stream.
+            eaten.push(t);
+            lx.push_back(&eaten);
+            return Ok(None);
+        }
+    }
+
+    /// A number operand: a literal, a register read at run time, or a call into
     /// a compiled `\rust{ … }` block.
     fn number(&mut self, lx: &mut Lexer) -> R<Num> {
-        // Peek for `\count`, which becomes a slot read rather than a constant.
+        // A register becomes a slot read rather than a constant, because its
+        // value is the run's and not the lowerer's.
+        if let Some(slot) = self.peek_int_register(lx, false)? {
+            return Ok(slot);
+        }
         loop {
             let Some(t) = lx.next_token(&self.eng.cats) else {
                 return Err(TexError("Missing number, treated as zero".into()));
@@ -2742,10 +2833,6 @@ impl Lowerer {
                 continue;
             }
             match &t {
-                Token::Cs(n) if n.name() == "count" => {
-                    let reg = self.eng.scan_number_file(lx)?;
-                    return Ok(Num::Count(reg));
-                }
                 Token::Cs(n) if n.name() == crate::rust_ffi::CALL_CS => {
                     return self.rust_call(lx, false);
                 }
@@ -3358,6 +3445,9 @@ impl Lowerer {
 
     /// A number operand inside a message body.
     fn msg_number(&mut self, work: &mut Lexer) -> R<Num> {
+        if let Some(slot) = self.peek_int_register(work, true)? {
+            return Ok(slot);
+        }
         loop {
             let Some(t) = work.pending.pop() else {
                 return Err(TexError("Missing number, treated as zero".into()));
@@ -3366,10 +3456,6 @@ impl Lowerer {
                 continue;
             }
             match &t {
-                Token::Cs(n) if n.name() == "count" => {
-                    let reg = self.eng.scan_number_pending(work)?;
-                    return Ok(Num::Count(reg));
-                }
                 Token::Cs(n) if n.name() == crate::rust_ffi::CALL_CS => {
                     return self.rust_call(work, true);
                 }
@@ -3668,6 +3754,81 @@ fn scaled_num(d: crate::dimen::ScannedDimen) -> Num {
     match d {
         crate::dimen::ScannedDimen::Constant(v) => Num::Literal(v),
         crate::dimen::ScannedDimen::Scaled { int, frac, reg } => Num::Scaled { int, frac, reg },
+    }
+}
+
+/// The commands out of `cmds` that establish PROGRAM state rather than output,
+/// appended to `out`.
+///
+/// What a preloaded preamble leaves behind is two things, and only one of them
+/// used to survive: the macro table, which is the expander's and outlives the
+/// lowering by itself, and the REGISTER VALUES, which live in VM slots and
+/// therefore only exist as commands. This keeps the second and drops the first
+/// kind of everything else -- every `\message` the preamble printed, the `(file`
+/// it opened, the text it set -- because those belong to the preamble's own run
+/// and the document is what the engine is reporting on.
+///
+/// A group and a conditional are carried with their bodies filtered the same
+/// way, so a register set inside `\if@twocolumn ... \fi` still reaches the run
+/// and still depends on the branch. A `Cmd::ErrorSite` is carried with them
+/// because it produces nothing on its own: it says where a later arithmetic
+/// error would be reported from, and dropping it would leave one unplaced.
+fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
+    fn filtered(cmds: &[Cmd]) -> Vec<Cmd> {
+        let mut v = Vec::new();
+        state_only(cmds, &mut v);
+        v
+    }
+    for cmd in cmds {
+        match cmd {
+            Cmd::SetCount(..) | Cmd::Arith(..) | Cmd::ErrorSite(_) => out.push(cmd.clone()),
+            Cmd::Group { saves, body } => out.push(Cmd::Group {
+                saves: saves.clone(),
+                body: filtered(body),
+            }),
+            Cmd::IfNum {
+                left,
+                rel,
+                right,
+                then_branch,
+                else_branch,
+            } => out.push(Cmd::IfNum {
+                left: left.clone(),
+                rel: *rel,
+                right: right.clone(),
+                then_branch: filtered(then_branch),
+                else_branch: filtered(else_branch),
+            }),
+            Cmd::IfOdd {
+                value,
+                then_branch,
+                else_branch,
+            } => out.push(Cmd::IfOdd {
+                value: value.clone(),
+                then_branch: filtered(then_branch),
+                else_branch: filtered(else_branch),
+            }),
+            Cmd::Loop {
+                body,
+                left,
+                rel,
+                right,
+            } => out.push(Cmd::Loop {
+                body: filtered(body),
+                left: left.clone(),
+                rel: *rel,
+                right: right.clone(),
+            }),
+            // Output, or the compilation of a `\rust` block, which the document's
+            // own pass compiles again where it is used.
+            Cmd::Message(_)
+            | Cmd::FileClose
+            | Cmd::Text(_)
+            | Cmd::Color { .. }
+            | Cmd::TranscriptNotice
+            | Cmd::Line(_)
+            | Cmd::RustCompile(_) => {}
+        }
     }
 }
 

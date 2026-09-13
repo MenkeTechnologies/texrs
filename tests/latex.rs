@@ -439,7 +439,13 @@ fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
     let _ = std::fs::remove_file(dir.join("crossref.aux"));
     let got = texrs::run_text_at(&doc, src).expect("run");
     let aux = std::fs::read_to_string(dir.join("crossref.aux")).expect("aux written");
-    assert!(aux.contains("\\newlabel{sec:a}{{1}{0}}"), "{aux}");
+    // `{{1}{1}}` -- the label's number and the PAGE it stands on. Real LaTeX
+    // writes `\newlabel{sec:a}{{1}{1}{}{section.1}{}}` for this document
+    // (LaTeX2e 2025-11-01, measured), so the first two fields agree. The page
+    // used to be 0 here, because `\setcounter{page}{1}` is in the kernel and
+    // `Lowerer::preload` dropped every command a preamble emitted; it keeps the
+    // register writes now.
+    assert!(aux.contains("\\newlabel{sec:a}{{1}{1}}"), "{aux}");
     assert!(aux.contains("\\bibcite{k}{1}"), "{aux}");
     // `0.1` rather than `1`: the number comes from `typeset::unit_numbers`,
     // which counts chapter, section and subsection and joins every level down
@@ -506,6 +512,53 @@ fn the_display_glue_parameters_are_registers_of_their_own() {
         out(src),
         "[10.0pt plus 2.0pt minus 5.0pt][11.0pt] [0.0pt plus 3.0pt][6.0pt]"
     );
+}
+
+/// The page dimensions `latex.ltx` declares, and `\baselineskip` beside them.
+///
+/// `latex.ltx:20362-20381` declares `\textwidth` and its neighbours with
+/// `\newdimen`, and `tex.web` §224 makes `\baselineskip` a glue parameter of the
+/// engine. Both were `\newcommand{\X}{}` stand-ins in `prelude.tex`, which is
+/// read BEFORE `kernel.tex` -- so the stand-in overwrote the register the kernel
+/// declared, and a name that looked declared was an empty macro. `size10.clo`
+/// found that out on its first `\setlength`: `package article is not loadable:
+/// Unsupported register \textwidth`.
+///
+/// Each has to be assignable and readable in the units of its own kind -- a
+/// dimension as a dimension, a glue as a whole glue -- and `\@settopoint` has to
+/// run on one, since that is what `size10.clo` does with five of them.
+#[test]
+fn the_page_dimensions_are_registers_and_settopoint_rounds_one() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\textwidth=345.678pt\n\
+               \\paperwidth=597.5pt\n\
+               \\baselineskip=12pt plus 1pt\n\
+               \\message{[\\the\\textwidth][\\the\\paperwidth][\\the\\baselineskip]}\n\
+               \\@settopoint\\textwidth\n\
+               \\message{[\\the\\textwidth]}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(
+        out(src),
+        "[345.678pt][597.5pt][12.0pt plus 1.0pt] [345.0pt]"
+    );
+}
+
+/// A glue parameter standing where a NUMBER is wanted, which is `size10.clo:134`.
+///
+/// `\divide\@tempdima\baselineskip` reads the glue as `tex.web` §430 reads it --
+/// the scaled points of the natural width at the front of it -- and writes the
+/// divisor with no `by`, which §407 has to put back whole. Against a
+/// `\baselineskip` of 12pt, 480pt of `\@tempdima` is forty lines.
+#[test]
+fn a_glue_parameter_divides_a_dimension_as_a_number() {
+    let src = "\\documentclass{article}\n\\makeatletter\n\
+               \\baselineskip=12pt\n\
+               \\@tempdima=480pt\n\
+               \\divide\\@tempdima\\baselineskip\n\
+               \\@tempcnta=\\@tempdima\n\
+               \\message{[\\the\\@tempcnta]}\n\
+               \\makeatother\n\\end\n";
+    assert_eq!(out(src), "[40]");
 }
 
 /// `\newtoks` reaches the token registers, and `\newbox` is a number the way

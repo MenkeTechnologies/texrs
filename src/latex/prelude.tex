@@ -197,6 +197,11 @@
 \newcommand{\index}[1]{}
 \newcommand{\setcounter}[2]{}
 \newcommand{\addtocounter}[2]{}
+% \setlength and \addtolength consume their arguments and write nothing. The
+% lengths they name ARE registers now, and latex.ltx's own two lines are two
+% lines -- but they stop on `em', which article.cls writes six times and this
+% engine has no current font to measure. `kernel.tex' says so at length where
+% the port would go.
 \newcommand{\setlength}[2]{}
 \newcommand{\addtolength}[2]{}
 \newcommand{\renewcommandx}[2]{}
@@ -274,9 +279,9 @@
 \newcommand{\midrule}{}
 \newcommand{\bottomrule}{}
 \newcommand{\arraybackslash}{}
-\newcommand{\linewidth}{}
-\newcommand{\textwidth}{}
-\newcommand{\tabcolsep}{}
+% \linewidth, \textwidth and \tabcolsep were stand-ins here too, and a stand-in
+% overwrites the register `kernel.tex' declares -- the prelude is read first.
+% They are declared there now, with the rest of latex.ltx's page dimensions.
 \newcommand{\real}[1]{#1}
 \newcommand{\LaTeX}{LaTeX}
 \newcommand{\TeX}{TeX}
@@ -411,38 +416,16 @@
 \def\tolerance=#1 {}
 \def\hbadness=#1 {}
 \def\emergencystretch=#1 {}
-% The dimension and glue parameters. texrs has no dimen registers, so these
-% carry no value and produce nothing; a `=3em' after one is left in the text,
-% where it is invisible because only \message reaches the output. Naming them
-% is what matters: an undefined one stops the document.
-\newcommand{\parindent}{}
-\newcommand{\parskip}{}
-\newcommand{\baselineskip}{}
-\newcommand{\lineskip}{}
-\newcommand{\parsep}{}
-\newcommand{\topsep}{}
-\newcommand{\partopsep}{}
-\newcommand{\itemsep}{}
-\newcommand{\labelsep}{}
-\newcommand{\labelwidth}{}
-\newcommand{\leftmargin}{}
-\newcommand{\rightmargin}{}
-\newcommand{\columnsep}{}
-\newcommand{\columnwidth}{}
-\newcommand{\textheight}{}
-\newcommand{\paperwidth}{}
-\newcommand{\paperheight}{}
-\newcommand{\hoffset}{}
-\newcommand{\voffset}{}
-\newcommand{\footnotesep}{}
+% The dimension and glue parameters used to be named here and nothing else --
+% texrs had no dimen registers, so a stand-in carried no value and a `=3em'
+% after one was left in the text. It has them now, and `kernel.tex' declares
+% every one of these as the register tex.web or latex.ltx makes it, which is
+% what lets \@settopoint really run. A \newcommand here would
+% overwrite that register with a macro -- the prelude is read BEFORE the kernel
+% -- so the names are gone rather than moved, and the declarations are the
+% kernel's alone. \maxdimen stays because the kernel answers it with a NUMBER
+% (see the section there): it is only ever read, never assigned.
 \newcommand{\maxdimen}{}
-\newcommand{\fboxsep}{}
-\newcommand{\fboxrule}{}
-\newcommand{\arrayrulewidth}{}
-\newcommand{\doublerulesep}{}
-\newcommand{\smallskipamount}{}
-\newcommand{\medskipamount}{}
-\newcommand{\bigskipamount}{}
 \newcommand{\and}{}
 \newcommand{\@ifundefined}[3]{#3}
 \newcommand{\@author}{}

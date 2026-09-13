@@ -2690,24 +2690,42 @@ impl Engine {
         Ok(())
     }
 
+    /// `tex.web` §1240's optional `by`, read as §407's `scan_keyword` reads it.
+    ///
+    /// The keyword is OPTIONAL, so a stream that does not spell it has to come
+    /// back exactly as it was -- §407 ends a failed match with
+    /// `back_list(link(backup_head))`, which puts back the WHOLE list it read.
+    /// Restoring a saved `pending` and then pushing the offending token as well
+    /// put that token back twice whenever it had come from `pending` in the
+    /// first place, and the duplicate was read as the next thing the scanner
+    /// wanted. `\divide\@tempdima\baselineskip` is the form that finds it:
+    /// size10.clo:134 and latex.ltx:10261's
+    /// `\def\@settopoint#1{\divide#1\p@\multiply#1\p@}` both write the divisor
+    /// with no `by`, and the doubled `\p@` became `! Missing number, found
+    /// \p@.`
     fn skip_by(&mut self, lx: &mut Lexer) -> R<()> {
-        while let Some(t) = lx.next_token(&self.cats) {
-            if !t.is_space() {
-                lx.push_back(&[t]);
-                break;
-            }
-        }
-        let save = lx.pending.clone();
+        // Only the letters that MATCHED go in here, which is §407's backup list
+        // exactly: a space in front of the keyword is dropped rather than
+        // stored, and the token that ended the match goes on the end.
+        let mut eaten: Vec<Token> = Vec::new();
         for want in ['b', 'y'] {
-            match lx.next_token(&self.cats) {
-                Some(Token::Char(c, _)) if c.eq_ignore_ascii_case(&want) => {}
-                other => {
-                    lx.pending = save;
-                    if let Some(t) = other {
-                        lx.push_back(&[t]);
-                    }
+            let t = loop {
+                let Some(t) = lx.next_token(&self.cats) else {
+                    lx.push_back(&eaten);
                     return Ok(());
+                };
+                // A space is skipped while nothing has matched yet (§407's
+                // `p = backup_head`); once a letter has, it is a mismatch,
+                // because the letters of a keyword are adjacent.
+                if t.is_space() && eaten.is_empty() {
+                    continue;
                 }
+                break t;
+            };
+            eaten.push(t);
+            if !matches!(&t, Token::Char(c, _) if c.eq_ignore_ascii_case(&want)) {
+                lx.push_back(&eaten);
+                return Ok(());
             }
         }
         Ok(())

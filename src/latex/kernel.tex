@@ -313,15 +313,14 @@
 \newcounter{enumiii}
 \newcounter{enumiv}
 \newcounter{Hfootnote}
-% The three counters LaTeX starts at something other than nought. WRITTEN, AND
-% NOT IN EFFECT: this file is read through `Lowerer::preload', which keeps the
-% definitions a preamble makes and DROPS the commands it emits, and a counter is
-% a register, so an assignment made here is one of the dropped ones. Measured:
-% `\documentclass{article}' then `\message{[\arabic{secnumdepth}]}' answers
-% `[0]'. They are left here because they are what latex.ltx sets and because the
-% moment a preamble's commands survive they will be right; what depends on them
-% -- \pageref answering 0 rather than 1, and the secnumdepth test \@sect@run does
-% not make -- says so where it depends on them.
+% The three counters LaTeX starts at something other than nought. These used to
+% be WRITTEN AND NOT IN EFFECT: `Lowerer::preload' kept the definitions a
+% preamble makes and DROPPED the commands it emitted, and a counter is a
+% register, so every assignment here was one of the dropped ones -- \pageref
+% answered 0 where LaTeX answers 1. `preload' keeps the slot writes now, so
+% these are in effect and the `.aux' this run leaves carries the page a real
+% LaTeX carries: `\newlabel{sec:a}{{1}{1}...}', measured against LaTeX2e
+% 2025-11-01 on the same document.
 \setcounter{page}{1}
 \setcounter{secnumdepth}{2}
 \setcounter{tocdepth}{2}
@@ -1112,6 +1111,65 @@
 \def\@setfontsize#1#2#3{}
 \def\@setsize#1#2#3#4{}
 %
+% ---- \@settopoint ---------------------------------------------------------
+% latex.ltx:10261, carried WORD FOR WORD:
+%
+%     \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+%
+% It rounds a dimension DOWN to a whole point, and it does it with nothing but
+% the two arithmetic primitives. \p@ is `\newdimen\p@ \p@=1pt' (latex.ltx:486),
+% so both operands are a dimension register standing where a NUMBER is wanted:
+% tex.web §430 coerces it to its count of scaled points, which is 65536. The
+% division throws the fraction away (§1236 truncates) and the multiplication
+% puts the points back.
+%
+% Nothing is substituted because nothing had to be. What it needed was the
+% coercion -- `src/lower.rs::peek_int_register' -- and §407's backing up of a
+% failed `by', without which the second `\p@' of `\divide#1\p@' was read twice.
+%
+% It is what stood between article.cls and a load once the four display skips
+% were declared: `texrs: package article needs \@settopoint'. size10.clo calls
+% it five times, on \textwidth, \oddsidemargin, \marginparwidth,
+% \evensidemargin and \topmargin.
+\def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+%
+% ---- \setlength and \addtolength: NOT ported yet --------------------------
+% latex.ltx:10253-10254 are two lines and nothing else:
+%
+%     \def\setlength#1#2{#1 #2\relax}
+%     \def\addtolength#1#2{\advance#1 #2\relax}
+%
+% An assignment and an \advance through the register the argument names -- and
+% every length the standard classes name IS a register now, so the port was
+% tried. It is `prelude.tex's stand-in that is still here, and the reason is
+% the UNIT rather than the macro.
+%
+% `em' and `ex' are read off the CURRENT FONT: tex.web §455 takes the quad and
+% the x-height out of `font_info', this engine has no current font in the
+% expander, and `src/dimen.rs' carries neither unit. article.cls writes six --
+% `\setlength\labelsep{.5em}', `\setlength\leftmargini{2.5em}' and four more --
+% and size10.clo:88 writes a seventh. With the real \setlength in place the
+% class stops at `package article is not loadable: Illegal unit of measure (pt
+% inserted)', which is EARLIER in the file than where the stub leaves it. So
+% the two lines wait on the unit; BUGS.md records `em'/`ex' as absent.
+%
+% ---- \raggedbottom and \flushbottom ---------------------------------------
+% latex.ltx:18328-18331, carried word for word:
+%
+%     \DeclareRobustCommand\raggedbottom{%
+%       \def\@textbottom{\vskip \z@ \@plus.0001fil}\let\@texttop\relax}
+%     \DeclareRobustCommand\flushbottom{%
+%       \let\@textbottom\relax \let\@texttop\relax}
+%
+% Both only DEFINE two names the page builder would read, and a macro body is
+% not expanded where it is written -- so \vskip being a primitive this engine
+% has no vertical list for costs nothing here. article.cls calls one of the two
+% on its own last lines, whichever way \if@twoside went.
+\DeclareRobustCommand\raggedbottom{%
+  \def\@textbottom{\vskip \z@ \@plus.0001fil}\let\@texttop\relax}
+\DeclareRobustCommand\flushbottom{%
+  \let\@textbottom\relax \let\@texttop\relax}
+%
 % ---- \pagenumbering -------------------------------------------------------
 % latex.ltx (ltpage):
 %
@@ -1198,6 +1256,12 @@
 \newcount\@itempenalty
 \newcount\@beginparpenalty
 \newcount\@endparpenalty
+% latex.ltx:22007-22009. The three penalties \@getpen picks from, which
+% article.cls sets on its own lines 118-120 and reads back into the list
+% penalties above.
+\newcount\@lowpenalty
+\newcount\@medpenalty
+\newcount\@highpenalty
 \def\@listI{}
 \let\@listi\@listI
 \def\@listii{}
@@ -1212,26 +1276,101 @@
 \newtoks\everypar
 \newtoks\everymath
 \newtoks\everydisplay
-% tex.web §247 makes these four GLUE parameters of the engine, so latex.ltx
-% never declares them and every class assigns to them as though they were
-% always there -- size10.clo's \normalsize opens
+% tex.web §224 makes these GLUE parameters of the engine, so latex.ltx never
+% declares them and every class assigns to them as though they were always
+% there -- size10.clo's \normalsize opens
 %
 %     \abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@
 %
 % and every size option of every standard class writes the same four lines.
-% texrs has no glue parameters and it does have glue registers, so the four are
+% texrs has no glue parameters and it does have glue registers, so they are
 % declared here exactly as \everypar above is: the store the engine really has,
 % under the name every file assumes. INITEX starts them at zero and the class
 % file is what sets them, so no value is written here either.
 %
-% Undeclared, they were the FIRST thing between article.cls and a load:
-% `texrs: package article needs \abovedisplayskip' on the simplest document
-% there is. What is left after them is BUGS.md's `<factor><internal unit>' --
-% the `10\p@' above -- which is a scanner gap and not a missing name.
+% Undeclared, the four display skips were the FIRST thing between article.cls
+% and a load: `texrs: package article needs \abovedisplayskip' on the simplest
+% document there is. \baselineskip is the next one of them the same file wants,
+% at size10.clo:134 --
+%
+%     \divide\@tempdima\baselineskip
+%
+% which is a glue parameter standing where a NUMBER is wanted (§430's coercion,
+% `src/lower.rs::peek_int_register'), so the divisor is the natural width in
+% scaled points. As an empty macro it divided by nothing at all.
 \newskip\abovedisplayskip
 \newskip\belowdisplayskip
 \newskip\abovedisplayshortskip
 \newskip\belowdisplayshortskip
+\newskip\baselineskip
+\newskip\lineskip
+\newskip\parskip
+\newskip\topskip
+% tex.web §247's DIMENSION parameters, declared for the same reason and in the
+% same way. size10.clo:88-100 sets the first two -- `\setlength\parindent{15\p@}'
+% and `\setlength\maxdepth{.5\topskip}' -- article.cls:87 sets \overfullrule from
+% its draft option, and \lineskiplimit is what plain's \normalbaselines restores.
+% \hoffset and \voffset are here because a document sets them itself.
+\newdimen\parindent
+\newdimen\maxdepth
+\newdimen\overfullrule
+\newdimen\lineskiplimit
+\newdimen\hoffset
+\newdimen\voffset
+% plain.tex:378-383. The skip amounts \smallskip, \medskip and \bigskip are
+% named for, and the three \normalbaselines restores from.
+\newskip\smallskipamount
+\newskip\medskipamount
+\newskip\bigskipamount
+\newskip\normalbaselineskip
+\newskip\normallineskip
+\newdimen\normallineskiplimit
+% latex.ltx:20362-20381. The page dimensions, declared there with \newdimen and
+% set by the size option's .clo -- size10.clo computes all of \textwidth,
+% \textheight, \oddsidemargin, \evensidemargin, \marginparwidth and \topmargin
+% from \paperwidth and \paperheight. A class that found these undefined stopped
+% on the first \setlength: `texrs: package article is not loadable: Unsupported
+% register \textwidth'.
+\newdimen\topmargin
+\newdimen\oddsidemargin
+\newdimen\evensidemargin
+\newdimen\headheight
+\newdimen\headsep
+\newdimen\footskip
+\newdimen\textheight
+\newdimen\textwidth
+\newdimen\columnwidth
+\newdimen\columnsep
+\newdimen\columnseprule
+\newdimen\marginparwidth
+\newdimen\marginparsep
+\newdimen\marginparpush
+\newdimen\paperheight
+\newdimen\paperwidth
+\newdimen\stockheight
+\newdimen\stockwidth
+% latex.ltx's other lengths that article.cls and size10.clo assign to:
+% the footnote rule's space (17648), the float separations (ltfloat), the
+% \fbox and tabular rules (ltboxes, ltarray), and \tabbingsep.
+\newdimen\footnotesep
+\newdimen\arraycolsep
+\newdimen\arrayrulewidth
+\newdimen\doublerulesep
+\newdimen\fboxsep
+\newdimen\fboxrule
+\newdimen\tabbingsep
+\newdimen\tabcolsep
+\newskip\floatsep
+\newskip\textfloatsep
+\newskip\intextsep
+\newskip\dblfloatsep
+\newskip\dbltextfloatsep
+\newskip\@fptop
+\newskip\@fpsep
+\newskip\@fpbot
+\newskip\@dblfptop
+\newskip\@dblfpsep
+\newskip\@dblfpbot
 % latex.ltx:8790-8800. The scratch registers every package helps itself to.
 \newcount\@tempcnta
 \newcount\@tempcntb
@@ -1286,6 +1425,26 @@
 % for reads it as a number -- `\advance\count@\m@ne' -- and none of it assigns
 % to it, which is the only thing a register would add.
 \def\m@ne{-1}
+% latex.ltx:16343 and 17629 allocate the two footnote insertions \@mpfootins
+% and \footins, with plain TeX's insertion allocator.
+%
+% They are written by hand here rather than declared with it, and the NUMBERS
+% are the reason. plain's allocator counts DOWN from 255 and reserves the
+% \count, \dimen, \skip and \box of that one number together, exactly so that an
+% insertion's \skip cannot be a \newskip name's; `src/latex/allocate.rs' has one
+% upward counter per pool, so an insertion would have come out in the low teens
+% and `\skip\footins' -- which is how size10.clo:203 and article.cls:448 reach
+% it -- would have named a glue register \newskip had already given away.
+%
+% So the two are frozen at the numbers a real LaTeX gives them, measured:
+% `\number\footins' is 253 and `\number\@mpfootins' is 254 under LaTeX2e
+% 2025-11-01. Both are clear of the upward pool by 240 names.
+%
+% (The allocator reads the file as TEXT and does not skip comments, so a
+% declaration quoted in one of these notes really allocates. That is why the
+% two are named above rather than written out.)
+\chardef\footins=253
+\chardef\@mpfootins=254
 % latex.ltx:1202-1203. The two keywords, as macros, which is what lets
 % `\@plus2\p@' read as `plus 2pt' when the glue is really scanned.
 \def\@minus{minus}

@@ -1,0 +1,31 @@
+% tex.web §1240 reads `by' with §407's scan_keyword, where the keyword is
+% OPTIONAL: a scan that does not find it ends with `back_list(link(backup_head))'
+% and puts back EVERY token it read, so what follows must read exactly as it
+% would have. latex.ltx:10261 and size10.clo:134 both write the form with no
+% `by' -- `\divide#1\p@' and `\divide\@tempdima\baselineskip' -- so a restore
+% that put one token back twice read the duplicate as the number.
+%
+% The same value is then reached with the keyword and without it, in the same
+% register, so the two spellings have to agree line by line.
+\catcode`\{=1 \catcode`\}=2
+\count0=100
+\count1=7
+\advance\count0\count1
+\message{[\the\count0]}
+\multiply\count0\count1
+\message{[\the\count0]}
+\divide\count0\count1
+\message{[\the\count0]}
+\advance\count0 by\count1
+\message{[\the\count0]}
+\dimen0=10pt
+\dimen1=3pt
+\advance\dimen0\dimen1
+\message{[\the\dimen0]}
+\count2=2
+\multiply\dimen0\count2
+\message{[\the\dimen0]}
+\skip0=4pt plus 1pt
+\advance\dimen0\skip0
+\message{[\the\dimen0]}
+\end

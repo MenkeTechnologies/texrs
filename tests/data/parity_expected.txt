@@ -102,6 +102,8 @@ inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 A B C C C [done]
 #==# ifx_after_edef_conditional.tex
 SAME
+#==# internal_quantity_as_a_number.tex
+[819200] [196608] [-163840] [37.0pt]
 #==# keyword_through_a_macro.tex
 [3.0pt plus 1.0pt minus 2.0pt][1.0pt][4.0pt minus 1.0pt]
 #==# let_alias.tex
@@ -126,6 +128,8 @@ one two
 42--17
 #==# number_too_big.tex
 ! Number too big.l.6 \count1=9999999999                      9[2147483647] )(see the transcript file for additional information
+#==# optional_by_is_put_back.tex
+[107] [749] [107] [114] [13.0pt] [26.0pt] [30.0pt]
 #==# outer_forbidden_use.tex
 Runaway text?[! Forbidden control sequence found while scanning text of \message.<inserted text>                 }<to be read again>                    \x l.7 \message{[\x                ]}[ ! Too many }'s.l.7 \message{[\x]}                  [1] )(see the transcript file for additional information)Output written on case.dvi (1 page, 208 bytes
 #==# param_brace_argument.tex

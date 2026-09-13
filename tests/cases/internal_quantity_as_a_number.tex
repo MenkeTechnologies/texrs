@@ -1,0 +1,30 @@
+% tex.web §430: where an INTEGER is scanned, an internal quantity of any of the
+% four levels is accepted and coerced -- a dimension reads as its count of
+% scaled points, and a glue as the scaled points of the natural width at the
+% front of it. So 12.5pt is 819200 and 3pt plus 2pt is 196608.
+%
+% The standard classes turn on it twice. size10.clo:135 is the coercion spelt
+% out, `\@tempcnta=\@tempdima', and latex.ltx:10261 is the other half:
+%
+%     \def\@settopoint#1{\divide#1\p@\multiply#1\p@}
+%
+% where \p@ is a \dimendef name (\ppt here, since @ is not a letter in INITEX) standing where a NUMBER is, so the divisor is
+% 65536 and the dimension comes back truncated to whole points. The last three
+% lines here are that macro written out, on a dimension with a fraction to lose.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=12.5pt
+\count0=\dimen0
+\message{[\the\count0]}
+\skip0=3pt plus 2pt minus 1pt
+\count1=\skip0
+\message{[\the\count1]}
+\dimen1=-2.5pt
+\count2=\dimen1
+\message{[\the\count2]}
+\dimendef\ppt=3
+\ppt=1pt
+\dimen2=37.9pt
+\divide\dimen2\ppt
+\multiply\dimen2\ppt
+\message{[\the\dimen2]}
+\end
