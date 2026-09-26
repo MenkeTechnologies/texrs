@@ -163,7 +163,7 @@ impl Token {
     /// A multi-letter control sequence prints with a trailing space and a
     /// single-character one does not (`tex.web` §294's `print_cs`) — the rule
     /// that makes `\message{\foo}` read `\foo ` and `\message{\!}` read `\!`.
-    pub fn to_text(&self, escape: char) -> String {
+    pub fn to_text(&self, escape: Esc) -> String {
         match self {
             Token::Char(c, _) => c.to_string(),
             Token::Cs(id) => {
@@ -179,5 +179,31 @@ impl Token {
 
     pub fn is_space(&self) -> bool {
         matches!(self, Token::Char(_, Cat::Space))
+    }
+}
+
+/// The character `\escapechar` puts in front of a control sequence's name when
+/// it is printed, or none (`tex.web` §63's `print_esc` prints nothing for a
+/// value outside 0..255 -- `\escapechar=-1` is how a document asks for a bare
+/// name).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Esc(pub Option<char>);
+
+impl Esc {
+    /// The escape character an `\escapechar` value selects.
+    pub fn from_code(code: i64) -> Self {
+        match u8::try_from(code) {
+            Ok(b) => Esc(Some(char::from(b))),
+            Err(_) => Esc(None),
+        }
+    }
+}
+
+impl std::fmt::Display for Esc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(c) => write!(f, "{c}"),
+            None => Ok(()),
+        }
     }
 }

@@ -30,7 +30,7 @@ use crate::token::{CsId, Token};
 pub const FORMAT_MAGIC: u32 = 0x5458_464D;
 
 /// Bumped whenever what is dumped changes shape. An older file is rebuilt.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// One token, by name rather than by interned id.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -73,7 +73,10 @@ pub struct Format {
     /// The texrs that wrote it. A format is only meaningful to the build that
     /// produced it, exactly as a `.fmt` is to its engine.
     texrs_version: String,
-    escape: char,
+    /// The §236 integer parameters the preamble left different from
+    /// INITEX's, by name. The four date parameters are never among them:
+    /// §1337 calls `fix_date_and_time` AFTER a format is loaded.
+    intpars: Vec<(String, i64)>,
     /// Only the codes that differ from INITEX's table, since most do not.
     catcodes: Vec<(u32, u8)>,
     counts: Vec<(i64, i64)>,
@@ -123,7 +126,12 @@ impl Format {
             magic: FORMAT_MAGIC,
             version: FORMAT_VERSION,
             texrs_version: env!("CARGO_PKG_VERSION").to_string(),
-            escape: engine.escape,
+            intpars: engine
+                .intpars
+                .differences(&crate::intpar::IntPars::new())
+                .into_iter()
+                .filter(|(n, _)| !matches!(n.as_str(), "time" | "day" | "month" | "year"))
+                .collect(),
             catcodes,
             counts,
             meanings,
@@ -133,7 +141,12 @@ impl Format {
 
     /// Put this state into `engine`, and say where the scratch counter was.
     pub fn apply(&self, engine: &mut Engine) -> i64 {
-        engine.escape = self.escape;
+        engine.intpars = crate::intpar::IntPars::new();
+        for (name, v) in &self.intpars {
+            if let Some(i) = crate::intpar::index(name) {
+                engine.intpars.set(i, *v);
+            }
+        }
         engine.cats = CatTable::new();
         for (code, cat) in &self.catcodes {
             if let Some(ch) = char::from_u32(*code) {
@@ -308,7 +321,7 @@ mod tests {
         let mark = format.apply(&mut fresh);
 
         assert_eq!(mark, scratch);
-        assert_eq!(fresh.escape, engine.escape);
+        assert_eq!(fresh.esc(), engine.esc());
         assert_eq!(fresh.cats.get('{'), Cat::BeginGroup);
         assert_eq!(fresh.cats.get('}'), Cat::EndGroup);
         assert_eq!(fresh.cats.get('#'), Cat::Param);

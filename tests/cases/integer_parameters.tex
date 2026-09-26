@@ -1,0 +1,17 @@
+% tex.web S236's integer parameters: assigned with or without `=', read back
+% by \the and \number, used wherever a number is scanned, changed by
+% \advance/\multiply/\divide (a quotient truncates toward zero), restored by a
+% group unless \global, and copied by \let. The oracle loads plain.tex, which
+% sets most of them, so every value read here is one this file assigned.
+\catcode`\{=1 \catcode`\}=2
+\tolerance=5 \advance\tolerance by 7 \multiply\tolerance 3 \divide\tolerance -4
+\message{[\the\tolerance][\number\tolerance]}
+\count1=\tolerance \message{[\the\count1]}
+\ifnum\tolerance<0 \message{negative}\fi
+\pretolerance 250 {\pretolerance=1 \message{[\the\pretolerance]}}
+\message{[\the\pretolerance]}
+{\global\hbadness=77 }\message{[\the\hbadness]}
+\linepenalty=4 \edef\x{\the\linepenalty}\linepenalty=3 \message{[\x][\the\linepenalty]}
+\let\t=\clubpenalty \t=33 \message{[\the\clubpenalty][\meaning\t][\meaning\widowpenalty]}
+\message{[\the\mag][\the\maxdeadcycles][\the\hangafter][\the\endlinechar]}
+\end

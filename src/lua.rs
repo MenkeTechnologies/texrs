@@ -1617,7 +1617,8 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
     ];
     // Everything else on the manual's list: the stomach's state, the output
     // routine's, the token-list parameters, the maths parameters, the tracing
-    // switches and the date. texrs holds none of them anywhere.
+    // switches and the date. The ones that are §236 integer parameters are
+    // held in `crate::intpar` for the TeX side; none is in the chunk's bridge.
     const REST: &[&str] = &[
         "abovedisplayshortskip",
         "abovedisplayskip",
@@ -1727,11 +1728,27 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
              the document, and it is not decided yet where a chunk stands"
         )));
     }
+    // A §236 integer parameter IS held -- `crate::intpar`, where `\the`,
+    // `\number` and an assignment reach it -- but not in the registers a
+    // chunk is handed, so the answer says both halves.
+    let held = match crate::intpar::index(name) {
+        Some(_) => format!(
+            "; texrs holds \\{name} for \\the, \\number and assignment, \
+             but not where a chunk can reach it"
+        ),
+        None => String::new(),
+    };
     if BREAKER.contains(&name) {
         return Ok(Some(format!(
-            "tex.{name} is one of LuaTeX's internal parameters, and texrs holds it \
-             as a constant in crate::linebreak rather than as a register a \
-             document can set"
+            "tex.{name} is one of LuaTeX's internal parameters, and the line \
+             breaker uses a constant in crate::linebreak rather than reading it{held}"
+        )));
+    }
+    if REST.contains(&name) && !held.is_empty() {
+        return Ok(Some(format!(
+            "tex.{name} is one of LuaTeX's internal parameters{held}; what reads \
+             it belongs to the stomach, the output routine or the maths, none of \
+             which is on the path a run takes"
         )));
     }
     if REST.contains(&name) {

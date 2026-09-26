@@ -103,6 +103,8 @@ enum Save {
     /// changed it. The tables are scoped exactly as the category codes are --
     /// measured: 777 inside the group, 555 outside.
     CharCode(crate::charcodes::Table, char, i64),
+    /// One integer parameter (§236) as it stood before a group assigned it.
+    IntPar(usize, i64),
     Count(i64, Option<i64>),
     Meaning(CsId, Option<Meaning>),
     /// The whole intercept registry as it stood before a registration inside
@@ -132,7 +134,9 @@ pub struct Engine {
     optional_defaults: HashMap<CsId, Vec<Token>>,
     pub count: HashMap<i64, i64>,
     pub messages: Vec<String>,
-    pub escape: char,
+    /// §236's integer parameters -- `\escapechar` among them, which is
+    /// why `esc()` reads here.
+    pub intpars: crate::intpar::IntPars,
     /// One frame per open group; each holds the undo records for that group.
     groups: Vec<Vec<Save>>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
@@ -325,7 +329,7 @@ impl Engine {
             optional_defaults: HashMap::new(),
             count: HashMap::new(),
             messages: Vec::new(),
-            escape: '\\',
+            intpars: crate::intpar::IntPars::new(),
             groups: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
@@ -404,6 +408,7 @@ impl Engine {
                 Save::CharCode(t, c, v) => {
                     let _ = self.charcodes.set(t, c, v);
                 }
+                Save::IntPar(i, v) => self.intpars.set(i, v),
                 Save::Count(reg, old) => match old {
                     Some(v) => {
                         self.count.insert(reg, v);
@@ -520,6 +525,78 @@ impl Engine {
         self.count.insert(reg, val);
     }
 
+    /// The escape character `\escapechar` currently selects.
+    pub fn esc(&self) -> crate::token::Esc {
+        crate::token::Esc::from_code(self.intpars.get(crate::intpar::ESCAPE_CHAR))
+    }
+
+    /// Which §236 integer parameter `name` MEANS, if any: the primitive itself
+    /// or a `\let` copy of it, and not a name a document has since redefined.
+    pub fn intpar_cs(&self, name: CsId) -> Option<usize> {
+        match self.meanings.get(&name) {
+            None => crate::intpar::index(name.name()),
+            Some(Meaning::Primitive(p)) => crate::intpar::index(p.name()),
+            Some(_) => None,
+        }
+    }
+
+    /// Assign an integer parameter, saved for the enclosing group unless the
+    /// assignment is `\global` -- in which case, as `set_meaning` does, the
+    /// values the open groups saved are dropped so no `}` puts one back.
+    fn set_intpar(&mut self, i: usize, v: i64) {
+        self.save(Save::IntPar(i, self.intpars.get(i)));
+        if self.global {
+            for frame in &mut self.groups {
+                frame.retain(|s| !matches!(s, Save::IntPar(j, _) if *j == i));
+            }
+        }
+        self.intpars.set(i, v);
+    }
+
+    /// `\tolerance=N` (§1228's `assign_int`): an optional `=` and a number.
+    fn do_intpar_assign(&mut self, lx: &mut Lexer, i: usize) -> R<()> {
+        self.skip_equals(lx)?;
+        let v = self.scan_number(lx, false)?;
+        self.set_intpar(i, v);
+        Ok(())
+    }
+
+    /// The same, for a caller that is lowering. The `\global` prefix is SPENT
+    /// here, as the lowerer's register arms spend it.
+    pub fn compile_time_intpar(&mut self, lx: &mut Lexer, i: usize) -> R<()> {
+        self.global = self.take_global_prefix();
+        let out = self.do_intpar_assign(lx, i);
+        self.global = false;
+        out
+    }
+
+    /// `\advance\tolerance by N` and its two siblings on a parameter (§1238).
+    fn intpar_arith(&mut self, lx: &mut Lexer, i: usize, op: Arith) -> R<()> {
+        self.skip_by(lx)?;
+        let val = self.scan_number(lx, false)?;
+        match arith_int(self.intpars.get(i), val, op) {
+            Some(v) => self.set_intpar(i, v),
+            // §1236 reports through `error`, not `fatal_error`: the run goes
+            // on and the parameter keeps the value it had.
+            None => self.report(lx, "Arithmetic overflow"),
+        }
+        Ok(())
+    }
+
+    /// The lowerer's door to [`Self::intpar_arith`]: `op` is the primitive's
+    /// name, which is what the lowerer holds.
+    pub fn compile_time_intpar_arith(&mut self, lx: &mut Lexer, i: usize, op: &str) -> R<()> {
+        let op = match op {
+            "advance" => Arith::Add,
+            "multiply" => Arith::Mul,
+            _ => Arith::Div,
+        };
+        self.global = self.take_global_prefix();
+        let out = self.intpar_arith(lx, i, op);
+        self.global = false;
+        out
+    }
+
     fn set_cat(&mut self, c: char, cat: Cat) {
         self.save(Save::Cat(c, self.cats.get(c)));
         self.cats.set(c, cat);
@@ -626,6 +703,10 @@ impl Engine {
                 self.do_charcode(lx, t)?
             }
             "count" => self.do_count_assign(lx)?,
+            _ if self.intpar_cs(name).is_some() => {
+                let i = self.intpar_cs(name).expect("just matched");
+                self.do_intpar_assign(lx, i)?
+            }
             "advance" => self.do_arith(lx, Arith::Add)?,
             "multiply" => self.do_arith(lx, Arith::Mul)?,
             "divide" => self.do_arith(lx, Arith::Div)?,
@@ -722,8 +803,8 @@ impl Engine {
                 if let Some(t) = self.take(lx, pending_only) {
                     let text = match &t {
                         Token::Cs(n) if bare => n.name().to_string(),
-                        Token::Cs(n) => format!("{}{}", self.escape, n.name()),
-                        other => other.to_text(self.escape),
+                        Token::Cs(n) => format!("{}{}", self.esc(), n.name()),
+                        other => other.to_text(self.esc()),
                     };
                     let toks: Vec<Token> =
                         text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
@@ -747,8 +828,10 @@ impl Engine {
             // which is what makes `\romannumeral0` the expansion trigger it is.
             "romannumeral" => {
                 let n = self.scan_number(lx, pending_only)?;
-                let toks: Vec<Token> =
-                    roman_int(n).chars().map(|c| Token::Char(c, Cat::Other)).collect();
+                let toks: Vec<Token> = roman_int(n)
+                    .chars()
+                    .map(|c| Token::Char(c, Cat::Other))
+                    .collect();
                 lx.push_back(&toks);
                 Ok(true)
             }
@@ -1615,10 +1698,10 @@ impl Engine {
             // A `\mathchardef` name reads back as `\char` rather than
             // `\mathchar`: both are `Meaning::CharDef`, and telling them apart
             // needs a variant `src/format.rs` also has to serialise.
-            Some(Meaning::CharDef(v)) => format!("{}char\"{v:X}", self.escape),
+            Some(Meaning::CharDef(v)) => format!("{}char\"{v:X}", self.esc()),
             Some(Meaning::CountDef(r)) => self.register_name(*r),
-            Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.escape),
-            Some(Meaning::Primitive(p)) => format!("{}{}", self.escape, p.name()),
+            Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.esc()),
+            Some(Meaning::Primitive(p)) => format!("{}{}", self.esc(), p.name()),
             Some(Meaning::Macro(m)) => {
                 let mut out = String::new();
                 // §1295's `print_cmd_chr` prints the whole thing as ONE escaped
@@ -1631,7 +1714,7 @@ impl Engine {
                     (m.outer, "outer"),
                 ] {
                     if on {
-                        out.push(self.escape);
+                        out.push_str(&self.esc().to_string());
                         out.push_str(word);
                     }
                 }
@@ -1649,8 +1732,13 @@ impl Engine {
             // the list of primitives texrs resolves -- `tests/docs_reference_
             // sections.rs` is what keeps it level with the dispatch -- so it
             // answers which of the two this is.
-            None => match crate::corpus::lookup(&format!("{}{}", self.escape, name.name())) {
-                Some(_) => format!("{}{}", self.escape, name.name()),
+            // A §236 parameter is a primitive whether or not the corpus has an
+            // entry of its own for it.
+            None if crate::intpar::index(name.name()).is_some() => {
+                format!("{}{}", self.esc(), name.name())
+            }
+            None => match crate::corpus::lookup(&format!("\\{}", name.name())) {
+                Some(_) => format!("{}{}", self.esc(), name.name()),
                 None => "undefined".to_string(),
             },
         }
@@ -1658,7 +1746,7 @@ impl Engine {
 
     /// The register a slot number names, spelt as the document would spell it.
     fn register_name(&self, slot: i64) -> String {
-        let e = self.escape;
+        let e = self.esc();
         if slot >= crate::compiler::MUSKIP_BASE {
             let n = (slot - crate::compiler::MUSKIP_BASE) / crate::compiler::SKIP_STRIDE;
             return format!("{e}muskip{n}");
@@ -1737,7 +1825,7 @@ impl Engine {
                 Token::Char(c, _) => out.push(*c),
                 Token::Cs(id) => {
                     let name = id.name();
-                    out.push(self.escape);
+                    out.push_str(&self.esc().to_string());
                     out.push_str(name);
                     if name.chars().all(|c| c.is_alphabetic()) {
                         out.push(' ');
@@ -1758,7 +1846,7 @@ impl Engine {
                 Token::Char(c, _) => out.push(*c),
                 Token::Cs(id) => {
                     let name = id.name();
-                    out.push(self.escape);
+                    out.push_str(&self.esc().to_string());
                     out.push_str(name);
                     // A control WORD carries a trailing space here, however
                     // short: `\b` prints as `\b `. A control sequence made of
@@ -2388,7 +2476,7 @@ impl Engine {
         }
         let argc = match self.scan_optional_bracket(lx)? {
             Some(toks) => {
-                let text: String = toks.iter().map(|t| t.to_text(self.escape)).collect();
+                let text: String = toks.iter().map(|t| t.to_text(self.esc())).collect();
                 text.trim().parse::<usize>().unwrap_or(0).min(9)
             }
             None => 0,
@@ -3025,6 +3113,9 @@ impl Engine {
         let Some(Token::Cs(what)) = lx.next_token(&self.cats) else {
             return Err(TexError("You can't use this after \\advance".into()));
         };
+        if let Some(i) = self.intpar_cs(what) {
+            return self.intpar_arith(lx, i, op);
+        }
         if what.name() != "count" {
             return Err(TexError(format!("Unsupported register \\{}", what.name())));
         }
@@ -3164,6 +3255,10 @@ impl Engine {
             if let Some(table) = crate::charcodes::Table::from_name(name.name()) {
                 let c = self.scan_char_code(lx, pending_only)?;
                 return Ok(sign * self.charcodes.get(table, c));
+            }
+            // §413: a §236 parameter is an internal integer too.
+            if let Some(i) = self.intpar_cs(name) {
+                return Ok(sign * self.intpars.get(i));
             }
             // A `\chardef` constant IS a number here, and a `\countdef` name is
             // the register it stands for -- which is the whole reason plain.tex
@@ -3500,18 +3595,18 @@ impl Engine {
                     // no trailing space after a multi-letter name.
                     if let Some(next) = lx.pending.pop() {
                         out.push_str(&match &next {
-                            Token::Cs(n) => format!("{}{}", self.escape, n.name()),
-                            other => other.to_text(self.escape),
+                            Token::Cs(n) => format!("{}{}", self.esc(), n.name()),
+                            other => other.to_text(self.esc()),
                         });
                     }
                 }
                 Token::Cs(name) => {
                     let name = *name;
                     if !self.try_expand(lx, name, true)? {
-                        out.push_str(&t.to_text(self.escape));
+                        out.push_str(&t.to_text(self.esc()));
                     }
                 }
-                other => out.push_str(&other.to_text(self.escape)),
+                other => out.push_str(&other.to_text(self.esc())),
             }
         }
         lx.pending = saved;
@@ -3793,14 +3888,14 @@ impl Engine {
         args: usize,
     ) -> R<(String, Vec<String>)> {
         let options = match self.scan_optional_bracket(lx)? {
-            Some(toks) => toks.iter().map(|t| t.to_text(self.escape)).collect(),
+            Some(toks) => toks.iter().map(|t| t.to_text(self.esc())).collect(),
             None => String::new(),
         };
         let mut names = Vec::with_capacity(args);
         for _ in 0..args {
             self.skip_spaces(lx);
             let toks = self.read_group_tokens(lx)?;
-            names.push(toks.iter().map(|t| t.to_text(self.escape)).collect());
+            names.push(toks.iter().map(|t| t.to_text(self.esc())).collect());
         }
         Ok((options, names))
     }
@@ -3849,7 +3944,7 @@ impl Engine {
     /// A `{...}` group's text, for a caller outside the expander.
     pub fn read_group_text_pub(&mut self, lx: &mut Lexer) -> R<String> {
         let toks = self.read_group_tokens(lx)?;
-        Ok(toks.iter().map(|t| t.to_text(self.escape)).collect())
+        Ok(toks.iter().map(|t| t.to_text(self.esc())).collect())
     }
 
     /// A `{...}` group's tokens, unexpanded.
@@ -4128,4 +4223,21 @@ pub fn roman_int(mut n: i64) -> String {
             v /= i64::from(POOL[j - 1] - b'0');
         }
     }
+}
+
+/// §1238-§1240 on an integer: `\advance` is a 32-bit word's addition, which
+/// wraps (`tests/cases/advance_wraps_at_32_bits.tex`), while `\multiply` and
+/// `\divide` are §105's `mult_integers` and §106's `x_over_n`, which refuse a
+/// result outside the 32-bit range and a zero divisor -- `None`, for the caller
+/// to report. The quotient truncates toward zero.
+fn arith_int(cur: i64, val: i64, op: Arith) -> Option<i64> {
+    let result = match op {
+        Arith::Add => return Some(i64::from((cur as i32).wrapping_add(val as i32))),
+        Arith::Mul => cur.checked_mul(val),
+        Arith::Div => match val {
+            0 => None,
+            d => cur.checked_div(d),
+        },
+    };
+    result.filter(|v| (i64::from(i32::MIN)..=i64::from(i32::MAX)).contains(v))
 }

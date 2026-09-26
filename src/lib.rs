@@ -42,6 +42,7 @@ pub mod glyf;
 pub mod image;
 pub mod include;
 pub mod intercepts;
+pub mod intpar;
 pub mod io;
 pub mod ir;
 pub mod itar;

@@ -907,6 +907,13 @@ impl Lowerer {
                         .expect("one of the five just matched");
                     self.eng.compile_time_charcode(lx, t)?
                 }
+                // `\tolerance=200`, `\escapechar=-1`: a §236 parameter is
+                // frontend state like a catcode (`crate::intpar` says why), so
+                // the assignment happens while lowering.
+                _ if self.eng.intpar_cs(name).is_some() => {
+                    let i = self.eng.intpar_cs(name).expect("just matched");
+                    self.eng.compile_time_intpar(lx, i)?
+                }
                 "count" => {
                     let reg = self.eng.scan_number_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
@@ -992,6 +999,15 @@ impl Lowerer {
                         self.note_global(&[reg]);
                         out.push(Cmd::SetCount(reg, v));
                     }
+                }
+                // `\advance\tolerance by 5`: the parameter is frontend state,
+                // so the arithmetic is done while lowering.
+                "advance" | "multiply" | "divide" if self.intpar_follows(lx) => {
+                    let Some(Token::Cs(what)) = lx.next_token(&self.eng.cats) else {
+                        unreachable!("intpar_follows saw a control sequence")
+                    };
+                    let i = self.eng.intpar_cs(what).expect("intpar_follows matched it");
+                    self.eng.compile_time_intpar_arith(lx, i, name.name())?
                 }
                 "advance" | "multiply" | "divide" => {
                     let op = match name.name() {
@@ -1440,6 +1456,7 @@ impl Lowerer {
             // `prefixed_command` and nowhere else, which is why this is here
             // rather than at the top of the loop.
             let assigned = crate::expand::Engine::is_assignment(name.name())
+                || self.eng.intpar_cs(name).is_some()
                 || matches!(
                     self.eng.numeric_cs(name),
                     Some(crate::expand::NumericCs::Register(_))
@@ -1594,7 +1611,7 @@ impl Lowerer {
                                 "Unsupported \\edef body: \\the{}",
                                 match other {
                                     Some(Token::Cs(w)) => format!("\\{}", w.name()),
-                                    Some(t) => t.to_text(self.eng.escape),
+                                    Some(t) => t.to_text(self.eng.esc()),
                                     None => String::new(),
                                 }
                             )))
@@ -2393,7 +2410,7 @@ impl Lowerer {
         Ok(self.eng.read_optional_bracket(lx)?.map(|tokens| {
             tokens
                 .iter()
-                .map(|t| t.to_text(self.eng.escape))
+                .map(|t| t.to_text(self.eng.esc()))
                 .collect::<String>()
         }))
     }
@@ -2853,6 +2870,17 @@ impl Lowerer {
 
     /// A number operand: a literal, a register read at run time, or a call into
     /// a compiled `\rust{ … }` block.
+    /// Whether the next token names a §236 integer parameter, leaving it where
+    /// it was.
+    fn intpar_follows(&mut self, lx: &mut Lexer) -> bool {
+        let Some(t) = lx.next_token(&self.eng.cats) else {
+            return false;
+        };
+        let hit = matches!(t, Token::Cs(cs) if self.eng.intpar_cs(cs).is_some());
+        lx.push_back(&[t]);
+        hit
+    }
+
     fn number(&mut self, lx: &mut Lexer) -> R<Num> {
         // A register becomes a slot read rather than a constant, because its
         // value is the run's and not the lowerer's.
@@ -3040,7 +3068,7 @@ impl Lowerer {
                 _ => t,
             };
             let Token::Cs(n) = &t else {
-                text.push_str(&t.to_text(self.eng.escape));
+                text.push_str(&t.to_text(self.eng.esc()));
                 continue;
             };
             let n = *n;
@@ -3096,6 +3124,13 @@ impl Lowerer {
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "count" => {}
+                            // A §236 parameter is frontend state, so its value
+                            // is known now.
+                            Some(Token::Cs(w)) if self.eng.intpar_cs(w).is_some() => {
+                                let i = self.eng.intpar_cs(w).expect("just matched");
+                                text.push_str(&self.eng.intpars.get(i).to_string());
+                                continue;
+                            }
                             // `\the\catcode`\x` reads the catcode table, which
                             // is frontend state here -- `compile_time_catcode`
                             // writes it -- so the answer is known now, exactly
@@ -3207,7 +3242,7 @@ impl Lowerer {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
                             Token::Cs(cs) => cs.name().to_string(),
-                            other => other.to_text(self.eng.escape),
+                            other => other.to_text(self.eng.esc()),
                         });
                     }
                 }
@@ -3237,8 +3272,8 @@ impl Lowerer {
                 "string" => {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
-                            Token::Cs(cs) => format!("{}{}", self.eng.escape, cs.name()),
-                            other => other.to_text(self.eng.escape),
+                            Token::Cs(cs) => format!("{}{}", self.eng.esc(), cs.name()),
+                            other => other.to_text(self.eng.esc()),
                         });
                     }
                 }
@@ -3432,7 +3467,7 @@ impl Lowerer {
                     out.push(self.case_chain(value, branches));
                 }
                 _ if self.eng.is_macro(n) => self.eng.expand_macro_pending(work, n)?,
-                _ => text.push_str(&t.to_text(self.eng.escape)),
+                _ => text.push_str(&t.to_text(self.eng.esc())),
             }
         }
         if !text.is_empty() {
@@ -3668,7 +3703,7 @@ impl Lowerer {
                     lx.push_back(std::slice::from_ref(&t));
                     let body = self.eng.read_balanced_group(lx)?;
                     let body = self.eng.expand_macros_only(&body)?;
-                    let escape = self.eng.escape;
+                    let escape = self.eng.esc();
                     name = body.iter().map(|t| t.to_text(escape)).collect();
                     // A control word's `to_text` writes the space that ends its
                     // name, and a file name has no spaces in it.

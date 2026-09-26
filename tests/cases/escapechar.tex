@@ -1,0 +1,14 @@
+% \escapechar is the character tex.web S63's print_esc writes in front of a
+% control sequence's name -- in \string, \meaning and a \message -- and a
+% value outside 0..255 means none at all. A group restores it; \global
+% does not let the group restore it.
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\escapechar][\string\foo]}
+{\escapechar=-1 \message{[\string\foo][\meaning\relax]}}
+{\escapechar=256 \message{[\string\foo]}}
+{\escapechar=`\A \message{[\string\foo][\meaning\tolerance]}\message{\relax}}
+\message{[\string\foo]}
+{\global\escapechar=`\! }\message{[\string\foo][\meaning\foo]}
+\def\m{\x}\message{[\meaning\m]}
+\escapechar=92 \message{[\string\foo]}
+\end
