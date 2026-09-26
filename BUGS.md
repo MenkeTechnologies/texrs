@@ -240,9 +240,9 @@ each necessary and none sufficient, and the stack was only ever visible from the
 bottom — the lost family could not be seen before a sans family existed to lose,
 and that could not be seen before `\titleformat` delivered anything at all.
 
-- **The Emacs mode's own version is five releases behind.**
+- **The Emacs mode's own version is behind the crate's.**
   `editors/emacs/texrs-mode.el` declares `;; Version: 0.1.0` while the crate is
-  at 0.6.0. It is a tracked file carrying a version that nothing stamps and
+  at 0.6.1. It is a tracked file carrying a version that nothing stamps and
   nothing checks: `scripts/bump.sh` stamps seven files and `tests/version_sync.rs`
   reads those same seven, and this is an eighth. The IntelliJ plugin's
   `gradle.properties` IS in both, so the convention is that an editor plugin
