@@ -46,8 +46,10 @@ passing, so the list is a claim the harness enforces rather than a note.
   built from broken strings rather than a node list with breakpoint indices, so
   `src/postline.rs`'s §877-§890 assembly and `src/page.rs`'s page builder are
   still a library beside the path a `--dvi` run takes rather than the path
-  itself. `\tolerance`, `\pretolerance` and the demerit weights are constants
-  in `src/linebreak.rs` rather than registers a document can set. Every
+  itself. `\tolerance`, `\pretolerance` and the demerit weights are §236
+  parameters a document can set and read back (`src/intpar.rs`), but the
+  breaker in `src/linebreak.rs` uses its own constants rather than reading
+  them. Every
   document that both engines set now reaches STRUCTURE; what separates that
   from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
   and §607-§615's compact movement encoding.

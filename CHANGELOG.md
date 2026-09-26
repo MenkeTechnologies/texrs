@@ -8,6 +8,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The 55 integer parameters of `tex.web` §236 (`\tolerance`, `\escapechar`,
+  `\mag`, `\time`, …) were undefined control sequences. They are frontend
+  state beside the catcode table now: assigned with or without `=`, read by
+  `\the` and `\number` and wherever a number is scanned, changed by
+  `\advance`/`\multiply`/`\divide`, restored by a group unless `\global`,
+  copied by `\let`, and carried by a format. `\escapechar` is what `\string`,
+  `\meaning` and a `\message` print before a control sequence's name, and a
+  value outside 0..255 prints none. Pinned by `tests/cases/escapechar.tex`
+  and `integer_parameters.tex` against tex.
 - Including a page of one PDF in another (`include`), ported from
   `pdf_include_page` in `xdvipdfmx`. This is what the PDF reader was for: the
   commonest figure in a LaTeX document is another PDF. A page cannot be copied

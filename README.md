@@ -270,6 +270,13 @@ than none.
   by 5pt` reads back `15.0pt`; `\skip0=3pt plus 1fil` reads back with its stretch.
   Box registers are the exception — there is no `\setbox`, so every one is
   void, which is what `\ifvoid`, `\ifhbox` and `\ifvbox` answer.
+- The integer parameters of `tex.web` §236 — `\tolerance`, `\escapechar`,
+  `\mag`, `\time` and the rest — at INITEX's values (§240) and the local
+  clock's date (§241): assigned, read by `\the`/`\number` and wherever a
+  number is scanned, changed by `\advance`/`\multiply`/`\divide`, scoped by
+  groups. `\escapechar` decides what `\string`, `\meaning` and `\message`
+  print in front of a name, and `-1` prints nothing. The line breaker and page
+  builder still use their own constants rather than reading the rest.
 - `\message`.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's.
@@ -388,8 +395,8 @@ routine over `\box255` (`src/page.rs`, §967-§1028). Maths is there too: `$…$
 converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
 `fontdimen`s (`src/math.rs`).
 
-What that leaves: `\tolerance`, `\pretolerance` and the demerit weights are
-constants rather than registers the document can set, and the shipper is handed
+What that leaves: `\tolerance`, `\pretolerance` and the demerit weights can be
+set and read back, but the breaker uses its own constants rather than them, and the shipper is handed
 line boxes built from already-broken strings rather than a node list, so
 `src/postline.rs` and `src/page.rs` are a library beside the path a run takes
 rather than the path itself.
