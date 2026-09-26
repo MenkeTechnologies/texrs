@@ -259,9 +259,10 @@ than none.
 - `^^X` notation.
 - `\def` with undelimited *and* delimited parameters (`\def\pair#1,#2.{...}`),
   `##`, and nested definitions.
-- `\csname`/`\endcsname`, `\string`, `\the`, `\number`, `\expandafter`.
+- `\csname`/`\endcsname`, `\string`, `\the`, `\number`, `\romannumeral`,
+  `\jobname`, `\expandafter`.
 - `\let`, `\edef`/`\xdef`, `\gdef`, `\global`, `\begingroup`/`\endgroup`.
-- Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\ifcase`
+- Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\if`, `\ifcat`, `\ifcase`
   with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.
 - Groups, which scope the macro table AND the count registers they write.
 - Registers: `\count`, `\dimen`, `\skip`, `\toks` and `\muskip`, with `` `x ``
