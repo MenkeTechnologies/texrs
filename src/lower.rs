@@ -3322,6 +3322,15 @@ impl Lowerer {
                     flush!();
                     out.extend(if same { t_ops } else { e_ops });
                 }
+                // Character codes and categories are frontend facts too, so
+                // `\if` and `\ifcat` are decided here as `\ifx` is. They were
+                // not named, so a message printed the test and both arms.
+                "if" | "ifcat" => {
+                    let same = self.eng.if_pending(work, n.name())?;
+                    let (t_ops, e_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.extend(if same { t_ops } else { e_ops });
+                }
                 // Both ask the macro table a question, which is a FRONTEND
                 // fact -- so they are decided here, exactly as `\iftrue` and
                 // `\ifx` above are, rather than lowered to a branch over a

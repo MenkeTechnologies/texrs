@@ -869,12 +869,12 @@ impl Engine {
                 let b = self.take(lx, pending_only);
                 self.meanings_equal(a.as_ref(), b.as_ref())
             }
-            "if" => {
-                // `\if` compares CHARACTER CODES after expansion; a control
-                // sequence compares equal to any other control sequence.
-                let a = self.expand_one_char(lx, pending_only)?;
-                let b = self.expand_one_char(lx, pending_only)?;
-                a == b
+            // `\if` compares CHARACTER CODES after expansion and `\ifcat`
+            // CATEGORIES; see `if_operand` for what each operand reads as.
+            "if" | "ifcat" => {
+                let a = self.if_operand(lx, pending_only)?;
+                let b = self.if_operand(lx, pending_only)?;
+                Self::if_operands_match(name, a, b)
             }
             // `tex.web` §503's box conditionals. Each reads an eight-bit
             // register number (§433) and asks what is in that box register: is
@@ -1050,23 +1050,47 @@ impl Engine {
         }
     }
 
-    /// Expand until a character token appears, for `\if`'s code comparison.
-    fn expand_one_char(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+    /// One operand of `\if` or `\ifcat`, as `tex.web` §506 reads it: expand
+    /// until an unexpandable token, then take its character code and its
+    /// command. A control sequence `\let` to a character stands for that
+    /// character -- `\let\x=a` makes `\if\x a` true -- and any other one reads
+    /// as code 256 and command `\relax`, which `None` stands for here, so every
+    /// such control sequence compares equal to every other.
+    fn if_operand(&mut self, lx: &mut Lexer, pending_only: bool) -> R<(u32, Option<Cat>)> {
         loop {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing token for \\if".into()));
             };
             match &t {
-                Token::Char(c, _) => return Ok(*c),
+                Token::Char(c, cat) => return Ok((*c as u32, Some(*cat))),
                 Token::Cs(n) => {
                     let n = *n;
-                    if !self.try_expand(lx, n, pending_only)? {
-                        // An unexpandable control sequence compares as itself.
-                        return Ok('\u{0}');
+                    if self.try_expand(lx, n, pending_only)? {
+                        continue;
                     }
+                    return Ok(match self.meanings.get(&n) {
+                        Some(Meaning::Char(c, cat)) => (*c as u32, Some(*cat)),
+                        _ => (256, None),
+                    });
                 }
             }
         }
+    }
+
+    /// §507: `\if` decides on the codes, `\ifcat` on the commands.
+    fn if_operands_match(name: &str, a: (u32, Option<Cat>), b: (u32, Option<Cat>)) -> bool {
+        match name {
+            "ifcat" => a.1 == b.1,
+            _ => a.0 == b.0,
+        }
+    }
+
+    /// `\if`/`\ifcat` for a `\message` body, which reads its tokens pending:
+    /// whether the two operands match.
+    pub fn if_pending(&mut self, work: &mut Lexer, name: &str) -> R<bool> {
+        let a = self.if_operand(work, true)?;
+        let b = self.if_operand(work, true)?;
+        Ok(Self::if_operands_match(name, a, b))
     }
 
     // ── definitions ──────────────────────────────────────────────────────

@@ -1,0 +1,20 @@
+% \if compares character CODES and \ifcat CATEGORIES, after expanding each
+% operand to an unexpandable token (tex.web 506-507). A control sequence \let
+% to a character stands for that character; any other unexpandable control
+% sequence reads as code 256 and command \relax, so all of them compare equal.
+% \ifcat was an unsupported conditional, and inside a \message neither was
+% decided: the test and both arms were printed as text.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\ifcat a b Y\else N\fi][\if aa Y\else N\fi][\ifcat 1a Y\else N\fi]}
+\if aa\message{T1}\else\message{F1}\fi
+\ifcat a1\message{T2}\else\message{F2}\fi
+\let\x=a
+\message{[\if\x a Y\else N\fi][\ifcat\x b Y\else N\fi][\ifcat\relax\def Y\else N\fi][\if\relax\x Y\else N\fi]}
+\def\a{b}\def\c{bz}
+\message{[\if\a b Y\else N\fi][\if\c Y\else N\fi]}
+\let\bg={ \ifcat\bg{\message{T3}\else\message{F3}\fi
+\chardef\q=65
+\message{[\if\q A Y\else N\fi][\ifcat\q\relax Y\else N\fi]}
+\edef\z{\ifcat ab Y\else N\fi}\message{\meaning\z}
+\message{[\ifcat 1. Y\else N\fi][\if 1. Y\else N\fi]}
+\end

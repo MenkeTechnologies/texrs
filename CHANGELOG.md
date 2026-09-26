@@ -55,6 +55,16 @@ All notable changes to texrs are recorded here. The format follows
   `\begingroup\catcode61\catcode48\catcode32=10\relax`, and behind it
   `bookmark`, `kvoptions`, `kvsetkeys`, `pdftexcmds`, `infwarerr` and
   `etexcmds`. The four §247 display glue parameters exist with them.
+- `\jobname` (`tex.web` §472): the input file's name without directory or
+  extension, `-jobname=NAME` when given, `texput` otherwise -- in running text
+  and inside a `\message`. It was an undefined control sequence. An explicit
+  `-jobname` is part of the bytecode cache key, since the name is expanded into
+  the chunk.
+- `\ifcat`, and `\if`/`\ifcat` inside a `\message` (`tex.web` §506-§507).
+  `\ifcat` stopped the run as an unsupported conditional, and a message printed
+  either test and both of its arms as text. A control sequence `\let` to a
+  character now stands for that character in both, where `\if` read every
+  control sequence as code 0.
 - LaTeX's own classes are known without a `.cls` to read. `class_declares_chapters`
   read the file `kpsewhich` points at, so a machine with no TeX installation read
   every class as `report`'s and an article's first section wrote

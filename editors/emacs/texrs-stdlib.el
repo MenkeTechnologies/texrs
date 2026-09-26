@@ -220,7 +220,7 @@
     (puthash "\\else" "\\else  —  Start the false arm of a conditional. [Conditionals]" table)
     (puthash "\\or" "\\or  —  Start the next case of an `\\ifcase`: the case before the first `\\or` is 0, and each `\\or` moves to the next. [Conditionals]" table)
     (puthash "\\fi" "\\fi  —  End a conditional. [Conditionals]" table)
-    (puthash "\\ifcat" "\\ifcat  —  RECOGNISED BUT NOT EVALUATED. [Conditionals]" table)
+    (puthash "\\ifcat" "\\ifcat  —  Compare two category codes after expansion, reading each operand as `\\if` does (`tex.web` §506-§507): a control sequence `\\let` to a character has that character's category, and any other one reads as `\\relax`, so `\\ifcat\\relax\\def` is true and `\\ifcat a1` is false. [Conditionals]" table)
     (puthash "\\ifdim" "\\ifdim  —  Compare two dimensions. [Conditionals]" table)
     (puthash "\\ifvoid" "\\ifvoid  —  Is box register N empty? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
     (puthash "\\ifhbox" "\\ifhbox  —  Does box register N hold an \\hbox? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)

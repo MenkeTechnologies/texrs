@@ -106,6 +106,8 @@ OUT IN OUT
 inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 #==# hash_hash.tex
 [A|B]
+#==# if_ifcat.tex
+[N][ Y][N] T1 F2 [ Y][ Y][Y][N] [ Y][N] T3 [N][Y] macro:-> Y [ Y][N]
 #==# ifcase_selector.tex
 A B C C C [done]
 #==# ifx_after_edef_conditional.tex

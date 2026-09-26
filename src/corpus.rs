@@ -237,7 +237,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\if",
         "Conditionals",
-        "Compare two character codes after expansion. A control sequence compares equal to any OTHER control sequence, because neither has a character code to compare \u{2014} that is `tex.web` \u{a7}506's rule, not a shortcut. Both sides are expanded first, so `\\if\\a\\b` tests what the macros produce, not their names.",
+        "Compare two character codes after expansion. A control sequence `\\let` to a character stands for that character (`\\let\\x=a` makes `\\if\\x a` true); any other control sequence compares equal to any OTHER control sequence, because neither has a character code to compare \u{2014} that is `tex.web` \u{a7}506's rule, not a shortcut. Both sides are expanded first, so `\\if\\a\\b` tests what the macros produce, not their names. Decided in running text and inside a `\\message` alike.",
         "\\if<token><token> <true>\\else <false>\\fi",
     ),
     (
@@ -267,7 +267,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ifcat",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED. Compares category codes; texrs skips the construct correctly so an unbalanced branch cannot confuse the scanner, but cannot decide it. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
+        "Compare two category codes after expansion, reading each operand as `\\if` does (`tex.web` \u{a7}506-\u{a7}507): a control sequence `\\let` to a character has that character's category, and any other one reads as `\\relax`, so `\\ifcat\\relax\\def` is true and `\\ifcat a1` is false. Decided in running text and inside a `\\message` alike.",
         "\\ifcat<token><token> <true>\\else <false>\\fi",
     ),
     (
