@@ -66,6 +66,8 @@ pub mod ops {
     /// than a run of arithmetic ops because §107's truncation and §460's clamp
     /// are the port, and one Rust function is where they stay readable.
     pub const SCALE_DIMEN: u16 = 4015;
+    /// Append a number as `\romannumeral` writes it: one argument, the value.
+    pub const MSG_ROMAN: u16 = 4016;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -397,6 +399,11 @@ impl Compiler {
                 MsgOp::Dimen(n) => {
                     self.num(n)?;
                     self.b.emit(Op::CallBuiltin(ops::MSG_DIMEN, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
+                MsgOp::Roman(n) => {
+                    self.num(n)?;
+                    self.b.emit(Op::CallBuiltin(ops::MSG_ROMAN, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::If {

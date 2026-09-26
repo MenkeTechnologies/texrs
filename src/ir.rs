@@ -82,6 +82,9 @@ pub enum MsgOp {
     /// is written, so this carries the same `Num` and asks the runtime for
     /// TeX's `print_scaled` instead of a plain integer.
     Dimen(Num),
+    /// A number written as lowercase roman numerals (`\romannumeral`), which
+    /// a register's run-time value needs as much as `\number` does.
+    Roman(Num),
     /// A glue, rendered from its four slots: natural, stretch, shrink and the
     /// packed orders.
     Glue([Num; 4]),
@@ -322,6 +325,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
             MsgOp::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
             MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
             MsgOp::Dimen(n) => out.push_str(&format!("{pad}Dimen {}\n", num_text(n))),
+            MsgOp::Roman(n) => out.push_str(&format!("{pad}Roman {}\n", num_text(n))),
             MsgOp::Glue(parts) => out.push_str(&format!("{pad}Glue {}\n", num_text(&parts[0]))),
             MsgOp::MuGlue(parts) => out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0]))),
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),

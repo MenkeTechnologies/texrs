@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">167</div>
+            <div class="stat-val">168</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -195,6 +195,8 @@
             <tr><td><code>\end</code></td><td>Stop the run, and ship what it built. A document that set text comes out as <code>Output written on NAME.pdf (N pages, N bytes).</code>; one that only sent messages reports <code>No pages of output.</code>, which is what real tex says for every case in the parity corpus and why the contract for those is still the <code>\message</code> stream.</td><td><pre>\end</pre></td></tr>
             <tr><td><code>\detokenize</code></td><td>The tokens of <code>{...}</code> written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.</td><td><pre>\message{\detokenize{\a b}}   % =&gt; \a b</pre></td></tr>
             <tr><td><code>\csstring</code></td><td><code>\string</code> without the escape character: <code>\csstring\foo</code> is <code>foo</code> where <code>\string\foo</code> is <code>\foo</code>. A LuaTeX primitive.</td><td><pre>\message{\csstring\foo}   % =&gt; foo</pre></td></tr>
+            <tr><td><code>\romannumeral</code></td><td>A number as lowercase roman numerals, by tex.web §69's <code>print_roman_int</code>: <code>\romannumeral 1984</code> is <code>mcmlxxxiv</code>. Zero and negative numbers produce NOTHING, which is why <code>\romannumeral0</code> or <code>\romannumeral-</code>0<code> is the classic way to force expansion: the number scan expands everything up to the first non-digit and then vanishes. Expandable, so it works in running text, in a number position and inside a </code>\message<code>.</code></td><td><pre>\romannumeral&lt;number&gt;
+\message{\romannumeral 1984}   % =&gt; mcmlxxxiv</pre></td></tr>
             <tr><td><code>\jobname</code></td><td>The job's name, as characters (tex.web §472): <code>-jobname=NAME</code> when the command line gives one, otherwise the input file's name without its directory or extension, and <code>texput</code> when the input did not come from a file. Expandable, so it works in running text and inside a <code>\message</code> alike.</td><td><pre>texrs report.tex
 \message{\jobname}   % =&gt; report</pre></td></tr>
             <tr><td><code>\Uchar</code></td><td>The character with the given code: <code>\Uchar65</code> is <code>A</code>. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.</td><td><pre>\message{\Uchar65\Uchar97}   % =&gt; Aa</pre></td></tr>
@@ -646,6 +648,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>TRANSCRIPT_NOTICE</code></td><td><code>4013</code></td><td>§1335's `(see the transcript file for additional information)`, written only if something was reported during the run. No arguments.</td></tr>
             <tr><td><code>MSG_MUGLUE</code></td><td><code>4014</code></td><td>Append a MATH glue, written as TeX writes one: the same four arguments `MSG_GLUE` takes, with `mu` for the unit.</td></tr>
             <tr><td><code>SCALE_DIMEN</code></td><td><code>4015</code></td><td>`tex.web` §453's `&lt;factor&gt;&lt;internal unit&gt;`: the register's value, the factor's integer part, and its fraction in 65536ths. A builtin rather than a run of arithmetic ops because §107's truncation and §460's clamp are the port, and one Rust function is where they stay readable.</td></tr>
+            <tr><td><code>MSG_ROMAN</code></td><td><code>4016</code></td><td>Append a number as `\romannumeral` writes it: one argument, the value.</td></tr>
           </tbody>
         </table>
       </section>

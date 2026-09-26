@@ -270,6 +270,14 @@ fn b_msg_dimen(vm: &mut VM, _argc: u8) -> Value {
     Value::Int(0)
 }
 
+/// Append a number as `\romannumeral` writes it (`tex.web` §69).
+fn b_msg_roman(vm: &mut VM, _argc: u8) -> Value {
+    let n = vm.pop().to_int();
+    let text = crate::expand::roman_int(n);
+    BUILDING.with(|b| b.borrow_mut().push_str(&text));
+    Value::Int(0)
+}
+
 /// Append a glue the way TeX writes one.
 fn b_msg_glue(vm: &mut VM, _argc: u8) -> Value {
     append_glue(vm, "pt")
@@ -304,6 +312,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
+    vm.register_builtin(ops::MSG_ROMAN, b_msg_roman);
     vm.register_builtin(ops::MSG_GLUE, b_msg_glue);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
     vm.register_builtin(ops::SCALE_DIMEN, b_scale_dimen);

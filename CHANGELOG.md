@@ -65,6 +65,10 @@ All notable changes to texrs are recorded here. The format follows
   either test and both of its arms as text. A control sequence `\let` to a
   character now stands for that character in both, where `\if` read every
   control sequence as code 0.
+- `\romannumeral` (`tex.web` §69's `print_roman_int`), in running text, in a
+  number position and inside a `\message`, where a register is read when the
+  message runs. Zero and negatives produce nothing, so `\romannumeral0` works
+  as the expansion trigger packages use. It was undefined.
 - LaTeX's own classes are known without a `.cls` to read. `class_declares_chapters`
   read the file `kpsewhich` points at, so a machine with no TeX installation read
   every class as `report`'s and an article's first section wrote

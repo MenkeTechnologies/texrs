@@ -3212,6 +3212,15 @@ impl Lowerer {
                     }
                 }
                 // `\Uchar<number>` is the character with that code.
+                // `\romannumeral<number>` is expandable: the numeral, as text.
+                // A register is read when the message runs, as `\number` reads one.
+                "romannumeral" => match self.msg_number(work)? {
+                    Num::Literal(n) => text.push_str(&crate::expand::roman_int(n)),
+                    n => {
+                        flush!();
+                        out.push(MsgOp::Roman(n));
+                    }
+                },
                 "Uchar" => {
                     let code = self.eng.scan_number_pending(work)?;
                     match u32::try_from(code).ok().and_then(char::from_u32) {

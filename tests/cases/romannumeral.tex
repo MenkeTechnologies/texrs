@@ -1,0 +1,13 @@
+% \romannumeral writes a number as lowercase roman numerals (tex.web 69's
+% print_roman_int, over the pool string "m2d5c2l5x2v5i"). Zero and negative
+% numbers write nothing, which is what makes \romannumeral0 the expansion
+% trigger macro packages use. It was undefined: a \message printed its name.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\romannumeral 1984][\romannumeral 4][\romannumeral 9][\romannumeral 3999]}
+\message{[\romannumeral 0][\romannumeral -5][\romannumeral 40][\romannumeral 90][\romannumeral 400]}
+\count1=14
+\message{[\romannumeral\count1][\romannumeral 5000]}
+\edef\r{\romannumeral 1984}\message{\meaning\r}
+\def\x{12}\edef\y{\romannumeral0 \x}\message{[\meaning\y]}
+\count2=\romannumeral0 12 \message{\the\count2}
+\end

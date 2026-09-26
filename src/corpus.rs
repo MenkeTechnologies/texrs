@@ -520,6 +520,12 @@ pub const CORPUS: &[Entry] = &[
         "\\message{\\csstring\\foo}   % => foo",
     ),
     (
+        "\\romannumeral",
+        "Expansion",
+        "A number as lowercase roman numerals, by tex.web \u{a7}69's `print_roman_int`: `\\romannumeral 1984` is `mcmlxxxiv`. Zero and negative numbers produce NOTHING, which is why `\\romannumeral0` or `\\romannumeral-`0` is the classic way to force expansion: the number scan expands everything up to the first non-digit and then vanishes. Expandable, so it works in running text, in a number position and inside a `\\message`.",
+        "\\romannumeral<number>\n\\message{\\romannumeral 1984}   % => mcmlxxxiv",
+    ),
+    (
         "\\jobname",
         "Expansion",
         "The job's name, as characters (tex.web \u{a7}472): `-jobname=NAME` when the command line gives one, otherwise the input file's name without its directory or extension, and `texput` when the input did not come from a file. Expandable, so it works in running text and inside a `\\message` alike.",

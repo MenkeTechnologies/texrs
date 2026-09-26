@@ -742,6 +742,16 @@ impl Engine {
             // `\jobname` is a `convert` primitive too (§470, §472): the job's name
             // as character tokens, which §464's `str_toks` makes category 12
             // except for a space, which stays a space.
+            // `\romannumeral` (§470): the number in lowercase roman numerals,
+            // as category-12 characters; zero and negatives produce nothing,
+            // which is what makes `\romannumeral0` the expansion trigger it is.
+            "romannumeral" => {
+                let n = self.scan_number(lx, pending_only)?;
+                let toks: Vec<Token> =
+                    roman_int(n).chars().map(|c| Token::Char(c, Cat::Other)).collect();
+                lx.push_back(&toks);
+                Ok(true)
+            }
             "jobname" => {
                 let toks: Vec<Token> = crate::lua::jobname()
                     .chars()
@@ -4085,4 +4095,37 @@ fn validate_params(params: &[Token]) -> R<()> {
         }
     }
     Ok(())
+}
+
+/// `tex.web` §69's `print_roman_int`, over the same pool string
+/// `"m2d5c2l5x2v5i"`: each letter is followed by the divisor that gives the
+/// next one's value, and a subtractive pair (`cm`, `iv`) is found by looking
+/// one or two letters ahead. A number that is not positive prints nothing.
+pub fn roman_int(mut n: i64) -> String {
+    const POOL: &[u8] = b"m2d5c2l5x2v5i";
+    let mut out = String::new();
+    let mut j = 0usize;
+    let mut v = 1000i64;
+    loop {
+        while n >= v {
+            out.push(POOL[j] as char);
+            n -= v;
+        }
+        if n <= 0 {
+            return out;
+        }
+        let mut k = j + 2;
+        let mut u = v / i64::from(POOL[k - 1] - b'0');
+        if POOL[k - 1] == b'2' {
+            k += 2;
+            u /= i64::from(POOL[k - 1] - b'0');
+        }
+        if n + u >= v {
+            out.push(POOL[k] as char);
+            n += u;
+        } else {
+            j += 2;
+            v /= i64::from(POOL[j - 1] - b'0');
+        }
+    }
 }
