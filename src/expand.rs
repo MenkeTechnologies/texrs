@@ -739,6 +739,17 @@ impl Engine {
                 }
                 Ok(true)
             }
+            // `\jobname` is a `convert` primitive too (§470, §472): the job's name
+            // as character tokens, which §464's `str_toks` makes category 12
+            // except for a space, which stays a space.
+            "jobname" => {
+                let toks: Vec<Token> = crate::lua::jobname()
+                    .chars()
+                    .map(|c| Token::Char(c, if c == ' ' { Cat::Space } else { Cat::Other }))
+                    .collect();
+                lx.push_back(&toks);
+                Ok(true)
+            }
             // `\meaning` is a `convert` primitive (`tex.web` §470), so it is
             // expandable and belongs beside `\string` rather than in the
             // executor: it turns the NEXT token into the characters §296's

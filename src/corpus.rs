@@ -520,6 +520,12 @@ pub const CORPUS: &[Entry] = &[
         "\\message{\\csstring\\foo}   % => foo",
     ),
     (
+        "\\jobname",
+        "Expansion",
+        "The job's name, as characters (tex.web \u{a7}472): `-jobname=NAME` when the command line gives one, otherwise the input file's name without its directory or extension, and `texput` when the input did not come from a file. Expandable, so it works in running text and inside a `\\message` alike.",
+        "texrs report.tex\n\\message{\\jobname}   % => report",
+    ),
+    (
         "\\Uchar",
         "Expansion",
         "The character with the given code: `\\Uchar65` is `A`. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.",

@@ -766,29 +766,43 @@ fn fold_registers(cmds: &[Cmd], into: &mut HashMap<i64, i64>) {
     }
 }
 
-/// The job name, which nothing threads into the lowerer.
+/// A job name given outright -- by [`set_jobname`] or `-jobname` -- rather than
+/// taken from the input file's name.
 ///
-/// `-jobname` and the input file are on the command line, and that is where
-/// this reads them when nothing has called [`set_jobname`]. tex's own default
-/// for input that came from the terminal rather than a file is `texput`.
-fn jobname() -> String {
+/// `\jobname` is expanded while LOWERING, so it is baked into the bytecode, and
+/// the bytecode cache is keyed on the file. A name that is not the file's own
+/// has to be part of that key, or a run with `-jobname=b` is served the chunk a
+/// run with `-jobname=a` compiled.
+pub fn explicit_jobname() -> Option<String> {
     if let Some(j) = JOBNAME.with(|j| j.borrow().clone()) {
-        return j;
+        return Some(j);
     }
     let mut args = std::env::args().skip(1);
-    let mut file = None;
     while let Some(a) = args.next() {
         if let Some(v) = a
             .strip_prefix("-jobname=")
             .or_else(|| a.strip_prefix("--jobname="))
         {
-            return v.to_string();
+            return Some(v.to_string());
         }
         if a == "-jobname" || a == "--jobname" {
-            if let Some(v) = args.next() {
-                return v;
-            }
+            return args.next();
         }
+    }
+    None
+}
+
+/// The job name, which nothing threads into the lowerer.
+///
+/// `-jobname` and the input file are on the command line, and that is where
+/// this reads them when nothing has called [`set_jobname`]. tex's own default
+/// for input that came from the terminal rather than a file is `texput`.
+pub(crate) fn jobname() -> String {
+    if let Some(j) = explicit_jobname() {
+        return j;
+    }
+    let mut file = None;
+    for a in std::env::args().skip(1) {
         if file.is_none() && !a.starts_with('-') && !a.starts_with('\\') && !a.starts_with('&') {
             file = Some(a);
         }

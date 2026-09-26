@@ -91,6 +91,7 @@
     "\\protected"
     "\\detokenize"
     "\\csstring"
+    "\\jobname"
     "\\Uchar"
     "\\expanded"
     "\\unexpanded"
@@ -261,6 +262,7 @@
     (puthash "\\protected" "\\protected  —  A definition prefix: the macro does not expand inside an `\\edef`, it survives as itself and runs when the result does. [Macro definition]" table)
     (puthash "\\detokenize" "\\detokenize  —  The tokens of `{...}` written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. [Expansion]" table)
     (puthash "\\csstring" "\\csstring  —  `\\string` without the escape character: `\\csstring\\foo` is `foo` where `\\string\\foo` is `\\foo`. [Expansion]" table)
+    (puthash "\\jobname" "\\jobname  —  The job's name, as characters (tex.web §472): `-jobname=NAME` when the command line gives one, otherwise the input file's name without its directory or extension, and `texput` when the input did not come from a file. [Expansion]" table)
     (puthash "\\Uchar" "\\Uchar  —  The character with the given code: `\\Uchar65` is `A`. [Expansion]" table)
     (puthash "\\expanded" "\\expanded  —  Expand the group's contents completely, here and now, and put the result back. [Expansion]" table)
     (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)

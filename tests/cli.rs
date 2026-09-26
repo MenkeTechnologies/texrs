@@ -1423,3 +1423,41 @@ fn output_directory_writes_there_and_not_beside_the_input() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// `\jobname` is the input file's name without its directory or extension, or
+/// the `-jobname` given -- in running text and inside a `\message` alike. It
+/// was an undefined control sequence, and the message printed `\jobname `.
+///
+/// Because it expands while lowering, the name is baked into the bytecode, and
+/// the cache is keyed on the file: the second half runs the SAME unchanged file
+/// under two job names and a third time under its own, which is what a cache
+/// keyed on the file alone answers wrongly.
+#[test]
+fn jobname_is_the_file_or_the_flag_and_the_cache_keeps_them_apart() {
+    let cache = scratch_cache("jobname");
+    let doc = cache.join("report.tex");
+    std::fs::write(
+        &doc,
+        "\\catcode`\\{=1 \\catcode`\\}=2\n\\message{[\\jobname]}\n\
+         \\edef\\j{\\jobname}\\message{(\\j)(\\meaning\\jobname)}\n\\end\n",
+    )
+    .unwrap();
+    let run = |extra: &[&str]| {
+        stdout_of(
+            texrs()
+                .env("XDG_CACHE_HOME", &cache)
+                .env("HOME", &cache)
+                .args(extra)
+                .arg(&doc),
+        )
+    };
+    let own = run(&[]);
+    assert!(own.contains("[report] (report)(\\jobname)"), "{own}");
+    let a = run(&["-jobname=alpha"]);
+    assert!(a.contains("[alpha] (alpha)"), "{a}");
+    let b = run(&["-jobname", "beta"]);
+    assert!(b.contains("[beta] (beta)"), "{b}");
+    let again = run(&[]);
+    assert!(again.contains("[report] (report)"), "{again}");
+    let _ = std::fs::remove_dir_all(&cache);
+}

@@ -442,7 +442,13 @@ impl Document {
         }
 
         let digests: Vec<String> = inputs.iter().map(|r| r.digest.clone()).collect();
-        let key = crate::script_cache::document_key(&digests, &output.name);
+        // An explicit `-jobname` is baked into the chunk (`\jobname` expands
+        // while lowering), so it keys the chunk as the inputs do.
+        let profile = match crate::lua::explicit_jobname() {
+            Some(job) => format!("{}#jobname={job}", output.name),
+            None => output.name.clone(),
+        };
+        let key = crate::script_cache::document_key(&digests, &profile);
         let chunk = match crate::script_cache::try_load_keyed(&key) {
             Some(chunk) => chunk,
             None => {

@@ -350,6 +350,11 @@ fn compile_text_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chun
         }
         false => "text".to_string(),
     };
+    // See `compile_cached`: an explicit job name is baked into the chunk.
+    let mode = match crate::lua::explicit_jobname() {
+        Some(job) => format!("{mode}#jobname={job}"),
+        None => mode,
+    };
     if let Some(chunk) = crate::script_cache::try_load_mode(path, &mode) {
         return Ok(chunk);
     }
@@ -556,6 +561,17 @@ pub fn run_messages_cached(path: &std::path::Path, src: &str) -> Result<String, 
 /// an ordinary run does, and throwing it away would mean the next run compiles
 /// it again.
 pub fn compile_cached(path: &std::path::Path, src: &str) -> Result<fusevm::Chunk, TexError> {
+    // A `-jobname` that is not the file's own is part of what the chunk says
+    // (`\jobname` expands while lowering), so it is part of the key too.
+    if let Some(job) = crate::lua::explicit_jobname() {
+        let mode = format!("jobname={job}");
+        if let Some(chunk) = crate::script_cache::try_load_mode(path, &mode) {
+            return Ok(chunk);
+        }
+        let chunk = compile(src)?;
+        crate::script_cache::store_mode(path, &mode, &chunk);
+        return Ok(chunk);
+    }
     if let Some(chunk) = crate::script_cache::try_load(path) {
         return Ok(chunk);
     }

@@ -95,10 +95,12 @@ there too.
   in running text; inside a `\message` body the `\expandafter`-over-`\fi` half
   of the idiom does not, because a message's arms are still lowered as bounded
   token regions.
-- **`\jobname`.** Stops the run with `! Undefined control sequence`. The
-  resolution logic exists and is correct at `src/lua.rs`'s `jobname()`; it is
-  private, and a second copy in the expander would be the same rule in two
-  places.
+- `\jobname` was on this list and is no longer: the expander and a `\message`
+  body both answer it from `src/lua.rs`'s `jobname()`, the one rule `tex.jobname`
+  already used. It expands while lowering, so the name is in the bytecode, and
+  an explicit `-jobname` is therefore part of the cache key -- without that, a
+  second run of an unchanged file under another job name was served the first
+  run's name. `tests/cli.rs` pins both halves.
   `\aftergroup`, `\afterassignment`, `\uppercase`/`\lowercase` and `\meaning`
   were on this list and are no longer missing: they are in `src/expand.rs` and
   `src/lower.rs`, documented in `src/corpus.rs`, and pinned by

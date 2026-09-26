@@ -3233,6 +3233,8 @@ impl Lowerer {
                         });
                     }
                 }
+                // `\jobname` is expandable: the job's name, as text.
+                "jobname" => text.push_str(&crate::lua::jobname()),
                 // `\meaning` is expandable, so it reaches a message body as
                 // readily as running text: what §296 would print for the next
                 // token, as characters.
