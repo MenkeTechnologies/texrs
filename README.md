@@ -275,8 +275,13 @@ than none.
   clock's date (§241): assigned, read by `\the`/`\number` and wherever a
   number is scanned, changed by `\advance`/`\multiply`/`\divide`, scoped by
   groups. `\escapechar` decides what `\string`, `\meaning` and `\message`
-  print in front of a name, and `-1` prints nothing. The line breaker and page
-  builder still use their own constants rather than reading the rest.
+  print in front of a name, and `-1` prints nothing. `\endlinechar` is what
+  the mouth appends to each line as it reads it (`-1` appends nothing, and an
+  assignment changes the NEXT line), and `\newlinechar` is the character a
+  `\message` prints as a line end; a control character prints in `^^`
+  notation. The `--pdf` line breaker reads `\tolerance`, `\pretolerance`,
+  `\linepenalty`, the hyphen penalties and the demerit weights a document
+  set; the page builder still uses its own constants.
 - `\message`.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's.
@@ -395,8 +400,8 @@ routine over `\box255` (`src/page.rs`, §967-§1028). Maths is there too: `$…$
 converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
 `fontdimen`s (`src/math.rs`).
 
-What that leaves: `\tolerance`, `\pretolerance` and the demerit weights can be
-set and read back, but the breaker uses its own constants rather than them, and the shipper is handed
+What that leaves: the breaker reads its parameters once per document rather
+than per paragraph, the page builder reads none, and the shipper is handed
 line boxes built from already-broken strings rather than a node list, so
 `src/postline.rs` and `src/page.rs` are a library beside the path a run takes
 rather than the path itself.

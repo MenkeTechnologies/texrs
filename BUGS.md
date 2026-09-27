@@ -46,10 +46,15 @@ passing, so the list is a claim the harness enforces rather than a note.
   built from broken strings rather than a node list with breakpoint indices, so
   `src/postline.rs`'s §877-§890 assembly and `src/page.rs`'s page builder are
   still a library beside the path a `--dvi` run takes rather than the path
-  itself. `\tolerance`, `\pretolerance` and the demerit weights are §236
-  parameters a document can set and read back (`src/intpar.rs`), but the
-  breaker in `src/linebreak.rs` uses its own constants rather than reading
-  them. Every
+  itself. The breaker in `src/linebreak.rs` reads `\tolerance`,
+  `\pretolerance`, `\linepenalty`, the two hyphen penalties and the three
+  demerit weights a document assigned (`linebreak::Params`), and plain.tex's
+  value for one it did not, since texrs loads no format -- but once, as the
+  document left them when lowering finished, not per paragraph as §816 reads
+  them; a penalty of 10000 forbids its break (§831). A `--dvi` run is handed its
+  `Layout` by the caller and so breaks at plain.tex's values. The page
+  builder's parameters (`\widowpenalty`, `\clubpenalty`, `\brokenpenalty`)
+  are still `src/page.rs`'s constants. Every
   document that both engines set now reaches STRUCTURE; what separates that
   from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
   and §607-§615's compact movement encoding.
@@ -199,6 +204,27 @@ start at the shallowest level the CLASS declares -- `report` and `book` declare
 for `\thesection`.
 
 ## Divergences from tex
+
+**Line ends and the printer** were here and are not. A line end in the file is
+not a character: the mouth appends `\endlinechar` as it reads the line
+(`tex.web` §362), so `\endlinechar=-1` joins lines, a letter `\endlinechar` ends a
+control word, an active `^^M` works, trailing spaces are dropped first (§31),
+and an assignment changes the NEXT line -- which is why `` \endlinechar=`\Q ``
+followed by a comment still ends the following line in `^^M`: §442's optional
+space after an alphabetic constant reads that line before the assignment is
+done. A `^^M` or `%` ends its line there and then (§347), and `^^J` is `Other`
+as INITEX has it. `\message` prints `\newlinechar` as a line end and a control
+character in `^^` notation (§59), and a control sequence gets its trailing
+space by §262's rule (a one-character name only when its character is a
+letter). Pinned by `tests/cases/endlinechar.tex` and `tests/eval.rs`. What
+is left: the file's last line, when it has no line end, gets no
+`\endlinechar` and keeps its trailing spaces;
+characters from 128 up print raw, as TeX Live's 8-bit engines print them
+under `cp227.tcx`, where Knuth's `tex` writes `^^e9`; and texrs's own in-band
+typesetting markers (`typeset::is_marker`) are control characters, so a
+document's own `^^Q` among them prints raw. The parity harness joins tex's
+output lines before comparing and texrs's are not joined, so a `\newlinechar`
+case cannot be a `tests/cases` file; it is a `tests/eval.rs` test instead.
 
 One type size and the ligature program were both on this list and are no longer,
 as of v0.6.0. Every size-selecting command was empty in the prelude and
