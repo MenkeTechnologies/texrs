@@ -408,7 +408,7 @@ impl Engine {
                 Save::CharCode(t, c, v) => {
                     let _ = self.charcodes.set(t, c, v);
                 }
-                Save::IntPar(i, v) => self.intpars.set(i, v),
+                Save::IntPar(i, v) => self.store_intpar(i, v),
                 Save::Count(reg, old) => match old {
                     Some(v) => {
                         self.count.insert(reg, v);
@@ -550,7 +550,16 @@ impl Engine {
                 frame.retain(|s| !matches!(s, Save::IntPar(j, _) if *j == i));
             }
         }
+        self.store_intpar(i, v);
+    }
+
+    /// Write an integer parameter, keeping the mouth's copy of `\endlinechar`
+    /// (in the catcode table it is handed) in step with the table.
+    pub fn store_intpar(&mut self, i: usize, v: i64) {
         self.intpars.set(i, v);
+        if i == crate::intpar::END_LINE_CHAR {
+            self.cats.set_end_line_char(v);
+        }
     }
 
     /// `\tolerance=N` (§1228's `assign_int`): an optional `=` and a number.
@@ -3206,6 +3215,15 @@ impl Engine {
                     .map(|c| u32::from(c) as i64)
                     .unwrap_or(0),
             };
+            // §442: "Scan an optional space" -- one space after the constant
+            // is absorbed, and reading for it is what reads the NEXT line when
+            // the constant ends one (so that line keeps the old `\endlinechar`
+            // in `\endlinechar=`\Q`).
+            match self.take(lx, pending_only) {
+                Some(t) if t.is_space() => {}
+                Some(t) => lx.push_back(std::slice::from_ref(&t)),
+                None => {}
+            }
             return Ok(sign * code);
         }
         if let Token::Cs(name) = &cur {

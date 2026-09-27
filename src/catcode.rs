@@ -91,6 +91,11 @@ pub struct CatTable {
     /// was produced under generation N" and be thrown away the moment
     /// `\catcode` moves the table on, without comparing 256 bytes each time.
     generation: u32,
+    /// `\endlinechar` (`tex.web` §240: 13 in INITEX), which the mouth appends to
+    /// every line it reads (§362) -- nothing when it is outside 0..=255. It is
+    /// a §236 integer parameter, kept here as well because the table is what
+    /// the mouth is handed; `crate::expand` keeps the two in step.
+    end_line_char: i64,
 }
 
 impl Default for CatTable {
@@ -111,20 +116,36 @@ impl CatTable {
         }
         codes[b'\\' as usize] = Cat::Escape;
         codes[b'%' as usize] = Cat::Comment;
+        // §232: `^^M` (the carriage return) is the only end-of-line character.
+        // A physical line end in the file is not a character at all -- the
+        // mouth appends `\endlinechar` in its place -- so `^^J` is `Other`.
         codes[b'\r' as usize] = Cat::EndLine;
-        codes[b'\n' as usize] = Cat::EndLine;
         codes[b' ' as usize] = Cat::Space;
         codes[0] = Cat::Ignored;
         codes[127] = Cat::Invalid;
         Self {
             codes,
             generation: 0,
+            end_line_char: 13,
         }
     }
 
     /// Which revision of the table this is; see [`CatTable::generation`]'s field.
     pub fn generation(&self) -> u32 {
         self.generation
+    }
+
+    /// `\endlinechar`, as a character: `None` when it is outside 0..=255, which
+    /// is how `tex.web` §362 says "append nothing".
+    pub fn end_line_char(&self) -> Option<char> {
+        u8::try_from(self.end_line_char).ok().map(char::from)
+    }
+
+    /// Record a new `\endlinechar`. It changes what the mouth produces, so
+    /// anything lexed ahead under the old value is stale, as after `\catcode`.
+    pub fn set_end_line_char(&mut self, v: i64) {
+        self.end_line_char = v;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn get(&self, c: char) -> Cat {

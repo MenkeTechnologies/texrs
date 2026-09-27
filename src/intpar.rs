@@ -18,7 +18,9 @@
 //!
 //! What each parameter is READ by is a separate question from whether it can be
 //! set and read back: `\escapechar` is honoured by everything that prints a
-//! control sequence; the line breaker's and page builder's parameters are still
+//! control sequence; `\endlinechar` by the mouth, through the copy
+//! `crate::catcode::CatTable` carries; `\newlinechar` by `\message`'s
+//! printer; the line breaker's and page builder's parameters are still
 //! the constants `crate::linebreak` and `crate::page` were written with, which
 //! `BUGS.md` records.
 

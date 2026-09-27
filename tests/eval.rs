@@ -172,6 +172,21 @@ fn number_drops_leading_zeros() {
     assert_eq!(run("\\message{\\number007}\n"), "7");
 }
 
+/// `\newlinechar` is the character a message prints as a line end, and an
+/// unprintable character prints in `^^` notation. Captured from tex 3.141592653
+/// on a terminal: its log has the same line breaks, which `tests/cases` cannot
+/// pin because the parity harness joins tex's lines before comparing.
+#[test]
+fn newlinechar_ends_a_printed_line_and_control_characters_print_as_carets() {
+    assert_eq!(
+        run("\\catcode`\\^=7 \\message{[a^^Jb^^Dc^^Ad]}\n\
+             \\newlinechar=`\\^^J \\message{[a^^Jb]}\n\
+             \\newlinechar=`\\| \\message{[a|b^^Jc]}\n\
+             {\\newlinechar=-1 \\message{[a|b]}}\\message{[a|b]}\n"),
+        "[a^^Jb^^Dc^^Ad] [a\nb] [a\nb^^Jc] [a|b] [a\nb]"
+    );
+}
+
 /// §262's `print_cs`: a one-character control sequence is followed by a space
 /// when its character is a LETTER now, and every longer name is, letters or
 /// not. `\@foo` and `\@@` printed with no space when `@` was made a letter.

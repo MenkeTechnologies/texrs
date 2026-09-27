@@ -1,0 +1,20 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\^=7
+\def\a{x
+y}
+\endlinechar=-1
+\def\b{x
+y}
+\endlinechar=`\Q
+\def\c{x
+y}\endlinechar=13 %
+\def\d{x   
+y}
+{\catcode`\^^M=13 \gdef\e{a
+b}}
+\def\f{\
+}
+\endlinechar=`\Q %
+\def\g{\ab
+}\endlinechar=13 %
+\message{[\meaning\a][\meaning\b][\meaning\c][\meaning\d][\meaning\e][\meaning\f][\meaning\g]}
+\end

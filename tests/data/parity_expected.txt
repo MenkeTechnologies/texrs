@@ -82,6 +82,8 @@ ZERO
 [3.0pt][9.0pt]
 #==# edef_with_parameters.tex
 [A|B|7]
+#==# endlinechar.tex
+[macro:->x y][macro:->xy][macro:->xy][macro:->x y][macro:->a^^Mb][macro:->\^^M][macro:->\ab ]
 #==# error_context_trimmed.tex
 ! Number too big.l.17 ...3=3 \count4=4 \count5=5 \count6=9999999999                                                  9 \count7=7 \count8=8 \cou...! Number too big.l.18 \count14="FFFFFFFF                       [2147483647][13][2147483647] )(see the transcript file for additional information
 #==# escapechar.tex

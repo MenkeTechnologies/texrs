@@ -65,6 +65,14 @@ pub struct Lexer {
     /// saves re-lexing the document.
     ahead_cooldown: usize,
     state: State,
+    /// The `\endlinechar` this line was read with, fixed when its first
+    /// character is looked at: `tex.web` §362 appends it as the line is read,
+    /// so an assignment ON a line changes the NEXT line's end, never its own.
+    /// `None` between a line end and the next line's first read.
+    line_end: Option<Option<char>>,
+    /// Where a character `^^` notation produced was spliced into `chars`: a
+    /// `^^M` written that way is the character 13, not a line end.
+    decoded_at: Option<usize>,
     /// Pushed-back tokens (`\expandafter` and macro expansion feed these).
     pub pending: Vec<Token>,
 }
@@ -95,6 +103,8 @@ impl Lexer {
             ahead_disabled: true,
             ahead_misses: 0,
             ahead_cooldown: Self::AHEAD_COOLDOWN,
+            line_end: None,
+            decoded_at: None,
         }
     }
 
@@ -149,6 +159,8 @@ impl Lexer {
             ahead_disabled: false,
             ahead_misses: 0,
             ahead_cooldown: Self::AHEAD_COOLDOWN,
+            line_end: None,
+            decoded_at: None,
         }
     }
 
@@ -388,6 +400,71 @@ impl Lexer {
         Some(tok)
     }
 
+    /// The length of the line terminator at `at` -- `\r\n`, `\n` or a lone
+    /// `\r`, the three TeX Live's `input_line` ends a line on -- or `None` when
+    /// `at` is not the end of a line. A `\r` that `^^M` notation produced is the
+    /// character 13, not a line end.
+    fn terminator_at(&self, at: usize) -> Option<usize> {
+        if self.decoded_at == Some(at) {
+            return None;
+        }
+        match self.chars.get(at).copied()? {
+            '\n' => Some(1),
+            '\r' if self.chars.get(at + 1).copied() == Some('\n') => Some(2),
+            '\r' => Some(1),
+            _ => None,
+        }
+    }
+
+    /// Whether only spaces lie between here and the end of the line:
+    /// `tex.web` §31 drops them before the line is read. The end of the TEXT is
+    /// not a line end -- a `tex.sprint` string keeps its trailing spaces.
+    fn only_spaces_to_line_end(&self) -> bool {
+        let mut i = self.pos;
+        while self.chars.get(i) == Some(&' ') {
+            i += 1;
+        }
+        self.terminator_at(i).is_some()
+    }
+
+    /// Discard the rest of the line, its end included, and start the next one
+    /// in state N (`loc:=limit+1` in `tex.web` §347).
+    fn finish_line(&mut self) {
+        while self.pos < self.chars.len() {
+            if let Some(len) = self.terminator_at(self.pos) {
+                self.pos += len;
+                break;
+            }
+            self.pos += 1;
+        }
+        self.line_end = None;
+        self.state = State::NewLine;
+    }
+
+    /// An end-of-line character in the current state (§347): a space in M, a
+    /// `\par` in N, nothing in S.
+    fn end_line_token(&self) -> Option<Token> {
+        match self.state {
+            State::MidLine => Some(Token::Char(' ', Cat::Space)),
+            State::NewLine => Some(Token::cs("par")),
+            State::SkipBlanks => None,
+        }
+    }
+
+    /// The token the `\endlinechar` `e` appended to a line makes, read with
+    /// its category code like any character of the line. It is the line's
+    /// last character, so a comment has nothing to discard and an escape
+    /// has no name to read (§354's null control sequence).
+    fn line_end_token(&self, e: char, cats: &CatTable) -> Option<Token> {
+        match cats.get(e) {
+            Cat::EndLine => self.end_line_token(),
+            Cat::Space => (self.state == State::MidLine).then_some(Token::Char(' ', Cat::Space)),
+            Cat::Comment | Cat::Ignored => None,
+            Cat::Escape => Some(Token::cs("")),
+            cat => Some(Token::Char(e, cat)),
+        }
+    }
+
     /// One token, or `None` at end of input.
     pub fn next_token(&mut self, cats: &CatTable) -> Option<Token> {
         if let Some(t) = self.pending.pop() {
@@ -398,9 +475,31 @@ impl Lexer {
         }
         loop {
             let c = self.peek()?;
+            if self.line_end.is_none() {
+                self.line_end = Some(cats.end_line_char());
+            }
+            // The end of a line in the FILE: `\endlinechar` stands in for it.
+            if let Some(len) = self.terminator_at(self.pos) {
+                self.pos += len;
+                let end = self.line_end.take().flatten();
+                let out = end.and_then(|e| self.line_end_token(e, cats));
+                self.state = State::NewLine;
+                match out {
+                    Some(t) => return Some(t),
+                    None => continue,
+                }
+            }
+            // §31: a line's trailing spaces are gone before it is looked at.
+            if c == ' ' && self.only_spaces_to_line_end() {
+                while self.peek() == Some(' ') {
+                    self.pos += 1;
+                }
+                continue;
+            }
             if let Some(decoded) = self.double_superscript(cats, c) {
                 // Re-read the decoded character in place of the `^^X` triple.
                 self.chars.splice(self.pos..self.pos, [decoded]);
+                self.decoded_at = Some(self.pos);
                 continue;
             }
             let cat = cats.get(c);
@@ -408,25 +507,18 @@ impl Lexer {
             match cat {
                 Cat::Escape => return Some(self.control_sequence(cats)),
                 Cat::Comment => {
-                    // The comment and the line end it eats produce nothing, and
-                    // the next line starts in state N.
-                    while let Some(ch) = self.peek() {
-                        self.pos += 1;
-                        if cats.get(ch) == Cat::EndLine {
-                            break;
-                        }
-                    }
-                    self.state = State::NewLine;
+                    // §347: a comment discards the rest of the line, the
+                    // appended `\endlinechar` with it, and the next line starts
+                    // in state N.
+                    self.finish_line();
                 }
                 Cat::EndLine => {
-                    // §304: a line end is a space in state M, a `\par` in state
-                    // N (the blank-line rule), and nothing while skipping blanks.
-                    let out = match self.state {
-                        State::MidLine => Some(Token::Char(' ', Cat::Space)),
-                        State::NewLine => Some(Token::cs("par")),
-                        State::SkipBlanks => None,
-                    };
-                    self.state = State::NewLine;
+                    // §347: an end-of-line character ends its line -- whatever
+                    // follows it there is discarded -- and is a space in state
+                    // M, a `\par` in state N (the blank-line rule), and nothing
+                    // while skipping blanks.
+                    let out = self.end_line_token();
+                    self.finish_line();
                     if out.is_some() {
                         return out;
                     }
@@ -469,6 +561,24 @@ impl Lexer {
     }
 
     fn control_sequence(&mut self, cats: &CatTable) -> Token {
+        // An escape last on its line names the line's appended character --
+        // `\` then a line end is `\^^M` -- and with no `\endlinechar` it is
+        // the null control sequence (§354: `loc>limit`). Spaces after it are
+        // trailing, so `\ ` last on a line is that too (§31).
+        if self.peek() == Some(' ') && self.only_spaces_to_line_end() {
+            while self.peek() == Some(' ') {
+                self.pos += 1;
+            }
+        }
+        if let Some(len) = self.terminator_at(self.pos) {
+            self.pos += len;
+            let end = self.line_end.take().flatten();
+            self.state = State::NewLine;
+            return match end {
+                Some(e) => Token::cs(e.encode_utf8(&mut [0u8; 4])),
+                None => Token::cs(""),
+            };
+        }
         let Some(first) = self.decoded_char(cats) else {
             return Token::cs("");
         };
@@ -483,6 +593,19 @@ impl Lexer {
         }
         let mut name = String::from(first);
         loop {
+            // A control word cannot run past its line (§356), but the line's
+            // `\endlinechar` is its last character, and may be a letter.
+            if let Some(len) = self.terminator_at(self.pos) {
+                let end = self.line_end.flatten();
+                if let Some(e) = end.filter(|e| cats.get(*e) == Cat::Letter) {
+                    name.push(e);
+                    self.pos += len;
+                    self.line_end = None;
+                    self.state = State::NewLine;
+                    return Token::cs(&name);
+                }
+                break;
+            }
             // The decode has to happen before the letter test, and be undone
             // when what it produced is not a letter: `\ab^^K` names `ab`.
             let save = self.pos;

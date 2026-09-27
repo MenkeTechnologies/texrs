@@ -153,6 +153,10 @@ impl Format {
                 engine.cats.set(ch, u8_to_cat(*cat));
             }
         }
+        // The table was rebuilt after the parameters were: give the mouth back
+        // the `\endlinechar` the format set.
+        let end_line_char = engine.intpars.get(crate::intpar::END_LINE_CHAR);
+        engine.cats.set_end_line_char(end_line_char);
         engine.count.clear();
         for (register, value) in &self.counts {
             engine.count.insert(*register, *value);
