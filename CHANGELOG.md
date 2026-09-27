@@ -6,6 +6,29 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A line end in the file was a character with a catcode of its own, so
+  `\endlinechar` did nothing. The mouth appends `\endlinechar` to each line as
+  it reads it (`tex.web` §362) after dropping trailing spaces (§31):
+  `\endlinechar=-1` joins lines, a letter one ends a control word, an active
+  `^^M` works, an escape last on a line is `\^^M`, and an assignment changes
+  the NEXT line. A `^^M` or `%` ends its line there (§347), `^^J` is `Other` as
+  in INITEX, and an alphabetic constant absorbs one optional space (§442).
+  Pinned by `tests/cases/endlinechar.tex` against tex.
+- `\message` prints `\newlinechar` as a line end and a control character in
+  `^^` notation (§59), and a control sequence is followed by a space by §262's
+  rule -- a one-character name only when its character is a letter, every
+  longer name always (`\@foo` under `\makeatletter` printed bare).
+- The `--pdf` line breaker reads `\tolerance`, `\pretolerance`,
+  `\linepenalty`, `\hyphenpenalty`, `\exhyphenpenalty` and the three demerit
+  weights a document set, keeping plain.tex's value for one it did not; a
+  negative `\pretolerance` skips the first pass and a penalty of 10000 forbids
+  its break. The LaTeX prelude's `\tolerance`/`\hbadness` macros, which ate
+  the value, are gone.
+- `escapechar.tex` and `integer_parameters.tex` had no frozen expectation, so
+  `tests/parity.rs` failed on 0.6.1.
+
 ## [0.6.1] - 2026-09-26
 
 ### Added
