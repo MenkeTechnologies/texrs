@@ -90,6 +90,13 @@ pub fn index(name: &str) -> Option<usize> {
 /// sequence it writes.
 pub const ESCAPE_CHAR: usize = 45;
 
+/// The position of `\endlinechar`, which the mouth appends to every line it
+/// reads; `crate::catcode::CatTable` carries a copy for the mouth.
+pub const END_LINE_CHAR: usize = 48;
+
+/// The position of `\newlinechar`, which the printer writes as a line end.
+pub const NEW_LINE_CHAR: usize = 49;
+
 /// The table itself.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntPars {
@@ -181,6 +188,12 @@ mod tests {
     #[test]
     fn escapechar_index_is_the_one_the_printer_reads() {
         assert_eq!(index("escapechar"), Some(ESCAPE_CHAR));
+    }
+
+    #[test]
+    fn line_char_indices_name_their_parameters() {
+        assert_eq!(index("endlinechar"), Some(END_LINE_CHAR));
+        assert_eq!(index("newlinechar"), Some(NEW_LINE_CHAR));
     }
 
     #[test]

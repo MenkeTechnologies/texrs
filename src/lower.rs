@@ -1095,6 +1095,10 @@ impl Lowerer {
                 }
                 "message" => {
                     let parts = self.message_parts(lx)?;
+                    // Printed to the terminal: §59's `print`, with the
+                    // `\newlinechar` in force now.
+                    let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
+                    let parts = crate::ir::printed_ops(parts, nl);
                     // Anything reported so far is printed HERE, in front of the
                     // message and with nothing between them: see `reports`.
                     let mut ops = self.take_reports();
@@ -3467,7 +3471,8 @@ impl Lowerer {
                     out.push(self.case_chain(value, branches));
                 }
                 _ if self.eng.is_macro(n) => self.eng.expand_macro_pending(work, n)?,
-                _ => text.push_str(&t.to_text(self.eng.esc())),
+                // An unexpandable control sequence prints as §262's `print_cs`.
+                _ => text.push_str(&self.eng.cs_text(n.name())),
             }
         }
         if !text.is_empty() {

@@ -1812,54 +1812,41 @@ impl Engine {
         Ok(())
     }
 
-    /// What `\the\toks<n>` writes: the tokens as text, by the same rule
-    /// `\string` uses -- a control word carries a trailing space, a
-    /// single-character control sequence does not.
-    /// A token list as text, by the token-list rule: a control WORD carries a
-    /// trailing space, a one-character control sequence does not. Shared by
-    /// `\the\toks` and `\detokenize`, which write the same way.
+    /// A token list as text, by `tex.web` §292's `show_token_list`: a character
+    /// is itself, and a control sequence is §262's `print_cs`. Shared by
+    /// `\meaning`, `\the\toks` and `\detokenize`, which write the same way.
     pub fn tokens_text(&self, tokens: &[Token]) -> String {
         let mut out = String::new();
         for t in tokens {
             match t {
                 Token::Char(c, _) => out.push(*c),
-                Token::Cs(id) => {
-                    let name = id.name();
-                    out.push_str(&self.esc().to_string());
-                    out.push_str(name);
-                    if name.chars().all(|c| c.is_alphabetic()) {
-                        out.push(' ');
-                    }
-                }
+                Token::Cs(id) => out.push_str(&self.cs_text(id.name())),
             }
         }
         out
     }
 
-    pub fn toks_text(&self, reg: i64) -> String {
-        let Some(tokens) = self.toks.get(&reg) else {
-            return String::new();
-        };
-        let mut out = String::new();
-        for t in tokens {
-            match t {
-                Token::Char(c, _) => out.push(*c),
-                Token::Cs(id) => {
-                    let name = id.name();
-                    out.push_str(&self.esc().to_string());
-                    out.push_str(name);
-                    // A control WORD carries a trailing space here, however
-                    // short: `\b` prints as `\b `. A control sequence made of
-                    // one non-letter does not. Measured -- and it is not the
-                    // rule `\string` follows, which never adds the space, so
-                    // the two cannot share a renderer.
-                    if name.chars().all(|c| c.is_alphabetic()) {
-                        out.push(' ');
-                    }
-                }
-            }
+    /// §262's `print_cs`: the escape character and the name, then a space
+    /// after every multi-letter name and after a one-character name whose
+    /// character is currently a LETTER -- `\A ` and, under
+    /// `\makeatletter`, `\@ `, but `\1` and `\^^M` bare. The null control
+    /// sequence prints as `\csname\endcsname `. `\string` is §263's
+    /// `sprint_cs` instead, which never adds the space.
+    pub fn cs_text(&self, name: &str) -> String {
+        let e = self.esc();
+        let mut chars = name.chars();
+        match (chars.next(), chars.next()) {
+            (None, _) => format!("{e}csname{e}endcsname "),
+            (Some(c), None) if self.cats.get(c) != Cat::Letter => format!("{e}{name}"),
+            _ => format!("{e}{name} "),
         }
-        out
+    }
+
+    pub fn toks_text(&self, reg: i64) -> String {
+        match self.toks.get(&reg) {
+            Some(tokens) => self.tokens_text(tokens),
+            None => String::new(),
+        }
     }
 
     /// The register a `\toksdef` name stands for.

@@ -396,3 +396,68 @@ fn rel_text(rel: Rel) -> &'static str {
         Rel::Greater => ">",
     }
 }
+
+/// `tex.web` §59's `print` of one string to the terminal or the log: the
+/// character `\newlinechar` names ends the line, and an unprintable character
+/// is written in §49's `^^` notation (`^^M` for 13, `^^?` for 127).
+/// texrs's own in-band markers ([`crate::typeset::is_marker`]) pass through
+/// raw for `without_marks` to remove, so a document's own `^^Q` is written
+/// raw too.
+///
+/// Characters from 128 up are written as they are. Knuth's `tex` would write
+/// them as `^^e9`, but texrs holds its input as decoded Unicode, where a
+/// UTF-8 `é` and a `^^e9` are the same character, and TeX Live's 8-bit engines
+/// print both raw under their default `cp227.tcx`.
+pub fn printed(text: &str, new_line_char: i64) -> String {
+    let nl = u32::try_from(new_line_char).ok().filter(|n| *n <= 255);
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let code = u32::from(c);
+        if Some(code) == nl {
+            out.push('\n');
+        } else if crate::typeset::is_marker(c) {
+            out.push(c);
+        } else if code < 32 {
+            out.push_str("^^");
+            out.push(char::from(code as u8 + 64));
+        } else if code == 127 {
+            out.push_str("^^?");
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// [`printed`] over every piece of text a message writes. The numbers,
+/// dimensions and glue it renders at run time are printable already.
+pub fn printed_ops(ops: Vec<MsgOp>, new_line_char: i64) -> Vec<MsgOp> {
+    ops.into_iter()
+        .map(|op| match op {
+            MsgOp::Text(t) => MsgOp::Text(printed(&t, new_line_char)),
+            MsgOp::If {
+                left,
+                rel,
+                right,
+                then_ops,
+                else_ops,
+            } => MsgOp::If {
+                left,
+                rel,
+                right,
+                then_ops: printed_ops(then_ops, new_line_char),
+                else_ops: printed_ops(else_ops, new_line_char),
+            },
+            MsgOp::IfOdd {
+                value,
+                then_ops,
+                else_ops,
+            } => MsgOp::IfOdd {
+                value,
+                then_ops: printed_ops(then_ops, new_line_char),
+                else_ops: printed_ops(else_ops, new_line_char),
+            },
+            other => other,
+        })
+        .collect()
+}

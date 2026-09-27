@@ -171,3 +171,14 @@ fn string_prints_a_control_sequence_with_its_escape() {
 fn number_drops_leading_zeros() {
     assert_eq!(run("\\message{\\number007}\n"), "7");
 }
+
+/// §262's `print_cs`: a one-character control sequence is followed by a space
+/// when its character is a LETTER now, and every longer name is, letters or
+/// not. `\@foo` and `\@@` printed with no space when `@` was made a letter.
+#[test]
+fn a_control_sequence_prints_its_space_by_the_catcode_rule() {
+    assert_eq!(
+        run("\\catcode`\\@=11 \\def\\b{\\@foo\\x\\@\\A\\@@\\1}\\message{[\\meaning\\b]}\n"),
+        "[macro:->\\@foo \\x \\@ \\A \\@@ \\1]"
+    );
+}

@@ -2395,6 +2395,36 @@ impl Face {
 /// there are four faces and no spec to carry.
 pub const FACE_PUSH: char = '\u{11}';
 
+/// Whether `c` is one of the control characters texrs carries typesetting
+/// instructions in, in-band, through its text and its messages (a face, a
+/// size, a reference, a table cell, ...). `crate::ir::printed` leaves these
+/// alone so that `without_marks` still finds them.
+pub fn is_marker(c: char) -> bool {
+    [
+        FACE_PUSH,
+        FACE_POP,
+        SIZE_PUSH,
+        SIZE_POP,
+        TOC,
+        REF,
+        LIST_INDENT,
+        PAGE_BREAK,
+        PICTURE,
+        IMAGE,
+        LISTING_BREAK,
+        TABLE_CELL,
+        TABLE_ROW,
+        TABLE_MARK,
+        LONGTABLE,
+        CENTRE,
+        CENTRE_END,
+        JUSTIFY,
+        VERTICAL_SPACE,
+        crate::math::RUN,
+    ]
+    .contains(&c)
+}
+
 /// A face marker closes. The stack under it is what `\ttfamily` inside a
 /// `\textbf` needs: the outer face comes back when the inner one ends.
 pub const FACE_POP: char = '\u{12}';
