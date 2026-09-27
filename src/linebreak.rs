@@ -16,12 +16,14 @@
 //! every shrunk line was drawn out past the measure. `pdf::Page::text_set` now
 //! sets a run to a width with PDF's `Tw`, and `typeset::to_pdf` sets every full
 //! line to the measure, so the answer this module returns is one the page can
-//! honour. Nothing here is used on the DVI path, whose driver still cannot.
+//! honour. The DVI path breaks through here too, and sets each line to the
+//! width `hpack` gives it.
 //!
 //! WHAT IS NOT TeX. `\tolerance`, `\pretolerance`, `\linepenalty`, the two
 //! hyphen penalties and the three demerit weights are [`Params`], read from
-//! the document -- but ONCE, as it stood when lowering finished, and not per
-//! paragraph as §816 reads them; one a document never assigns keeps
+//! the document per paragraph as §816 reads them -- the lowerer writes the
+//! values in force at each paragraph end into the text
+//! (`typeset::BREAK_PARAMS`) -- and one a document never assigns keeps
 //! plain.tex's value, because texrs loads no format. The interword glue stretches
 //! and shrinks by cmr10's own fractions of the space rather than by each
 //! embedded face's `\fontdimen3` and `\fontdimen4`, which a PDF font file does
@@ -101,8 +103,8 @@ impl Default for Params {
 }
 
 impl Params {
-    /// The parameters as a document left them when it was lowered, and
-    /// plain.tex's for any it never assigned: texrs loads no format, and
+    /// The parameters as they stand in the engine, and plain.tex's for any the
+    /// document never assigned: texrs loads no format, and
     /// INITEX's own values (`\tolerance=10000`, `\pretolerance=0`,
     /// `\linepenalty=0`) are not what a document is set with.
     pub fn from_intpars(p: &crate::intpar::IntPars) -> Self {

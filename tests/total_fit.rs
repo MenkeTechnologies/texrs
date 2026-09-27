@@ -166,26 +166,73 @@ fn hyphenpenalty_ten_thousand_forbids_hyphenation() {
     assert_eq!(whole.join(" "), prose.split_whitespace().collect::<Vec<_>>().join(" "));
 }
 
+/// The text the lowerer hands the typesetter, as one string.
+fn lowered_text(lowerer: &mut texrs::lower::Lowerer, src: &str) -> String {
+    lowerer
+        .lower(src)
+        .expect("lowers")
+        .iter()
+        .filter_map(|cmd| match cmd {
+            texrs::ir::Cmd::Text(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// What the lowerer hands the breaker: a parameter the document assigned, and
 /// plain.tex's value for one it did not (texrs loads no format, and INITEX's
-/// `\tolerance=10000` is not what anything is set with). A LaTeX document's
-/// `\tolerance=2000` is an assignment, not text for a prelude macro to eat.
+/// `\tolerance=10000` is not what anything is set with), carried on the
+/// paragraph it ends. A LaTeX document's `\tolerance=2000` is an assignment,
+/// not text for a prelude macro to eat.
 #[test]
 fn the_breaker_reads_the_parameters_the_document_set() {
-    let mut plain = texrs::lower::Lowerer::new();
-    plain
-        .lower("\\tolerance=1000 \\pretolerance=-1 \\linepenalty=5\n")
-        .expect("lowers");
-    let p = plain.layout.breaking;
+    let base = texrs::linebreak::Params::default();
+    let mut plain = texrs::lower::Lowerer::new().with_text_output();
+    let text = lowered_text(
+        &mut plain,
+        "\\tolerance=1000 \\pretolerance=-1 \\linepenalty=5 words\n",
+    );
+    let (p, rest) = texrs::typeset::paragraph_params(&text, &base);
     assert_eq!(
         (p.tolerance, p.pretolerance, p.line_penalty, p.hyphen_penalty),
         (1000.0, -1.0, 5.0, 50.0)
     );
+    assert_eq!(rest.trim(), "words");
     let doc = "\\documentclass{article}\n\\tolerance=2000\n\\begin{document}\nx\n\\end{document}\n";
-    let mut latex = texrs::lower::Lowerer::new();
+    let mut latex = texrs::lower::Lowerer::new().with_text_output();
     latex
         .preload(&texrs::latex::preamble_text(doc))
         .expect("prelude");
-    latex.lower(doc).expect("lowers");
-    assert_eq!(latex.layout.breaking.tolerance, 2000.0);
+    let text = lowered_text(&mut latex, doc);
+    assert_eq!(texrs::typeset::paragraph_params(&text, &base).0.tolerance, 2000.0);
+}
+
+/// Each paragraph is broken with the parameters in force where it ENDS
+/// (§816), not with the ones the document finished on, and `--dvi` -- which
+/// its caller hands plain.tex's layout -- reads them too. Against tex 3.141592653
+/// with plain.tex, the first paragraph below, set at `\hyphenpenalty=10000`,
+/// splits no word; texrs's `--dvi` split two there, because it broke both at
+/// plain.tex's 50.
+#[test]
+fn each_paragraph_is_broken_with_the_parameters_it_ended_under() {
+    if !metrics_available() {
+        return;
+    }
+    if texrs::linebreak::hyphenator().is_empty() {
+        return;
+    }
+    let chain = texrs::typeset::FontChain::load("cmr10", &["cmsy10", "cmmi10"]).expect("cmr10");
+    let prose = "Considering the extraordinarily counterintuitive ramifications, the \
+                 interdisciplinary committee recommended a comprehensive reorganisation of \
+                 the internationalisation infrastructure, notwithstanding the \
+                 incontrovertible evidence that such transformations invariably \
+                 precipitate organisational disintegration among the uncharacteristically \
+                 overrepresented constituencies.";
+    let src = format!("\\hyphenpenalty=10000\n{prose}\n\n\\hyphenpenalty=50\n{prose}\n\n\\end\n");
+    let dvi = texrs::run_dvi_fallback(None, &src, &chain, &texrs::typeset::Layout::default())
+        .expect("dvi");
+    let text = texrs::dvi::Dvi::parse(&dvi).expect("parses").text();
+    let second = text.rfind("Considering").expect("two paragraphs");
+    assert!(!text[..second].contains('-'), "the first splits no word: {text:?}");
+    assert!(text[second..].contains('-'), "the second may: {text:?}");
 }

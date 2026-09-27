@@ -304,9 +304,12 @@ impl Lowerer {
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
         let mut cmds = self.lower_located(src).map_err(|(e, _line)| e)?;
-        // The breaker reads the paragraph parameters as the document left them.
-        // The page builder reads its penalties the same way.
-        self.layout.breaking = crate::linebreak::Params::from_intpars(&self.eng.intpars);
+        // The last paragraph ends with the document rather than with a blank
+        // line, and is broken with the parameters in force there.
+        if let Some(mark) = self.paragraph_end_mark() {
+            self.push_text(&mut cmds, &mark);
+        }
+        // The page builder reads its penalties as the document left them.
         self.layout.paging = crate::typeset::PageParams::from_intpars(&self.eng.intpars);
         // What a preloaded preamble WROTE to the registers runs first: see
         // `preload`.
@@ -2532,7 +2535,23 @@ impl Lowerer {
     }
 
     /// Append text to the run in progress, looking past line directives.
+    ///
+    /// Text that opens with a paragraph break ends the paragraph before it, and
+    /// that paragraph is broken with the breaker's parameters in force here
+    /// (§816), so they go in front of the break when they are not plain.tex's:
+    /// see `typeset::BREAK_PARAMS`.
     fn push_text(&self, out: &mut Vec<Cmd>, text: &str) {
+        let marked;
+        let text = match text.starts_with("\n\n") {
+            true => match self.paragraph_end_mark() {
+                Some(mark) => {
+                    marked = format!("{mark}{text}");
+                    marked.as_str()
+                }
+                None => text,
+            },
+            false => text,
+        };
         let mut at = out.len();
         while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
             at -= 1;
@@ -2541,6 +2560,15 @@ impl Lowerer {
             Some(Cmd::Text(t)) => t.push_str(text),
             _ => out.push(Cmd::Text(text.to_string())),
         }
+    }
+
+    /// The marker carrying the breaker's parameters as they stand, for a
+    /// paragraph ending here -- `None` when they are plain.tex's, which is what
+    /// a paragraph without one is broken with, or when no text is kept.
+    fn paragraph_end_mark(&self) -> Option<String> {
+        let params = crate::linebreak::Params::from_intpars(&self.eng.intpars);
+        (self.text_output && params != crate::linebreak::Params::default())
+            .then(|| crate::typeset::break_params_span(&params))
     }
 
     /// The environment name after `\begin`, without consuming it.

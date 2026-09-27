@@ -140,6 +140,9 @@ fn without_marks(text: &str) -> String {
     // Whether the walk stands inside a size marker's spec, which the marker
     // brackets at both ends the way a picture span is bracketed.
     let mut in_size_spec = false;
+    // And inside the breaker's parameters for a paragraph, spanned the same
+    // way.
+    let mut in_break_params = false;
     for ch in text.chars() {
         match ch {
             // A cross-reference span: the marker, that code, the label key,
@@ -197,6 +200,9 @@ fn without_marks(text: &str) -> String {
             crate::typeset::SIZE_PUSH => in_size_spec = !in_size_spec,
             _ if in_size_spec => {}
             crate::typeset::SIZE_POP => {}
+            // How a paragraph was to be broken is a fact about the page.
+            crate::typeset::BREAK_PARAMS => in_break_params = !in_break_params,
+            _ if in_break_params => {}
             // A table's structure has a plain-text spelling, the way a
             // listing's line break does: a cell boundary is the space that
             // stands between two cells when they are not set in columns, and a

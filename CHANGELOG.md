@@ -8,6 +8,12 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- The line breaker reads its parameters per paragraph, as they stand where
+  the paragraph ends (§816), instead of once as the document finished; a
+  `--dvi` run, which broke every paragraph at plain.tex's values, reads them
+  too, through the bytecode cache as well. A document that sets
+  `\hyphenpenalty=10000` for one paragraph and back for the next gets one of
+  each, as it does from tex.
 - The `--pdf` page breaker reads `\clubpenalty`, `\widowpenalty` and
   `\brokenpenalty` as the document set them, keeping plain.tex's value for
   one it did not; it charged 150, 150 and 100 whatever the document said, so

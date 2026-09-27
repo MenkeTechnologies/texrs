@@ -46,7 +46,8 @@ pub struct Layout {
     /// The font's design size, at which its metrics are stated.
     pub size: f64,
     /// What the line breaker reads (`tex.web` §236's `\tolerance` and the
-    /// rest), taken from the document by the lowerer.
+    /// rest) for a paragraph that carries no `BREAK_PARAMS` marker -- the
+    /// lowerer marks every paragraph whose values are not plain.tex's.
     pub breaking: crate::linebreak::Params,
     /// What the page builder charges between a paragraph's lines
     /// (`\clubpenalty`, `\widowpenalty`, `\brokenpenalty`), taken from the
@@ -552,6 +553,10 @@ pub fn broken_lines(text: &str, chain: &FontChain, layout: &Layout) -> Vec<Broke
 
 /// One paragraph, by total demerits (§813).
 fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<BrokenLine> {
+    // The parameters this paragraph ended under, and the paragraph without
+    // the marker that carried them.
+    let (params, para) = paragraph_params(para, &layout.breaking);
+    let para: &str = &para;
     // A line the author broke is set as it stands: a code listing is what the
     // program is, and a table's rows are rows. Neither is stretched to the
     // measure, and neither is offered to the breaker.
@@ -624,7 +629,7 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<Broken
             &mut pieces,
         );
     }
-    let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure, &layout.breaking);
+    let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure, &params);
 
     let mut lines = Vec::with_capacity(breaks.len());
     let mut from = 0usize;
@@ -2577,6 +2582,86 @@ pub fn size_span(size: f64, leading: f64, body: &str) -> String {
     format!("{SIZE_PUSH}{size};{leading}{SIZE_PUSH}{body}{SIZE_POP}")
 }
 
+/// The line breaker's parameters for the paragraph this marker ends: U+001C,
+/// the eight §236 values, and U+001C again.
+///
+/// `tex.web` §816 reads `\tolerance` and the rest when `line_break` runs, at
+/// the `\par` that ends a paragraph, so each paragraph is broken with the
+/// values in force THERE -- a document that sets `\hyphenpenalty=10000` for
+/// one paragraph and back for the next gets one of each. The lowerer knows
+/// those values paragraph by paragraph; the typesetter, which breaks the
+/// text long after lowering finished, does not. So the lowerer writes them
+/// into the text in front of each paragraph end whose values differ from
+/// plain.tex's, the typesetter reads them back off the paragraph
+/// ([`paragraph_params`]), and a paragraph without one is broken at the
+/// layout's own. Riding in the text is what carries them through the bytecode
+/// cache and into `--dvi`, whose caller hands it no layout of the document's.
+///
+/// Spanned by the same marker at both ends, as `SIZE_PUSH` is, rather than
+/// spending a second control character on a close.
+pub const BREAK_PARAMS: char = '\u{1c}';
+
+/// The marker carrying `p`, for the lowerer to write at a paragraph end.
+pub fn break_params_span(p: &crate::linebreak::Params) -> String {
+    format!(
+        "{BREAK_PARAMS}{},{},{},{},{},{},{},{}{BREAK_PARAMS}",
+        p.pretolerance,
+        p.tolerance,
+        p.line_penalty,
+        p.hyphen_penalty,
+        p.ex_hyphen_penalty,
+        p.adj_demerits,
+        p.double_hyphen_demerits,
+        p.final_hyphen_demerits
+    )
+}
+
+/// The breaker's parameters for one paragraph, and the paragraph without the
+/// marker that carried them: the last marker in it, or `base` when it has
+/// none or the one it has is damaged.
+pub fn paragraph_params<'a>(
+    para: &'a str,
+    base: &crate::linebreak::Params,
+) -> (crate::linebreak::Params, std::borrow::Cow<'a, str>) {
+    if !para.contains(BREAK_PARAMS) {
+        return (*base, std::borrow::Cow::Borrowed(para));
+    }
+    let mut text = String::with_capacity(para.len());
+    let mut params = *base;
+    let mut parts = para.split(BREAK_PARAMS);
+    text.push_str(parts.next().unwrap_or(""));
+    while let Some(spec) = parts.next() {
+        if let Some(read) = break_params_spec(spec) {
+            params = read;
+        }
+        text.push_str(parts.next().unwrap_or(""));
+    }
+    (params, std::borrow::Cow::Owned(text))
+}
+
+/// The eight values a [`break_params_span`] carries.
+fn break_params_spec(spec: &str) -> Option<crate::linebreak::Params> {
+    let v: Vec<f64> = spec
+        .split(',')
+        .map(|n| n.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    let [pretolerance, tolerance, line_penalty, hyphen_penalty, ex_hyphen_penalty, adj_demerits, double_hyphen_demerits, final_hyphen_demerits] =
+        v[..]
+    else {
+        return None;
+    };
+    Some(crate::linebreak::Params {
+        pretolerance,
+        tolerance,
+        line_penalty,
+        hyphen_penalty,
+        ex_hyphen_penalty,
+        adj_demerits,
+        double_hyphen_demerits,
+        final_hyphen_demerits,
+    })
+}
+
 /// What a requested family maps to among the fourteen fonts a PDF reader has.
 ///
 /// The mapping is by what the face IS, not by its name: Arimo is Arial's
@@ -3483,6 +3568,21 @@ fn break_lines_measured(
     // 0 is "not in a list".
     let mut depth = 0usize;
     for para in text.split("\n\n") {
+        // The parameters this paragraph ended under (see `BREAK_PARAMS`), which
+        // `fill` reads off the layout it is handed.
+        let (params, para) = paragraph_params(para, &layout.breaking);
+        let para: &str = &para;
+        let with_params;
+        let layout = match params == layout.breaking {
+            true => layout,
+            false => {
+                with_params = Layout {
+                    breaking: params,
+                    ..layout.clone()
+                };
+                &with_params
+            }
+        };
         // `\parskip`: the space LaTeX leaves BETWEEN two paragraphs, which
         // texrs left out entirely -- and which is the largest reason it set a
         // book short. See `PARAGRAPH_SPACE`. It goes in only between two
@@ -5701,6 +5801,8 @@ pub const MARKERS: &[(char, bool)] = &[
     // code does; the walk toggles on it instead, as it does for `PICTURE`.
     (SIZE_PUSH, false),
     (SIZE_POP, false),
+    // The breaker's parameters for a paragraph, a spec spanned the same way.
+    (BREAK_PARAMS, false),
     // The image span, bracketed by its own marker the way a picture is.
     (IMAGE, false),
     (TABLE_CELL, false),

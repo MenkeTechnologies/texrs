@@ -49,13 +49,14 @@ passing, so the list is a claim the harness enforces rather than a note.
   itself. The breaker in `src/linebreak.rs` reads `\tolerance`,
   `\pretolerance`, `\linepenalty`, the two hyphen penalties and the three
   demerit weights a document assigned (`linebreak::Params`), and plain.tex's
-  value for one it did not, since texrs loads no format -- but once, as the
-  document left them when lowering finished, not per paragraph as §816 reads
-  them; a penalty of 10000 forbids its break (§831). A `--dvi` run is handed its
-  `Layout` by the caller and so breaks at plain.tex's values. The `--pdf` page
-  breaker reads `\clubpenalty`, `\widowpenalty` and `\brokenpenalty` the same
-  way -- as the document left them, plain.tex's for one it did not assign
-  (`typeset::PageParams`) -- where it used constants. Every
+  value for one it did not, since texrs loads no format -- per paragraph, as
+  §816 reads them: the lowerer writes the values in force at each paragraph end
+  into the text (`typeset::BREAK_PARAMS`), so `--pdf` and `--dvi` both read
+  them, through the bytecode cache too; a penalty of 10000 forbids its break
+  (§831). The `--pdf` page breaker reads the `\clubpenalty`, `\widowpenalty`
+  and `\brokenpenalty` a document assigned, and plain.tex's for one it did not
+  (`typeset::PageParams`) -- but once, as the document left them, not per
+  paragraph. Every
   document that both engines set now reaches STRUCTURE; what separates that
   from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
   and §607-§615's compact movement encoding.
