@@ -84,6 +84,8 @@ ZERO
 [A|B|7]
 #==# error_context_trimmed.tex
 ! Number too big.l.17 ...3=3 \count4=4 \count5=5 \count6=9999999999                                                  9 \count7=7 \count8=8 \cou...! Number too big.l.18 \count14="FFFFFFFF                       [2147483647][13][2147483647] )(see the transcript file for additional information
+#==# escapechar.tex
+[92][\foo] [foo][relax] [foo] [Afoo][Atolerance] Arelax  [\foo] [!foo][undefined] [macro:->!x ] [\foo]
 #==# expandafter.tex
 \b
 #==# expandafter_brace_arg.tex
@@ -112,6 +114,8 @@ inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 A B C C C [done]
 #==# ifx_after_edef_conditional.tex
 SAME
+#==# integer_parameters.tex
+[-9][-9] [-9] negative [1] [250] [77] [4][3] [33][\clubpenalty][\widowpenalty] [1000][25][1][13]
 #==# internal_quantity_as_a_number.tex
 [819200] [196608] [-163840] [37.0pt]
 #==# keyword_through_a_macro.tex
