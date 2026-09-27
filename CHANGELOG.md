@@ -6,6 +6,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-09-27
+
 ### Fixed
 
 - The line breaker reads its parameters per paragraph, as they stand where
@@ -1027,6 +1029,7 @@ which is the release that carries it to crates.io and the Homebrew tap.
   printed output — output parity alone would not distinguish a frontend from a
   tree-walker.
 
+[0.6.3]: https://github.com/MenkeTechnologies/texrs/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/MenkeTechnologies/texrs/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/MenkeTechnologies/texrs/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/MenkeTechnologies/texrs/compare/v0.4.0...v0.6.0
