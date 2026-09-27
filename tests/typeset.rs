@@ -3774,7 +3774,9 @@ fn the_page_builder_reads_the_penalties_the_document_set() {
             }
             body.push_str("\n\n");
         }
-        format!("\\documentclass{{article}}\n{preamble}\\begin{{document}}\n{body}\\end{{document}}\n")
+        format!(
+            "\\documentclass{{article}}\n{preamble}\\begin{{document}}\n{body}\\end{{document}}\n"
+        )
     };
     let priced = by_page(&texrs::run_pdf(&doc("")).expect("pdf"));
     let (orphans, widows) = orphans_and_widows(&priced, 60);

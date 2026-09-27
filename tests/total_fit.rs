@@ -194,7 +194,12 @@ fn the_breaker_reads_the_parameters_the_document_set() {
     );
     let (p, rest) = texrs::typeset::paragraph_params(&text, &base);
     assert_eq!(
-        (p.tolerance, p.pretolerance, p.line_penalty, p.hyphen_penalty),
+        (
+            p.tolerance,
+            p.pretolerance,
+            p.line_penalty,
+            p.hyphen_penalty
+        ),
         (1000.0, -1.0, 5.0, 50.0)
     );
     assert_eq!(rest.trim(), "words");
@@ -204,7 +209,10 @@ fn the_breaker_reads_the_parameters_the_document_set() {
         .preload(&texrs::latex::preamble_text(doc))
         .expect("prelude");
     let text = lowered_text(&mut latex, doc);
-    assert_eq!(texrs::typeset::paragraph_params(&text, &base).0.tolerance, 2000.0);
+    assert_eq!(
+        texrs::typeset::paragraph_params(&text, &base).0.tolerance,
+        2000.0
+    );
 }
 
 /// Each paragraph is broken with the parameters in force where it ENDS
@@ -233,6 +241,9 @@ fn each_paragraph_is_broken_with_the_parameters_it_ended_under() {
         .expect("dvi");
     let text = texrs::dvi::Dvi::parse(&dvi).expect("parses").text();
     let second = text.rfind("Considering").expect("two paragraphs");
-    assert!(!text[..second].contains('-'), "the first splits no word: {text:?}");
+    assert!(
+        !text[..second].contains('-'),
+        "the first splits no word: {text:?}"
+    );
     assert!(text[second..].contains('-'), "the second may: {text:?}");
 }
