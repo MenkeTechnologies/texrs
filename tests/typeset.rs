@@ -3729,3 +3729,78 @@ UprightFont=ShareTechMono-Regular]\n\\begin{{document}}\n\
         "the two verbatim lines share a baseline: {first} and {second}"
     );
 }
+
+/// Of paragraphs `1..=count` (lines tagged `open{k}z` / `word{k}x`), the
+/// orphans (a first line alone at a page's foot) and
+/// widows (a last line alone at a page's head) among them.
+fn orphans_and_widows(pages: &[Vec<String>], count: usize) -> (Vec<usize>, Vec<usize>) {
+    let mut orphans = Vec::new();
+    let mut widows = Vec::new();
+    for k in 1..=count {
+        let on: Vec<usize> = pages
+            .iter()
+            .map(|page| {
+                page.iter()
+                    .filter(|run| {
+                        run.contains(&format!("word{k}x")) || run.contains(&format!("open{k}z"))
+                    })
+                    .count()
+            })
+            .filter(|lines| *lines > 0)
+            .collect();
+        if on.len() > 1 && on[0] == 1 {
+            orphans.push(k);
+        }
+        if on.len() > 1 && on[on.len() - 1] == 1 {
+            widows.push(k);
+        }
+    }
+    (orphans, widows)
+}
+
+#[test]
+fn the_page_builder_reads_the_penalties_the_document_set() {
+    // `\clubpenalty`, `\widowpenalty` and `\brokenpenalty` are the document's
+    // (tex.web §890), not constants. At plain.tex's 150 a single line alone at
+    // a page's foot is sometimes cheaper than the white space that avoiding it
+    // leaves, so these sixty paragraphs leave some; at 10000, §831's infinite
+    // penalty, no page may end there at all.
+    let doc = |preamble: &str| {
+        let mut body = String::new();
+        for k in 1..=60 {
+            body.push_str(&format!("open{k}z "));
+            for w in 0..20 + (k % 13) * 7 {
+                body.push_str(&format!("word{k}x{w}z "));
+            }
+            body.push_str("\n\n");
+        }
+        format!("\\documentclass{{article}}\n{preamble}\\begin{{document}}\n{body}\\end{{document}}\n")
+    };
+    let priced = by_page(&texrs::run_pdf(&doc("")).expect("pdf"));
+    let (orphans, widows) = orphans_and_widows(&priced, 60);
+    assert!(
+        !orphans.is_empty() || !widows.is_empty(),
+        "at 150 some page ends on a single line: {} pages",
+        priced.len()
+    );
+    let forbidden = doc("\\clubpenalty=10000 \\widowpenalty=10000\n");
+    let pages = by_page(&texrs::run_pdf(&forbidden).expect("pdf"));
+    assert_eq!(
+        orphans_and_widows(&pages, 60),
+        (vec![], vec![]),
+        "at 10000 none does: {} pages",
+        pages.len()
+    );
+    let mut lowerer = texrs::lower::Lowerer::new();
+    lowerer
+        .lower("\\clubpenalty=10000 \\widowpenalty=40 \n")
+        .expect("lowers");
+    assert_eq!(
+        lowerer.layout.paging,
+        texrs::typeset::PageParams {
+            club: 10000.0,
+            widow: 40.0,
+            broken: 100.0
+        }
+    );
+}

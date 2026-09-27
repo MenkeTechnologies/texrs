@@ -52,9 +52,10 @@ passing, so the list is a claim the harness enforces rather than a note.
   value for one it did not, since texrs loads no format -- but once, as the
   document left them when lowering finished, not per paragraph as §816 reads
   them; a penalty of 10000 forbids its break (§831). A `--dvi` run is handed its
-  `Layout` by the caller and so breaks at plain.tex's values. The page
-  builder's parameters (`\widowpenalty`, `\clubpenalty`, `\brokenpenalty`)
-  are still `src/page.rs`'s constants. Every
+  `Layout` by the caller and so breaks at plain.tex's values. The `--pdf` page
+  breaker reads `\clubpenalty`, `\widowpenalty` and `\brokenpenalty` the same
+  way -- as the document left them, plain.tex's for one it did not assign
+  (`typeset::PageParams`) -- where it used constants. Every
   document that both engines set now reaches STRUCTURE; what separates that
   from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
   and §607-§615's compact movement encoding.

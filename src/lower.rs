@@ -305,7 +305,9 @@ impl Lowerer {
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
         let mut cmds = self.lower_located(src).map_err(|(e, _line)| e)?;
         // The breaker reads the paragraph parameters as the document left them.
+        // The page builder reads its penalties the same way.
         self.layout.breaking = crate::linebreak::Params::from_intpars(&self.eng.intpars);
+        self.layout.paging = crate::typeset::PageParams::from_intpars(&self.eng.intpars);
         // What a preloaded preamble WROTE to the registers runs first: see
         // `preload`.
         if !self.prologue.is_empty() {

@@ -6,6 +6,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The `--pdf` page breaker reads `\clubpenalty`, `\widowpenalty` and
+  `\brokenpenalty` as the document set them, keeping plain.tex's value for
+  one it did not; it charged 150, 150 and 100 whatever the document said, so
+  `\clubpenalty=10000` did not keep a paragraph's first line off a page's
+  foot.
+
 ## [0.6.2] - 2026-09-26
 
 ### Fixed

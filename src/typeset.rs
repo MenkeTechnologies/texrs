@@ -48,6 +48,10 @@ pub struct Layout {
     /// What the line breaker reads (`tex.web` §236's `\tolerance` and the
     /// rest), taken from the document by the lowerer.
     pub breaking: crate::linebreak::Params,
+    /// What the page builder charges between a paragraph's lines
+    /// (`\clubpenalty`, `\widowpenalty`, `\brokenpenalty`), taken from the
+    /// document by the lowerer.
+    pub paging: PageParams,
 }
 
 impl Default for Layout {
@@ -62,6 +66,7 @@ impl Default for Layout {
             margin: 72.0,
             size: 10.0,
             breaking: crate::linebreak::Params::default(),
+            paging: PageParams::default(),
         }
     }
 }
@@ -4266,17 +4271,51 @@ fn page_stops(
     stops
 }
 
-/// `\clubpenalty`: what leaving a paragraph's first line alone at the foot of
-/// a page costs. latex.ltx:500 of the 2026 release sets it to 150.
-const CLUB_PENALTY: f64 = 150.0;
+/// The three penalties the page builder charges between the lines of a
+/// paragraph (tex.web §890), read from the document by the lowerer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PageParams {
+    /// `\clubpenalty`: what leaving a paragraph's first line alone at the foot
+    /// of a page costs.
+    pub club: f64,
+    /// `\widowpenalty`: what leaving its last line alone at the top of the
+    /// next page costs.
+    pub widow: f64,
+    /// `\brokenpenalty`: charged for ending a page on a line that broke
+    /// inside a word.
+    pub broken: f64,
+}
 
-/// `\widowpenalty`: what leaving its last line alone at the top of the next
-/// page costs. latex.ltx:501 sets it to 150 as well.
-const WIDOW_PENALTY: f64 = 150.0;
+impl Default for PageParams {
+    /// plain.tex's values, which latex.ltx:500-503 of the 2026 release sets
+    /// identically: 150, 150 and 100.
+    fn default() -> Self {
+        Self {
+            club: 150.0,
+            widow: 150.0,
+            broken: 100.0,
+        }
+    }
+}
 
-/// `\brokenpenalty` (latex.ltx:503), charged for ending a page on a line that
-/// broke inside a word.
-const BROKEN_PENALTY: f64 = 100.0;
+impl PageParams {
+    /// The penalties as a document left them when it was lowered, and
+    /// plain.tex's for any it never assigned -- texrs loads no format, and
+    /// INITEX's zeros are not what a document is set with.
+    pub fn from_intpars(p: &crate::intpar::IntPars) -> Self {
+        let d = Self::default();
+        let read = |name: &str, fallback: f64| {
+            crate::intpar::index(name)
+                .and_then(|i| p.assigned(i))
+                .map_or(fallback, |v| v as f64)
+        };
+        Self {
+            club: read("clubpenalty", d.club),
+            widow: read("widowpenalty", d.widow),
+            broken: read("brokenpenalty", d.broken),
+        }
+    }
+}
 
 /// `\@secpenalty` (latex.ltx:17229), which `\@startsection` adds BEFORE the
 /// space above a heading (latex.ltx:17242): a page would rather end there than
@@ -4316,7 +4355,7 @@ const SLACK_COST: f64 = 100.0;
 /// run too and is treated as a paragraph -- leaving one line of a program
 /// alone at the top of a page is the same fault as leaving one line of prose
 /// there.
-fn break_penalties(lines: &[String]) -> Vec<f64> {
+fn break_penalties(lines: &[String], params: &PageParams) -> Vec<f64> {
     let n = lines.len();
     let mut cost = vec![0.0f64; n + 1];
     let space: Vec<bool> = lines.iter().map(|l| is_space_line(l)).collect();
@@ -4376,13 +4415,13 @@ fn break_penalties(lines: &[String]) -> Vec<f64> {
         }
         for e in from + 1..upto {
             if e == from + 1 {
-                cost[e] += CLUB_PENALTY;
+                cost[e] += params.club;
             }
             if e == upto - 1 {
-                cost[e] += WIDOW_PENALTY;
+                cost[e] += params.widow;
             }
             if printing_chars(&lines[e - 1]).last() == Some('-') {
-                cost[e] += BROKEN_PENALTY;
+                cost[e] += params.broken;
             }
         }
     }
@@ -4422,7 +4461,7 @@ fn plan_pages(items: &[Item], lines: &[String], layout: &Layout, leadings: &[f64
     // Float slack, so a page that comes to exactly its height is not one line
     // short of it.
     const SLACK: f64 = 1e-6;
-    let penalty = break_penalties(lines);
+    let penalty = break_penalties(lines, &layout.paging);
     let count = items.len();
     let mut best = vec![f64::INFINITY; count + 1];
     let mut chosen: Vec<Option<Stop>> = vec![None; count + 1];
