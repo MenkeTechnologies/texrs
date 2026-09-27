@@ -304,6 +304,8 @@ impl Lowerer {
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
         let mut cmds = self.lower_located(src).map_err(|(e, _line)| e)?;
+        // The breaker reads the paragraph parameters as the document left them.
+        self.layout.breaking = crate::linebreak::Params::from_intpars(&self.eng.intpars);
         // What a preloaded preamble WROTE to the registers runs first: see
         // `preload`.
         if !self.prologue.is_empty() {

@@ -142,3 +142,50 @@ fn a_word_is_broken_where_knuths_patterns_break_it() {
         "broken at the patterns' own points, with the hyphen the word did not carry"
     );
 }
+
+/// The breaker reads the document's parameters: `\hyphenpenalty=10000` is
+/// §831's infinite penalty, which FORBIDS a hyphenated break rather than
+/// pricing it, so the paragraph above comes out with no word split. The
+/// LaTeX prelude used to define `\tolerance` and `\hbadness` as macros that
+/// ate their values, and the breaker read constants whatever a document set.
+#[test]
+fn hyphenpenalty_ten_thousand_forbids_hyphenation() {
+    if texrs::linebreak::hyphenator().is_empty() {
+        return;
+    }
+    let prose = "Considering the extraordinarily counterintuitive ramifications, the \
+                 interdisciplinary committee recommended a comprehensive reorganisation of \
+                 the internationalisation infrastructure, notwithstanding the \
+                 incontrovertible evidence that such transformations invariably \
+                 precipitate organisational disintegration among the uncharacteristically \
+                 overrepresented constituencies.";
+    let hyphenated = set(prose);
+    assert!(hyphenated.iter().any(|l| l.ends_with('-')), "{hyphenated:?}");
+    let whole = set(&format!("\\hyphenpenalty=10000 {prose}"));
+    assert!(!whole.iter().any(|l| l.ends_with('-')), "{whole:?}");
+    assert_eq!(whole.join(" "), prose.split_whitespace().collect::<Vec<_>>().join(" "));
+}
+
+/// What the lowerer hands the breaker: a parameter the document assigned, and
+/// plain.tex's value for one it did not (texrs loads no format, and INITEX's
+/// `\tolerance=10000` is not what anything is set with). A LaTeX document's
+/// `\tolerance=2000` is an assignment, not text for a prelude macro to eat.
+#[test]
+fn the_breaker_reads_the_parameters_the_document_set() {
+    let mut plain = texrs::lower::Lowerer::new();
+    plain
+        .lower("\\tolerance=1000 \\pretolerance=-1 \\linepenalty=5\n")
+        .expect("lowers");
+    let p = plain.layout.breaking;
+    assert_eq!(
+        (p.tolerance, p.pretolerance, p.line_penalty, p.hyphen_penalty),
+        (1000.0, -1.0, 5.0, 50.0)
+    );
+    let doc = "\\documentclass{article}\n\\tolerance=2000\n\\begin{document}\nx\n\\end{document}\n";
+    let mut latex = texrs::lower::Lowerer::new();
+    latex
+        .preload(&texrs::latex::preamble_text(doc))
+        .expect("prelude");
+    latex.lower(doc).expect("lowers");
+    assert_eq!(latex.layout.breaking.tolerance, 2000.0);
+}

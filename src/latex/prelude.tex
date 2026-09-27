@@ -407,11 +407,9 @@
 \newcommand{\VERB}[1]{#1}
 %
 % ---- registers written with an = rather than \setlength -----------------
-% `\tolerance=2000' is an assignment to a TeX parameter texrs does not carry.
-% The delimited parameter eats the `=<value>' up to the end of the line, which
-% is where such an assignment always ends in these documents.
-\def\tolerance=#1 {}
-\def\hbadness=#1 {}
+% `\tolerance=2000' and `\hbadness=10000' are tex.web §236 parameters the
+% engine carries, so they are assigned as they are written; the line breaker
+% reads \tolerance (src/linebreak.rs).
 % \emergencystretch is not one of them any more. It is tex.web §247's dimension
 % parameter and `kernel.tex' declares it as the register, because \setlength is
 % the real two lines now and `\setlength{\emergencystretch}{3em}' -- which

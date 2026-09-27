@@ -45,6 +45,9 @@ pub struct Layout {
     pub margin: f64,
     /// The font's design size, at which its metrics are stated.
     pub size: f64,
+    /// What the line breaker reads (`tex.web` §236's `\tolerance` and the
+    /// rest), taken from the document by the lowerer.
+    pub breaking: crate::linebreak::Params,
 }
 
 impl Default for Layout {
@@ -58,6 +61,7 @@ impl Default for Layout {
             leading: 12.0,
             margin: 72.0,
             size: 10.0,
+            breaking: crate::linebreak::Params::default(),
         }
     }
 }
@@ -615,7 +619,7 @@ fn break_paragraph(para: &str, chain: &FontChain, layout: &Layout) -> Vec<Broken
             &mut pieces,
         );
     }
-    let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure);
+    let breaks = crate::linebreak::break_paragraph(&pieces, layout.measure, &layout.breaking);
 
     let mut lines = Vec::with_capacity(breaks.len());
     let mut from = 0usize;
@@ -3623,7 +3627,7 @@ fn fill(
         }
         // tex.web §813: the set of breakpoints that costs the WHOLE paragraph
         // least, rather than the ones a left-to-right fill happens to reach.
-        let breaks = crate::linebreak::break_paragraph(&pieces, measure);
+        let breaks = crate::linebreak::break_paragraph(&pieces, measure, &layout.breaking);
         let mut from = 0usize;
         for (number, end) in breaks.iter().enumerate() {
             let mut line = start(*centred, *depth);

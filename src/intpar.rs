@@ -20,9 +20,9 @@
 //! set and read back: `\escapechar` is honoured by everything that prints a
 //! control sequence; `\endlinechar` by the mouth, through the copy
 //! `crate::catcode::CatTable` carries; `\newlinechar` by `\message`'s
-//! printer; the line breaker's and page builder's parameters are still
-//! the constants `crate::linebreak` and `crate::page` were written with, which
-//! `BUGS.md` records.
+//! printer; the line breaker's eight by `crate::linebreak::Params`, as the
+//! document left them when lowering finished; the page builder's are still the
+//! constants `crate::page` was written with, which `BUGS.md` records.
 
 /// §236's integer parameters, in order.
 pub const NAMES: [&str; 55] = [
@@ -103,6 +103,12 @@ pub const NEW_LINE_CHAR: usize = 49;
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntPars {
     values: [i64; NAMES.len()],
+    /// Which parameters an assignment has written, one bit per [`NAMES`]
+    /// position (55 fit in 64). The typesetting path reads a parameter a
+    /// document set and keeps plain.tex's value for one it did not, because
+    /// texrs loads no format and INITEX's values (`\tolerance=10000`,
+    /// `\pretolerance=0`) are not what any document is set with.
+    written: u64,
 }
 
 impl IntPars {
@@ -130,7 +136,10 @@ impl IntPars {
         ] {
             values[index(name).expect("a §236 name")] = v;
         }
-        Self { values }
+        Self {
+            values,
+            written: 0,
+        }
     }
 
     pub fn get(&self, i: usize) -> i64 {
@@ -139,6 +148,12 @@ impl IntPars {
 
     pub fn set(&mut self, i: usize, v: i64) {
         self.values[i] = v;
+        self.written |= 1 << i;
+    }
+
+    /// The value of parameter `i` if anything has assigned it, else `None`.
+    pub fn assigned(&self, i: usize) -> Option<i64> {
+        (self.written & (1 << i) != 0).then(|| self.values[i])
     }
 
     /// The parameters that differ from `other`, by name, for a format dump.

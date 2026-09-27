@@ -18,10 +18,11 @@
 //! line to the measure, so the answer this module returns is one the page can
 //! honour. Nothing here is used on the DVI path, whose driver still cannot.
 //!
-//! WHAT IS NOT TeX. `\tolerance`, `\pretolerance` and the demerit weights are
-//! read from nothing -- they are the constants below, which are plain TeX's and
-//! LaTeX's defaults, because no document in the corpus sets them and the
-//! engine does not yet resolve those registers. The interword glue stretches
+//! WHAT IS NOT TeX. `\tolerance`, `\pretolerance`, `\linepenalty`, the two
+//! hyphen penalties and the three demerit weights are [`Params`], read from
+//! the document -- but ONCE, as it stood when lowering finished, and not per
+//! paragraph as §816 reads them; one a document never assigns keeps
+//! plain.tex's value, because texrs loads no format. The interword glue stretches
 //! and shrinks by cmr10's own fractions of the space rather than by each
 //! embedded face's `\fontdimen3` and `\fontdimen4`, which a PDF font file does
 //! not state. And TeX's final pass drops the demerits of a break it has no
@@ -43,10 +44,10 @@ pub enum After {
     /// is discarded.
     Glue(f64),
     /// A hyphenation point inside a word: breaking here sets a hyphen of this
-    /// width at the end of the line and costs `HYPHEN_PENALTY`.
+    /// width at the end of the line and costs `\hyphenpenalty`.
     Discretionary(f64),
     /// A break after a hyphen the AUTHOR wrote. The hyphen is already in the
-    /// text, so nothing is added; it costs `EX_HYPHEN_PENALTY` (§869).
+    /// text, so nothing is added; it costs `\exhyphenpenalty` (§869).
     Explicit,
     /// The pieces run together with no break between them and no space.
     Nothing,
@@ -62,31 +63,77 @@ pub struct Piece {
     pub after: After,
 }
 
-/// `\linepenalty`: what every line costs before its badness (plain.tex).
-const LINE_PENALTY: f64 = 10.0;
-/// `\hyphenpenalty`, `\exhyphenpenalty`: what breaking a word costs.
-const HYPHEN_PENALTY: f64 = 50.0;
-const EX_HYPHEN_PENALTY: f64 = 50.0;
-/// `\adjdemerits`: charged when two consecutive lines are more than one
-/// fitness class apart -- a tight line under a very loose one.
-const ADJ_DEMERITS: f64 = 10000.0;
-/// `\doublehyphendemerits`, `\finalhyphendemerits`: charged for two hyphens in
-/// a row, and for a hyphen on the second-to-last line.
-const DOUBLE_HYPHEN_DEMERITS: f64 = 10000.0;
-const FINAL_HYPHEN_DEMERITS: f64 = 5000.0;
+/// The eight `tex.web` §236 parameters the breaker reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Params {
+    /// `\pretolerance`: the first pass's badness limit; negative skips it.
+    pub pretolerance: f64,
+    /// `\tolerance`: the second pass's, which offers the hyphens.
+    pub tolerance: f64,
+    /// `\linepenalty`: what every line costs before its badness.
+    pub line_penalty: f64,
+    /// `\hyphenpenalty`, `\exhyphenpenalty`: what breaking a word costs.
+    pub hyphen_penalty: f64,
+    pub ex_hyphen_penalty: f64,
+    /// `\adjdemerits`: charged when two consecutive lines are more than one
+    /// fitness class apart -- a tight line under a very loose one.
+    pub adj_demerits: f64,
+    /// `\doublehyphendemerits`, `\finalhyphendemerits`: charged for two
+    /// hyphens in a row, and for a hyphen on the second-to-last line.
+    pub double_hyphen_demerits: f64,
+    pub final_hyphen_demerits: f64,
+}
+
+impl Default for Params {
+    /// plain.tex's values, which latex.ltx sets identically.
+    fn default() -> Self {
+        Self {
+            pretolerance: 100.0,
+            tolerance: 200.0,
+            line_penalty: 10.0,
+            hyphen_penalty: 50.0,
+            ex_hyphen_penalty: 50.0,
+            adj_demerits: 10000.0,
+            double_hyphen_demerits: 10000.0,
+            final_hyphen_demerits: 5000.0,
+        }
+    }
+}
+
+impl Params {
+    /// The parameters as a document left them when it was lowered, and
+    /// plain.tex's for any it never assigned: texrs loads no format, and
+    /// INITEX's own values (`\tolerance=10000`, `\pretolerance=0`,
+    /// `\linepenalty=0`) are not what a document is set with.
+    pub fn from_intpars(p: &crate::intpar::IntPars) -> Self {
+        let d = Self::default();
+        let read = |name: &str, fallback: f64| {
+            crate::intpar::index(name)
+                .and_then(|i| p.assigned(i))
+                .map_or(fallback, |v| v as f64)
+        };
+        Self {
+            pretolerance: read("pretolerance", d.pretolerance),
+            tolerance: read("tolerance", d.tolerance),
+            line_penalty: read("linepenalty", d.line_penalty),
+            hyphen_penalty: read("hyphenpenalty", d.hyphen_penalty),
+            ex_hyphen_penalty: read("exhyphenpenalty", d.ex_hyphen_penalty),
+            adj_demerits: read("adjdemerits", d.adj_demerits),
+            double_hyphen_demerits: read("doublehyphendemerits", d.double_hyphen_demerits),
+            final_hyphen_demerits: read("finalhyphendemerits", d.final_hyphen_demerits),
+        }
+    }
+}
 /// `inf_bad` (§108): the badness of a line that cannot be set at all.
 const INF_BAD: f64 = 10000.0;
 /// What an OVERFULL line costs, which is more than any paragraph of merely bad
 /// ones: §859 caps a line's demerits at 1e8 and no paragraph runs to ten
 /// thousand lines, so this floor cannot be reached by adding ordinary lines up.
 const OVERFULL_DEMERITS: f64 = 1e12;
+/// `inf_penalty` (§157): a penalty this large forbids its break.
+const INF_PENALTY: f64 = 10000.0;
 /// `eject_penalty` (§157): the forced break at the end of the paragraph.
 const EJECT_PENALTY: f64 = -10000.0;
-/// `\pretolerance` and `\tolerance` at LaTeX's defaults: the first pass tries
-/// to break with no hyphens at all, and only a paragraph it cannot is offered
-/// them.
-const PRETOLERANCE: f64 = 100.0;
-const TOLERANCE: f64 = 200.0;
 /// cmr10's interword glue is `3.33333pt plus 1.66666pt minus 1.11111pt`
 /// (`\fontdimen2..4`), so it stretches by half the space and shrinks by a
 /// third of it. A PDF font file states no such thing, so these fractions stand
@@ -168,16 +215,21 @@ fn assess(natural: f64, stretch: f64, shrink: f64, measure: f64, fil: bool) -> (
 /// The answer always covers the whole paragraph: the last entry is
 /// `pieces.len()`. An empty paragraph gets an empty answer.
 ///
-/// TeX's three passes (§863): break with no hyphens at `\pretolerance`; if no
-/// set of breakpoints is that good, offer the hyphens at `\tolerance`; and if
-/// that fails too, take the least bad set there is, overfull lines included.
-pub fn break_paragraph(pieces: &[Piece], measure: f64) -> Vec<usize> {
+/// TeX's three passes (§863): break with no hyphens at `\pretolerance` (a
+/// negative one skips the pass); if no set of breakpoints is that good, offer
+/// the hyphens at `\tolerance`; and if that fails too, take the least bad set
+/// there is, overfull lines included.
+pub fn break_paragraph(pieces: &[Piece], measure: f64, params: &Params) -> Vec<usize> {
     if pieces.is_empty() {
         return Vec::new();
     }
-    total_fit(pieces, measure, PRETOLERANCE, false, false)
-        .or_else(|| total_fit(pieces, measure, TOLERANCE, true, false))
-        .or_else(|| total_fit(pieces, measure, INF_BAD, true, true))
+    let first = match params.pretolerance >= 0.0 {
+        true => total_fit(pieces, measure, params.pretolerance, false, false, params),
+        false => None,
+    };
+    first
+        .or_else(|| total_fit(pieces, measure, params.tolerance, true, false, params))
+        .or_else(|| total_fit(pieces, measure, INF_BAD, true, true, params))
         .unwrap_or_else(|| vec![pieces.len()])
 }
 
@@ -192,6 +244,7 @@ fn total_fit(
     threshold: f64,
     hyphens: bool,
     overfull: bool,
+    params: &Params,
 ) -> Option<Vec<usize>> {
     let n = pieces.len();
     // Prefix sums, so the width of a candidate line is a subtraction rather
@@ -211,10 +264,13 @@ fn total_fit(
         give[k + 1] = give[k] + space * STRETCH_FRACTION;
         take[k + 1] = take[k] + space * SHRINK_FRACTION;
     }
+    // §831: a penalty of 10000 or more is no breakpoint at all, so
+    // `\hyphenpenalty=10000` forbids hyphenation rather than pricing it.
+    let allowed = |penalty: f64| penalty < INF_PENALTY;
     let breakable = |k: usize| match pieces[k].after {
         After::Glue(_) => true,
-        After::Discretionary(_) => hyphens,
-        After::Explicit => true,
+        After::Discretionary(_) => hyphens && allowed(params.hyphen_penalty),
+        After::Explicit => allowed(params.ex_hyphen_penalty),
         After::Nothing => false,
     };
 
@@ -263,13 +319,13 @@ fn total_fit(
                     let penalty = match last {
                         true => EJECT_PENALTY,
                         false => match pieces[b - 1].after {
-                            After::Discretionary(_) => HYPHEN_PENALTY,
-                            After::Explicit => EX_HYPHEN_PENALTY,
+                            After::Discretionary(_) => params.hyphen_penalty,
+                            After::Explicit => params.ex_hyphen_penalty,
                             _ => 0.0,
                         },
                     };
                     // §859: the demerits of this line.
-                    let mut cost = LINE_PENALTY + bad;
+                    let mut cost = params.line_penalty + bad;
                     cost = match cost.abs() >= INF_BAD {
                         true => 1e8,
                         false => cost * cost,
@@ -302,8 +358,8 @@ fn total_fit(
                         );
                     if hyphen_here && after_hyphen {
                         cost += match last {
-                            true => FINAL_HYPHEN_DEMERITS,
-                            false => DOUBLE_HYPHEN_DEMERITS,
+                            true => params.final_hyphen_demerits,
+                            false => params.double_hyphen_demerits,
                         };
                     }
                     for before in 0..4 {
@@ -312,7 +368,7 @@ fn total_fit(
                         }
                         let mut total = best[p][before] + cost;
                         if here.abs_diff(before) > 1 {
-                            total += ADJ_DEMERITS;
+                            total += params.adj_demerits;
                         }
                         if total < best[b][here] {
                             best[b][here] = total;
@@ -624,7 +680,7 @@ mod tests {
         greedy.push(pieces.len());
         assert_eq!(greedy, vec![5, 9, 15, 17], "first fit stops at the measure");
 
-        let total = break_paragraph(&pieces, measure);
+        let total = break_paragraph(&pieces, measure, &Params::default());
         assert_eq!(total, vec![5, 10, 16, 17], "total fit takes one box more");
         assert_ne!(total, greedy, "the two answers differ, which is the point");
     }
@@ -645,6 +701,6 @@ mod tests {
                 after: After::Nothing,
             },
         ];
-        assert_eq!(break_paragraph(&pieces, 100.0), vec![1, 2]);
+        assert_eq!(break_paragraph(&pieces, 100.0, &Params::default()), vec![1, 2]);
     }
 }
