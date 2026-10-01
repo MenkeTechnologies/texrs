@@ -1,0 +1,5 @@
+% A register assigned \global and then locally in the same group: tex
+% restores the globally-set value at the `}` (S283), texrs keeps the local one.
+\catcode`\{=1 \catcode`\}=2
+\count1=1 {\global\advance\count1 by 5 \count1=100 }\message{[\the\count1]}
+\end

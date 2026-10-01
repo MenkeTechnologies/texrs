@@ -1714,7 +1714,11 @@ impl Engine {
     /// travels with the character unchanged, which is the property LaTeX's
     /// `\MakeUppercase` is built on.
     pub fn do_case_shift(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<()> {
-        let group = self.read_group_tokens(lx)?;
+        // §1288 reads its text with `scan_toks(false, false)`, whose left
+        // brace is §403's: found by EXPANDING, so `\uppercase\expandafter{`
+        // reaches the brace through the `\expandafter`.
+        self.scan_left_brace(lx)?;
+        let group = self.read_balanced(lx)?;
         let shifted: Vec<Token> = group
             .into_iter()
             .map(|t| match &t {
@@ -2685,6 +2689,23 @@ impl Engine {
     }
 
     /// A `{...}` group's tokens, with the braces removed.
+    /// §403's `scan_left_brace`: skip blanks and `\relax`, expanding as it
+    /// goes, and consume the left brace that must come next.
+    fn scan_left_brace(&mut self, lx: &mut Lexer) -> R<()> {
+        loop {
+            let Some(t) = lx.next_token(&self.cats) else {
+                return Err(TexError("Missing { inserted".into()));
+            };
+            match t {
+                t if t.is_space() => continue,
+                Token::Char(_, Cat::BeginGroup) => return Ok(()),
+                Token::Cs(n) if self.primitive_meaning(n).name() == "relax" => continue,
+                Token::Cs(n) if self.try_expand(lx, n, false)? => continue,
+                _ => return Err(TexError("Missing { inserted".into())),
+            }
+        }
+    }
+
     pub fn read_group_tokens(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         loop {
             let Some(t) = lx.next_token(&self.cats) else {

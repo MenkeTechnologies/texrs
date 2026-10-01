@@ -1,0 +1,6 @@
+% S1288 reads the text of \uppercase/\lowercase with scan_toks, whose left
+% brace S403 finds by expanding: \expandafter and a macro reach it.
+\catcode`\{=1 \catcode`\}=2
+\def\x{abc}\uppercase\expandafter{\expandafter\def\expandafter\y\expandafter{\x}}\message{[\y]}
+\def\z{{\message{[XY]}}}\lowercase\z \lowercase\relax{\message{[QZ]}}
+\end

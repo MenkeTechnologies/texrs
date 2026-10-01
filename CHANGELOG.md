@@ -38,6 +38,11 @@ All notable changes to texrs are recorded here. The format follows
 - A token-register assignment expands what stands before its brace (§1226),
   and `\the\toks` expands in running text: `\toks2=\expandafter{\the\toks1 c}`
   stopped with `Missing { inserted`.
+- `\uppercase` and `\lowercase` find their brace by expanding (§403), so
+  `\uppercase\expandafter{...}` works.
+- `\multiply` of a dimension overflows at `max_dimen` (§1240), reporting
+  `! Arithmetic overflow.` and leaving the register alone, where it used to
+  multiply on up to the 32-bit range.
 
 ### Added
 

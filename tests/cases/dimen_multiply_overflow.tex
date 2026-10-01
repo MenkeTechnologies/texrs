@@ -1,0 +1,6 @@
+% S1240 multiplies a dimension with nx_plus_y, bounded at 2^30-1: past it
+% tex reports "! Arithmetic overflow." and leaves the register alone.
+\catcode`\{=1 \catcode`\}=2
+\dimen1=16000pt \multiply\dimen1 2 \message{[\the\dimen1]}
+\dimen2=8191.99998pt \multiply\dimen2 2 \message{[\the\dimen2]}
+\end

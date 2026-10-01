@@ -223,8 +223,13 @@ impl Compiler {
                     // raise `Arithmetic overflow` rather than wrapping -- so
                     // they go through a host builtin that applies TeX's rule
                     // and can raise. Neither is what a hot loop is made of.
+                    // A dimension or a glue component is bounded by §421's
+                    // `max_dimen`, not by the 32-bit word: §1240 multiplies it
+                    // with `nx_plus_y(..., 0)`, whose limit is 2^30-1.
                     Arith::Mul | Arith::Div => {
+                        let scaled = (DIMEN_BASE..MUSKIP_BASE + 256 * SKIP_STRIDE).contains(reg);
                         let which = match op {
+                            Arith::Mul if scaled => 2,
                             Arith::Mul => 0,
                             _ => 1,
                         };

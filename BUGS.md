@@ -592,9 +592,19 @@ too-big negative gives -2147483647 rather than -2147483648. texrs checked only
 for host `i64` overflow until this was measured, so `\count1=99999999999` was
 accepted outright and printed back.
 
-The one divergence left is the recovery from a RUN-TIME overflow. `\multiply`
-past the range is detected on the VM (`src/runtime.rs`), which stops rather than
-reporting, so `tests/cases/multiply_overflow.tex` is still a written-down gap.
+A RUN-TIME overflow recovers as tex's does: `\multiply` past the range is
+detected on the VM (`src/runtime.rs`), reports `! Arithmetic overflow.` with its
+context, leaves the register alone and carries on --
+`tests/cases/multiply_overflow.tex`. A DIMENSION is bounded tighter, at §421's
+`max_dimen` (2^30-1), because §1240 multiplies it with `nx_plus_y`:
+`\dimen1=16000pt \multiply\dimen1 2` overflows where the same product in a
+count would not (`tests/cases/dimen_multiply_overflow.tex`).
+
+What is left is a GLUE multiplied past that bound. §1240 builds the product
+glue whole and drops it if any component overflowed, so the register is left
+entirely alone and one error is reported; texrs multiplies the three
+components as three checked operations, so the components that fit change, the
+one that does not stays, and each overflowing component reports.
 The scanner's own limit recovers the way tex does — `\count1=99999999999`
 reports `! Number too big.`, clamps to 2147483647 and carries on — and
 `tests/cases/number_too_big.tex` and `tests/cases/error_context_trimmed.tex` pin

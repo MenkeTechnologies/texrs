@@ -253,12 +253,18 @@ fn b_ffi_call(vm: &mut VM, argc: u8) -> Value {
 /// `fatal_error`, so the run CONTINUES with the register untouched. Returning
 /// the old value is what leaves it untouched -- the caller's `SetSlot` writes
 /// whatever comes back, and writing the old value is a no-op.
+///
+/// `which` is 0 for an integer product, 1 for a quotient, and 2 for a product
+/// of a dimension or glue component, which §1240 bounds at 2^30-1.
 fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     let which = vm.pop().to_int();
     let operand = vm.pop().to_int();
     let old = vm.pop().to_int();
     let result = match which {
         0 => old.checked_mul(operand),
+        2 => old
+            .checked_mul(operand)
+            .filter(|v| v.abs() <= crate::dimen::MAX_DIMEN),
         _ => match operand {
             0 => None,
             d => old.checked_div(d),

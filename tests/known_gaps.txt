@@ -77,3 +77,13 @@ edef_over_a_dimension.tex
 #                  one shape that does not. It is also the whole of what
 #                  \strip@pt needs, so amsgen.sty:85's
 #                  `\edef\f@size{\strip@pt\@tempdimb}' waits on it.
+global_then_local_in_group.tex
+#                  `{\global\advance\count1 by 5 \count1=100 }' -- tex's S283
+#                  restores the value the \global left (6) at the `}', because
+#                  the local assignment after it saved that value; texrs prints
+#                  100. A Cmd::Group saves and restores around its whole body,
+#                  and a register written \global inside it is left out of the
+#                  save, so nothing restores it. A per-assignment save stack
+#                  is what tex has and what this would take (see
+#                  `src/lower.rs`'s `globals` field). Found by a round-2
+#                  parity probe.
