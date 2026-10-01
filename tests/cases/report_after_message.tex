@@ -1,0 +1,5 @@
+% An error reported after a \message starts on a fresh line (print_nl), so in
+% the joined stream it follows the message with no space between them.
+\catcode`\{=1 \catcode`\}=2
+\message{a}\chardef\x=256 \message{b}\chardef\y=300
+\end

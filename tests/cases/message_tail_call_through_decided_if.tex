@@ -1,0 +1,11 @@
+% A tail call through a conditional the lowerer decides. `\expandafter\l\fi`
+% expands the \fi BEFORE \l reads its argument (tex.web 366/510), so each call
+% takes the next character. Lowering both arms of the \ifx up front expanded
+% the arm not taken as well, and that one recursed forever.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\l#1{\ifx#1.\else[#1]\expandafter\l\fi}
+\message{\l abc.}
+\def\m#1{\if#1z\else(#1)\expandafter\m\fi}
+\message{\m xyz}
+\message{\iftrue A\else B\fi\iffalse C\else D\fi}
+\end

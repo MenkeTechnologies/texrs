@@ -417,7 +417,7 @@ impl Lowerer {
         self.reports.extend(fresh);
         std::mem::take(&mut self.reports)
             .into_iter()
-            .map(MsgOp::Text)
+            .map(MsgOp::Report)
             .collect()
     }
 
@@ -1099,6 +1099,16 @@ impl Lowerer {
                             out.push(Cmd::Arith(op, reg, v));
                         }
                     }
+                }
+                // `\show` takes the next token UNEXPANDED (§1294's `get_token`)
+                // and prints what it means. The meaning is a frontend fact, so
+                // the text is known now; it reaches the terminal the way a
+                // report does, in front of whatever is printed next.
+                "show" => {
+                    let Some(tok) = lx.next_token(&self.eng.cats) else {
+                        return Err(TexError("File ended while scanning \\show".into()));
+                    };
+                    self.eng.show_token(lx, &tok);
                 }
                 "message" => {
                     let parts = self.message_parts(lx)?;
@@ -3087,6 +3097,13 @@ impl Lowerer {
     fn msg_ops(&mut self, work: &mut Lexer, stop: &[&str]) -> R<Vec<MsgOp>> {
         let mut out: Vec<MsgOp> = Vec::new();
         let mut text = String::new();
+        // Conditionals this walk DECIDED (their truth is a frontend fact) and
+        // is still inside: §498's `cond_ptr`, for the ones that never become a
+        // run-time branch. Their `\else` and `\fi` are met in-stream, as tex
+        // meets them, rather than collected up front with both arms lowered --
+        // which expanded the arm not taken, so a tail call in it
+        // (`\else...\expandafter\l\fi`) recursed forever.
+        let mut decided = 0usize;
         macro_rules! flush {
             () => {
                 if !text.is_empty() {
@@ -3104,13 +3121,21 @@ impl Lowerer {
                 _ => t,
             };
             let Token::Cs(n) = &t else {
+                // §294: a macro-parameter character prints doubled.
+                if let Token::Char(c, Cat::Param) = t {
+                    text.push(c);
+                }
                 text.push_str(&t.to_text(self.eng.esc()));
                 continue;
             };
             let n = *n;
-            if stop.contains(&n.name()) {
+            if stop.contains(&n.name()) && !(decided > 0 && matches!(n.name(), "else" | "fi")) {
                 work.push_back(&[Token::Cs(n)]);
                 break;
+            }
+            if decided > 0 && matches!(n.name(), "else" | "fi") {
+                self.close_decided(work, n.name(), &mut decided)?;
+                continue;
             }
             match n.name() {
                 "the" | "number" => {
@@ -3124,12 +3149,12 @@ impl Lowerer {
                             // is known while lowering because the table is.
                             Some(Token::Cs(w)) if w.name() == "toks" => {
                                 let reg = self.eng.scan_number_pending(work)?;
-                                text.push_str(&self.eng.toks_text(reg));
+                                text.push_str(&self.eng.toks_shown(reg));
                                 continue;
                             }
                             Some(Token::Cs(w)) if self.eng.toks_cs(w).is_some() => {
                                 let reg = self.eng.toks_cs(w).expect("just matched");
-                                text.push_str(&self.eng.toks_text(reg));
+                                text.push_str(&self.eng.toks_shown(reg));
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "skip" || w.name() == "muskip" => {
@@ -3303,7 +3328,7 @@ impl Lowerer {
                 // `\the\toks` uses, and the same renderer.
                 "detokenize" => {
                     let group = self.eng.read_group_tokens(work)?;
-                    text.push_str(&self.eng.tokens_text(&group));
+                    text.push_str(&self.eng.tokens_shown(&group));
                 }
                 "string" => {
                     if let Some(next) = work.pending.pop() {
@@ -3336,7 +3361,7 @@ impl Lowerer {
                 // tokens survive as tokens.
                 "unexpanded" => {
                     let group = self.eng.read_group_tokens(work)?;
-                    text.push_str(&self.eng.tokens_text(&group));
+                    text.push_str(&self.eng.tokens_shown(&group));
                 }
                 // `\begincsname` is `\csname` that does not define what it does
                 // not find: an unknown name expands to nothing instead of to
@@ -3361,6 +3386,13 @@ impl Lowerer {
                         return Err(TexError("Missing token after \\expandafter".into()));
                     };
                     match &next {
+                        // The `\else` or `\fi` of a conditional decided here
+                        // expands one step like any other: `\expandafter\l\fi`
+                        // closes the conditional before `\l` reads its argument.
+                        Token::Cs(m) if decided > 0 && matches!(m.name(), "else" | "fi") => {
+                            let m = *m;
+                            self.close_decided(work, m.name(), &mut decided)?;
+                        }
                         Token::Cs(m) if self.eng.is_macro(*m) => {
                             let m = *m;
                             self.eng.expand_macro_pending(work, m)?;
@@ -3390,26 +3422,20 @@ impl Lowerer {
                 }
                 "iftrue" | "iffalse" => {
                     let taken = n.name() == "iftrue";
-                    let (t_ops, e_ops) = self.msg_arms(work)?;
-                    flush!();
-                    out.extend(if taken { t_ops } else { e_ops });
+                    self.open_decided(work, taken, &mut decided)?;
                 }
                 "ifx" => {
                     let a = work.pending.pop();
                     let b = work.pending.pop();
                     let same = self.eng.meanings_equal_pub(a.as_ref(), b.as_ref());
-                    let (t_ops, e_ops) = self.msg_arms(work)?;
-                    flush!();
-                    out.extend(if same { t_ops } else { e_ops });
+                    self.open_decided(work, same, &mut decided)?;
                 }
                 // Character codes and categories are frontend facts too, so
                 // `\if` and `\ifcat` are decided here as `\ifx` is. They were
                 // not named, so a message printed the test and both arms.
                 "if" | "ifcat" => {
                     let same = self.eng.if_pending(work, n.name())?;
-                    let (t_ops, e_ops) = self.msg_arms(work)?;
-                    flush!();
-                    out.extend(if same { t_ops } else { e_ops });
+                    self.open_decided(work, same, &mut decided)?;
                 }
                 // Both ask the macro table a question, which is a FRONTEND
                 // fact -- so they are decided here, exactly as `\iftrue` and
@@ -3444,9 +3470,7 @@ impl Lowerer {
                             other == "ifvoid"
                         }
                     };
-                    let (t_ops, e_ops) = self.msg_arms(work)?;
-                    flush!();
-                    out.extend(if truth { t_ops } else { e_ops });
+                    self.open_decided(work, truth, &mut decided)?;
                 }
                 "ifnum" => {
                     let left = self.msg_number(work)?;
@@ -3578,6 +3602,27 @@ impl Lowerer {
             true => Ok((else_ops, then_ops)),
             false => Ok((then_ops, else_ops)),
         }
+    }
+
+    /// Enter a conditional decided while lowering, as §498 does: a true test
+    /// runs on into its own text; a false one skips (§494, unexpanded) to the
+    /// `\else`, whose text then runs, or past the `\fi`.
+    fn open_decided(&mut self, work: &mut Lexer, truth: bool, decided: &mut usize) -> R<()> {
+        let truth = truth != self.eng.take_unless();
+        if truth || self.eng.skip_to_pending(work, true)? {
+            *decided += 1;
+        }
+        Ok(())
+    }
+
+    /// Meet the `\else` or `\fi` of a decided conditional (§510): `\fi` ends
+    /// it, `\else` ends the text that ran and skips the rest to the `\fi`.
+    fn close_decided(&mut self, work: &mut Lexer, name: &str, decided: &mut usize) -> R<()> {
+        if name == "else" {
+            self.eng.skip_to_pending(work, false)?;
+        }
+        *decided -= 1;
+        Ok(())
     }
 
     /// A number operand inside a message body.

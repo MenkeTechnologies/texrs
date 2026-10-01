@@ -126,6 +126,18 @@ pub const CORPUS: &[Entry] = &[
         "\\string\\cs\n\\message{\\string\\undefined}   % => \\undefined",
     ),
     (
+        "\\show",
+        "Expansion",
+        "Print what the next token means (tex.web \u{a7}1294), read UNEXPANDED: `> `, the name and `=`, the same text `\\meaning` gives, and a period, followed by the context an error shows \u{2014} `\\show` ends by calling `error`, so the run closes with the transcript notice as it does after an error.",
+        "\\show<token>\n\\def\\a#1{x#1}\\show\\a   % => > \\a=macro:#1->x#1.",
+    ),
+    (
+        "\\inputlineno",
+        "Expansion",
+        "The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and `\\the` and `\\number` write it.",
+        "\\inputlineno\n\\message{\\the\\inputlineno}   % => the line this is on",
+    ),
+    (
         "\\meaning",
         "Expansion",
         "What a token MEANS, as characters (tex.web \u{a7}296's print_meaning). A macro reads back as `macro:` then its parameter text, `->` and its body, with `\\long`, `\\outer` and `\\protected` run together in front; a `\\chardef` constant reads back as `\\char\"41`; a register name reads back as the register it stands for; a character carries the NAME of its category, so `\\meaning A` is `the letter A`. A name nothing has defined is `undefined`. Expandable, like `\\string`, so it works inside a `\\message`.",

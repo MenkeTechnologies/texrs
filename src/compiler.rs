@@ -68,6 +68,10 @@ pub mod ops {
     pub const SCALE_DIMEN: u16 = 4015;
     /// Append a number as `\romannumeral` writes it: one argument, the value.
     pub const MSG_ROMAN: u16 = 4016;
+    /// Append a report the lowerer made (§82's `print_err` and its context):
+    /// one argument, the text. Unlike `MSG_APPEND` it marks a message that
+    /// OPENS with it as starting on a fresh line rather than after a space.
+    pub const MSG_REPORT: u16 = 4017;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -369,6 +373,12 @@ impl Compiler {
                     let k = self.str_const(t)?;
                     self.b.emit(Op::LoadConst(k), self.line);
                     self.b.emit(Op::CallBuiltin(ops::MSG_APPEND, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
+                MsgOp::Report(t) => {
+                    let k = self.str_const(t)?;
+                    self.b.emit(Op::LoadConst(k), self.line);
+                    self.b.emit(Op::CallBuiltin(ops::MSG_REPORT, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::Discard(n) => {

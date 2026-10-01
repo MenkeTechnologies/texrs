@@ -1,0 +1,8 @@
+% \show (tex.web 1294): `> `, the name and `=`, the meaning, a period, and
+% the context an error shows. Like an error it starts on a fresh line, so it
+% sits hard against a message printed before it rather than after a space.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\~=13
+\def\a#1{x#1}\show\a
+\show\relax \show a \show\undefinedfoo \def~{T}\show~
+\message{after}\show\count \let\b=c\show\b \long\def\c{}\show\c
+\end

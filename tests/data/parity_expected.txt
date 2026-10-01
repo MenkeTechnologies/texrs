@@ -116,6 +116,8 @@ inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 A B C C C [done]
 #==# ifx_after_edef_conditional.tex
 SAME
+#==# inputlineno.tex
+[3] [5] [5]
 #==# integer_parameters.tex
 [-9][-9] [-9] negative [1] [250] [77] [4][3] [33][\clubpenalty][\widowpenalty] [1000][25][1][13]
 #==# internal_quantity_as_a_number.tex
@@ -132,6 +134,10 @@ NO THROUGH LESS
 HELLO-WORLD
 #==# meaning_prim.tex
 [macro:#1->[#1]][\long macro:#1->(#1)][\outer macro:->o][macro:#1,#2\stop -><#1;#2>] [macro:->][\char"41][\count3][\dimen4] [\skip5][\toks6][the letter A][begin-group character {] [\relax][undefined] [the letter A][the character 1][math shift character $][alignment tab character &] [macro parameter character #][superscript character ^][subscript character _][begin-group character {][end-group character }] [\count][\def][\message]
+#==# message_doubles_parameter_character.tex
+[##][a##b]
+#==# message_tail_call_through_decided_if.tex
+[a][b][c] (x)(y) AD
 #==# multi_message.tex
 one two
 #==# multiply_overflow.tex
@@ -164,8 +170,12 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 [5.0pt][6.0pt][3.5pt] [3.0pt plus 5.0pt minus 5.0pt] [3.0pt plus 4.0fil minus 1.0pt] [3.0pt plus 3.0fil] [3.0pt plus 1.0fill minus 1.0fil] [3.0pt plus 6.0pt minus 9.0pt] [1.5pt plus 3.0pt minus 4.5pt]
 #==# register_copy.tex
 [4.0pt plus 1.0fil minus 2.0pt][4.0pt plus 1.0fil minus 2.0pt] [4.0pt][8.0pt][4.0pt] [4.0pt plus 1.0fil minus 2.0pt]
+#==# report_after_message.tex
+a! Bad character code (256).l.4 \message{a}\chardef\x=256                               \message{b}\chardef\y=300b! Bad character code (300).l.4 ...{a}\chardef\x=256 \message{b}\chardef\y=300                                                   )(see the transcript file for additional information
 #==# romannumeral.tex
 [mcmlxxxiv][iv][ix][mmmcmxcix] [][][xl][xc][cd] [xiv][mmmmm] macro:->mcmlxxxiv [macro:->12] 12
+#==# show_meanings.tex
+> \a=macro:#1->x#1.l.5 \def\a#1{x#1}\show\a                        > \relax=\relax.l.6 \show\relax                \show a \show\undefinedfoo \def~{T}\show~> the letter a.l.6 \show\relax \show a                        \show\undefinedfoo \def~{T}\show~> \undefinedfoo=undefined.l.6 \show\relax \show a \show\undefinedfoo                                           \def~{T}\show~> ~=macro:->T.l.6 ...x \show a \show\undefinedfoo \def~{T}\show~                                                  after> \count=\count.l.7 \message{after}\show\count                               \let\b=c\show\b \long\def\c{}\show\c> \b=the letter c.l.7 \message{after}\show\count \let\b=c\show\b                                               \long\def\c{}\show\c> \c=\long macro:->.l.7 ...\count \let\b=c\show\b \long\def\c{}\show\c                                                   )(see the transcript file for additional information
 #==# skipdef_alias.tex
 [1.0pt plus 2.0pt][1.0pt plus 2.0pt]
 #==# skipped_text_counts_aliased_ifs.tex
@@ -174,6 +184,8 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 [Xy]
 #==# string_and_cs.tex
 \foo\!
+#==# string_brace_in_message.tex
+[{] [}]
 #==# toks_registers.tex
 [abc][a\b c][\.] [\x ][] [abc]
 #==# toks_scoping.tex

@@ -20,6 +20,14 @@ thread_local! {
 }
 
 thread_local! {
+    /// Whether the message being built OPENS with a report. §82's
+    /// `print_err` begins with `print_nl`, which starts a fresh line rather
+    /// than writing the space `\message` puts between two messages -- so such
+    /// a message is written hard against the one before it, not after a space.
+    static GLUED: RefCell<bool> = const { RefCell::new(false) };
+}
+
+thread_local! {
     /// The document's own text, in the order it was read.
     static TEXT: RefCell<String> = const { RefCell::new(String::new()) };
 }
@@ -66,6 +74,36 @@ pub fn take_text() -> String {
     TEXT.with(|t| std::mem::take(&mut *t.borrow_mut()))
 }
 
+/// Record a finished message: as a message of its own, or -- when it opens
+/// with a report -- appended to the last one, with nothing between.
+fn record(done: String) {
+    let glued = GLUED.with(|g| std::mem::take(&mut *g.borrow_mut()));
+    MESSAGES.with(|m| {
+        let mut m = m.borrow_mut();
+        match (glued, m.last_mut()) {
+            (true, Some(last)) => last.push_str(&done),
+            _ => m.push(done),
+        }
+    });
+}
+
+/// Append a report to the message being built; see [`GLUED`].
+fn push_report(text: &str) {
+    BUILDING.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.is_empty() {
+            GLUED.with(|g| *g.borrow_mut() = true);
+        }
+        b.push_str(text);
+    });
+}
+
+/// A report the mouth or the lowerer made, carried to its place in the run.
+fn b_msg_report(vm: &mut VM, _argc: u8) -> Value {
+    push_report(&render(&vm.pop()));
+    Value::Undef
+}
+
 /// Append one piece to the message being built.
 fn b_msg_append(vm: &mut VM, _argc: u8) -> Value {
     let piece = render(&vm.pop());
@@ -76,7 +114,7 @@ fn b_msg_append(vm: &mut VM, _argc: u8) -> Value {
 /// Finish the message and record it.
 fn b_msg_flush(_vm: &mut VM, _argc: u8) -> Value {
     let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
-    MESSAGES.with(|m| m.borrow_mut().push(done));
+    record(done);
     Value::Undef
 }
 
@@ -139,10 +177,7 @@ fn fault(vm: &mut VM, msg: impl Into<String>) -> Value {
 fn report(msg: &str) {
     let site = ERROR_SITE.with(|s| s.borrow().clone());
     REPORTED.with(|r| *r.borrow_mut() = true);
-    BUILDING.with(|b| {
-        b.borrow_mut()
-            .push_str(&format!("! {msg}.{}", site.replace('\n', "")))
-    });
+    push_report(&format!("! {msg}.{}", site.replace('\n', "")));
 }
 
 /// Record where the command about to run would be reported from. One argument.
@@ -158,11 +193,15 @@ fn b_err_site(vm: &mut VM, _argc: u8) -> Value {
 /// when the file ends and which is otherwise the last character of the run.
 fn b_transcript_notice(_vm: &mut VM, _argc: u8) -> Value {
     if REPORTED.with(|r| *r.borrow()) {
+        // What was held is glued (`record`); the notice is not -- tex writes the
+        // closing paren after a space.
         let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+        if !held.is_empty() {
+            record(held);
+        }
         MESSAGES.with(|m| {
-            m.borrow_mut().push(format!(
-                "{held})(see the transcript file for additional information"
-            ))
+            m.borrow_mut()
+                .push(")(see the transcript file for additional information".to_string())
         });
     }
     Value::Int(0)
@@ -310,6 +349,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::COLOR_POP, b_color_pop);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    vm.register_builtin(ops::MSG_REPORT, b_msg_report);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
     vm.register_builtin(ops::MSG_ROMAN, b_msg_roman);
@@ -337,6 +377,7 @@ fn run_with(
 ) -> Result<Vec<String>, String> {
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
+    GLUED.with(|g| *g.borrow_mut() = false);
     FAULT.with(|f| *f.borrow_mut() = None);
     ERROR_SITE.with(|s| s.borrow_mut().clear());
     REPORTED.with(|r| *r.borrow_mut() = false);
@@ -372,7 +413,7 @@ fn run_with(
     // one, which tex writes on the terminal as it happens.
     let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
     if !held.is_empty() {
-        MESSAGES.with(|m| m.borrow_mut().push(held));
+        record(held);
     }
     // A builtin that faulted halted the VM, so the halt has to be read as the
     // error it stands for rather than as a clean finish.

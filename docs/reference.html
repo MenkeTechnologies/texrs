@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">168</div>
+            <div class="stat-val">170</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -167,6 +167,10 @@
             <tr><td><code>\endcsname</code></td><td>Terminate a <code>\csname</code>. It is an error to reach one without an open <code>\csname</code>.</td><td><pre>\csname foo\endcsname</pre></td></tr>
             <tr><td><code>\string</code></td><td>Print a control sequence as text, escape character included — the inverse of <code>\csname</code>.</td><td><pre>\string\cs
 \message{\string\undefined}   % =&gt; \undefined</pre></td></tr>
+            <tr><td><code>\show</code></td><td>Print what the next token means (tex.web §1294), read UNEXPANDED: <code>&gt; </code>, the name and <code>=</code>, the same text <code>\meaning</code> gives, and a period, followed by the context an error shows — <code>\show</code> ends by calling <code>error</code>, so the run closes with the transcript notice as it does after an error.</td><td><pre>\show&lt;token&gt;
+\def\a#1{x#1}\show\a   % =&gt; &gt; \a=macro:#1-&gt;x#1.</pre></td></tr>
+            <tr><td><code>\inputlineno</code></td><td>The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and <code>\the</code> and <code>\number</code> write it.</td><td><pre>\inputlineno
+\message{\the\inputlineno}   % =&gt; the line this is on</pre></td></tr>
             <tr><td><code>\meaning</code></td><td>What a token MEANS, as characters (tex.web §296's print_meaning). A macro reads back as <code>macro:</code> then its parameter text, <code>-&gt;</code> and its body, with <code>\long</code>, <code>\outer</code> and <code>\protected</code> run together in front; a <code>\chardef</code> constant reads back as <code>\char"41</code>; a register name reads back as the register it stands for; a character carries the NAME of its category, so <code>\meaning A</code> is <code>the letter A</code>. A name nothing has defined is <code>undefined</code>. Expandable, like <code>\string</code>, so it works inside a <code>\message</code>.</td><td><pre>\meaning&lt;token&gt;
 \def\a#1{[#1]}
 \message{\meaning\a}   % =&gt; macro:#1-&gt;[#1]</pre></td></tr>
@@ -649,6 +653,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>MSG_MUGLUE</code></td><td><code>4014</code></td><td>Append a MATH glue, written as TeX writes one: the same four arguments `MSG_GLUE` takes, with `mu` for the unit.</td></tr>
             <tr><td><code>SCALE_DIMEN</code></td><td><code>4015</code></td><td>`tex.web` §453's `&lt;factor&gt;&lt;internal unit&gt;`: the register's value, the factor's integer part, and its fraction in 65536ths. A builtin rather than a run of arithmetic ops because §107's truncation and §460's clamp are the port, and one Rust function is where they stay readable.</td></tr>
             <tr><td><code>MSG_ROMAN</code></td><td><code>4016</code></td><td>Append a number as `\romannumeral` writes it: one argument, the value.</td></tr>
+            <tr><td><code>MSG_REPORT</code></td><td><code>4017</code></td><td>Append a report the lowerer made (§82's `print_err` and its context): one argument, the text. Unlike `MSG_APPEND` it marks a message that OPENS with it as starting on a fresh line rather than after a space.</td></tr>
           </tbody>
         </table>
       </section>

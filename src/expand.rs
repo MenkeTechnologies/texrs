@@ -134,6 +134,10 @@ pub struct Engine {
     optional_defaults: HashMap<CsId, Vec<Token>>,
     pub count: HashMap<i64, i64>,
     pub messages: Vec<String>,
+    /// The line `\inputlineno` was last read on (§1382's `line`). A read
+    /// primitive answers the line of the token that named it, so the mouth
+    /// records it at that token rather than when the value is used.
+    input_line: u32,
     /// §236's integer parameters -- `\escapechar` among them, which is
     /// why `esc()` reads here.
     pub intpars: crate::intpar::IntPars,
@@ -329,6 +333,7 @@ impl Engine {
             optional_defaults: HashMap::new(),
             count: HashMap::new(),
             messages: Vec::new(),
+            input_line: 0,
             intpars: crate::intpar::IntPars::new(),
             groups: Vec::new(),
             conds: Vec::new(),
@@ -486,6 +491,28 @@ impl Engine {
         let context = lx.context().unwrap_or_default();
         self.errors
             .push(format!("! {msg}.{}", context.replace('\n', "")));
+    }
+
+    /// §1294's `\show`: `> ` and what the token means, then the context an
+    /// error shows -- `\show` ends by calling `error` -- so it lands in the
+    /// stream exactly where a report does.
+    pub fn show_token(&mut self, lx: &Lexer, tok: &Token) {
+        let name = match tok {
+            Token::Cs(n) => format!("{}{}=", self.esc(), n.name()),
+            Token::Char(c, Cat::Active) => format!("{c}="),
+            Token::Char(..) => String::new(),
+        };
+        let meaning = match tok {
+            Token::Char(c, Cat::Active) => match self.active_meaning(*c) {
+                Some(id) => self.meaning_text(&Token::Cs(id)),
+                None => "undefined".to_string(),
+            },
+            _ => self.meaning_text(tok),
+        };
+        let shown = format!("> {name}{meaning}.");
+        let context = lx.context().unwrap_or_default();
+        self.errors
+            .push(format!("{shown}{}", context.replace('\n', "")));
     }
 
     /// The errors reported since the last call, clearing them.
@@ -883,7 +910,11 @@ impl Engine {
     fn take(&mut self, lx: &mut Lexer, pending_only: bool) -> Option<Token> {
         match pending_only {
             true => lx.pending.pop(),
-            false => lx.next_token(&self.cats),
+            false => {
+                let t = lx.next_token(&self.cats);
+                self.note_input_line(lx, t.as_ref());
+                t
+            }
         }
     }
 
@@ -1835,6 +1866,32 @@ impl Engine {
         out
     }
 
+    /// The same text as §294's `show_token_list` prints it into a message:
+    /// a macro-parameter character comes out DOUBLED (`mac_param: print(c);
+    /// print(c)`), so `\message{\the\toks0}` over `a#b` prints `a##b`.
+    pub fn tokens_shown(&self, tokens: &[Token]) -> String {
+        let mut out = String::new();
+        for t in tokens {
+            match t {
+                Token::Char(c, Cat::Param) => {
+                    out.push(*c);
+                    out.push(*c);
+                }
+                Token::Char(c, _) => out.push(*c),
+                Token::Cs(id) => out.push_str(&self.cs_text(id.name())),
+            }
+        }
+        out
+    }
+
+    /// `\the\toks<n>` as a message shows it; see [`Engine::tokens_shown`].
+    pub fn toks_shown(&self, reg: i64) -> String {
+        self.toks
+            .get(&reg)
+            .map(|t| self.tokens_shown(t))
+            .unwrap_or_default()
+    }
+
     /// §262's `print_cs`: the escape character and the name, then a space
     /// after every multi-letter name and after a one-character name whose
     /// character is currently a LETTER -- `\A ` and, under
@@ -2639,10 +2696,24 @@ impl Engine {
     /// The two definitions differ in WHEN the value is known: a `\chardef`
     /// constant is fixed at definition time and can be folded while lowering,
     /// while a `\countdef` name is a register whose value the run may change.
+    /// Record the line an `\inputlineno` token was read on.
+    fn note_input_line(&mut self, lx: &Lexer, t: Option<&Token>) {
+        if let Some(Token::Cs(n)) = t {
+            if n.name() == "inputlineno" {
+                self.input_line = lx.line();
+            }
+        }
+    }
+
     pub fn numeric_cs(&self, name: CsId) -> Option<NumericCs> {
         match self.meanings.get(&name) {
             Some(Meaning::CharDef(v)) => Some(NumericCs::Value(*v)),
             Some(Meaning::CountDef(r)) => Some(NumericCs::Register(*r)),
+            // eTeX's `\inputlineno` (etex.ch `input_line_no_code`) is a
+            // read-only integer: the line it was read on.
+            None if name.name() == "inputlineno" => {
+                Some(NumericCs::Value(i64::from(self.input_line)))
+            }
             _ => None,
         }
     }
@@ -3853,7 +3924,35 @@ impl Engine {
             }
             break;
         }
-        self.read_balanced(lx)
+        // §473: `\message` reads its text with `scan_toks(false, true)`,
+        // EXPANDING as it goes, so a brace that `\string` turns into an other
+        // character is never counted -- `\message{\string{}` prints `{`. A
+        // plain balanced read counted it and ran away.
+        let mut depth = 1usize;
+        let mut out = Vec::new();
+        while let Some(t) = lx.next_token(&self.cats) {
+            self.note_input_line(lx, Some(&t));
+            match &t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(out);
+                    }
+                }
+                Token::Cs(n) if self.primitive_meaning(*n).name() == "string" => {
+                    out.push(t);
+                    match lx.next_token(&self.cats) {
+                        Some(next) => out.push(next),
+                        None => break,
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(t);
+        }
+        Err(TexError("Runaway argument".into()))
     }
 }
 
@@ -4136,6 +4235,12 @@ impl Engine {
     }
     pub fn read_relation_pending(&mut self, lx: &mut Lexer) -> R<char> {
         self.read_relation(lx, true)
+    }
+    /// §494's skip over pending tokens: to the matching `\else` (when
+    /// `stop_at_else`) or `\fi`, consuming it, and saying whether it was an
+    /// `\else`.
+    pub fn skip_to_pending(&mut self, lx: &mut Lexer, stop_at_else: bool) -> R<bool> {
+        self.skip_to(lx, stop_at_else, true)
     }
     pub fn meanings_equal_pub(&self, a: Option<&Token>, b: Option<&Token>) -> bool {
         self.meanings_equal(a, b)

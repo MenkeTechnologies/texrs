@@ -1,0 +1,7 @@
+% tex.web 294: show_token_list prints a macro-parameter character DOUBLED,
+% so a `#` that reaches a \message as a character token -- written there, or
+% out of a token register through \the -- comes out as `##`.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\toks0={a#b}
+\message{[#][\the\toks0]}
+\end

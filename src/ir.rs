@@ -76,6 +76,10 @@ pub enum Arith {
 #[derive(Clone, Debug)]
 pub enum MsgOp {
     Text(String),
+    /// A report -- `! ...` or `\show`'s `> ...` with its context -- made while
+    /// lowering. Printed like `Text`, except that tex starts it on a fresh line
+    /// (§62's `print_nl`), so a message that opens with one carries no space.
+    Report(String),
     Number(Num),
     /// A number rendered as a DIMENSION -- `\the\dimen0` gives `1.0pt`, not
     /// `65536`. The value is scaled points either way; what differs is how it
@@ -323,6 +327,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
         let pad = "  ".repeat(depth);
         match op {
             MsgOp::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
+            MsgOp::Report(t) => out.push_str(&format!("{pad}Report {t:?}\n")),
             MsgOp::Number(n) => out.push_str(&format!("{pad}Number {}\n", num_text(n))),
             MsgOp::Dimen(n) => out.push_str(&format!("{pad}Dimen {}\n", num_text(n))),
             MsgOp::Roman(n) => out.push_str(&format!("{pad}Roman {}\n", num_text(n))),

@@ -1,0 +1,6 @@
+% \message reads its text EXPANDING (tex.web 473), so the brace \string turns
+% into an other character is not counted toward the balance.
+\catcode`\{=1 \catcode`\}=2
+\message{[\string{]}
+\message{[\string}]}
+\end

@@ -6,6 +6,24 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A tail call through a conditional the lowerer decides (`\ifx`, `\if`,
+  `\ifcat`, `\iftrue`, `\ifdefined`, ...) inside a `\message` no longer
+  recurses forever: the arm not taken is skipped unexpanded (§494) and the
+  `\else`/`\fi` is met in-stream, so `\expandafter\l\fi` closes the
+  conditional before `\l` reads its argument.
+- A macro-parameter character prints doubled in a `\message` (§294), whether
+  written there or brought in by `\the\toks`, `\detokenize` or `\unexpanded`.
+- `\message{\string{}` no longer runs away: a brace `\string` turns into an
+  other character is not counted toward the balance (§473).
+- A report (an error, or `\show`) that follows a message starts on a fresh
+  line as tex's `print_nl` does, so it is no longer written after a space.
+
+### Added
+
+- `\show` (§1294) and `\inputlineno`.
+
 ## [0.6.3] - 2026-09-27
 
 ### Fixed
