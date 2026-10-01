@@ -689,16 +689,18 @@ fn get_macro_and_get_meaning_answer_the_body_and_the_parameter_text() {
     );
     assert_eq!(
         out(&format!("{defs}{}", says("token.get_macro(\"foo\")"))),
-        "[foo-#1]"
+        "[foo-##1]"
     );
-    // "->bar" and "#1->foo-#1": `\meaning` without its `macro:` prefix.
+    // "->bar" and "#1->foo-#1": `\meaning` without its `macro:` prefix. The
+    // `#` reaches the `\message` as a parameter character, which §294 prints
+    // doubled -- `luatex -ini` prints `[foo-##1]` and `[##1->foo-##1]`.
     assert_eq!(
         out(&format!("{defs}{}", says("token.get_meaning(\"bar\")"))),
         "[->bar]"
     );
     assert_eq!(
         out(&format!("{defs}{}", says("token.get_meaning(\"foo\")"))),
-        "[#1->foo-#1]"
+        "[##1->foo-##1]"
     );
     // Not a macro, or not defined at all, answers NO VALUE in `luatex` rather
     // than nil or an empty string, so `select('#', ...)` is 0 and a chunk can
