@@ -15,6 +15,9 @@ pub enum Num {
     Literal(i64),
     /// `\count<n>` — a register read.
     Count(i64),
+    /// A register read, negated: §440's `-\count<n>`, where an odd number of
+    /// minus signs stands before an internal quantity.
+    Neg(i64),
     /// `tex.web` §453's `<factor><internal unit>` — size10.clo's `10\p@`.
     ///
     /// The unit is a REGISTER, so the product cannot be taken while lowering:
@@ -373,6 +376,7 @@ fn num_text(num: &Num) -> String {
     match num {
         Num::Literal(v) => v.to_string(),
         Num::Count(n) => format!("\\count{n}"),
+        Num::Neg(n) => format!("-\\count{n}"),
         // The factor as the document wrote it, then the register it scales.
         Num::Scaled { int, frac, reg } => format!(
             "{}\\count{reg}",

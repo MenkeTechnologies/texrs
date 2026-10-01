@@ -486,6 +486,11 @@ impl Compiler {
             Num::Count(reg) => {
                 self.b.emit(Op::GetSlot(slot(*reg)), self.line);
             }
+            Num::Neg(reg) => {
+                self.b.emit(Op::LoadInt(0), self.line);
+                self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+                self.b.emit(Op::Sub, self.line);
+            }
             // The register first, then the two halves of the factor: the
             // builtin pops them back in that order and takes §453's product.
             Num::Scaled { int, frac, reg } => {

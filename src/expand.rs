@@ -3513,6 +3513,14 @@ impl Engine {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
+                // §367: `\noexpand` makes the token after it unexpandable. Both
+                // stay, so the pass that freezes the body sees the marker too.
+                Token::Cs(name) if name.name() == "noexpand" => {
+                    out.push(t);
+                    if let Some(next) = work.pending.pop() {
+                        out.push(next);
+                    }
+                }
                 // `\unexpanded{...}` is the one thing that stops this pass:
                 // its group goes into the body as tokens, so a macro inside it
                 // is called when the body runs rather than now.
@@ -3555,6 +3563,12 @@ impl Engine {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
+                // §367: the token after `\noexpand` goes into the body as itself.
+                Token::Cs(name) if name.name() == "noexpand" => {
+                    if let Some(next) = lx.pending.pop() {
+                        out.push(next);
+                    }
+                }
                 Token::Cs(name) => {
                     let name = *name;
                     // A `\protected` macro is NOT expanded here: that is the
@@ -3605,6 +3619,14 @@ impl Engine {
                 continue;
             };
             let name = *name;
+            // §367: the token after `\noexpand` goes into the body as itself,
+            // so `\edef\b{\noexpand\a}` defines a call of `\a`.
+            if name.name() == "noexpand" {
+                if let Some(next) = lx.pending.pop() {
+                    out.push(next);
+                }
+                continue;
+            }
             // `\unexpanded{...}` is the one thing that stops this pass: its
             // group goes into the body AS TOKENS, so a macro inside it is
             // called when the body runs rather than now. `\expanded{...}` is
@@ -3662,6 +3684,12 @@ impl Engine {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
             match &t {
+                // §367: a `\noexpand`ed token is printed, not expanded.
+                Token::Cs(name) if name.name() == "noexpand" => {
+                    if let Some(next) = lx.pending.pop() {
+                        out.push_str(&self.tokens_shown(&[next]));
+                    }
+                }
                 Token::Cs(name) if name.name() == "the" || name.name() == "number" => {
                     let n = self.read_the(lx, name.name() == "number", true)?;
                     out.push_str(&n);
@@ -4256,14 +4284,24 @@ impl Engine {
     /// when the BODY is expanded. A definition path that dropped them would
     /// leave `\edef\pair#1,#2.{…}` matching nothing and its delimiters landing
     /// in the output.
+    ///
+    /// `global` is `\xdef`, or an `\edef` under a `\global` prefix: the
+    /// definition survives every enclosing group, as `do_def` makes a `\gdef`.
+    /// The prefixes are spent here for the reason `do_def` spends them.
     pub fn define_macro_with_params(
         &mut self,
         name: CsId,
         params: Vec<Token>,
         body: Vec<Token>,
+        global: bool,
     ) -> R<()> {
         validate_params(&params)?;
+        let was = std::mem::replace(&mut self.global, global);
         self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
+        self.global = was;
+        self.long = false;
+        self.outer = false;
+        self.protected = false;
         Ok(())
     }
 }

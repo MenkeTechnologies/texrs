@@ -19,6 +19,14 @@ All notable changes to texrs are recorded here. The format follows
   other character is not counted toward the balance (§473).
 - A report (an error, or `\show`) that follows a message starts on a fresh
   line as tex's `print_nl` does, so it is no longer written after a space.
+- `\noexpand` (§367) keeps the token after it unexpanded: `\edef\b{\noexpand\a}`
+  defines a call of `\a` rather than `\a`'s expansion, and `\message` prints
+  `\a ` rather than expanding it.
+- `\xdef`, and `\edef` under `\global`, define past the group they are made in;
+  both were local.
+- Signs before an internal quantity negate it (§440): `\count2=-\count1`,
+  `\advance\count3 by -\count1`, `\ifnum-\count1>0` and `\number-\count1` read
+  the register negated where they read it as zero or unsigned.
 
 ### Added
 

@@ -1320,7 +1320,8 @@ impl Lowerer {
                 // the macros after it expand to.
                 "intercept" => self.eng.compile_time_intercept(lx)?,
                 "edef" | "xdef" => {
-                    if let Some(cmd) = self.edef_snapshot(lx)? {
+                    let global = name.name() == "xdef" || self.eng.take_global_prefix();
+                    if let Some(cmd) = self.edef_snapshot(lx, global)? {
                         out.push(cmd);
                     }
                 }
@@ -1573,7 +1574,7 @@ impl Lowerer {
     /// frozen either way: a DIMENSION, whose value is a slot and whose §478
     /// spelling is `12.0pt` rather than a count of scaled points. That is what
     /// the refusal names.
-    fn edef_snapshot(&mut self, lx: &mut Lexer) -> R<Option<Cmd>> {
+    fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Option<Cmd>> {
         let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
@@ -1609,7 +1610,8 @@ impl Lowerer {
         // that `\unexpanded` still stops it.
         if self.reads_only_untouched_registers(&body) {
             if let Ok(frozen) = self.eng.expand_edef_body(&raw) {
-                self.eng.define_macro_with_params(name, params, frozen)?;
+                self.eng
+                    .define_macro_with_params(name, params, frozen, global)?;
                 return Ok(None);
             }
         }
@@ -1620,6 +1622,13 @@ impl Lowerer {
         let mut cmd = None;
         while let Some(t) = work.pending.pop() {
             match &t {
+                // §367: the token after `\noexpand` goes into the body as
+                // itself, and the marker does not.
+                Token::Cs(n) if n.name() == "noexpand" => {
+                    if let Some(next) = work.pending.pop() {
+                        new_body.push(next);
+                    }
+                }
                 Token::Cs(n) if n.name() == "the" => {
                     match work.pending.pop() {
                         Some(Token::Cs(w)) if w.name() == "count" => {}
@@ -1652,7 +1661,8 @@ impl Lowerer {
                 other => new_body.push(*other),
             }
         }
-        self.eng.define_macro_with_params(name, params, new_body)?;
+        self.eng
+            .define_macro_with_params(name, params, new_body, global)?;
         Ok(cmd)
     }
 
@@ -2877,12 +2887,20 @@ impl Lowerer {
     /// belongs to the run, and only the slot number is known while lowering.
     fn peek_int_register(&mut self, lx: &mut Lexer, pending: bool) -> R<Option<Num>> {
         let mut eaten = Vec::new();
+        // §440 reads the signs before an internal integer and negates it for
+        // an odd number of minuses: `\count2=-\count1`, `\number-\count1`.
+        let mut negative = false;
         loop {
             let Some(t) = self.eng.take_any(lx, pending) else {
                 lx.push_back(&eaten);
                 return Ok(None);
             };
             if t.is_space() {
+                eaten.push(t);
+                continue;
+            }
+            if matches!(t, Token::Char('+' | '-', Cat::Other)) {
+                negative ^= matches!(t, Token::Char('-', _));
                 eaten.push(t);
                 continue;
             }
@@ -2898,12 +2916,12 @@ impl Lowerer {
                 };
                 if let Some((base, stride)) = file {
                     let reg = self.eng.scan_number_any(lx, pending)?;
-                    return Ok(Some(Num::Count(base + reg * stride)));
+                    return Ok(Some(signed(negative, base + reg * stride)));
                 }
                 // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name
                 // is that register, in every position the spelt-out form works.
                 if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
-                    return Ok(Some(Num::Count(r)));
+                    return Ok(Some(signed(negative, r)));
                 }
             }
             // Not a register: everything read goes back in the order it was
@@ -3251,6 +3269,19 @@ impl Lowerer {
                         out.push(MsgOp::Number(Num::Count(reg)));
                         continue;
                     }
+                    // A sign before a register: §440 negates the register's
+                    // value, which is the run's, so it is read when the
+                    // message runs. A sign before a literal is the scanner's.
+                    if matches!(
+                        work.pending.last(),
+                        Some(Token::Char('+' | '-', Cat::Other))
+                    ) {
+                        match self.msg_number(work)? {
+                            Num::Literal(v) => text.push_str(&v.to_string()),
+                            num => out.push(MsgOp::Number(num)),
+                        }
+                        continue;
+                    }
                     // `\number` takes either a register or a literal.
                     // `\number\skip0` gives the natural component only.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "skip") {
@@ -3336,6 +3367,13 @@ impl Lowerer {
                             Token::Cs(cs) => format!("{}{}", self.eng.esc(), cs.name()),
                             other => other.to_text(self.eng.esc()),
                         });
+                    }
+                }
+                // §367: `\noexpand` makes the next token unexpandable, so a
+                // message prints a macro after it as §262's `print_cs` does.
+                "noexpand" => {
+                    if let Some(next) = work.pending.pop() {
+                        text.push_str(&self.eng.tokens_shown(&[next]));
                     }
                 }
                 // `\jobname` is expandable: the job's name, as text.
@@ -3650,6 +3688,13 @@ impl Lowerer {
     }
 }
 
+/// A register read, negated when §440's signs before it said so.
+fn signed(negative: bool, reg: i64) -> Num {
+    match negative {
+        true => Num::Neg(reg),
+        false => Num::Count(reg),
+    }
+}
 /// The two halves of a recognised tail loop: what runs, and what decides.
 struct TailLoop {
     body: Vec<Token>,

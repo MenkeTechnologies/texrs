@@ -1,0 +1,5 @@
+% \xdef, and \edef under \global, define past the group they are made in.
+\catcode`\{=1 \catcode`\}=2
+\def\q{1}{\xdef\r{\q\q}\global\edef\s{\q}\edef\lcl{local}}
+\message{[\r][\s][\meaning\lcl]}
+\end

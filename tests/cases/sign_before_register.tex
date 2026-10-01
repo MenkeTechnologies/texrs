@@ -1,0 +1,8 @@
+% S440: signs before an internal quantity negate it, an odd number of them.
+\catcode`\{=1 \catcode`\}=2
+\countdef\c=7 \c=4 \count1=-17 \count2=-\count1 \count3=5 \advance\count3 by -\count1
+\message{[\the\count2][\the\count3][\ifnum-\count1>0 P\else N\fi][\number-\count1]}
+\message{[\number--\count1][\number - + -\c][\number-5]}
+\dimen1=2pt \count4=-\dimen1 \message{[\the\count4][\number-\dimen1]}
+\multiply\count3 by -\c \message{[\the\count3]}
+\end

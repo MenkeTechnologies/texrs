@@ -1,0 +1,6 @@
+% \noexpand (S367): the token after it goes into an \edef body as itself,
+% and a \message prints it rather than expanding it.
+\catcode`\{=1 \catcode`\}=2
+\def\a{A}\edef\b{\noexpand\a\a}\message{[\meaning\b]}
+\edef\c{\noexpand\a}\message{[\meaning\c][\noexpand\a][\c]}
+\end

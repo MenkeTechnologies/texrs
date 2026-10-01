@@ -146,6 +146,8 @@ one two
 -5/15
 #==# nested_macros.tex
 <zz>
+#==# noexpand_in_edef.tex
+[macro:->\a A] [macro:->\a ][\a ][A]
 #==# number_prim.tex
 42--17
 #==# number_stands_where_a_number_is_scanned.tex
@@ -176,6 +178,8 @@ a! Bad character code (256).l.4 \message{a}\chardef\x=256                       
 [mcmlxxxiv][iv][ix][mmmcmxcix] [][][xl][xc][cd] [xiv][mmmmm] macro:->mcmlxxxiv [macro:->12] 12
 #==# show_meanings.tex
 > \a=macro:#1->x#1.l.5 \def\a#1{x#1}\show\a                        > \relax=\relax.l.6 \show\relax                \show a \show\undefinedfoo \def~{T}\show~> the letter a.l.6 \show\relax \show a                        \show\undefinedfoo \def~{T}\show~> \undefinedfoo=undefined.l.6 \show\relax \show a \show\undefinedfoo                                           \def~{T}\show~> ~=macro:->T.l.6 ...x \show a \show\undefinedfoo \def~{T}\show~                                                  after> \count=\count.l.7 \message{after}\show\count                               \let\b=c\show\b \long\def\c{}\show\c> \b=the letter c.l.7 \message{after}\show\count \let\b=c\show\b                                               \long\def\c{}\show\c> \c=\long macro:->.l.7 ...\count \let\b=c\show\b \long\def\c{}\show\c                                                   )(see the transcript file for additional information
+#==# sign_before_register.tex
+[17][22][P][17] [-17][4][-5] [-131072][-131072] [-88]
 #==# skipdef_alias.tex
 [1.0pt plus 2.0pt][1.0pt plus 2.0pt]
 #==# skipped_text_counts_aliased_ifs.tex
@@ -194,3 +198,5 @@ a! Bad character code (256).l.4 \message{a}\chardef\x=256                       
 [1.0pt][72.26999pt][71.13188pt] [1.0pt plus 2.0pt minus 3.0pt]
 #==# undefined_cs.tex
 ! Undefined control sequence.l.2 \message{A\undefinedxx                           B}AB )(see the transcript file for additional information
+#==# xdef_survives_group.tex
+[11][1][undefined]
