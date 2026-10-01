@@ -396,11 +396,13 @@ and that could not be seen before `\titleformat` delivered anything at all.
   scratch value. texrs starts every register at zero, as INITEX does.
   `tests/cases/plain_count0.tex` pins that, and `scripts/fuzz/gen.pl` generates
   against `\count1`..`\count9`, the window where both engines start equal.
-- **`\edef` scratch registers.** Freezing `\the\count0` into a macro body needs
-  somewhere to put the value now, and the count registers are the only run-time
-  store this milestone has. texrs takes them from the top (255 downward), so a
+- **`\edef` scratch registers.** Freezing `\the\count0` or `\the\dimen0` into a
+  macro body needs somewhere to put the value now, and the registers are the
+  only run-time store this milestone has. texrs takes a scratch register of the
+  same kind from the top (255 downward), one per `\the` in the body, so a
   document that both uses `\edef` and reads a high register can see a value real
-  tex would not put there. Low registers are untouched.
+  tex would not put there, and `\meaning` of the macro shows `\the \count 255`
+  where tex shows the frozen digits. Low registers are untouched.
 
 ## Finding files
 

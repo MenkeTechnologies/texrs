@@ -51,6 +51,10 @@ All notable changes to texrs are recorded here. The format follows
 - A number's digits are read with expansion (§445): `\count1=1\d` over
   `\def\d{23}` is 123.
 - `\meaning` of an active character is the command it stands for.
+- An `\edef` body freezes `\the\dimen` (§478's `3.0pt`), which stopped with
+  `Unsupported \edef body: \the\dimen`; and a body reading several assigned
+  registers freezes every one, where only the last was snapshotted and the
+  others read zero.
 
 ### Added
 

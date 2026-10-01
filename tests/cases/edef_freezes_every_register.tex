@@ -1,0 +1,6 @@
+% An \edef body reading several assigned registers freezes every one of them
+% (S366): each \the gets its own snapshot, where only the last one kept its.
+\catcode`\{=1 \catcode`\}=2
+\count1=3 \count2=4 \edef\x{\the\count1-\the\count2}\count1=9 \count2=9 \message{[\x]}
+\dimen3=2.5pt \count4=7 \edef\y{\the\dimen3/\the\count4}\dimen3=1pt \count4=1 \message{[\y]}
+\end

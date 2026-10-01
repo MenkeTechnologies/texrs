@@ -82,6 +82,8 @@ VALUE
 [ab-cd][\inner -x-yy][OUT-x]
 #==# edef_freezes_conditional.tex
 ZERO
+#==# edef_freezes_every_register.tex
+[3-4] [2.5pt/7]
 #==# edef_over_a_dimension.tex
 [3.0pt][9.0pt]
 #==# edef_with_parameters.tex

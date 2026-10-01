@@ -1327,9 +1327,8 @@ impl Lowerer {
                 "intercept" => self.eng.compile_time_intercept(lx)?,
                 "edef" | "xdef" => {
                     let global = name.name() == "xdef" || self.eng.take_global_prefix();
-                    if let Some(cmd) = self.edef_snapshot(lx, global)? {
-                        out.push(cmd);
-                    }
+                    let snapshots = self.edef_snapshot(lx, global)?;
+                    out.extend(snapshots);
                 }
                 // `\begingroup` is a group in tex.web's sense (§1063's
                 // `simple_group` reached by `new_save_level`), so it scopes the
@@ -1580,7 +1579,7 @@ impl Lowerer {
     /// frozen either way: a DIMENSION, whose value is a slot and whose §478
     /// spelling is `12.0pt` rather than a count of scaled points. That is what
     /// the refusal names.
-    fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Option<Cmd>> {
+    fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Vec<Cmd>> {
         let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
@@ -1618,14 +1617,16 @@ impl Lowerer {
             if let Ok(frozen) = self.eng.expand_edef_body(&raw) {
                 self.eng
                     .define_macro_with_params(name, params, frozen, global)?;
-                return Ok(None);
+                return Ok(Vec::new());
             }
         }
         // Find `\the\count<n>` in the body; anything else stays literal.
         let mut work = Lexer::new("");
         work.push_back(&body);
         let mut new_body: Vec<Token> = Vec::new();
-        let mut cmd = None;
+        // One snapshot per `\the` in the body: each copies the register it
+        // reads into a scratch one, at the point the `\edef` stands.
+        let mut snapshots = Vec::new();
         while let Some(t) = work.pending.pop() {
             match &t {
                 // §367: the token after `\noexpand` goes into the body as
@@ -1636,8 +1637,14 @@ impl Lowerer {
                     }
                 }
                 Token::Cs(n) if n.name() == "the" => {
-                    match work.pending.pop() {
-                        Some(Token::Cs(w)) if w.name() == "count" => {}
+                    // §478 writes a count as digits and a dimension as `3.0pt`;
+                    // the scratch register is of the same kind, so `\the` of
+                    // it writes the frozen value the way tex froze it.
+                    let (file, kind) = match work.pending.pop() {
+                        Some(Token::Cs(w)) if w.name() == "count" => (0, "count"),
+                        Some(Token::Cs(w)) if w.name() == "dimen" => {
+                            (crate::compiler::DIMEN_BASE, "dimen")
+                        }
                         // Name the quantity rather than the construct: a
                         // report saying only `Unsupported \edef body' left
                         // every reader bisecting a .sty to find out which
@@ -1652,14 +1659,14 @@ impl Lowerer {
                                 }
                             )))
                         }
-                    }
+                    };
                     let reg = self.eng.scan_number_pending(&mut work)?;
                     let scratch = self.next_scratch;
                     self.next_scratch -= 1;
-                    self.assigned.insert(scratch);
-                    cmd = Some(Cmd::SetCount(scratch, Num::Count(reg)));
+                    self.assigned.insert(file + scratch);
+                    snapshots.push(Cmd::SetCount(file + scratch, Num::Count(file + reg)));
                     new_body.push(Token::cs("the"));
-                    new_body.push(Token::cs("count"));
+                    new_body.push(Token::cs(kind));
                     for ch in scratch.to_string().chars() {
                         new_body.push(Token::Char(ch, Cat::Other));
                     }
@@ -1669,7 +1676,7 @@ impl Lowerer {
         }
         self.eng
             .define_macro_with_params(name, params, new_body, global)?;
-        Ok(cmd)
+        Ok(snapshots)
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
