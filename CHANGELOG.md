@@ -43,6 +43,14 @@ All notable changes to texrs are recorded here. The format follows
 - `\multiply` of a dimension overflows at `max_dimen` (§1240), reporting
   `! Arithmetic overflow.` and leaving the register alone, where it used to
   multiply on up to the 32-bit range.
+- plain.tex's `\loop...\repeat` runs as a loop: `\iterate`'s two `\let`s were
+  both run while lowering, so every loop ran once. Text between a loop's test
+  and its repeat -- `\loop A \ifnum X<Y B \repeat`, or the same in a
+  self-calling macro before its tail call -- runs on each further pass rather
+  than being dropped.
+- A number's digits are read with expansion (§445): `\count1=1\d` over
+  `\def\d{23}` is 123.
+- `\meaning` of an active character is the command it stands for.
 
 ### Added
 

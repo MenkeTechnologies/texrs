@@ -1,0 +1,7 @@
+% A tail-recursive macro with text between its test and its call: the text
+% runs before each further pass rather than being dropped.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\r{\advance\count1 1 \message{a\the\count1}\ifnum\count1<3 \message{m}\r\fi}
+\r
+\count1=0 \def\s{\advance\count1 1 \ifnum\count1<3 \s\fi}\s\message{[\the\count1]}
+\end

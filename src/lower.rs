@@ -869,7 +869,7 @@ impl Lowerer {
                 && self.meaning_wins(lx, name)
             {
                 if let Some(parts) = self.tail_loop(name) {
-                    out.push(self.lower_tail_loop(parts)?);
+                    out.extend(self.lower_tail_loop(parts)?);
                     continue;
                 }
                 self.eng.expand_macro_file(lx, name)?;
@@ -1432,8 +1432,8 @@ impl Lowerer {
                     // inline copy. Inlining it cannot terminate: the copy holds
                     // the call that gets copied.
                     if let Some(parts) = self.tail_loop(name) {
-                        let cmd = self.lower_tail_loop(parts)?;
-                        out.push(cmd);
+                        let cmds = self.lower_tail_loop(parts)?;
+                        out.extend(cmds);
                         continue;
                     }
                     // A macro expands into the stream and lowering continues
@@ -2698,6 +2698,9 @@ impl Lowerer {
         if !m.params.is_empty() {
             return None;
         }
+        if let Some(parts) = self.plain_iterate(name, &m.body) {
+            return Some(parts);
+        }
         let is_self = |t: &Token| matches!(t, Token::Cs(n) if *n == name);
         // The tail call sits at the end, before an optional space and `\fi`.
         let mut end = m.body.len();
@@ -2726,11 +2729,80 @@ impl Lowerer {
         if body.iter().chain(cond.iter()).any(is_self) {
             return None;
         }
-        Some(TailLoop { body, cond })
+        Some(TailLoop {
+            body,
+            cond,
+            leaves_relax: None,
+        })
+    }
+
+    /// Recognise plain.tex's `\iterate` (plain.tex's `\loop...\repeat`):
+    ///
+    /// ```text
+    /// \def\loop#1\repeat{\def\body{#1}\iterate}
+    /// \def\iterate{\body \let\next\iterate \else\let\next\relax\fi \next}
+    /// ```
+    ///
+    /// `\body` ends with the OPEN `\ifnum` that `\iterate` closes, so the loop is
+    /// `\body`'s text up to that `\ifnum`, then the test, again while it holds:
+    /// the do-while `Cmd::Loop` is. Lowered by inlining instead, both `\let`s
+    /// ran while lowering and the else arm's won, so every loop ran once.
+    ///
+    /// The same narrowness as `tail_loop`: exactly this shape, a guard that is
+    /// an `\ifnum` with nothing conditional after it, and a body that names
+    /// neither macro. The loop leaves `\next` meaning `\relax`, as tex does.
+    fn plain_iterate(&self, name: CsId, body: &[Token]) -> Option<TailLoop> {
+        let toks: Vec<&Token> = body.iter().filter(|t| !t.is_space()).collect();
+        let cs = |i: usize| match toks.get(i) {
+            Some(Token::Cs(n)) => Some(*n),
+            _ => None,
+        };
+        if toks.len() != 10 {
+            return None;
+        }
+        let (inner, next) = (cs(0)?, cs(2)?);
+        let shape = [(1, "let"), (4, "else"), (5, "let"), (7, "relax"), (8, "fi")];
+        if shape
+            .iter()
+            .any(|(i, w)| cs(*i).map(|n| n.name()) != Some(*w))
+            || cs(3)? != name
+            || cs(6)? != next
+            || cs(9)? != next
+        {
+            return None;
+        }
+        let Some(Meaning::Macro(b)) = self.eng.meanings.get(&inner) else {
+            return None;
+        };
+        if !b.params.is_empty() {
+            return None;
+        }
+        let guard = b
+            .body
+            .iter()
+            .rposition(|t| matches!(t, Token::Cs(n) if n.name() == "ifnum"))?;
+        let cond = b.body[guard + 1..].to_vec();
+        let loop_body = b.body[..guard].to_vec();
+        let names_one = |t: &Token| {
+            matches!(t, Token::Cs(n) if *n == name || *n == inner || *n == next
+                || Engine::is_conditional(*n))
+        };
+        if cond.iter().any(names_one)
+            || loop_body
+                .iter()
+                .any(|t| matches!(t, Token::Cs(n) if *n == name || *n == inner))
+        {
+            return None;
+        }
+        Some(TailLoop {
+            body: loop_body,
+            cond,
+            leaves_relax: Some(next),
+        })
     }
 
     /// Lower a recognised tail loop: the body as a block, the guard as a test.
-    fn lower_tail_loop(&mut self, parts: TailLoop) -> R<Cmd> {
+    fn lower_tail_loop(&mut self, parts: TailLoop) -> R<Vec<Cmd>> {
         let mut body_lx = Lexer::new("");
         body_lx.push_back(&parts.body);
         let body = self.block(&mut body_lx, None)?;
@@ -2744,12 +2816,49 @@ impl Lowerer {
             _ => Rel::Equal,
         };
         let right = self.number(&mut cond_lx)?;
-        Ok(Cmd::Loop {
-            body,
-            left,
-            rel,
-            right,
-        })
+        // What follows the test inside the true arm, before the tail call:
+        // `\loop A \ifnum X<Y B \repeat` runs A, then B and A again while
+        // the test holds. Dropping B compiled a different program.
+        let mut rest = Vec::new();
+        while let Some(t) = cond_lx.next_token(&self.eng.cats) {
+            rest.push(t);
+        }
+        let cmd = match rest.iter().all(Token::is_space) {
+            true => vec![Cmd::Loop {
+                body,
+                left,
+                rel,
+                right,
+            }],
+            // A; if X<Y { do { B; A } while X<Y }. A is lowered a second time
+            // for the loop's own copy of it.
+            false => {
+                let mut again_lx = Lexer::new("");
+                again_lx.push_back(&rest);
+                let mut again = self.block(&mut again_lx, None)?;
+                let mut body_lx = Lexer::new("");
+                body_lx.push_back(&parts.body);
+                again.extend(self.block(&mut body_lx, None)?);
+                let mut out = body;
+                out.push(Cmd::IfNum {
+                    left: left.clone(),
+                    rel,
+                    right: right.clone(),
+                    then_branch: vec![Cmd::Loop {
+                        body: again,
+                        left,
+                        rel,
+                        right,
+                    }],
+                    else_branch: Vec::new(),
+                });
+                out
+            }
+        };
+        if let Some(next) = parts.leaves_relax {
+            self.eng.let_relax(next);
+        }
+        Ok(cmd)
     }
 
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
@@ -3712,6 +3821,8 @@ fn signed(negative: bool, reg: i64) -> Num {
 struct TailLoop {
     body: Vec<Token>,
     cond: Vec<Token>,
+    /// The control sequence the loop leaves meaning `\relax`: plain's `\next`.
+    leaves_relax: Option<CsId>,
 }
 
 /// The one character a text font joins these two into, if it joins them.

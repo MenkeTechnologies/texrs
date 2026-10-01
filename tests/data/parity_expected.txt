@@ -144,6 +144,8 @@ NO THROUGH LESS
 HELLO-WORLD
 #==# mathchardef_meaning.tex
 [\mathchar"7123][28963][28963][F][T] [28963]
+#==# meaning_active_character.tex
+[macro:->T] [the letter x] [\relax]
 #==# meaning_prim.tex
 [macro:#1->[#1]][\long macro:#1->(#1)][\outer macro:->o][macro:#1,#2\stop -><#1;#2>] [macro:->][\char"41][\count3][\dimen4] [\skip5][\toks6][the letter A][begin-group character {] [\relax][undefined] [the letter A][the character 1][math shift character $][alignment tab character &] [macro parameter character #][superscript character ^][subscript character _][begin-group character {][end-group character }] [\count][\def][\message]
 #==# message_doubles_parameter_character.tex
@@ -162,6 +164,8 @@ one two
 [macro:->\a A] [macro:->\a ][\a ][A]
 #==# number_prim.tex
 42--17
+#==# number_scan_expands_macro.tex
+[123] [123] [31]
 #==# number_stands_where_a_number_is_scanned.tex
 [11][11]
 #==# number_too_big.tex
@@ -178,6 +182,8 @@ Runaway text?[! Forbidden control sequence found while scanning text of \message
 ! Illegal parameter number in definition of \greet.<to be read again>                    1l.2 \def\greet#{1HELLO-#1                         }1HELLO-##1{WORLD} )(see the transcript file for additional information
 #==# plain_count0.tex
 [1]
+#==# plain_loop_repeat.tex
+1 2 3 4 [\relax] (10) (7) (4) (1) in in
 #==# radix_constants.tex
 [255][511][8705] [8705]
 #==# register_arithmetic.tex
@@ -202,6 +208,8 @@ a! Bad character code (256).l.4 \message{a}\chardef\x=256                       
 \foo\!
 #==# string_brace_in_message.tex
 [{] [}]
+#==# tail_loop_text_after_test.tex
+a1 m a2 m a3 [3]
 #==# toks_assign_expands.tex
 [a##bc] [xy] [z] [Y\y ]
 #==# toks_registers.tex

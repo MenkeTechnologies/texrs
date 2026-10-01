@@ -1749,6 +1749,14 @@ impl Engine {
             let Token::Char(c, cat) = tok else {
                 unreachable!("a token is a character or a control sequence")
             };
+            // An active character is a command (§296 prints its meaning as a
+            // control sequence's), not a character of category 13.
+            if *cat == Cat::Active {
+                return match self.active_meaning(*c) {
+                    Some(id) => self.meaning_text(&Token::Cs(id)),
+                    None => "undefined".to_string(),
+                };
+            }
             return Self::char_meaning(*c, *cat);
         };
         match self.meanings.get(name) {
@@ -3434,6 +3442,14 @@ impl Engine {
                         any = true;
                     }
                     other if other.is_space() && any => break,
+                    // §445 reads each digit with `get_x_token`: a macro after
+                    // the first digits expands and the constant goes on.
+                    // Only a macro: a conditional here belongs to whichever
+                    // pass owns it, and the lowerer decides those itself.
+                    Token::Cs(n) if self.is_macro(*n) => {
+                        let n = *n;
+                        self.expand_macro(lx, n, pending_only)?;
+                    }
                     other => {
                         lx.push_back(std::slice::from_ref(other));
                         break;
@@ -3460,6 +3476,12 @@ impl Engine {
                 // part of what follows. Pushing it back put it in the text, so
                 // `\ifnum\count0>3 BIG` rendered as " BIG".
                 other if other.is_space() && any => break,
+                // §445 reads each digit with `get_x_token`: `\count1=1\d`
+                // over `\def\d{23}` is 123.
+                Token::Cs(n) if self.is_macro(*n) => {
+                    let n = *n;
+                    self.expand_macro(lx, n, pending_only)?;
+                }
                 other => {
                     lx.push_back(std::slice::from_ref(other));
                     break;
@@ -4300,6 +4322,12 @@ impl Engine {
     pub fn take_unless(&mut self) -> bool {
         std::mem::take(&mut self.unless)
     }
+    /// `\let\name=\relax`, for a construct the lowerer runs as a whole: plain's
+    /// `\loop` leaves `\next` meaning `\relax` when it ends.
+    pub fn let_relax(&mut self, name: CsId) {
+        self.set_meaning(name, Meaning::Primitive(CsId::intern("relax")));
+    }
+
     pub fn is_macro(&self, name: CsId) -> bool {
         matches!(self.meanings.get(&name), Some(Meaning::Macro(_)))
     }

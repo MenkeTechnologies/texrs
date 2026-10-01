@@ -1,0 +1,7 @@
+% S445 reads each digit with get_x_token: a macro after the first digits
+% expands and the constant goes on.
+\catcode`\{=1 \catcode`\}=2
+\def\d{23}\count1=1\d\relax\message{[\the\count1]}
+\def\e{2}\count2=1\e 3 \message{[\the\count2]}
+\def\h{F}\count3="1\h\relax\message{[\the\count3]}
+\end

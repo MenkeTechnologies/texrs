@@ -1,0 +1,10 @@
+% plain.tex's \loop...\repeat: \iterate closes the \ifnum \body leaves open.
+% Text after the test runs before each further pass, and \next ends \relax.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\loop#1\repeat{\def\body{#1}\iterate}
+\def\iterate{\body \let\next\iterate \else\let\next\relax\fi \next}
+\count1=0 \loop\advance\count1 1 \message{\the\count1}\ifnum\count1<4 \repeat
+\message{[\meaning\next]}
+\count2=10 \loop \message{(\the\count2)}\advance\count2 by -3 \ifnum\count2>0\repeat
+{\count3=0 \loop\advance\count3 1 \ifnum\count3<3 \message{in}\repeat}
+\end
