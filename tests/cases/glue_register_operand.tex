@@ -1,0 +1,10 @@
+% S1239 glue_add with a glue REGISTER operand, whose orders are the run's,
+% and S461 signs before one.
+\catcode`\{=1 \catcode`\}=2
+\skip1=3pt plus 2fil minus 1fill \skip2=1pt plus 1pt minus 4pt \advance\skip2\skip1 \message{[\the\skip2]}
+\skip3=1pt plus 1fil \advance\skip3 by \skip3 \message{[\the\skip3]}
+\skip4=1pt plus 1fill minus 2pt \skip5=2pt plus 3fil minus 1pt
+\advance\skip4 by -\skip5 \message{[\the\skip4]}
+\skipdef\s=6 \s=1pt minus 1fil \advance\skip4\s \message{[\the\skip4]}
+\skip7=-\skip5 \message{[\the\skip7]}
+\end

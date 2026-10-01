@@ -1,0 +1,7 @@
+% S1226: a token-register assignment expands what stands before its brace,
+% so \expandafter reaches \the\toks inside it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\toks1={a#b}\toks2=\expandafter{\the\toks1 c}\message{[\the\toks2]}
+\def\x{{xy}}\toks3=\x \message{[\the\toks3]}\toks4=\relax{z}\message{[\the\toks4]}
+\def\y{Y}\toks5=\expandafter{\y\y}\message{[\the\toks5]}
+\end

@@ -27,6 +27,17 @@ All notable changes to texrs are recorded here. The format follows
 - Signs before an internal quantity negate it (§440): `\count2=-\count1`,
   `\advance\count3 by -\count1`, `\ifnum-\count1>0` and `\number-\count1` read
   the register negated where they read it as zero or unsigned.
+- `\advance\skip<n> by \skip<m>` adds a glue REGISTER (§1239's `glue_add`
+  over orders only the run knows), and `\skip<n>=-\skip<m>` negates one; both
+  stopped with `Illegal unit of measure`.
+- `\let` reads one optional space after its `=` and no more (§1221), so
+  `\let\b==` lets `\b` be `=` and `\let\sptoken= ` followed by a space lets it
+  be that space.
+- `\mathchardef` is its own command: `\meaning` prints `\mathchar"7123`
+  rather than `\char"7123`, and `\ifx` tells it from a `\chardef`.
+- A token-register assignment expands what stands before its brace (§1226),
+  and `\the\toks` expands in running text: `\toks2=\expandafter{\the\toks1 c}`
+  stopped with `Missing { inserted`.
 
 ### Added
 

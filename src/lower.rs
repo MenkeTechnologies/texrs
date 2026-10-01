@@ -1065,21 +1065,27 @@ impl Lowerer {
                     }
                     match (glue, matches!(op, Arith::Add)) {
                         (true, true) => {
-                            let (nat, st, sto, sh, sho) = match reg >= crate::compiler::MUSKIP_BASE
-                            {
-                                true => self.eng.scan_muglue(lx)?,
-                                false => self.eng.scan_glue(lx)?,
-                            };
-                            out.extend(advance_glue(
-                                reg,
-                                crate::glue::Glue {
-                                    natural: nat,
-                                    stretch: st,
-                                    stretch_order: sto,
-                                    shrink: sh,
-                                    shrink_order: sho,
-                                },
-                            ));
+                            // A glue REGISTER operand has orders that are the
+                            // run's, so it cannot be scanned now (§461).
+                            let mu = reg >= crate::compiler::MUSKIP_BASE;
+                            if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
+                                out.extend(advance_glue_by_register(reg, from, negative));
+                            } else {
+                                let (nat, st, sto, sh, sho) = match mu {
+                                    true => self.eng.scan_muglue(lx)?,
+                                    false => self.eng.scan_glue(lx)?,
+                                };
+                                out.extend(advance_glue(
+                                    reg,
+                                    crate::glue::Glue {
+                                        natural: nat,
+                                        stretch: st,
+                                        stretch_order: sto,
+                                        shrink: sh,
+                                        shrink_order: sho,
+                                    },
+                                ));
+                            }
                         }
                         // A glue scaled by an integer scales in every
                         // component and keeps both orders (§1240).
@@ -2981,9 +2987,10 @@ impl Lowerer {
         // read in: `tex.web` §1228 assigns a `mu_val` from a `mu_val` and a
         // `glue_val` from a `glue_val`, and never mixes them.
         let mu = base >= crate::compiler::MUSKIP_BASE;
-        if let Some(from) = self.peek_glue_register(lx, mu)? {
+        if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
+            // Negating a glue negates its three widths and keeps its orders.
             return Ok((0..crate::compiler::SKIP_STRIDE)
-                .map(|i| Cmd::SetCount(base + i, Num::Count(from + i)))
+                .map(|i| Cmd::SetCount(base + i, signed(negative && i < 3, from + i)))
                 .collect());
         }
         let g = match mu {
@@ -3007,13 +3014,15 @@ impl Lowerer {
     }
 
     /// The base slot of a glue register standing where a glue is wanted, if
-    /// that is what comes next; nothing is consumed otherwise.
-    fn peek_glue_register(&mut self, lx: &mut Lexer, mu: bool) -> R<Option<i64>> {
+    /// that is what comes next, and whether §461's signs before it negate it;
+    /// nothing is consumed otherwise.
+    fn peek_glue_register(&mut self, lx: &mut Lexer, mu: bool) -> R<Option<(i64, bool)>> {
         let (want, file) = match mu {
             true => ("muskip", crate::compiler::MUSKIP_BASE),
             false => ("skip", crate::compiler::SKIP_BASE),
         };
         let mut eaten = Vec::new();
+        let mut negative = false;
         loop {
             let Some(t) = self.eng.take_file(lx) else {
                 lx.push_back(&eaten);
@@ -3023,11 +3032,15 @@ impl Lowerer {
                 eaten.push(t);
                 continue;
             }
+            if matches!(t, Token::Char('+' | '-', Cat::Other)) {
+                negative ^= matches!(t, Token::Char('-', _));
+                eaten.push(t);
+                continue;
+            }
             if let Token::Cs(n) = &t {
                 if n.name() == want {
-                    return Ok(Some(
-                        file + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE,
-                    ));
+                    let reg = self.eng.scan_number_file(lx)?;
+                    return Ok(Some((file + reg * crate::compiler::SKIP_STRIDE, negative)));
                 }
                 if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
                     // A `\skipdef` name is a glue register and a `\muskipdef`
@@ -3035,7 +3048,7 @@ impl Lowerer {
                     // does.
                     let is_mu = r >= crate::compiler::MUSKIP_BASE;
                     if r >= crate::compiler::SKIP_BASE && is_mu == mu {
-                        return Ok(Some(r));
+                        return Ok(Some((r, negative)));
                     }
                 }
             }
@@ -4082,31 +4095,67 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
 /// apart with arithmetic the VM has no remainder op for. It is the same shape
 /// `\ifcase` lowers to, and for the same reason.
 fn advance_glue(base: i64, op: crate::glue::Glue) -> Vec<Cmd> {
-    let packed = base + 3;
     let mut out = vec![Cmd::Arith(Arith::Add, base, Num::Literal(op.natural))];
+    out.extend(glue_add_orders(
+        base,
+        (Num::Literal(op.stretch), op.stretch_order),
+        (Num::Literal(op.shrink), op.shrink_order),
+    ));
+    out
+}
+
+/// `\advance\skip<n> by \skip<m>`: the same §1239 `glue_add`, with an operand
+/// whose ORDERS are the run's too. The operand's packed orders are dispatched
+/// on first, sixteen ways, so inside each arm they are constants again and the
+/// register's own chain is the one `advance_glue` builds.
+///
+/// The natural width is added first and the operand's components are read
+/// from its slots inside the arm, so `\advance\skip1\skip1` doubles: the
+/// register's stretch and shrink are read before the arm writes them.
+fn advance_glue_by_register(base: i64, from: i64, negative: bool) -> Vec<Cmd> {
+    let mut out = vec![Cmd::Arith(Arith::Add, base, signed(negative, from))];
+    let mut chain: Vec<Cmd> = Vec::new();
+    for state in (0..16i64).rev() {
+        let arm = glue_add_orders(
+            base,
+            (signed(negative, from + 1), state / 4),
+            (signed(negative, from + 2), state % 4),
+        );
+        chain = vec![Cmd::IfNum {
+            left: Num::Count(from + 3),
+            rel: Rel::Equal,
+            right: Num::Literal(state),
+            then_branch: arm,
+            else_branch: chain,
+        }];
+    }
+    out.extend(chain);
+    out
+}
+
+/// The stretch and shrink half of `glue_add`, for an operand whose two orders
+/// are known while lowering and whose values are `Num`s.
+fn glue_add_orders(base: i64, stretch: (Num, i64), shrink: (Num, i64)) -> Vec<Cmd> {
+    let packed = base + 3;
+    let mut out = Vec::new();
     // Built from the last state backwards, so each arm's `else` is the chain
     // for every state after it.
     let mut chain: Vec<Cmd> = Vec::new();
     for state in (0..16i64).rev() {
         let (was_stretch, was_shrink) = (state / 4, state % 4);
         let mut arm = Vec::new();
-        for (slot, was, add, order) in [
-            (base + 1, was_stretch, op.stretch, op.stretch_order),
-            (base + 2, was_shrink, op.shrink, op.shrink_order),
+        for (slot, was, (add, order)) in [
+            (base + 1, was_stretch, &stretch),
+            (base + 2, was_shrink, &shrink),
         ] {
-            match was.cmp(&order) {
+            match was.cmp(order) {
                 // The register's component is the more infinite: it stands.
                 std::cmp::Ordering::Greater => {}
-                std::cmp::Ordering::Equal => {
-                    arm.push(Cmd::Arith(Arith::Add, slot, Num::Literal(add)))
-                }
-                std::cmp::Ordering::Less => arm.push(Cmd::SetCount(slot, Num::Literal(add))),
+                std::cmp::Ordering::Equal => arm.push(Cmd::Arith(Arith::Add, slot, add.clone())),
+                std::cmp::Ordering::Less => arm.push(Cmd::SetCount(slot, add.clone())),
             }
         }
-        let after = (
-            was_stretch.max(op.stretch_order),
-            was_shrink.max(op.shrink_order),
-        );
+        let after = (was_stretch.max(stretch.1), was_shrink.max(shrink.1));
         let repacked = after.0 * 4 + after.1;
         if repacked != state {
             arm.push(Cmd::SetCount(packed, Num::Literal(repacked)));

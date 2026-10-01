@@ -47,6 +47,10 @@ pub enum Meaning {
     /// is scanned. plain.tex builds its constants this way: `\chardef\active=13`
     /// is what makes `\catcode`\~=\active` readable.
     CharDef(i64),
+    /// `\mathchardef\a="7123` -- a math character code. A number wherever
+    /// one is scanned, like a `\chardef`; a different command for `\meaning`
+    /// (§1295 prints `\mathchar"7123`) and for `\ifx`.
+    MathCharDef(i64),
     /// `\toksdef\toks@=0` — another name for a token register.
     ToksDef(i64),
     /// `\countdef\pageno=0` — another name for a count register, in every
@@ -824,6 +828,16 @@ impl Engine {
                 self.do_expandafter(lx, pending_only)?;
                 Ok(true)
             }
+            // `\the` of a token register: the list is frontend state, so it
+            // expands here as §465's `ins_the_toks` does. Any other quantity is
+            // left for the context that reads it, since its value is the run's.
+            "the" => match self.the_token_list(lx, pending_only)? {
+                Some(list) => {
+                    lx.push_back(&list);
+                    Ok(true)
+                }
+                None => Ok(false),
+            },
             // `\string` is expandable and reaches running text, not only the
             // inside of a `\message`. tex.web 262 has the expander produce the
             // characters of the next token wherever it appears; handling it only
@@ -1735,10 +1749,8 @@ impl Engine {
         };
         match self.meanings.get(name) {
             Some(Meaning::Char(c, cat)) => Self::char_meaning(*c, *cat),
-            // A `\mathchardef` name reads back as `\char` rather than
-            // `\mathchar`: both are `Meaning::CharDef`, and telling them apart
-            // needs a variant `src/format.rs` also has to serialise.
             Some(Meaning::CharDef(v)) => format!("{}char\"{v:X}", self.esc()),
+            Some(Meaning::MathCharDef(v)) => format!("{}mathchar\"{v:X}", self.esc()),
             Some(Meaning::CountDef(r)) => self.register_name(*r),
             Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.esc()),
             Some(Meaning::Primitive(p)) => format!("{}{}", self.esc(), p.name()),
@@ -1835,10 +1847,16 @@ impl Engine {
                 // `\toks1=\toks0` copies, and `\toks1=\toksA` copies through a
                 // name defined by \toksdef.
                 Token::Cs(n) => {
+                    let n = *n;
                     let from = match n.name() {
                         "toks" => self.scan_number(lx, false)?,
-                        _ => match self.meanings.get(n) {
-                            Some(Meaning::ToksDef(r)) => *r,
+                        _ => match self.meanings.get(&n).cloned() {
+                            Some(Meaning::ToksDef(r)) => r,
+                            // §1226 reads the next non-blank non-relax token
+                            // with `get_x_token`, so anything expandable before
+                            // the brace expands: `\toks2=\expandafter{\the\toks1}`.
+                            _ if self.primitive_meaning(n).name() == "relax" => continue,
+                            _ if self.try_expand(lx, n, false)? => continue,
                             _ => return Err(TexError("Missing { inserted".into())),
                         },
                     };
@@ -2707,7 +2725,7 @@ impl Engine {
 
     pub fn numeric_cs(&self, name: CsId) -> Option<NumericCs> {
         match self.meanings.get(&name) {
-            Some(Meaning::CharDef(v)) => Some(NumericCs::Value(*v)),
+            Some(Meaning::CharDef(v) | Meaning::MathCharDef(v)) => Some(NumericCs::Value(*v)),
             Some(Meaning::CountDef(r)) => Some(NumericCs::Register(*r)),
             // eTeX's `\inputlineno` (etex.ch `input_line_no_code`) is a
             // read-only integer: the line it was read on.
@@ -2749,9 +2767,10 @@ impl Engine {
             v = 0;
         }
         let meaning = match kind {
-            // A mathchar is a constant like a chardef: what differs is the
-            // range it may hold, not what it then does.
-            "chardef" | "mathchardef" => Meaning::CharDef(v),
+            // A mathchar is a constant like a chardef, with its own range and
+            // its own command.
+            "chardef" => Meaning::CharDef(v),
+            "mathchardef" => Meaning::MathCharDef(v),
             // A dimension register is a register: the name stands for the slot,
             // and the slot is the one the dimensions live in.
             "dimendef" => Meaning::CountDef(crate::compiler::DIMEN_BASE + v),
@@ -2797,16 +2816,18 @@ impl Engine {
 
     fn do_let(&mut self, lx: &mut Lexer) -> R<()> {
         let name = self.scan_defined_name(lx)?;
-        // An optional `=` and one optional space, then the source token.
-        let mut src = None;
-        while let Some(t) = lx.next_token(&self.cats) {
-            match &t {
-                t if t.is_space() => continue,
-                Token::Char('=', _) => continue,
-                other => {
-                    src = Some(*other);
-                    break;
-                }
+        // §1221: spaces, then an optional other-character `=` followed by ONE
+        // optional space, then the source token. So `\let\b==` lets `\b` be
+        // the second `=`, and `\let\sptoken= ` followed by a space lets it be
+        // that space.
+        let mut src = lx.next_token(&self.cats);
+        while src.as_ref().is_some_and(Token::is_space) {
+            src = lx.next_token(&self.cats);
+        }
+        if matches!(src, Some(Token::Char('=', Cat::Other))) {
+            src = lx.next_token(&self.cats);
+            if src.as_ref().is_some_and(Token::is_space) {
+                src = lx.next_token(&self.cats);
             }
         }
         let Some(src) = src else {
@@ -3569,6 +3590,12 @@ impl Engine {
                         out.push(next);
                     }
                 }
+                // §478: `\the\toks` in an `\edef` body is the list itself, put
+                // in the body without being expanded again.
+                Token::Cs(name) if name.name() == "the" => match self.the_token_list(lx, true)? {
+                    Some(list) => out.extend(list),
+                    None => out.push(t),
+                },
                 Token::Cs(name) => {
                     let name = *name;
                     // A `\protected` macro is NOT expanded here: that is the

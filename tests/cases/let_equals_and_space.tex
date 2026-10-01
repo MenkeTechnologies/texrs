@@ -1,0 +1,7 @@
+% S1221: \let reads spaces, an optional other-character `=`, then ONE
+% optional space, then the token it copies.
+\catcode`\{=1 \catcode`\}=2
+\let\b==\message{[\meaning\b]}
+\def\\{\let\spt= }\\ \message{[\meaning\spt]}
+\let\c= = \message{[\meaning\c]}
+\end

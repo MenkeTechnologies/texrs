@@ -1,0 +1,7 @@
+% \mathchardef is its own command: \meaning prints \mathchar (S1295), and
+% \ifx tells it from a \chardef of the same code.
+\catcode`\{=1 \catcode`\}=2
+\mathchardef\b="7123 \chardef\c=65 \mathchardef\d=65 \mathchardef\e=65
+\message{[\meaning\b][\the\b][\number\b][\ifx\c\d T\else F\fi][\ifx\d\e T\else F\fi]}
+\count1=\b \message{[\the\count1]}
+\end
