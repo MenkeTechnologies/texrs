@@ -703,6 +703,9 @@ mod tests {
                 after: After::Nothing,
             },
         ];
-        assert_eq!(break_paragraph(&pieces, 100.0, &Params::default()), vec![1, 2]);
+        assert_eq!(
+            break_paragraph(&pieces, 100.0, &Params::default()),
+            vec![1, 2]
+        );
     }
 }

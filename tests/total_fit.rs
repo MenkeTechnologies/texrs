@@ -160,10 +160,16 @@ fn hyphenpenalty_ten_thousand_forbids_hyphenation() {
                  precipitate organisational disintegration among the uncharacteristically \
                  overrepresented constituencies.";
     let hyphenated = set(prose);
-    assert!(hyphenated.iter().any(|l| l.ends_with('-')), "{hyphenated:?}");
+    assert!(
+        hyphenated.iter().any(|l| l.ends_with('-')),
+        "{hyphenated:?}"
+    );
     let whole = set(&format!("\\hyphenpenalty=10000 {prose}"));
     assert!(!whole.iter().any(|l| l.ends_with('-')), "{whole:?}");
-    assert_eq!(whole.join(" "), prose.split_whitespace().collect::<Vec<_>>().join(" "));
+    assert_eq!(
+        whole.join(" "),
+        prose.split_whitespace().collect::<Vec<_>>().join(" ")
+    );
 }
 
 /// The text the lowerer hands the typesetter, as one string.

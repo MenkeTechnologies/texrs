@@ -136,10 +136,7 @@ impl IntPars {
         ] {
             values[index(name).expect("a §236 name")] = v;
         }
-        Self {
-            values,
-            written: 0,
-        }
+        Self { values, written: 0 }
     }
 
     pub fn get(&self, i: usize) -> i64 {
