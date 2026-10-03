@@ -623,7 +623,7 @@ impl Engine {
         Ok(())
     }
 
-    /// The lowerer's door to [`Self::intpar_arith`]: `op` is the primitive's
+    /// The lowerer's door to `Self::intpar_arith`: `op` is the primitive's
     /// name, which is what the lowerer holds.
     pub fn compile_time_intpar_arith(&mut self, lx: &mut Lexer, i: usize, op: &str) -> R<()> {
         let op = match op {
