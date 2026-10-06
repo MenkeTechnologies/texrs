@@ -333,6 +333,37 @@ const ASSIGNMENTS: &[&str] = &[
     "DeclareRobustCommand",
 ];
 
+/// The primitives other than the conditionals that expand (§366): the
+/// `expand_after`, `no_expand`, `cs_name`, `convert`, `the`, `top_bot_mark`,
+/// `input` and `fi_or_else` commands, and e-TeX's additions to them.
+const EXPANDABLE_PRIMITIVES: &[&str] = &[
+    "expandafter",
+    "unless",
+    "noexpand",
+    "csname",
+    "number",
+    "romannumeral",
+    "string",
+    "meaning",
+    "fontname",
+    "jobname",
+    "csstring",
+    "the",
+    "detokenize",
+    "unexpanded",
+    "topmark",
+    "firstmark",
+    "botmark",
+    "splitfirstmark",
+    "splitbotmark",
+    "input",
+    "endinput",
+    "scantokens",
+    "fi",
+    "or",
+    "else",
+];
+
 const CONDITIONALS: &[&str] = &[
     "if",
     "ifcat",
@@ -1250,20 +1281,69 @@ impl Engine {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing token for \\if".into()));
             };
+            // An active character is a control sequence in every way that
+            // matters here: §506's `get_x_token_or_active_char` expands it if
+            // it is a macro, and otherwise takes what it MEANS. One with no
+            // meaning stays the active character it is.
+            let t = match t {
+                Token::Char(c, Cat::Active) => match self.active_meaning(c) {
+                    Some(id) => Token::Cs(id),
+                    None => t,
+                },
+                _ => t,
+            };
             match &t {
                 Token::Char(c, cat) => return Ok((*c as u32, Some(*cat))),
+                // §358: `\noexpand` turns an EXPANDABLE token into one that
+                // means `\relax` (and §506 then makes an active character the
+                // character it is); an unexpandable one is unaffected.
+                Token::Cs(n) if self.primitive_meaning(*n).name() == "noexpand" => {
+                    let Some(next) = self.take(lx, pending_only) else {
+                        return Err(TexError("Missing token for \\if".into()));
+                    };
+                    return Ok(match next {
+                        Token::Char(c, Cat::Active) => match self.active_meaning(c) {
+                            Some(id) if !self.is_expandable(id) => self.cs_operand(id),
+                            _ => (c as u32, Some(Cat::Active)),
+                        },
+                        Token::Char(c, cat) => (c as u32, Some(cat)),
+                        Token::Cs(m) => self.cs_operand(m),
+                    });
+                }
                 Token::Cs(n) => {
                     let n = *n;
                     if self.try_expand(lx, n, pending_only)? {
                         continue;
                     }
-                    return Ok(match self.meanings.get(&n) {
-                        Some(Meaning::Char(c, cat)) => (*c as u32, Some(*cat)),
-                        _ => (256, None),
-                    });
+                    return Ok(self.cs_operand(n));
                 }
             }
         }
+    }
+
+    /// What an unexpanded control sequence is to `\if` and `\ifcat` (§506): a
+    /// `\let` copy of a character is that character, and anything else is
+    /// `\relax` with code 256.
+    fn cs_operand(&self, name: CsId) -> (u32, Option<Cat>) {
+        match self.meanings.get(&name) {
+            Some(Meaning::Char(c, cat)) => (*c as u32, Some(*cat)),
+            _ => (256, None),
+        }
+    }
+
+    /// Whether `name` would expand (§366): a macro, an expandable primitive,
+    /// or a name with no meaning at all, which tex expands to report it.
+    fn is_expandable(&self, name: CsId) -> bool {
+        match self.meanings.get(&name) {
+            Some(Meaning::Macro(_)) => true,
+            Some(Meaning::Primitive(p)) => Self::expandable_primitive(p.name()),
+            None => !self.is_primitive_name(name) || Self::expandable_primitive(name.name()),
+            Some(_) => false,
+        }
+    }
+
+    fn expandable_primitive(name: &str) -> bool {
+        CONDITIONALS.contains(&name) || EXPANDABLE_PRIMITIVES.contains(&name)
     }
 
     /// §507: `\if` decides on the codes, `\ifcat` on the commands.

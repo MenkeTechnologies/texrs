@@ -1,0 +1,18 @@
+% \if and \ifcat read each operand with S506's get_x_token_or_active_char: an
+% active character expands if it is a macro and is what it means if it is not,
+% and S358's \noexpand turns an EXPANDABLE token into \relax -- which makes an
+% active character the character it is (category 13) -- while leaving an
+% unexpandable one alone. Every control sequence that is not a character is
+% \relax with code 256 to both tests.
+\catcode`\{=1 \catcode`\}=2 \catcode`\~=13 \catcode`\!=13
+\def!{X}\def~{Y}\message{[\ifcat!a y\else n\fi][\ifcat!\noexpand~y\else n\fi]}
+\message{[\if\noexpand~~y\else n\fi][\if\noexpand~\noexpand~y\else n\fi]}
+\message{[\ifcat\noexpand~\noexpand!y\else n\fi][\if\noexpand~\string~y\else n\fi]}
+\let~=a \message{[\ifcat~ay\else n\fi][\if~ay\else n\fi][\ifcat\noexpand~ay\else n\fi]}
+\let~=\relax \message{[\ifcat~\relax y\else n\fi][\if\noexpand~\par y\else n\fi]}
+\def\a{}\def\b{x}\message{[\ifcat\noexpand\a\noexpand\b y\else n\fi]}
+\message{[\ifcat\noexpand\a\relax y\else n\fi][\ifcat\noexpand\fi\relax y\else n\fi]}
+\message{[\ifcat\relax\par y\else n\fi][\if\relax\count y\else n\fi]}
+\def~{Y}\ifcat\noexpand~!\message{[file: y]}\else\message{[file: n]}\fi
+\if~Y\message{[file: y]}\else\message{[file: n]}\fi
+\end

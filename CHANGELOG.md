@@ -30,6 +30,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\if` and `\ifcat` read an active character as §506 does: a macro expands
+  and anything else is what it means, so `\let~=a` makes `\ifcat~a` true.
+  `\noexpand` before an operand makes an expandable token `\relax` (§358), and
+  an active character the category-13 character it is; it was read past and
+  the token after it expanded anyway.
 - A group restores a register to what its last `\global` assignment left, even
   when a local assignment followed it (§283): `{\global\count0=2 \count0=3}`
   leaves 2, where texrs kept 3. It holds for count, dimen and glue registers

@@ -134,6 +134,8 @@ inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 [A|B]
 #==# if_ifcat.tex
 [N][ Y][N] T1 F2 [ Y][ Y][Y][N] [ Y][N] T3 [N][Y] macro:-> Y [ Y][N]
+#==# if_operands_active_and_noexpand.tex
+[ y][n] [n][y] [y][y] [y][y][y] [y][y] [y] [y][y] [y][y] [file: n] [file: y]
 #==# ifcase_register_selector.tex
 two other negative one const one
 #==# ifcase_selector.tex
