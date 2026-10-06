@@ -1204,6 +1204,20 @@ impl Lowerer {
                         else_branch,
                     });
                 }
+                // `tex.web` §509 over a selector the run decides. A constant
+                // selector is the expander's, which skips the losing cases with
+                // §494's `pass_text` and lowers only the one that is selected;
+                // a register's value is the VM's, so the cases lower to the
+                // same equality chain the `\message` arm builds. Leaving this
+                // to the expander answered from its own copy of the register,
+                // which no run-time `\count1=2` ever reaches.
+                "ifcase" => match self.number(lx)? {
+                    Num::Literal(n) => self.eng.ifcase_file(lx, n)?,
+                    value => {
+                        let branches = self.case_arms(lx)?;
+                        out.extend(case_chain_cmds(value, branches));
+                    }
+                },
                 "ifodd" => {
                     let value = self.number(lx)?;
                     let (then_branch, else_branch) = self.arms(lx)?;
@@ -2725,6 +2739,13 @@ impl Lowerer {
             return None;
         }
         end -= 1;
+        // `\ifnum ... \expandafter\loop\fi` is the same loop: the
+        // `\expandafter` only closes the conditional (§510) before the call
+        // instead of after it returns, which is what keeps tex's input stack
+        // from growing, and changes nothing about which passes run.
+        if end > 0 && matches!(&m.body[end - 1], Token::Cs(n) if n.name() == "expandafter") {
+            end -= 1;
+        }
         // Everything before it splits at the `\ifnum` that guards the call.
         let guard = m.body[..end]
             .iter()
@@ -2890,6 +2911,33 @@ impl Lowerer {
         match negated {
             true => Ok((else_branch, then_branch)),
             false => Ok((then_branch, else_branch)),
+        }
+    }
+
+    /// The `\or`-separated cases of a file-level `\ifcase`, the last being
+    /// `\else`'s (empty when there is none).
+    fn case_arms(&mut self, lx: &mut Lexer) -> R<Vec<Vec<Cmd>>> {
+        let mut arms = Vec::new();
+        loop {
+            arms.push(self.block(lx, Some(&["or", "else", "fi"]))?);
+            match lx.next_token(&self.eng.cats) {
+                Some(Token::Cs(n)) if n.name() == "or" => continue,
+                Some(Token::Cs(n)) if n.name() == "else" => {
+                    arms.push(self.block(lx, Some(&["fi"]))?);
+                    let _ = lx.next_token(&self.eng.cats);
+                    return Ok(arms);
+                }
+                Some(Token::Cs(n)) if n.name() == "fi" => {
+                    arms.push(Vec::new());
+                    return Ok(arms);
+                }
+                other => {
+                    if let Some(t) = other {
+                        lx.push_back(&[t]);
+                    }
+                    return Err(TexError("Incomplete \\ifcase; missing \\fi".into()));
+                }
+            }
         }
     }
 
@@ -3436,15 +3484,11 @@ impl Lowerer {
                         out.push(MsgOp::Number(Num::Count(crate::compiler::DIMEN_BASE + reg)));
                         continue;
                     }
-                    let is_reg =
-                        matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "count");
-                    if is_reg {
-                        let _ = work.pending.pop();
-                        let reg = self.eng.scan_number_pending(work)?;
-                        out.push(MsgOp::Number(Num::Count(reg)));
-                    } else {
-                        let v = self.eng.scan_number_pending(work)?;
-                        text.push_str(&v.to_string());
+                    // `\count` and every `\countdef` name are read when the
+                    // message runs; anything else is a number known now.
+                    match self.msg_number(work)? {
+                        Num::Literal(v) => text.push_str(&v.to_string()),
+                        num => out.push(MsgOp::Number(num)),
                     }
                 }
                 // An advice marker: it carries depth, not text.
@@ -3493,7 +3537,7 @@ impl Lowerer {
                 "string" => {
                     if let Some(next) = work.pending.pop() {
                         text.push_str(&match &next {
-                            Token::Cs(cs) => format!("{}{}", self.eng.esc(), cs.name()),
+                            Token::Cs(cs) => self.eng.sprint_cs(*cs),
                             other => other.to_text(self.eng.esc()),
                         });
                     }
@@ -3563,6 +3607,18 @@ impl Lowerer {
                         Token::Cs(m) if self.eng.is_macro(*m) => {
                             let m = *m;
                             self.eng.expand_macro_pending(work, m)?;
+                        }
+                        // An active character defined as a macro expands as
+                        // a macro does: `\expandafter\string~` is `\string`
+                        // over the first token of `~`'s body.
+                        Token::Char(c, Cat::Active)
+                            if self
+                                .eng
+                                .active_meaning(*c)
+                                .is_some_and(|id| self.eng.is_macro(id)) =>
+                        {
+                            let id = self.eng.active_meaning(*c).expect("just matched");
+                            self.eng.expand_macro_pending(work, id)?;
                         }
                         // `tex.web` §366: `\expandafter\A\B` expands `\B` ONE
                         // step whatever `\B` is, and only a macro was being
@@ -4196,6 +4252,24 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::RustCompile(_) => {}
         }
     }
+}
+
+/// A run-time `\ifcase` as commands: case i runs when the selector equals i,
+/// and the last of `branches` (the `\else` text) when it equals none of them --
+/// which is §509's answer for a negative selector and for one past the last
+/// `\or` alike.
+fn case_chain_cmds(value: Num, mut branches: Vec<Vec<Cmd>>) -> Vec<Cmd> {
+    let mut chain = branches.pop().unwrap_or_default();
+    for (i, arm) in branches.into_iter().enumerate().rev() {
+        chain = vec![Cmd::IfNum {
+            left: value.clone(),
+            rel: Rel::Equal,
+            right: Num::Literal(i as i64),
+            then_branch: arm,
+            else_branch: chain,
+        }];
+    }
+    chain
 }
 
 /// `\advance\skip<n> by <glue>`, as commands (`tex.web` §1240 through §1239's

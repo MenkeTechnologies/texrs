@@ -1,0 +1,14 @@
+% \ifx compares meanings (tex.web §507). Two names that were never defined
+% are the same command, undefined, but a primitive is not undefined: \relax
+% against an undefined name is false. A \let copy of an undefined name is
+% undefined too, and a \let copy of a primitive is that primitive.
+\catcode`\{=1 \catcode`\}=2
+\def\a{x}
+\message{\ifx\a\undefined U\else D\fi}
+\message{\ifx\relax\undefined U\else D\fi}
+\message{\ifx\undefineda\undefinedb U\else D\fi}
+\let\c\undefinedc
+\message{\ifx\c\undefinedd U\else D\fi\ifx\c\relax R\else N\fi}
+\let\r\relax
+\message{\ifx\r\relax R\else N\fi\ifx\r\undefinede U\else D\fi}
+\end

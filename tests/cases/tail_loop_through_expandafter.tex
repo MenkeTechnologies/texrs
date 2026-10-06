@@ -1,0 +1,11 @@
+% A macro that calls itself as `\expandafter\loop\fi' is the same loop as one
+% that calls itself before the \fi: the \expandafter only ends the
+% conditional (tex.web §510) before the call is made.
+\catcode`\{=1 \catcode`\}=2
+\count1=0
+\def\loop{\advance\count1 by 1 \ifnum\count1<5 \expandafter\loop\fi}
+\loop\message{\the\count1}
+\count2=10
+\def\down{\message{\the\count2}\advance\count2 by -3 \ifnum\count2>0 \expandafter\down\fi}
+\down
+\end

@@ -8,6 +8,31 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\ifcase` over a register at the top of a file selects by the value the run
+  gives it (§509); it read the expander's copy of the register, which no
+  run-time assignment reaches, and so always took case 0.
+- `\meaning` names every TeX82 primitive (§226), not only the ones texrs
+  executes: `\hsize`, `\baselineskip`, `\everypar`, `\hbox`, `\halign`,
+  `\ `, `\/`, `\-` and the rest printed `undefined`. `\nullfont` is
+  `select font nullfont`, and a `\let` copy of an undefined name is `undefined`.
+- `\ifx` tells a primitive from an undefined name (§507): `\ifx\relax\undefined`
+  was true, as was any comparison of two names absent from the macro table.
+- An infinite glue order is `fil` and then one more per `l` keyword (§454), so
+  `1 fil l` is `fill`; and `true` is looked for after `fil`, not before it.
+- A macro that loops through `\ifnum ... \expandafter\loop\fi` is lowered as the
+  loop it is; it stopped with `Missing token after \expandafter`.
+- `\number` of a `\countdef` name inside a `\message` reads the register when
+  the message runs; it printed `0`.
+- `\expandafter` over an active character defined as a macro expands it inside
+  a `\message`: `\expandafter\string~` is `\string` of the first token of `~`.
+- A `\global` prefix before `\def`, `\let`, `\futurelet`, `\chardef` and the
+  other compile-time assignments is spent by that assignment (§1211); it stayed
+  set and made every later `\def` global, so no group undid one.
+- `\string` of the null control sequence is `\csname\endcsname` (§263), and
+  the characters `\string` and `\meaning` expand to keep a space a space token
+  (§464), so they can delimit an argument.
+- An octal or hexadecimal constant up to 2147483647 is in range (§444):
+  `"7FFFFFFF` and `'17777777777` reported `Number too big`.
 - A tail call through a conditional the lowerer decides (`\ifx`, `\if`,
   `\ifcat`, `\iftrue`, `\ifdefined`, ...) inside a `\message` no longer
   recurses forever: the arm not taken is skipped unexpanded (§494) and the

@@ -227,6 +227,10 @@ typesetting markers (`typeset::is_marker`) are control characters, so a
 document's own `^^Q` among them prints raw. The parity harness joins tex's
 output lines before comparing and texrs's are not joined, so a `\newlinechar`
 case cannot be a `tests/cases` file; it is a `tests/eval.rs` test instead.
+The same printer has no line end that is not the `\newlinechar` character, so
+`\meaning\topmark` (and the four other marks) prints `\topmark:` without the
+`print_ln` §296 writes after the colon; tex then prints the mark's text, which
+is empty in both engines because neither fills one here.
 
 One type size and the ligature program were both on this list and are no longer,
 as of v0.6.0. Every size-selecting command was empty in the prelude and

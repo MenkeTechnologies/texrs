@@ -225,7 +225,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ifcase",
         "Conditionals",
-        "Switch on a number: the first case is 0, each `\\or` starts the next, and `\\else` catches everything past the last. Lowers to a real branch. A selector past the last `\\or` with no `\\else` selects nothing and the run continues. DIVERGENCE: a NEGATIVE selector takes case 0 here where tex takes `\\else` \u{2014} `\\ifcase -1 ZERO\\else DEFAULT\\fi` prints ZERO rather than DEFAULT. Pinned by `tests/cases/cond_ifcase_negative.tex`.",
+        "Switch on a number: the first case is 0, each `\\or` starts the next, and `\\else` catches everything past the last. Lowers to a real branch. A selector that is negative or past the last `\\or` takes `\\else` (tex.web §509), and selects nothing when there is none. A register selector is read when the run reaches the `\\ifcase`. Pinned by `tests/cases/cond_ifcase_negative.tex` and `tests/cases/ifcase_register_selector.tex`.",
         "\\ifcase<number> <0>\\or <1>\\or <2>\\else <other>\\fi\n\\count1=2\n\\message{\\ifcase\\count1 ZERO\\or ONE\\or TWO\\else MANY\\fi}   % => TWO",
     ),
     (

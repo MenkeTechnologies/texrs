@@ -1,0 +1,10 @@
+% \number of a \countdef name is the register's value when the message runs
+% (tex.web §468 scans an internal integer, §413), exactly as \the of it is
+% and as \number\count<n> is.
+\catcode`\{=1 \catcode`\}=2
+\count10=100 \countdef\c=10
+\message{\number\c}
+\c=7 \message{\number\c:\the\c}
+\count10=9 \message{\number\c:\the\c:\number\count10}
+\c=-\c \message{\number\c:\number-\c}
+\end

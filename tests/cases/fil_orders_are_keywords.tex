@@ -1,0 +1,10 @@
+% An infinite order is `fil' and then one more for each `l' (tex.web §454),
+% and each `l' is a keyword of its own: §407's scan_keyword skips spaces
+% before the first letter it matches, so `fil l' is `fill'. Letters match in
+% either case, and the physical units after `true' are read the same way.
+\catcode`\{=1 \catcode`\}=2
+\skip1=1pt plus 1 fil l minus 2pt \message{\the\skip1}
+\skip2=0pt plus 2 fill minus 1 FiLlL \message{\the\skip2}
+\skip3=0pt plus 3 true pt \message{\the\skip3}
+\dimen0=2 truein \message{\the\dimen0}
+\end

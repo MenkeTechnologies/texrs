@@ -1,0 +1,15 @@
+% \ifcase over a register selects by the value the RUN gives it (tex.web §509):
+% the selector is not known while lowering, so every case is lowered and the
+% one whose number matches runs. A selector past the last \or, or negative,
+% takes \else; a constant selector is still decided as the file is read.
+\catcode`\{=1 \catcode`\}=2
+\count1=2
+\ifcase\count1 \message{zero}\or\message{one}\or\message{two}\else\message{other}\fi
+\advance\count1 by 5
+\ifcase\count1 \message{zero}\or\message{one}\else\message{other}\fi
+\count1=-1
+\ifcase\count1 \message{zero}\else\message{negative}\fi
+\count1=1
+\ifcase\count1 \message{zero}\or\message{one}\fi
+\ifcase 1 \message{zero}\or\message{const one}\fi
+\end

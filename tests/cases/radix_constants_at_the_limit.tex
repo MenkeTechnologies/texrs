@@ -1,0 +1,9 @@
+% tex.web §444 bounds a constant before its last digit by m = 2^31 / radix,
+% which is exact for octal (2^28) and hexadecimal (2^27): '17777777777 and
+% "7FFFFFFF are 2147483647 and in range, one more digit is too big.
+\catcode`\{=1 \catcode`\}=2
+\count1="7FFFFFFF \message{\the\count1}
+\count1=-"7FFFFFFF \message{\the\count1}
+\count1='17777777777 \message{\the\count1}
+\count1="7FFFFFF \message{\the\count1}
+\end

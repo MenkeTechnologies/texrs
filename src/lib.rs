@@ -63,6 +63,7 @@ pub mod pdf_parity;
 pub mod pdfread;
 pub mod pk;
 pub mod postline;
+pub mod primitives;
 pub mod repl;
 pub mod runtime;
 pub mod rust_ffi;

@@ -853,12 +853,10 @@ impl Engine {
                 if let Some(t) = self.take(lx, pending_only) {
                     let text = match &t {
                         Token::Cs(n) if bare => n.name().to_string(),
-                        Token::Cs(n) => format!("{}{}", self.esc(), n.name()),
+                        Token::Cs(n) => self.sprint_cs(*n),
                         other => other.to_text(self.esc()),
                     };
-                    let toks: Vec<Token> =
-                        text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
-                    lx.push_back(&toks);
+                    lx.push_back(&str_toks(&text));
                 }
                 Ok(true)
             }
@@ -900,9 +898,7 @@ impl Engine {
             "meaning" => {
                 if let Some(t) = self.take(lx, pending_only) {
                     let text = self.meaning_text(&t);
-                    let toks: Vec<Token> =
-                        text.chars().map(|c| Token::Char(c, Cat::Other)).collect();
-                    lx.push_back(&toks);
+                    lx.push_back(&str_toks(&text));
                 }
                 Ok(true)
             }
@@ -1161,7 +1157,19 @@ impl Engine {
         match (a, b) {
             (Some(Token::Cs(x)), Some(Token::Cs(y))) => {
                 match (self.meanings.get(x), self.meanings.get(y)) {
-                    (None, None) => true,
+                    // A name with no entry, or a `\let` copy of one, is the
+                    // primitive of that name or undefined; two undefined names
+                    // are the same command (§507 compares `undefined_cs` with
+                    // itself), so `\ifx\a\b` over two of them is true while
+                    // `\ifx\relax\undefined` is false.
+                    (None | Some(Meaning::Primitive(_)), None | Some(Meaning::Primitive(_)))
+                        if !self.is_primitive_name(self.unbound_name(*x))
+                            || !self.is_primitive_name(self.unbound_name(*y)) =>
+                    {
+                        !self.is_primitive_name(self.unbound_name(*x))
+                            && !self.is_primitive_name(self.unbound_name(*y))
+                    }
+                    (None, None) => x == y,
                     (Some(mx), Some(my)) => mx == my,
                     // One side is a bare primitive and the other has been GIVEN
                     // that primitive as its meaning. texrs does not enter a
@@ -1765,7 +1773,7 @@ impl Engine {
             Some(Meaning::MathCharDef(v)) => format!("{}mathchar\"{v:X}", self.esc()),
             Some(Meaning::CountDef(r)) => self.register_name(*r),
             Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.esc()),
-            Some(Meaning::Primitive(p)) => format!("{}{}", self.esc(), p.name()),
+            Some(Meaning::Primitive(p)) => self.unbound_meaning(*p),
             Some(Meaning::Macro(m)) => {
                 let mut out = String::new();
                 // §1295's `print_cmd_chr` prints the whole thing as ONE escaped
@@ -1796,15 +1804,44 @@ impl Engine {
             // the list of primitives texrs resolves -- `tests/docs_reference_
             // sections.rs` is what keeps it level with the dispatch -- so it
             // answers which of the two this is.
-            // A §236 parameter is a primitive whether or not the corpus has an
-            // entry of its own for it.
-            None if crate::intpar::index(name.name()).is_some() => {
-                format!("{}{}", self.esc(), name.name())
-            }
-            None => match crate::corpus::lookup(&format!("\\{}", name.name())) {
-                Some(_) => format!("{}{}", self.esc(), name.name()),
-                None => "undefined".to_string(),
-            },
+            None => self.unbound_meaning(*name),
+        }
+    }
+
+    /// The name whose unredefined meaning `name` carries: itself when the
+    /// table has nothing for it, the source of a `\let` copy of a primitive
+    /// or of an undefined name, and `name` again for anything else.
+    fn unbound_name(&self, name: CsId) -> CsId {
+        match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) => *p,
+            _ => name,
+        }
+    }
+
+    /// Whether a name the table holds nothing for is a primitive rather than
+    /// undefined -- the question [`Self::unbound_meaning`] answers in words.
+    fn is_primitive_name(&self, name: CsId) -> bool {
+        self.unbound_meaning(name) != "undefined"
+    }
+
+    /// The meaning of a name the table holds nothing for: the primitive it is
+    /// from the start, or `undefined`. A `\let` copy of such a name reads the
+    /// same answer, so `\let\x\nullfont` is `select font nullfont` and
+    /// `\let\x\undefined` is `undefined` (§1221 copies `eqtb[cur_cs]`, which
+    /// for a name never defined is `undefined_cs`).
+    fn unbound_meaning(&self, name: CsId) -> String {
+        // A §236 parameter is a primitive whether or not the corpus has an
+        // entry of its own for it.
+        if crate::intpar::index(name.name()).is_some() {
+            return format!("{}{}", self.esc(), name.name());
+        }
+        // Every other TeX82 primitive, whether or not texrs executes it.
+        if crate::primitives::is_primitive(name.name()) {
+            return crate::primitives::meaning(name.name(), &self.esc().to_string());
+        }
+        match crate::corpus::lookup(&format!("\\{}", name.name())) {
+            Some(_) => format!("{}{}", self.esc(), name.name()),
+            None => "undefined".to_string(),
         }
     }
 
@@ -1920,6 +1957,17 @@ impl Engine {
             .get(&reg)
             .map(|t| self.tokens_shown(t))
             .unwrap_or_default()
+    }
+
+    /// §263's `sprint_cs`, which `\string` writes: the escape character and
+    /// the name with no space after it, and `\csname\endcsname` for the null
+    /// control sequence.
+    pub fn sprint_cs(&self, name: CsId) -> String {
+        let e = self.esc();
+        match name.name() {
+            "" => format!("{e}csname{e}endcsname"),
+            n => format!("{e}{n}"),
+        }
     }
 
     /// §262's `print_cs`: the escape character and the name, then a space
@@ -2137,54 +2185,41 @@ impl Engine {
                 0,
             ));
         }
-        // §453's optional `true`, eaten here for the same reason it is eaten in
-        // `scan_dimen`: with `\mag` fixed at 1000 a true unit is the unit, but
-        // the word still has to come off the stream.
-        let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
-        // Up to five letters, because `filll` is five; whatever is not part of
-        // the unit goes back, so `1pt x` still leaves the `x` in the document.
-        let mut letters = String::new();
-        let mut extra = Vec::new();
-        while letters.len() < 5 {
-            let Some(t) = self.take(lx, pending_only) else {
-                break;
-            };
-            match &t {
-                t if t.is_space() && letters.is_empty() => continue,
-                Token::Char(c, _) if c.is_ascii_alphabetic() => {
-                    letters.push(c.to_ascii_lowercase());
-                    extra.push(t);
+        // §453: `fil`, then one order further for each `l` after it, each read
+        // by §407's `scan_keyword` -- so a space may stand before an `l`
+        // (`1 fil l` is `fill`), and an `l` past `filll` is an error that
+        // keeps the order where it is.
+        let mut order = 0;
+        let mut unit = "";
+        if self.scan_keyword(lx, "fil", pending_only)? {
+            order = 1;
+            while self.scan_keyword(lx, "l", pending_only)? {
+                match order {
+                    3 => self.report(lx, "Illegal unit of measure (replaced by filll)"),
+                    _ => order += 1,
                 }
-                other => {
-                    lx.push_back(std::slice::from_ref(other));
+            }
+        } else {
+            // §453's optional `true`, AFTER `fil` was looked for, as in
+            // `scan_dimen`: with `\mag` fixed at 1000 a true unit is the unit,
+            // but the word still has to come off the stream.
+            let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
+            // §456 and §458: `mu` alone in math units, otherwise the physical
+            // units in §458's order, each a keyword of its own.
+            let units: &[&str] = match self.mu_units {
+                true => &["mu"],
+                false => &["pt", "in", "pc", "cm", "mm", "bp", "dd", "cc", "sp"],
+            };
+            for u in units {
+                if self.scan_keyword(lx, u, pending_only)? {
+                    unit = u;
                     break;
                 }
             }
-        }
-        // Longest match wins, so `filll` is not read as `fil` with two letters
-        // left over.
-        let mut order = 0;
-        let mut taken = 0;
-        for n in (2..=letters.len()).rev() {
-            let candidate = &letters[..n];
-            if let Some(o) = crate::glue::order_of(candidate) {
-                order = o;
-                taken = n;
-                break;
-            }
-            if n == 2 && self.finite_unit(0, 0, candidate).is_some() {
-                taken = 2;
-                break;
+            if unit.is_empty() {
+                return Err(self.illegal_unit());
             }
         }
-        if taken == 0 {
-            return Err(self.illegal_unit());
-        }
-        // Letters past the unit were never part of it.
-        for t in extra[taken..].iter().rev() {
-            lx.push_back(std::slice::from_ref(t));
-        }
-        let unit = &letters[..taken];
         let sp = match order {
             // An infinite component's number is not converted: `1fil` is one,
             // in the same 65536ths a point uses, at a different order. §455's
@@ -2768,6 +2803,11 @@ impl Engine {
     /// `\chardef\a=65` and `\countdef\pageno=0`, which differ only in what the
     /// number means and in the message tex reports when it is out of range.
     pub fn compile_time_numeric_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
+        let out = self.numeric_def(lx, kind);
+        self.spend_prefixes(out)
+    }
+
+    fn numeric_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
         let Some(Token::Cs(name)) = self.take(lx, false) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
@@ -3199,7 +3239,8 @@ impl Engine {
         lx: &mut Lexer,
         table: crate::charcodes::Table,
     ) -> R<()> {
-        self.do_charcode(lx, table)
+        let out = self.do_charcode(lx, table);
+        self.spend_prefixes(out)
     }
 
     /// What one of the tables says about a character, for `\the`.
@@ -3524,7 +3565,15 @@ impl Engine {
         ok_so_far: &mut bool,
     ) -> i64 {
         const INFINITY: i64 = 2147483647;
-        let m = INFINITY / radix;
+        // §444's `m`: 2^31 over the radix, which for ten is the quotient
+        // 214748364 and for eight and sixteen is EXACT -- `"7FFFFFFF` reaches
+        // 0x7FFFFFF < 2^27 before its last digit and is in range. `infinity
+        // / radix` is one less than that for both, and refused it.
+        let m = match radix {
+            10 => 214748364,
+            8 => 0o2000000000,
+            _ => 0o1000000000,
+        };
         if value >= m && (value > m || d > 7 || radix != 10) {
             if *ok_so_far {
                 self.report(lx, "Number too big");
@@ -3769,7 +3818,7 @@ impl Engine {
                     // no trailing space after a multi-letter name.
                     if let Some(next) = lx.pending.pop() {
                         out.push_str(&match &next {
-                            Token::Cs(n) => format!("{}{}", self.esc(), n.name()),
+                            Token::Cs(n) => self.sprint_cs(*n),
                             other => other.to_text(self.esc()),
                         });
                     }
@@ -3927,12 +3976,14 @@ impl Default for Engine {
 impl Engine {
     /// `\def`/`\gdef` at compile time: it changes how the rest of the file reads.
     pub fn compile_time_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
-        self.do_def(lx, kind)
+        let out = self.do_def(lx, kind);
+        self.spend_prefixes(out)
     }
 
     /// `\catcode` at compile time, for the same reason.
     pub fn compile_time_catcode(&mut self, lx: &mut Lexer) -> R<()> {
-        self.do_catcode(lx)
+        let out = self.do_catcode(lx);
+        self.spend_prefixes(out)
     }
 
     /// Skip the arm of a conditional the frontend decided against, the way
@@ -3963,6 +4014,12 @@ impl Engine {
 
     pub fn read_relation_file(&mut self, lx: &mut Lexer) -> R<char> {
         self.read_relation(lx, false)
+    }
+
+    /// `\ifcase` at the top of a file with a selector known while lowering:
+    /// §509's case selection, with the cases that lose skipped unlowered.
+    pub fn ifcase_file(&mut self, lx: &mut Lexer, n: i64) -> R<()> {
+        self.do_ifcase(lx, n, false)
     }
 
     pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
@@ -4060,7 +4117,8 @@ impl Engine {
     /// `\futurelet` while lowering: the peek it performs is a frontend fact,
     /// exactly as `\let` is.
     pub fn compile_time_futurelet(&mut self, lx: &mut Lexer) -> R<()> {
-        self.do_futurelet(lx, false)
+        let out = self.do_futurelet(lx, false);
+        self.spend_prefixes(out)
     }
 
     /// `\newcommand` and friends while lowering, exactly as `\def` is: a macro
@@ -4155,7 +4213,8 @@ impl Engine {
     }
 
     pub fn compile_time_let(&mut self, lx: &mut Lexer) -> R<()> {
-        self.do_let(lx)
+        let out = self.do_let(lx);
+        self.spend_prefixes(out)
     }
 
     /// Consume an advice marker, if `name` is one.
@@ -4268,6 +4327,16 @@ impl Engine {
 
     pub fn set_global_prefix(&mut self, on: bool) {
         self.global = on;
+    }
+
+    /// End an assignment the lowerer handed over: `tex.web` §1211's prefixes
+    /// belong to the one command they precede, so a `\global` the lowerer set
+    /// in front of `\def` must not stand in front of the NEXT assignment too.
+    /// Left set, it made every later `\def` global, and a group no longer
+    /// undid any of them.
+    fn spend_prefixes<T>(&mut self, out: R<T>) -> R<T> {
+        self.global = false;
+        out
     }
 
     /// Whether a `\global` prefix is in force, SPENDING it.
@@ -4464,4 +4533,16 @@ fn arith_int(cur: i64, val: i64, op: Arith) -> Option<i64> {
         },
     };
     result.filter(|v| (i64::from(i32::MIN)..=i64::from(i32::MAX)).contains(v))
+}
+
+/// §464's `str_toks`: a printed string as the tokens a `convert` primitive
+/// (`\string`, `\meaning`) expands to -- category 12 for every character but
+/// the space, which is a space token, so the result can delimit an argument.
+pub fn str_toks(text: &str) -> Vec<Token> {
+    text.chars()
+        .map(|c| match c {
+            ' ' => Token::Char(' ', Cat::Space),
+            c => Token::Char(c, Cat::Other),
+        })
+        .collect()
 }

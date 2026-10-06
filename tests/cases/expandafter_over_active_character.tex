@@ -1,0 +1,9 @@
+% \expandafter expands the token after the next one ONE step whatever it is
+% (tex.web §366), and an active character defined as a macro is a macro:
+% \expandafter\string~ is \string over the first token of ~'s body.
+\catcode`\{=1 \catcode`\}=2 \catcode`\~=13
+\def~{Tilde}
+\message{\expandafter\string~}
+\let~=\relax
+\message{\meaning~\expandafter\string~}
+\end

@@ -1,0 +1,18 @@
+% Every TeX82 primitive means itself until it is redefined (tex.web §226),
+% whether or not this engine executes it: \meaning prints the escaped name
+% for the glue, token, and dimension parameters and the commands alike. Two
+% print otherwise: \nullfont is `select font nullfont' (§577), and a control
+% symbol keeps its one-character name. A \let copy of a primitive reads the
+% same answer, and a \let copy of an undefined name is undefined.
+\catcode`\{=1 \catcode`\}=2
+\message{\meaning\baselineskip\meaning\thinmuskip\meaning\everypar}
+\message{\meaning\hsize\meaning\emergencystretch\meaning\parshape}
+\message{\meaning\hbox\meaning\vskip\meaning\kern\meaning\penalty}
+\message{\meaning\halign\meaning\cr\meaning\noalign\meaning\span}
+\message{\meaning\mathchar\meaning\left\meaning\over\meaning\eqno}
+\message{\meaning\write\meaning\special\meaning\openin\meaning\showthe}
+\message{[\meaning\ ][\meaning\/][\meaning\-]}
+\message{\meaning\nullfont}
+\let\x\hrule \let\y\nullfont \let\z\undefinedname
+\message{\meaning\x\meaning\y\meaning\z}
+\end

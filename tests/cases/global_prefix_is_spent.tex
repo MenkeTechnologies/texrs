@@ -1,0 +1,10 @@
+% A prefix belongs to the one command it precedes (tex.web §1211), so after
+% \global\def the next \def is local again and the group undoes it. And a
+% local \def after a global one in the same group is undone back to the
+% GLOBAL value (§283), not to the one before the group.
+\catcode`\{=1 \catcode`\}=2
+\def\a{A}{\global\def\a{B}\def\a{C}}\message{\a}
+\def\b{A}\begingroup\def\b{C}\endgroup\message{\b}
+\def\c{A}{\global\let\c\b\def\c{C}}\message{\c}
+{\global\chardef\d=65 \def\e{E}}\message{\meaning\d\meaning\e}
+\end

@@ -1,0 +1,12 @@
+% \string writes a control sequence by tex.web §263's sprint_cs, and the null
+% control sequence -- \csname\endcsname -- is written as those two names,
+% with no space after them. The characters \string and \meaning expand to are
+% §464's str_toks: category 12, except that a space is a space token, so the
+% result can delimit a macro argument.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{\string\csname\expandafter\string\csname\endcsname}
+\edef\a{\expandafter\string\csname\endcsname}\message{\meaning\a}
+\def\b#1 #2.{[#1|#2]}
+\edef\c{\meaning a}\message{\expandafter\b\c.}
+\edef\d{\string\ x}\message{\expandafter\b\d.}
+\end
