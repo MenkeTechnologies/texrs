@@ -292,6 +292,7 @@ than none.
   `\linepenalty`, the hyphen penalties and the demerit weights a document
   set, paragraph by paragraph and under `--dvi` too, and its page breaker
   reads `\clubpenalty`, `\widowpenalty` and `\brokenpenalty`.
+- `\errmessage`, reported as tex reports an error and carried on from.
 - `\message`, and `\immediate\write` to the terminal (a negative stream to the
   log alone). `\openout` is not implemented, so no write stream is ever open,
   and neither is a `\write` without `\immediate`, which waits for a shipout.

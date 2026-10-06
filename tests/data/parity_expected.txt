@@ -92,6 +92,8 @@ ZERO
 [A|B|7]
 #==# endlinechar.tex
 [macro:->x y][macro:->xy][macro:->xy][macro:->x y][macro:->a^^Mb][macro:->\^^M][macro:->\ab ]
+#==# errmessage_reports_and_continues.tex
+a! oops.l.7 \message{a}\errmessage{oops}                                \message{b}b! n=5.l.8 \count1=5 \errmessage{n=\the\count1 }                                         \message{c}c! AA\a .l.9 \def\a{AA}\errmessage{\a\noexpand\a}                                        ! one.l.10 \errmessage{one}                     \errmessage{two}\message{d}! two.l.10 \errmessage{one}\errmessage{two}                                     \message{d}d e! .l.11 \message{e}\errmessage{}                             \immediate\write16{w}\message{f}wf )(see the transcript file for additional information
 #==# error_context_trimmed.tex
 ! Number too big.l.17 ...3=3 \count4=4 \count5=5 \count6=9999999999                                                  9 \count7=7 \count8=8 \cou...! Number too big.l.18 \count14="FFFFFFFF                       [2147483647][13][2147483647] )(see the transcript file for additional information
 #==# escapechar.tex

@@ -81,7 +81,10 @@ pub struct Lowerer {
     /// §1279 would otherwise put in front of it. Prepending the report to that
     /// message's pieces is that arrangement: the report and the message are one
     /// terminal line, not two.
-    reports: Vec<String>,
+    ///
+    /// Message pieces rather than strings, because `\errmessage` expands its
+    /// text as `\message` does, and a register in it is read at run time.
+    reports: Vec<MsgOp>,
     /// Whether anything was reported at all, for the line tex writes at the end
     /// of a run that had errors.
     reported: bool,
@@ -418,11 +421,17 @@ impl Lowerer {
     fn take_reports(&mut self) -> Vec<MsgOp> {
         let fresh = self.eng.take_errors();
         self.reported = self.reported || !fresh.is_empty() || !self.reports.is_empty();
-        self.reports.extend(fresh);
+        self.reports.extend(fresh.into_iter().map(MsgOp::Report));
         std::mem::take(&mut self.reports)
-            .into_iter()
-            .map(MsgOp::Report)
-            .collect()
+    }
+
+    /// Hold a report the lowerer built from pieces, behind whatever the
+    /// expander reported before it.
+    fn queue_report(&mut self, ops: Vec<MsgOp>) {
+        let fresh = self.eng.take_errors();
+        self.reports.extend(fresh.into_iter().map(MsgOp::Report));
+        self.reports.extend(ops);
+        self.reported = true;
     }
 
     /// Lower commands until the input ends, `\end` is seen, or one of `stop` is
@@ -1124,6 +1133,19 @@ impl Lowerer {
                         return Err(TexError("File ended while scanning \\show".into()));
                     };
                     self.eng.show_token(lx, &tok);
+                }
+                // §1283: the text is expanded as a `\message`'s is, printed as
+                // an error's (`! ` and the text), and §82's `error` follows
+                // with its `.` and the context. In nonstop mode the help goes to
+                // the log alone, so the terminal shows nothing more.
+                "errmessage" => {
+                    let parts = self.message_parts(lx)?;
+                    let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
+                    let context = lx.context().unwrap_or_default().replace('\n', "");
+                    let mut ops = vec![MsgOp::Report("! ".into())];
+                    ops.extend(crate::ir::printed_ops(parts, nl));
+                    ops.push(MsgOp::Report(format!(".{context}")));
+                    self.queue_report(ops);
                 }
                 "message" => {
                     let parts = self.message_parts(lx)?;

@@ -1,0 +1,12 @@
+% \errmessage (tex.web S1283): the text is expanded as \message's is and
+% printed as an error -- `! ', the text, then S82's `.' and the context -- and
+% the run goes on. In nonstop mode the help goes to the log alone. The
+% \message after it starts where the context display ended, with no space,
+% and the run ends with the transcript notice.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{a}\errmessage{oops}\message{b}
+\count1=5 \errmessage{n=\the\count1 }\message{c}
+\def\a{AA}\errmessage{\a\noexpand\a}
+\errmessage{one}\errmessage{two}\message{d}
+\message{e}\errmessage{}\immediate\write16{w}\message{f}
+\end

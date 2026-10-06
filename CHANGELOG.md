@@ -8,6 +8,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\errmessage` (§1283): the text is expanded as a `\message` is and printed as
+  an error, `! ` and the text and §82's `.` and context, and the run carries on
+  to the transcript notice.
 - The dimension (§247), glue (§224) and token (§230) parameters: `\hsize`,
   `\parindent`, `\baselineskip`, `\thinmuskip`, `\everypar`, `\output` and the
   rest are assigned, read by `\the` and wherever a dimension or glue is

@@ -198,6 +198,12 @@ pub const CORPUS: &[Entry] = &[
         "\\immediate\\write<number>{<text>}\n\\immediate\\write16{\\the\\count0}   % => its own line on the terminal\n\\immediate\\write-1{log only}",
     ),
     (
+        "\\errmessage",
+        "Expansion",
+        "Report an error of the document's own and carry on (tex.web \u{a7}1283). The text is expanded as `\\message` expands its own and printed as tex prints an error: `! `, the text, a `.` and the context. The help goes to the log alone in nonstop mode, so the terminal shows nothing more, and the run ends with the transcript notice.",
+        "\\errmessage{<text>}\n\\errmessage{Bad value \\the\\count1 }   % => ! Bad value 5.",
+    ),
+    (
         "\\relax",
         "Expansion",
         "Do nothing. Accepted so a document can stop a number scan, or fill a slot that needs a token but no action \u{2014} which is also what `\\csname` makes of a name with no meaning.",
