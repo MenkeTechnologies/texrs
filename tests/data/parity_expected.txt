@@ -156,6 +156,8 @@ awb c d exyfA\a \a##[7][7]T\a via a macrogh[9][7]
 [3] [5] [5]
 #==# integer_parameters.tex
 [-9][-9] [-9] negative [1] [250] [77] [4][3] [33][\clubpenalty][\widowpenalty] [1000][25][1][13]
+#==# internal_integer_as_factor.tex
+[11.0pt] [-1.0pt] [3.0pt] [7.0pt] [144.54pt] [7.0pt plus 7.0fil] [0.44289pt]
 #==# internal_quantity_as_a_number.tex
 [819200] [196608] [-163840] [37.0pt]
 #==# keyword_through_a_macro.tex

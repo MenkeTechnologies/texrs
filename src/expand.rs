@@ -1859,8 +1859,25 @@ impl Engine {
                 if self.try_expand(lx, n, pending_only)? {
                     continue;
                 }
+                // §413's internal integers are all factors here, the code
+                // tables and the §236 parameters with the rest: `\catcode`\a pt`
+                // is 11pt. Their values are frontend state, known now.
+                let table = crate::charcodes::Table::from_name(n.name());
                 let found = match n.name() {
                     "count" => Some(NumericCs::Register(self.scan_number(lx, pending_only)?)),
+                    "catcode" => {
+                        let c = self.scan_char_code(lx, pending_only)?;
+                        Some(NumericCs::Value(self.cats.get(c) as i64))
+                    }
+                    _ if table.is_some() => {
+                        let c = self.scan_char_code(lx, pending_only)?;
+                        let table = table.expect("just matched");
+                        Some(NumericCs::Value(self.charcodes.get(table, c)))
+                    }
+                    _ if self.intpar_cs(n).is_some() => {
+                        let i = self.intpar_cs(n).expect("just matched");
+                        Some(NumericCs::Value(self.intpars.get(i)))
+                    }
                     // A `\countdef` name is its register and a `\chardef` or
                     // `\mathchardef` one is its number; both are internal
                     // integers in §449's sense.

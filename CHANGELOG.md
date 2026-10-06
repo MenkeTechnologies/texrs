@@ -32,6 +32,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A dimension's factor may be any internal integer (§449): `\catcode`\a pt`,
+  `\tolerance pt` and the other code tables and §236 parameters were
+  `Illegal unit of measure`.
 - A delimited argument loses its braces only when it is one item and that item
   is a group (§392, §400): `{x}{y}` and `{x} ` keep theirs, where texrs
   stripped the first `{` and the last `}` of anything that began and ended with

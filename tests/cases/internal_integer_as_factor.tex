@@ -1,0 +1,12 @@
+% A dimension's factor may be any internal integer (tex.web S449 fetches it
+% with scan_something_internal and goes on to the unit): a code table entry,
+% a S236 parameter, a register -- in a dimension and in a glue's stretch.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\dimen0=\catcode`\a pt \message{[\the\dimen0]}
+\dimen0=-\catcode`\{ pt \message{[\the\dimen0]}
+\lccode`\a=3 \dimen0=\lccode`\a pt \message{[\the\dimen0]}
+\tolerance=7 \dimen0=\tolerance pt \message{[\the\dimen0]}
+\escapechar=2 \dimen0=\escapechar in \message{[\the\dimen0]}
+\skip0=\tolerance pt plus \tolerance fil \message{[\the\skip0]}
+\mathcode`\a="7161 \dimen0=\mathcode`\a sp \message{[\the\dimen0]}
+\end
