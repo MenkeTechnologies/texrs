@@ -4430,6 +4430,29 @@ impl Engine {
     pub fn read_balanced_pub(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         self.read_balanced(lx)
     }
+
+    /// §380's `get_x_token` for a caller outside the expander: the next token
+    /// that does not expand, every one before it expanded, and what it MEANS
+    /// as a primitive when it is a control sequence.
+    pub fn next_unexpandable(&mut self, lx: &mut Lexer) -> R<Option<(Token, Option<CsId>)>> {
+        while let Some(t) = lx.next_token(&self.cats) {
+            let Token::Cs(n) = t else {
+                return Ok(Some((t, None)));
+            };
+            if !self.try_expand(lx, n, false)? {
+                return Ok(Some((t, Some(self.primitive_meaning(n)))));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The text of a `\write`, as §1352 reads it: `scan_toks(false, false)`,
+    /// so §403's `scan_left_brace` expands its way to the brace and the list
+    /// itself is taken UNEXPANDED. §1371's `write_out` expands it later.
+    pub fn read_write_text(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        self.scan_left_brace(lx)?;
+        self.read_balanced(lx)
+    }
     pub fn read_csname_pending(&mut self, lx: &mut Lexer) -> R<String> {
         self.read_csname(lx, true)
     }

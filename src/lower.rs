@@ -1137,6 +1137,17 @@ impl Lowerer {
                     ops.extend(parts);
                     out.push(Cmd::Message(ops));
                 }
+                // §1375: `\immediate` reads the next token with `get_x_token`
+                // and, when it is `\write`, writes now. Anything else goes back
+                // to be read as if `\immediate` had not been there. `\openout`
+                // and `\closeout` are not implemented, so no write stream is
+                // ever open and every `\write` goes where §1370 sends one to a
+                // closed stream.
+                "immediate" => match self.eng.next_unexpandable(lx)? {
+                    Some((_, Some(p))) if p.name() == "write" => self.immediate_write(lx, &mut out)?,
+                    Some((t, _)) => lx.push_back(&[t]),
+                    None => {}
+                },
                 // `\input FILE` reads another file HERE, sharing every piece of
                 // state: a macro it defines is defined afterwards, a `\catcode`
                 // it sets stays set. That is the whole point of it -- a real
@@ -3285,6 +3296,28 @@ impl Lowerer {
         }
     }
 
+    /// `\immediate\write<number>{<text>}`: §1350 reads the stream number and
+    /// the text unexpanded, and §1370's `write_out` expands the text the way
+    /// `\message` does and prints it on a line of its own. No stream is open,
+    /// so a negative number writes to the log alone -- nothing reaches the
+    /// terminal, though the text is still expanded -- and any other number
+    /// writes to the terminal (and the log).
+    fn immediate_write(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        let stream = self.eng.scan_number_file(lx)?;
+        let body = self.eng.read_write_text(lx)?;
+        let mut work = Lexer::new("");
+        work.push_back(&body);
+        let parts = self.msg_ops(&mut work, &[])?;
+        if stream < 0 {
+            return Ok(());
+        }
+        let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
+        let mut ops = self.take_reports();
+        ops.extend(crate::ir::printed_ops(parts, nl));
+        out.push(Cmd::Write(ops));
+        Ok(())
+    }
+
     /// `\message{...}` lowered to the steps that build it at run time.
     ///
     /// The body is walked as a token list. Macros and `\csname` resolve here --
@@ -4288,6 +4321,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             // Output, or the compilation of a `\rust` block, which the document's
             // own pass compiles again where it is used.
             Cmd::Message(_)
+            | Cmd::Write(_)
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
@@ -4453,7 +4487,7 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 Cmd::Loop { body, .. } | Cmd::Color { body, .. } | Cmd::Group { body, .. } => {
                     walk(body, regs)
                 }
-                Cmd::Message(_) => {}
+                Cmd::Message(_) | Cmd::Write(_) => {}
             }
         }
     }

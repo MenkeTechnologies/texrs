@@ -28,6 +28,14 @@ thread_local! {
 }
 
 thread_local! {
+    /// Whether the next message is glued to the one before it because that
+    /// one was an `\immediate\write`: §1370 ends a write with `print_ln`, which
+    /// leaves `term_offset` at zero, and §1280 writes the space in front of a
+    /// `\message` only when it is not.
+    static GLUE_NEXT: RefCell<bool> = const { RefCell::new(false) };
+}
+
+thread_local! {
     /// The document's own text, in the order it was read.
     static TEXT: RefCell<String> = const { RefCell::new(String::new()) };
 }
@@ -77,7 +85,8 @@ pub fn take_text() -> String {
 /// Record a finished message: as a message of its own, or -- when it opens
 /// with a report -- appended to the last one, with nothing between.
 fn record(done: String) {
-    let glued = GLUED.with(|g| std::mem::take(&mut *g.borrow_mut()));
+    let glued = GLUED.with(|g| std::mem::take(&mut *g.borrow_mut()))
+        | GLUE_NEXT.with(|g| std::mem::take(&mut *g.borrow_mut()));
     MESSAGES.with(|m| {
         let mut m = m.borrow_mut();
         match (glued, m.last_mut()) {
@@ -115,6 +124,17 @@ fn b_msg_append(vm: &mut VM, _argc: u8) -> Value {
 fn b_msg_flush(_vm: &mut VM, _argc: u8) -> Value {
     let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
     record(done);
+    Value::Undef
+}
+
+/// Finish an `\immediate\write` and record it on a line of its own (see
+/// [`GLUE_NEXT`]): §1370's `print_nl` glues it to what came before, and its
+/// `print_ln` glues what comes after to it.
+fn b_write_flush(_vm: &mut VM, _argc: u8) -> Value {
+    let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    GLUED.with(|g| *g.borrow_mut() = true);
+    record(done);
+    GLUE_NEXT.with(|g| *g.borrow_mut() = true);
     Value::Undef
 }
 
@@ -355,6 +375,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::COLOR_POP, b_color_pop);
     vm.register_builtin(ops::MSG_APPEND, b_msg_append);
     vm.register_builtin(ops::MSG_FLUSH, b_msg_flush);
+    vm.register_builtin(ops::WRITE_FLUSH, b_write_flush);
     vm.register_builtin(ops::MSG_REPORT, b_msg_report);
     vm.register_builtin(ops::MSG_CLOSE, b_msg_close);
     vm.register_builtin(ops::MSG_DIMEN, b_msg_dimen);
@@ -384,6 +405,7 @@ fn run_with(
     MESSAGES.with(|m| m.borrow_mut().clear());
     BUILDING.with(|b| b.borrow_mut().clear());
     GLUED.with(|g| *g.borrow_mut() = false);
+    GLUE_NEXT.with(|g| *g.borrow_mut() = false);
     FAULT.with(|f| *f.borrow_mut() = None);
     ERROR_SITE.with(|s| s.borrow_mut().clear());
     REPORTED.with(|r| *r.borrow_mut() = false);

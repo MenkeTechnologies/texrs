@@ -6,6 +6,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `\immediate\write` (§1350, §1370): the text is expanded as a `\message` is and
+  printed on a line of its own, to the terminal for a stream that is not open
+  or above 15 and to the log alone for a negative one. `\immediate` expands
+  its way to the `\write` and leaves anything else to be read as usual.
+
 ### Fixed
 
 - A group restores a register to what its last `\global` assignment left, even

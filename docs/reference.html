@@ -654,6 +654,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>SCALE_DIMEN</code></td><td><code>4015</code></td><td>`tex.web` §453's `&lt;factor&gt;&lt;internal unit&gt;`: the register's value, the factor's integer part, and its fraction in 65536ths. A builtin rather than a run of arithmetic ops because §107's truncation and §460's clamp are the port, and one Rust function is where they stay readable.</td></tr>
             <tr><td><code>MSG_ROMAN</code></td><td><code>4016</code></td><td>Append a number as `\romannumeral` writes it: one argument, the value.</td></tr>
             <tr><td><code>MSG_REPORT</code></td><td><code>4017</code></td><td>Append a report the lowerer made (§82's `print_err` and its context): one argument, the text. Unlike `MSG_APPEND` it marks a message that OPENS with it as starting on a fresh line rather than after a space.</td></tr>
+            <tr><td><code>WRITE_FLUSH</code></td><td><code>4018</code></td><td>Finish an `\immediate\write` and record it on a line of its own: glued to what came before, and the next message glued to it. No arguments.</td></tr>
           </tbody>
         </table>
       </section>

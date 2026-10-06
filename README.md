@@ -265,7 +265,9 @@ than none.
 - `\let`, `\edef`/`\xdef`, `\gdef`, `\global`, `\begingroup`/`\endgroup`.
 - Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\if`, `\ifcat`, `\ifcase`
   with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.
-- Groups, which scope the macro table AND the count registers they write.
+- Groups, which scope the macro table AND the registers they write; a
+  register assigned `\global` inside one keeps what the last global assignment
+  left, even when a local one follows it (§283).
 - Registers: `\count`, `\dimen`, `\skip`, `\toks` and `\muskip`, with `` `x ``
   character codes and `\advance`/`\multiply`/`\divide`. `\dimen0=10pt \advance\dimen0
   by 5pt` reads back `15.0pt`; `\skip0=3pt plus 1fil` reads back with its stretch.
@@ -284,7 +286,9 @@ than none.
   `\linepenalty`, the hyphen penalties and the demerit weights a document
   set, paragraph by paragraph and under `--dvi` too, and its page breaker
   reads `\clubpenalty`, `\widowpenalty` and `\brokenpenalty`.
-- `\message`.
+- `\message`, and `\immediate\write` to the terminal (a negative stream to the
+  log alone). `\openout` is not implemented, so no write stream is ever open,
+  and neither is a `\write` without `\immediate`, which waits for a shipout.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's.
 - Verbatim environments — `verbatim`, `Verbatim` and the fancyvrb family,

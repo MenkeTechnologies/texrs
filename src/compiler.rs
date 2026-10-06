@@ -72,6 +72,9 @@ pub mod ops {
     /// one argument, the text. Unlike `MSG_APPEND` it marks a message that
     /// OPENS with it as starting on a fresh line rather than after a space.
     pub const MSG_REPORT: u16 = 4017;
+    /// Finish an `\immediate\write` and record it on a line of its own: glued
+    /// to what came before, and the next message glued to it. No arguments.
+    pub const WRITE_FLUSH: u16 = 4018;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -276,6 +279,11 @@ impl Compiler {
             Cmd::Message(msg) => {
                 self.msg_ops(msg)?;
                 self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::Write(msg) => {
+                self.msg_ops(msg)?;
+                self.b.emit(Op::CallBuiltin(ops::WRITE_FLUSH, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Group { saves, keeps, body } => {

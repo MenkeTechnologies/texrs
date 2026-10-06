@@ -180,6 +180,11 @@ pub enum Cmd {
     },
     /// `\message{...}` — built piece by piece at run time.
     Message(Vec<MsgOp>),
+    /// `\immediate\write` to the terminal, built as a message is. §1370's
+    /// `write_out` starts it with `print_nl` and ends it with `print_ln`, so it
+    /// sits on a line of its own: nothing between it and what came before, and
+    /// no space in front of the `\message` after it.
+    Write(Vec<MsgOp>),
     /// The `)` that closes an `\input` file, attached to the message before it.
     ///
     /// tex writes `(./inner.tex [msg])` with no space in front of the paren,
@@ -279,6 +284,10 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             Cmd::FileClose => out.push_str(&format!("{pad}FileClose\n")),
             Cmd::Message(ops) => {
                 out.push_str(&format!("{pad}Message\n"));
+                render_msg(ops, depth + 1, out);
+            }
+            Cmd::Write(ops) => {
+                out.push_str(&format!("{pad}Write\n"));
                 render_msg(ops, depth + 1, out);
             }
             Cmd::KeepGlobal { reg, into } => {

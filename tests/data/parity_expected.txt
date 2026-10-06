@@ -138,6 +138,8 @@ A B C C C [done]
 SAME
 #==# ifx_undefined_against_primitive.tex
 D D U UN RD
+#==# immediate_write_to_terminal.tex
+awb c d exyfA\a \a##[7][7]T\a via a macrogh[9][7]
 #==# inputlineno.tex
 [3] [5] [5]
 #==# integer_parameters.tex

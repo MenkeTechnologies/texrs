@@ -1,0 +1,18 @@
+% \immediate\write (tex.web S1350, S1370): the text is read unexpanded and
+% expanded when written, like \message's, and printed on a line of its own --
+% so nothing separates it from what came before, and the \message after it
+% gets no space. A negative stream goes to the log alone; a stream that is not
+% open, or one above 15, goes to the terminal. \immediate expands its way to
+% the \write, and leaves anything else to be read as usual.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{a}\immediate\write16{w}\message{b}
+\message{c}\immediate\write-1{hidden}\message{d}
+\message{e}\immediate\write5{x}\immediate\write99{y}\message{f}
+\def\a{A}\count1=7
+\immediate\write16{\a\noexpand\a\string\a#[\the\count1][\number\count1]}
+\toks0={T\a}\immediate\write16{\the\toks0}
+\def\w{\write}\immediate\w16{via a macro}
+\immediate\relax\message{g}
+\immediate\write16{}\message{h}
+{\count1=9 \immediate\write16{[\the\count1]}}\immediate\write16{[\the\count1]}
+\end
