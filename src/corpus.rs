@@ -186,6 +186,18 @@ pub const CORPUS: &[Entry] = &[
         "\\message{<text>}\n\\message{HELLO-WORLD}   % => (./file.tex HELLO-WORLD )",
     ),
     (
+        "\\immediate",
+        "Expansion",
+        "Do the `\\write` that follows now rather than at shipout (tex.web \u{a7}1375). The next token is read with expansion; anything other than `\\write` is put back and read as if `\\immediate` had not been there. `\\openout` and `\\closeout` are not implemented.",
+        "\\immediate\\write<number>{<text>}\n\\immediate\\write16{HELLO}",
+    ),
+    (
+        "\\write",
+        "Expansion",
+        "Write a line (tex.web \u{a7}1350, \u{a7}1370). The text is read unexpanded and expanded when written, as `\\message` expands its own, and printed on a line of its own: nothing between it and what came before, and no space in front of the next `\\message`. No stream is ever open, so a negative number writes to the log alone and any other number to the terminal. Only `\\immediate\\write` is implemented; one waiting for a shipout is not.",
+        "\\immediate\\write<number>{<text>}\n\\immediate\\write16{\\the\\count0}   % => its own line on the terminal\n\\immediate\\write-1{log only}",
+    ),
+    (
         "\\relax",
         "Expansion",
         "Do nothing. Accepted so a document can stop a number scan, or fill a slot that needs a token but no action \u{2014} which is also what `\\csname` makes of a name with no meaning.",
