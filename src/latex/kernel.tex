@@ -1520,71 +1520,18 @@
 \def\@listiv{}
 \def\@listv{}
 \def\@listvi{}
-% latex.ltx:9138, 10758-10759. In tex.web these three are token PARAMETERS of
-% the engine (§230); latex.ltx declares them with \newtoks because LaTeX takes
-% them over, and that is the declaration this layer can carry -- a token
-% register is a store texrs has.
-\newtoks\everypar
-\newtoks\everymath
-\newtoks\everydisplay
-% tex.web §224 makes these GLUE parameters of the engine, so latex.ltx never
-% declares them and every class assigns to them as though they were always
-% there -- size10.clo's \normalsize opens
+% \everypar, \abovedisplayskip, \baselineskip, \parindent, \hsize,
+% \emergencystretch and the rest of tex.web's token (§230), glue (§224) and
+% dimension (§247) parameters are the ENGINE's, as they are in tex, so nothing
+% here declares them: latex.ltx never does, and every class assigns to them as
+% though they were always there -- size10.clo's \normalsize opens
 %
 %     \abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@
 %
-% and every size option of every standard class writes the same four lines.
-% texrs has no glue parameters and it does have glue registers, so they are
-% declared here exactly as \everypar above is: the store the engine really has,
-% under the name every file assumes. INITEX starts them at zero and the class
-% file is what sets them, so no value is written here either.
-%
-% Undeclared, the four display skips were the FIRST thing between article.cls
-% and a load: `texrs: package article needs \abovedisplayskip' on the simplest
-% document there is. \baselineskip is the next one of them the same file wants,
-% at size10.clo:134 --
-%
-%     \divide\@tempdima\baselineskip
-%
-% which is a glue parameter standing where a NUMBER is wanted (§430's coercion,
-% `src/lower.rs::peek_int_register'), so the divisor is the natural width in
-% scaled points. As an empty macro it divided by nothing at all.
-\newskip\abovedisplayskip
-\newskip\belowdisplayskip
-\newskip\abovedisplayshortskip
-\newskip\belowdisplayshortskip
-\newskip\baselineskip
-\newskip\lineskip
-\newskip\parskip
-\newskip\topskip
-% tex.web §247's DIMENSION parameters, declared for the same reason and in the
-% same way. size10.clo:88-100 sets the first two -- `\setlength\parindent{15\p@}'
-% and `\setlength\maxdepth{.5\topskip}' -- article.cls:87 sets \overfullrule from
-% its draft option, and \lineskiplimit is what plain's \normalbaselines restores.
-% \hoffset and \voffset are here because a document sets them itself.
-%
-% \hsize is the same kind of name and is here for the same reason. It is the
-% measure a paragraph is broken to (tex.web §247), latex.ltx never declares it
-% because INITEX already has it, and \onecolumn and \twocolumn both assign to
-% it on article.cls's last lines -- `\global\hsize\columnwidth'. texrs decides
-% the measure in `src/typeset.rs::Layout' from the class options rather than
-% from this register, so what is carried here is the STORE and not the effect:
-% the assignment succeeds and \the\hsize answers what was written, and the
-% paragraph is still broken to the layout's measure. BUGS.md's note about one
-% type size covers the same ground.
-\newdimen\parindent
-\newdimen\maxdepth
-\newdimen\overfullrule
-\newdimen\lineskiplimit
-\newdimen\hoffset
-\newdimen\voffset
-\newdimen\hsize
-% tex.web §247's last dimension parameter here, and the one \setlength made
-% necessary: a Pandoc preamble writes `\setlength{\emergencystretch}{3em}' and
-% `src/latex/load.rs::AFTERWARDS' makes every package prove that line still
-% runs after it. The stand-in in `prelude.tex' was delimited on an `=' and had
-% nothing to match.
-\newdimen\emergencystretch
+% and size10.clo:134 divides by \baselineskip, a glue parameter standing where
+% a NUMBER is wanted (§430's coercion). See `src/params.rs'. What texrs carries
+% is the STORE and not every effect: \hsize answers what was written, and the
+% paragraph is still broken to `src/typeset.rs::Layout's measure.
 % plain.tex:378-383. The skip amounts \smallskip, \medskip and \bigskip are
 % named for, and the three \normalbaselines restores from.
 \newskip\smallskipamount

@@ -1530,7 +1530,7 @@ impl Engine {
                     },
                 };
                 if let Some(reg) = reg {
-                    let is_mu = reg >= crate::compiler::MUSKIP_BASE;
+                    let is_mu = crate::compiler::is_mu_slot(reg);
                     if is_mu == self.mu_units {
                         return Ok(Some(reg));
                     }
@@ -1867,6 +1867,9 @@ impl Engine {
     /// The register a slot number names, spelt as the document would spell it.
     fn register_name(&self, slot: i64) -> String {
         let e = self.esc();
+        if let Some(name) = crate::params::name_of_slot(slot) {
+            return format!("{e}{name}");
+        }
         if slot >= crate::compiler::MUSKIP_BASE {
             let n = (slot - crate::compiler::MUSKIP_BASE) / crate::compiler::SKIP_STRIDE;
             return format!("{e}muskip{n}");
@@ -1921,13 +1924,13 @@ impl Engine {
                 t if t.is_space() => continue,
                 Token::Char(_, Cat::BeginGroup) => break self.read_balanced(lx)?,
                 // `\toks1=\toks0` copies, and `\toks1=\toksA` copies through a
-                // name defined by \toksdef.
+                // name defined by \toksdef -- or a token parameter, `\everypar`.
                 Token::Cs(n) => {
                     let n = *n;
                     let from = match n.name() {
                         "toks" => self.scan_number(lx, false)?,
-                        _ => match self.meanings.get(&n).cloned() {
-                            Some(Meaning::ToksDef(r)) => r,
+                        _ => match self.toks_cs(n) {
+                            Some(r) => r,
                             // §1226 reads the next non-blank non-relax token
                             // with `get_x_token`, so anything expandable before
                             // the brace expands: `\toks2=\expandafter{\the\toks1}`.
@@ -2024,6 +2027,10 @@ impl Engine {
     pub fn toks_cs(&self, name: CsId) -> Option<i64> {
         match self.meanings.get(&name) {
             Some(Meaning::ToksDef(r)) => Some(*r),
+            // A token parameter (§230) is a token list, by its own name or by
+            // a `\let` copy of it.
+            None => crate::params::toks_register(name.name()),
+            Some(Meaning::Primitive(p)) => crate::params::toks_register(p.name()),
             _ => None,
         }
     }
@@ -2822,6 +2829,12 @@ impl Engine {
             // read-only integer: the line it was read on.
             None if name.name() == "inputlineno" => {
                 Some(NumericCs::Value(i64::from(self.input_line)))
+            }
+            // A dimension or glue parameter (§247, §224) is a register, by
+            // its own name or by a `\let` copy of it.
+            None => crate::params::register_slot(name.name()).map(NumericCs::Register),
+            Some(Meaning::Primitive(p)) => {
+                crate::params::register_slot(p.name()).map(NumericCs::Register)
             }
             _ => None,
         }

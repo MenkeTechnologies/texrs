@@ -230,7 +230,7 @@ impl Compiler {
                     // `max_dimen`, not by the 32-bit word: §1240 multiplies it
                     // with `nx_plus_y(..., 0)`, whose limit is 2^30-1.
                     Arith::Mul | Arith::Div => {
-                        let scaled = (DIMEN_BASE..MUSKIP_BASE + 256 * SKIP_STRIDE).contains(reg);
+                        let scaled = (DIMEN_BASE..i64::from(TOTAL_SLOTS)).contains(reg);
                         let which = match op {
                             Arith::Mul if scaled => 2,
                             Arith::Mul => 0,
@@ -561,14 +561,38 @@ impl Compiler {
     }
 }
 
-/// A register number as a slot, clamped to the 256 TeX provides.
+/// A register number as a slot, clamped to the slot file.
 fn slot(reg: i64) -> u16 {
     u16::try_from(reg).unwrap_or(0).min(TOTAL_SLOTS - 1)
 }
 
 /// Every register kind that lives in the slot file, end to end: 256 counts, 256
-/// dimensions, then 256 glues and 256 math glues at four slots each.
-pub const TOTAL_SLOTS: u16 = 2560;
+/// dimensions, 256 glues and 256 math glues at four slots each, then the
+/// dimension, glue and math glue PARAMETERS (`crate::params`).
+pub const TOTAL_SLOTS: u16 = MUGLUEPAR_END as u16;
+
+/// Where §247's dimension parameters start: one slot each, past every register.
+pub const DIMPAR_BASE: i64 = MUSKIP_BASE + 256 * SKIP_STRIDE;
+/// Where §224's ordinary glue parameters start, four slots each like a `\skip`.
+pub const GLUEPAR_BASE: i64 = DIMPAR_BASE + crate::params::DIMEN_NAMES.len() as i64;
+/// Where §224's three math glue parameters start, four slots each like a
+/// `\muskip`.
+pub const MUGLUEPAR_BASE: i64 = GLUEPAR_BASE + crate::params::ORDINARY_GLUE as i64 * SKIP_STRIDE;
+/// One past the last parameter slot.
+const MUGLUEPAR_END: i64 = MUGLUEPAR_BASE
+    + (crate::params::GLUE_NAMES.len() - crate::params::ORDINARY_GLUE) as i64 * SKIP_STRIDE;
+
+/// Whether `slot` holds (a component of) a glue: a `\skip` or `\muskip`
+/// register, or a glue parameter of either kind.
+pub fn is_glue_slot(slot: i64) -> bool {
+    (SKIP_BASE..DIMPAR_BASE).contains(&slot) || (GLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+}
+
+/// Whether `slot` holds (a component of) a MATH glue: a `\muskip` register or
+/// one of the three math glue parameters.
+pub fn is_mu_slot(slot: i64) -> bool {
+    (MUSKIP_BASE..DIMPAR_BASE).contains(&slot) || (MUGLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+}
 
 impl Default for Compiler {
     fn default() -> Self {

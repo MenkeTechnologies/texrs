@@ -1,0 +1,26 @@
+% tex.web's dimension (S247), glue (S224) and token (S230) parameters are
+% registers by another name: assigned with or without `=', read by \the and
+% wherever a dimension or glue is scanned, changed by \advance and \multiply,
+% restored by a group, coerced from glue to dimen to integer (S430), copied
+% between \toks and a token parameter. Each case assigns first, because the
+% reference loads plain.tex and plain gives most of them values.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\hsize=100pt \advance\hsize by -\hsize \advance\hsize 3pt \message{[\the\hsize]}
+\hsize=100pt \dimen0=\hsize \multiply\dimen0 by 2 \message{[\the\dimen0]}
+\count0=\hsize \message{[\the\count0][\number\hsize]}
+\dimen3=7pt \hsize=\dimen3 \message{[\the\hsize]}
+\hsize 5pt {\hsize=7pt \global\vsize=3pt}\message{[\the\hsize][\the\vsize]}
+\let\x=\hsize \x=4pt \message{[\the\hsize][\meaning\x]}
+\baselineskip=12pt plus 1fil minus 2pt \message{[\the\baselineskip]}
+\skip0=3pt plus 1pt \parskip=\skip0 \advance\parskip by \parskip \message{[\the\parskip]}
+\thinmuskip=3mu \medmuskip=4mu plus 2mu minus 4mu \message{[\the\thinmuskip][\the\medmuskip]}
+\thickmuskip=1mu \muskip0=\thickmuskip \message{[\the\muskip0]}
+\leftskip=1pt plus 2pt \dimen0=\leftskip \message{[\the\dimen0]}
+\everypar={a#b}\message{[\the\everypar]}
+\everypar={a}\toks0=\everypar \message{[\the\toks0]}
+\toks2={z}\output=\toks2 {\everycr={q}}\message{[\the\output][\the\everycr]}
+\parindent=2pt \parindent=1.5\parindent \message{[\the\parindent]}
+\hfuzz=1pt \message{\ifdim\hfuzz>0.5pt [y]\else [n]\fi}
+\count0=3 \overfullrule=\count0 sp \message{[\the\overfullrule]}
+\message{[\the\tabskip][\the\errhelp][\the\emergencystretch]}
+\end

@@ -77,10 +77,11 @@
 //!   `crate::lua::node`'s `REFUSED`.
 //! - **The internal parameters** — `tex.hsize`, `tex.parindent`,
 //!   `tex.baselineskip` and the rest of the manual's "Internal parameter
-//!   values" list. Not one is a register in texrs: the page geometry is
+//!   values" list. A document can assign and read most of them, but none is
+//!   in the registers a chunk is handed: the page geometry is
 //!   `crate::typeset::Layout`, decided from the class and geometry options
-//!   rather than assigned by the document, and the breaker's parameters are
-//!   constants in `crate::linebreak`. They REFUSE, naming which of the two it
+//!   rather than read from the document's assignments, and the breaker's
+//!   are read as `crate::linebreak::Params`. They REFUSE, naming which of the two it
 //!   is; they answered `nil` until that was seen for what it is, which is a
 //!   claim that LuaTeX has no such parameter.
 //! - **`token`'s userdata half** — `token.create`, `token.get_next`,
@@ -1555,8 +1556,8 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
         return Ok(None);
     };
     let name = s.to_str()?.to_string();
-    // The page geometry. `\hsize` is not a primitive in texrs and not a
-    // register: `crate::typeset::Layout` holds the measure, the leading, the
+    // The page geometry. `\hsize` is a register a document can assign
+    // (`crate::params`), but `crate::typeset::Layout` holds the measure, the leading, the
     // indent and the paragraph spacing, decided from the class options and
     // `geometry`'s. A chunk cannot read it because it is not decided where the
     // chunk stands -- lowering runs before the page is laid out at all.
@@ -1721,24 +1722,28 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
         "year",
     ];
     let name = name.as_str();
-    if GEOMETRY.contains(&name) {
-        return Ok(Some(format!(
-            "tex.{name} is one of LuaTeX's internal parameters, and texrs has no \
-             register for it: the page geometry lives in crate::typeset::Layout, \
-             decided from the class and geometry options rather than assigned by \
-             the document, and it is not decided yet where a chunk stands"
-        )));
-    }
     // A §236 integer parameter IS held -- `crate::intpar`, where `\the`,
-    // `\number` and an assignment reach it -- but not in the registers a
-    // chunk is handed, so the answer says both halves.
-    let held = match crate::intpar::index(name) {
-        Some(_) => format!(
+    // `\number` and an assignment reach it -- and so is a §247 dimension, §224
+    // glue or §230 token parameter (`crate::params`), but none of them in the
+    // registers a chunk is handed, so the answer says both halves.
+    let is_param = crate::intpar::index(name).is_some()
+        || crate::params::register_slot(name).is_some()
+        || crate::params::toks_register(name).is_some();
+    let held = match is_param {
+        true => format!(
             "; texrs holds \\{name} for \\the, \\number and assignment, \
              but not where a chunk can reach it"
         ),
-        None => String::new(),
+        false => String::new(),
     };
+    if GEOMETRY.contains(&name) {
+        return Ok(Some(format!(
+            "tex.{name} is one of LuaTeX's internal parameters, and the page \
+             geometry lives in crate::typeset::Layout, decided from the class and \
+             geometry options rather than read from what the document assigned, \
+             and it is not decided yet where a chunk stands{held}"
+        )));
+    }
     if BREAKER.contains(&name) {
         return Ok(Some(format!(
             "tex.{name} is one of LuaTeX's internal parameters, and the line \

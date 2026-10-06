@@ -60,6 +60,8 @@ VALUE
 [A] [B] [C] [diff]
 #==# delimited_params.tex
 [alpha|beta]
+#==# dimen_glue_token_parameters.tex
+[3.0pt] [200.0pt] [6553600][6553600] [7.0pt] [5.0pt][3.0pt] [4.0pt][\hsize] [12.0pt plus 1.0fil minus 2.0pt] [6.0pt plus 2.0pt] [3.0mu][4.0mu plus 2.0mu minus 4.0mu] [1.0mu] [1.0pt] [a##b] [a] [z][] [3.0pt] [y] [0.00005pt] [0.0pt][][0.0pt]
 #==# dimen_multiply_overflow.tex
 ! Arithmetic overflow.l.4 \dimen1=16000pt \multiply\dimen1 2                                        \message{[\the\dimen1]}[16000.0pt] [16383.99997pt] )(see the transcript file for additional information
 #==# dimendef_alias.tex

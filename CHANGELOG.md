@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- The dimension (§247), glue (§224) and token (§230) parameters: `\hsize`,
+  `\parindent`, `\baselineskip`, `\thinmuskip`, `\everypar`, `\output` and the
+  rest are assigned, read by `\the` and wherever a dimension or glue is
+  scanned, changed by `\advance`/`\multiply`/`\divide`, coerced (§430) and
+  restored by a group, at INITEX's zero. The dimension and glue ones are slots
+  past the registers (`src/params.rs`), so a run-time right-hand side works.
+  The LaTeX kernel no longer declares stand-in registers under their names.
 - `\immediate\write` (§1350, §1370): the text is expanded as a `\message` is and
   printed on a line of its own, to the terminal for a stream that is not open
   or above 15 and to the log alone for a negative one. `\immediate` expands

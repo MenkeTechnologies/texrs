@@ -57,6 +57,7 @@ pub mod node;
 pub mod pack;
 pub mod page;
 pub mod parallel;
+pub mod params;
 pub mod parity;
 pub mod pdf;
 pub mod pdf_parity;

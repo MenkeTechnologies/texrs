@@ -271,6 +271,12 @@ than none.
 - Registers: `\count`, `\dimen`, `\skip`, `\toks` and `\muskip`, with `` `x ``
   character codes and `\advance`/`\multiply`/`\divide`. `\dimen0=10pt \advance\dimen0
   by 5pt` reads back `15.0pt`; `\skip0=3pt plus 1fil` reads back with its stretch.
+  The dimension, glue and token parameters of `tex.web` §247, §224 and §230 --
+  `\hsize`, `\parindent`, `\baselineskip`, `\thinmuskip`, `\everypar` and the
+  rest -- are registers in the same sense, at INITEX's zero: assigned, read,
+  coerced and restored by a group like `\dimen`, `\skip` and `\toks`. They are
+  stores: the breaker's measure is `Layout`'s, not `\hsize`, and `\everypar`
+  is not inserted when a paragraph starts.
   Box registers are the exception — there is no `\setbox`, so every one is
   void, which is what `\ifvoid`, `\ifhbox` and `\ifvbox` answer.
 - The integer parameters of `tex.web` §236 — `\tolerance`, `\escapechar`,
@@ -484,7 +490,8 @@ valid Lua — texrs used to "complete" them only because it consumed the chunk
 unread. `lualatex` refuses those same files too (`! LaTeX Error: \usepackage
 before \documentclass`), so the drop is the engine reading what it used to skip
 rather than a capability lost. Of the remaining four, three are texrs's own DVI
-fixtures needing `\hsize` and one is written to fail.
+fixtures, which stop on `\special`, `\font` and `\vfill`, and one is written to
+fail.
 
 Two things decide that count besides the engine, and a re-run that ignores them
 reports failures texrs did not cause. The sweep defaults to `target/debug/texrs`

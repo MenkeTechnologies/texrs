@@ -1003,7 +1003,7 @@ impl Lowerer {
                     // dimension a dimension, a count a number. Reading the
                     // wrong one stores a prefix of the value and leaves the
                     // rest in the document.
-                    if reg >= crate::compiler::SKIP_BASE {
+                    if crate::compiler::is_glue_slot(reg) {
                         self.note_global(&[reg, reg + 1, reg + 2, reg + 3]);
                         let cmds = self.glue_assign(lx, reg)?;
                         out.extend(cmds);
@@ -1065,7 +1065,7 @@ impl Lowerer {
                     // register is -- glue times a length is not a thing TeX
                     // has. Reading the wrong one stores a prefix of the value
                     // and leaves the rest in the document.
-                    let glue = reg >= crate::compiler::SKIP_BASE;
+                    let glue = crate::compiler::is_glue_slot(reg);
                     let dimen = !glue && reg >= crate::compiler::DIMEN_BASE;
                     if glue {
                         self.note_global(&[reg, reg + 1, reg + 2, reg + 3]);
@@ -1076,7 +1076,7 @@ impl Lowerer {
                         (true, true) => {
                             // A glue REGISTER operand has orders that are the
                             // run's, so it cannot be scanned now (§461).
-                            let mu = reg >= crate::compiler::MUSKIP_BASE;
+                            let mu = crate::compiler::is_mu_slot(reg);
                             if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
                                 out.extend(advance_glue_by_register(reg, from, negative));
                             } else {
@@ -1144,7 +1144,9 @@ impl Lowerer {
                 // ever open and every `\write` goes where §1370 sends one to a
                 // closed stream.
                 "immediate" => match self.eng.next_unexpandable(lx)? {
-                    Some((_, Some(p))) if p.name() == "write" => self.immediate_write(lx, &mut out)?,
+                    Some((_, Some(p))) if p.name() == "write" => {
+                        self.immediate_write(lx, &mut out)?
+                    }
                     Some((t, _)) => lx.push_back(&[t]),
                     None => {}
                 },
@@ -3171,7 +3173,7 @@ impl Lowerer {
         // Which glue file the destination is in decides the units the source is
         // read in: `tex.web` §1228 assigns a `mu_val` from a `mu_val` and a
         // `glue_val` from a `glue_val`, and never mixes them.
-        let mu = base >= crate::compiler::MUSKIP_BASE;
+        let mu = crate::compiler::is_mu_slot(base);
         if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
             // Negating a glue negates its three widths and keeps its orders.
             return Ok((0..crate::compiler::SKIP_STRIDE)
@@ -3231,8 +3233,8 @@ impl Lowerer {
                     // A `\skipdef` name is a glue register and a `\muskipdef`
                     // name is a math one; each stands only where its own kind
                     // does.
-                    let is_mu = r >= crate::compiler::MUSKIP_BASE;
-                    if r >= crate::compiler::SKIP_BASE && is_mu == mu {
+                    let is_mu = crate::compiler::is_mu_slot(r);
+                    if crate::compiler::is_glue_slot(r) && is_mu == mu {
                         return Ok(Some((r, negative)));
                     }
                 }
@@ -3466,9 +3468,9 @@ impl Lowerer {
                                         Num::Count(r + 2),
                                         Num::Count(r + 3),
                                     ];
-                                    out.push(if r >= crate::compiler::MUSKIP_BASE {
+                                    out.push(if crate::compiler::is_mu_slot(r) {
                                         MsgOp::MuGlue(slots)
-                                    } else if r >= crate::compiler::SKIP_BASE {
+                                    } else if crate::compiler::is_glue_slot(r) {
                                         MsgOp::Glue(slots)
                                     } else if r >= crate::compiler::DIMEN_BASE {
                                         MsgOp::Dimen(Num::Count(r))
