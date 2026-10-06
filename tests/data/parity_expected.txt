@@ -90,6 +90,8 @@ ZERO
 [3.0pt][9.0pt]
 #==# edef_with_parameters.tex
 [A|B|7]
+#==# endinput_ends_after_the_line.tex
+a b
 #==# endlinechar.tex
 [macro:->x y][macro:->xy][macro:->xy][macro:->x y][macro:->a^^Mb][macro:->\^^M][macro:->\ab ]
 #==# errmessage_reports_and_continues.tex

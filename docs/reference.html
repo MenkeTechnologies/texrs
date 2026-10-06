@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">176</div>
+            <div class="stat-val">177</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -383,6 +383,8 @@
           <tbody>
             <tr><td><code>\input</code></td><td>Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a <code>\catcode</code> it sets stays set. The name runs to the first space or end of line (tex.web §537) and <code>.tex</code> is supplied when it carries no extension. texrs searches the working directory and then <code>TEXINPUTS</code>, and asks <code>kpsewhich</code> only when both miss, so a document that reads the files beside it never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.</td><td><pre>\input macros
 \input chapters/one.tex</pre></td></tr>
+            <tr><td><code>\endinput</code></td><td>End the file being read with the line <code>\endinput</code> is on (tex.web §362): the rest of that line is still read, and nothing after it is. In the document itself that leaves no <code>\end</code> to find unless one is on the same line.</td><td><pre>\endinput
+\message{last}\endinput\message{still read}</pre></td></tr>
             <tr><td><code>\openin</code></td><td>Open a <code>\read</code> stream on a file (tex.web §1275): the stream is closed first, then opened on the file the name finds — searched for as <code>\input</code> searches, with <code>.tex</code> supplied — and left closed when nothing has it. It happens at once, whatever groups are open, and the file is read while lowering.</td><td><pre>\openin&lt;0-15&gt;=&lt;file name&gt;
 \openin3=data \ifeof3 \message{no data}\fi</pre></td></tr>
             <tr><td><code>\closein</code></td><td>Close a <code>\read</code> stream (tex.web §1275), so <code>\ifeof</code> is true for it.</td><td><pre>\closein&lt;0-15&gt;

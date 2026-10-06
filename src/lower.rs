@@ -1176,6 +1176,10 @@ impl Lowerer {
                     self.eng.close_read_stream(n);
                 }
                 "read" => self.eng.compile_time_read(lx)?,
+                // §362: the file ends with the line being read. In the
+                // document itself that leaves no `\end` to find unless it is on
+                // the same line, as in tex.
+                "endinput" => lx.end_file_after_line(),
                 // §1375: `\immediate` reads the next token with `get_x_token`
                 // and, when it is `\write`, writes now. Anything else goes back
                 // to be read as if `\immediate` had not been there. `\openout`

@@ -270,3 +270,41 @@ fn read_takes_a_line_at_a_time_and_ifeof_sees_the_stream_close() {
     );
     assert_eq!(got, want);
 }
+
+#[test]
+fn endinput_ends_an_input_file_with_the_line_it_is_on() {
+    let Some(tex) = common::tex() else {
+        eprintln!("skipping: no pinned `tex` on PATH");
+        return;
+    };
+    // tex.web S362: the rest of the line \endinput is on is still read, and
+    // nothing after it -- from a macro, at the end of a line, after a comment
+    // that ended the line before it, and as the file's last line.
+    let dir = documents(
+        &format!(
+            "{CATS}\\input inner \\message{{after}}\n\\input inner2 \\message{{after2}}\n\
+             \\input inner3 \\message{{after3}}\n\\input inner4 \\message{{after4}}\n\\end\n"
+        ),
+        &[
+            (
+                "inner.tex",
+                "\\message{in1}\\endinput \\message{in2}\n\\message{never}\n",
+            ),
+            (
+                "inner2.tex",
+                "\\message{x}\n\\def\\e{\\endinput}\\e\n\\message{never}\n",
+            ),
+            (
+                "inner3.tex",
+                "\\message{y}%\n\\endinput\n\\message{never}\n",
+            ),
+            ("inner4.tex", "\\message{z}\\endinput\n"),
+        ],
+    );
+    let (want, got) = both(&tex, dir.path());
+    assert!(
+        want.contains("in1 in2") && !want.contains("never"),
+        "the oracle said: {want}"
+    );
+    assert_eq!(got, want);
+}

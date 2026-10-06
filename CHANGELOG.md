@@ -8,6 +8,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\endinput` (§362): the file ends with the line being read, so the rest of
+  that line is still read and nothing after it is.
 - `\openin`, `\closein`, `\read` and `\ifeof` (§482-§486, §501, §1275): a
   `\read` stream opens on the file `\input` would find, `\read` defines a macro
   as its next line (more while a brace is open, a blank line a `\par`), and

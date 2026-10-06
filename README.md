@@ -297,7 +297,8 @@ than none.
   log alone). `\openout` is not implemented, so no write stream is ever open,
   and neither is a `\write` without `\immediate`, which waits for a shipout.
 - `\input`, which is what every real document does first: the file is read where
-  it is named, and its own `(./name.tex …)` nests inside the outer one's.
+  it is named, and its own `(./name.tex …)` nests inside the outer one's. `\endinput`
+  ends it with the line it is on.
 - `\openin`, `\closein`, `\read` and `\ifeof`: a stream opens on the file the
   name finds, as `\input` finds one, and `\read` takes it a line at a time
   (more while a brace is open), closing it when a read finds nothing left. A

@@ -1,0 +1,6 @@
+% \endinput (tex.web S362) ends the file with the line being read: the rest of
+% that line is still read -- the \message and the \end after it here -- and
+% nothing after it is, so `never' is never printed.
+\catcode`\{=1 \catcode`\}=2
+\def\stop{\endinput}\message{a}\stop\message{b}\end
+\message{never}

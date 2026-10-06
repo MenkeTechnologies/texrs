@@ -135,6 +135,21 @@ impl Lexer {
         None
     }
 
+    /// `\endinput` (`tex.web` §362's `force_eof`): the file ends with the line
+    /// being read, so the rest of THAT line is still read and nothing after it
+    /// is. Between two lines -- the last one's end consumed, the next one not
+    /// started -- the line being read is the one already finished.
+    pub fn end_file_after_line(&mut self) {
+        self.ahead = None;
+        let end = match self.line_end.is_none() && self.pos > 0 {
+            true => self.pos,
+            false => (self.pos..self.chars.len())
+                .find_map(|i| self.terminator_at(i).map(|len| i + len))
+                .unwrap_or(self.chars.len()),
+        };
+        self.chars.truncate(end);
+    }
+
     /// How far the mouth has read, as an index into the characters.
     ///
     /// The pre-lexer records this after each token so a cached stream can be

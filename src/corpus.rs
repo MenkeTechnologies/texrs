@@ -605,6 +605,12 @@ pub const CORPUS: &[Entry] = &[
         "\\input macros\n\\input chapters/one.tex",
     ),
     (
+        "\\endinput",
+        "Files",
+        "End the file being read with the line `\\endinput` is on (tex.web \u{a7}362): the rest of that line is still read, and nothing after it is. In the document itself that leaves no `\\end` to find unless one is on the same line.",
+        "\\endinput\n\\message{last}\\endinput\\message{still read}",
+    ),
+    (
         "\\openin",
         "Files",
         "Open a `\\read` stream on a file (tex.web \u{a7}1275): the stream is closed first, then opened on the file the name finds \u{2014} searched for as `\\input` searches, with `.tex` supplied \u{2014} and left closed when nothing has it. It happens at once, whatever groups are open, and the file is read while lowering.",
