@@ -278,15 +278,31 @@ impl Compiler {
                 self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
-            Cmd::Group { saves, body } => {
+            Cmd::Group { saves, keeps, body } => {
                 // The saved values sit on the VM stack under the group's own
                 // work, which stays balanced, and are written back in reverse.
                 for reg in saves {
                     self.b.emit(Op::GetSlot(slot(*reg)), self.line);
                 }
+                // A kept register's scratch slot starts at the entry value,
+                // which is what the `}` restores if no `\global` runs.
+                for (reg, scratch) in keeps {
+                    self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+                    self.b.emit(Op::SetSlot(*scratch), self.line);
+                }
                 self.block(body)?;
+                for (reg, scratch) in keeps {
+                    self.b.emit(Op::GetSlot(*scratch), self.line);
+                    self.b.emit(Op::SetSlot(slot(*reg)), self.line);
+                }
                 for reg in saves.iter().rev() {
                     self.b.emit(Op::SetSlot(slot(*reg)), self.line);
+                }
+            }
+            Cmd::KeepGlobal { reg, into } => {
+                for scratch in into {
+                    self.b.emit(Op::GetSlot(slot(*reg)), self.line);
+                    self.b.emit(Op::SetSlot(*scratch), self.line);
                 }
             }
             Cmd::IfNum {

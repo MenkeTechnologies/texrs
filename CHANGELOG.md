@@ -8,6 +8,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A group restores a register to what its last `\global` assignment left, even
+  when a local assignment followed it (§283): `{\global\count0=2 \count0=3}`
+  leaves 2, where texrs kept 3. It holds for count, dimen and glue registers
+  through nested groups and conditional arms, and for `\toks` and the code
+  tables, which a `\global` assignment after a local one left restorable.
+- A `\global` prefix before `\toks` is spent by that assignment (§1211); it
+  made the next `\toks` assignment global too.
 - `\ifcase` over a register at the top of a file selects by the value the run
   gives it (§509); it read the expander's copy of the register, which no
   run-time assignment reaches, and so always took case 0.

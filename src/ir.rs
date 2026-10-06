@@ -192,7 +192,23 @@ pub enum Cmd {
     /// A group: the listed count registers are saved on entry and restored on
     /// exit, which is what `{\count0=99}` needs and the macro table alone
     /// cannot give — a register lives in a VM slot, not in the frontend.
-    Group { saves: Vec<i64>, body: Vec<Cmd> },
+    ///
+    /// `keeps` are the registers the body also assigns `\global`ly, each with
+    /// a scratch slot of its own. `tex.web` §283 restores such a register to
+    /// the value its LAST global assignment left (a local assignment after it
+    /// saved that value, and `unsave` throws away a save whose level a global
+    /// reset), or to its value on entry if no global assignment ran. So the
+    /// scratch slot takes the entry value, every [`Cmd::KeepGlobal`] for the
+    /// register refreshes it, and the `}` writes it back.
+    Group {
+        saves: Vec<i64>,
+        keeps: Vec<(i64, u16)>,
+        body: Vec<Cmd>,
+    },
+    /// Just after a `\global` assignment to `reg`: copy its new value into the
+    /// scratch slot of every enclosing group that keeps it (see `Cmd::Group`).
+    /// With no such group it generates no code.
+    KeepGlobal { reg: i64, into: Vec<u16> },
     /// `\ifnum<a><rel><b>` … `\else` … `\fi`
     IfNum {
         left: Num,
@@ -265,8 +281,14 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 out.push_str(&format!("{pad}Message\n"));
                 render_msg(ops, depth + 1, out);
             }
-            Cmd::Group { saves, body } => {
-                out.push_str(&format!("{pad}Group saves={saves:?}\n"));
+            Cmd::KeepGlobal { reg, into } => {
+                out.push_str(&format!("{pad}KeepGlobal \\count{reg} into={into:?}\n"))
+            }
+            Cmd::Group { saves, keeps, body } => {
+                match keeps.is_empty() {
+                    true => out.push_str(&format!("{pad}Group saves={saves:?}\n")),
+                    false => out.push_str(&format!("{pad}Group saves={saves:?} keeps={keeps:?}\n")),
+                }
                 render_into(body, depth + 1, out);
             }
             Cmd::IfNum {

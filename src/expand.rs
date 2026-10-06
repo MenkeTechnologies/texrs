@@ -125,6 +125,24 @@ enum Save {
     AfterGroup(Token),
 }
 
+impl Save {
+    /// Whether two records restore the same entry of the same table -- which is
+    /// what a global assignment to that entry has to drop from every group.
+    /// The intercept registry and an `\aftergroup` token are not entries a
+    /// `\global` assignment can name, so they match nothing.
+    fn same_entry(&self, other: &Save) -> bool {
+        match (self, other) {
+            (Save::Cat(a, _), Save::Cat(b, _)) => a == b,
+            (Save::Toks(a, _), Save::Toks(b, _)) => a == b,
+            (Save::CharCode(ta, a, _), Save::CharCode(tb, b, _)) => ta == tb && a == b,
+            (Save::IntPar(a, _), Save::IntPar(b, _)) => a == b,
+            (Save::Count(a, _), Save::Count(b, _)) => a == b,
+            (Save::Meaning(a, _), Save::Meaning(b, _)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 pub struct Engine {
     pub cats: CatTable,
     /// What each control sequence means, keyed by interned id.
@@ -527,9 +545,20 @@ impl Engine {
     /// Record the current value so the enclosing group can put it back.
     ///
     /// `\global` skips every frame, which is what makes `\gdef` survive to the
-    /// outermost level rather than only to the next `}`.
+    /// outermost level rather than only to the next `}`. It also DROPS what the
+    /// open groups saved for the same entry: §283's `unsave` keeps the current
+    /// value of an entry whose level a global assignment reset to `level_one`,
+    /// so no `}` can put an older value back over a global one -- whichever
+    /// kind of entry it is. A LOCAL assignment after it saves afresh, and that
+    /// is the value its group restores.
     fn save(&mut self, rec: Save) {
-        if self.global || self.groups.is_empty() {
+        if self.global {
+            for frame in &mut self.groups {
+                frame.retain(|s| !s.same_entry(&rec));
+            }
+            return;
+        }
+        if self.groups.is_empty() {
             return;
         }
         if let Some(frame) = self.groups.last_mut() {
@@ -539,14 +568,9 @@ impl Engine {
 
     fn set_meaning(&mut self, name: CsId, m: Meaning) {
         let old = self.meanings.get(&name).cloned();
+        // A global assignment wipes the saved values other groups hold (see
+        // `save`), so no `}` can restore the old meaning over it.
         self.save(Save::Meaning(name, old));
-        // A global assignment wipes the saved values other groups hold, so no
-        // `}` can restore the old meaning over it.
-        if self.global {
-            for frame in &mut self.groups {
-                frame.retain(|s| !matches!(s, Save::Meaning(n, _) if *n == name));
-            }
-        }
         self.meanings.insert(name, m);
     }
 
@@ -572,15 +596,10 @@ impl Engine {
     }
 
     /// Assign an integer parameter, saved for the enclosing group unless the
-    /// assignment is `\global` -- in which case, as `set_meaning` does, the
-    /// values the open groups saved are dropped so no `}` puts one back.
+    /// assignment is `\global` -- in which case `save` drops the values the
+    /// open groups saved, so no `}` puts one back.
     fn set_intpar(&mut self, i: usize, v: i64) {
         self.save(Save::IntPar(i, self.intpars.get(i)));
-        if self.global {
-            for frame in &mut self.groups {
-                frame.retain(|s| !matches!(s, Save::IntPar(j, _) if *j == i));
-            }
-        }
         self.store_intpar(i, v);
     }
 
@@ -1884,7 +1903,15 @@ impl Engine {
     /// The braced form is stored VERBATIM: nothing in it expands, which is the
     /// difference between a token register and a macro. Measured --
     /// `\toks0={\x}` reads back as `\x`, whatever `\x` means.
+    ///
+    /// A `\global` in front belongs to this assignment and to nothing after it
+    /// (§1211), so it is spent here whether or not the assignment succeeds.
     pub fn do_toks_assign(&mut self, lx: &mut Lexer, reg: i64) -> R<()> {
+        let out = self.toks_assign(lx, reg);
+        self.spend_prefixes(out)
+    }
+
+    fn toks_assign(&mut self, lx: &mut Lexer, reg: i64) -> R<()> {
         self.skip_equals(lx)?;
         let value = loop {
             let Some(t) = lx.next_token(&self.cats) else {

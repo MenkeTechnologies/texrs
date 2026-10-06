@@ -1,0 +1,16 @@
+% tex.web S283: a group restores a register to what its LAST \global left,
+% even when a local assignment came after it, and to its entry value when no
+% \global ran. That holds for every kind of entry -- count, dimen, skip, toks,
+% the code tables -- and through a nested group and a conditional arm. A
+% \global spends itself on the one assignment it precedes, \toks included.
+\catcode`\{=1 \catcode`\}=2
+\count0=1 {\global\count0=3 \count0=4 \global\count0=5 \count0=6 }\message{[\the\count0]}
+\count0=1 {\count0=2 {\global\count0=3 \count0=4 }\message{[\the\count0]}}\message{[\the\count0]}
+\count0=1 \begingroup\global\advance\count0 by 1 \count0=7 \endgroup\message{[\the\count0]}
+\count0=1 {\count5=0 \global\count0=2 \ifnum\count5=1 \global\count0=9 \fi \count0=3 }\message{[\the\count0]}
+\dimen0=1pt {\global\advance\dimen0 by 1pt \advance\dimen0 by 5pt}\message{[\the\dimen0]}
+\skip0=1pt plus 1fil{\global\advance\skip0 by 1pt \skip0=7pt}\message{[\the\skip0]}
+\toks0={a}{\global\toks0={b}\toks0={c}\toks1={d}}\message{[\the\toks0][\the\toks1]}
+\toks0={a}{\toks0={b}{\global\toks0={c}}}\message{[\the\toks0]}
+\lccode`a=1 {\lccode`a=2 \global\lccode`a=3 }\message{[\the\lccode`a]}
+\end

@@ -65,13 +65,3 @@ param_brace_illegal_number.tex
 #                  and once it stopped panicking tests/fuzz_smoke.rs reported it
 #                  as a seed that now compiles cleanly. Renamed to
 #                  fuzz/corpus/lower/param_brace_zero_params.tex.
-global_then_local_in_group.tex
-#                  `{\global\advance\count1 by 5 \count1=100 }' -- tex's S283
-#                  restores the value the \global left (6) at the `}', because
-#                  the local assignment after it saved that value; texrs prints
-#                  100. A Cmd::Group saves and restores around its whole body,
-#                  and a register written \global inside it is left out of the
-#                  save, so nothing restores it. A per-assignment save stack
-#                  is what tex has and what this would take (see
-#                  `src/lower.rs`'s `globals` field). Found by a round-2
-#                  parity probe.

@@ -110,6 +110,8 @@ BUILT
 1.0pt plus 1.0fill minus 2.0pt 0.0pt plus 2.0fill minus 1.0filll 0.0pt plus 3.0pt 144.54pt
 #==# gdef_survives_group.tex
 GLOBAL
+#==# global_and_local_in_one_group.tex
+[5] [3] [3] [2] [2] [2.0pt] [2.0pt plus 1.0fil] [b][] [c] [3]
 #==# global_prefix_is_spent.tex
 B A A \char"41undefined
 #==# global_then_local_in_group.tex

@@ -54,19 +54,21 @@ pub struct Lowerer {
     /// Every register a `\global` assignment has written, in the order they
     /// were lowered.
     ///
-    /// A group must not restore one. `tex.web` §283's `geq_word_define` sets
-    /// `xeq_level` to `level_one`, and §282's `unsave` DESTROYS a saved value
-    /// whose level no longer matches -- so a register assigned globally inside
-    /// a group keeps its new value at the `}`. A `Cmd::Group` expresses
-    /// save-and-restore as one pair around the whole body, so "do not restore"
-    /// has to mean "do not save", and the enclosing group finds out which
-    /// registers those are by the slice of this list its body added.
-    ///
-    /// The one shape this does not reproduce is a register assigned BOTH ways
-    /// in the same group with the local assignment last: tex restores the
-    /// globally-set value there and this keeps the local one. A per-assignment
-    /// save stack is what that would take.
+    /// A group must not simply restore one. `tex.web` §283's `geq_word_define`
+    /// sets `xeq_level` to `level_one`, and §282's `unsave` DESTROYS a saved
+    /// value whose level no longer matches -- so a register assigned globally
+    /// inside a group keeps what the LAST global assignment left, even when a
+    /// local one came after it (that one saved the global value, and the `}`
+    /// restores it). The enclosing group finds out which registers those are by
+    /// the slice of this list its body added, and keeps them through a scratch
+    /// slot rather than the save on its stack: see `Cmd::Group`'s `keeps`.
     globals: Vec<i64>,
+    /// Registers the command just lowered assigned `\global`ly, waiting for a
+    /// `Cmd::KeepGlobal` after the last of the commands it lowered to.
+    pending_keeps: Vec<i64>,
+    /// The next scratch slot a group can keep a globally assigned register
+    /// in, past every slot a register occupies.
+    next_keep_slot: u16,
     /// The register writes a preloaded preamble made, waiting to be put in
     /// front of the document's own commands. See [`Lowerer::preload`].
     prologue: Vec<Cmd>,
@@ -244,6 +246,8 @@ impl Lowerer {
             ended: false,
             next_scratch: 255,
             globals: Vec::new(),
+            pending_keeps: Vec::new(),
+            next_keep_slot: crate::compiler::TOTAL_SLOTS,
             prologue: Vec::new(),
             reports: Vec::new(),
             reported: false,
@@ -560,7 +564,12 @@ impl Lowerer {
         // than per command: a `\count` assignment and the `\message` beside it
         // share a line and need only one.
         let mut marked = 0u32;
-        while let Some(tok) = lx.next_token(&self.eng.cats) {
+        // A `\global` register assignment the last command made is marked
+        // here, AFTER every command it lowered to, so the mark sees its value.
+        while let Some(tok) = {
+            self.flush_keeps(&mut out);
+            lx.next_token(&self.eng.cats)
+        } {
             let line = lx.line();
             if line != marked {
                 out.push(Cmd::Line(line));
@@ -604,13 +613,13 @@ impl Lowerer {
                         // lowered and wrapped in save/restore.
                         self.eng.compile_time_begin_group();
                         let mark = self.globals.len();
-                        let body = self.block(lx, Some(&["\u{0}endgroup"]))?;
+                        let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
                         // Whatever `\aftergroup` held for this group is read
                         // next, which is what "after the group" means.
                         let after = self.eng.take_after_group();
                         lx.push_back(&after);
-                        let saves = self.saved_by_group(&body, mark);
+                        let (saves, keeps) = self.group_parts(&mut body, mark)?;
                         // A group exists to save registers and to scope the
                         // macro table. The macro table is a compile-time fact
                         // and is already handled above, so a group that assigns
@@ -624,7 +633,7 @@ impl Lowerer {
                         let only_text = body
                             .iter()
                             .all(|c| matches!(c, Cmd::Text(_) | Cmd::Line(_)));
-                        if saves.is_empty() && only_text {
+                        if saves.is_empty() && keeps.is_empty() && only_text {
                             for cmd in body {
                                 match (&cmd, out.last_mut()) {
                                     (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
@@ -632,7 +641,7 @@ impl Lowerer {
                                 }
                             }
                         } else {
-                            out.push(Cmd::Group { saves, body });
+                            out.push(Cmd::Group { saves, keeps, body });
                         }
                     }
                     Token::Char(_, Cat::EndGroup) => {
@@ -1355,7 +1364,7 @@ impl Lowerer {
                 "begingroup" => {
                     self.eng.compile_time_begin_group();
                     let mark = self.globals.len();
-                    let body = self.block(lx, Some(&["endgroup"]))?;
+                    let mut body = self.block(lx, Some(&["endgroup"]))?;
                     // The `\endgroup` that stopped the block was pushed back
                     // for this arm to consume; at end of input there is none.
                     if !self.ended {
@@ -1364,12 +1373,12 @@ impl Lowerer {
                     self.eng.compile_time_end_group()?;
                     let after = self.eng.take_after_group();
                     lx.push_back(&after);
-                    let saves = self.saved_by_group(&body, mark);
+                    let (saves, keeps) = self.group_parts(&mut body, mark)?;
                     // No register written means nothing is left for run time --
                     // the macro table was already scoped above -- so the body
                     // is spliced in rather than wrapped, which also keeps a
                     // stretch of text one constant instead of two.
-                    if saves.is_empty() {
+                    if saves.is_empty() && keeps.is_empty() {
                         for cmd in body {
                             match (&cmd, out.last_mut()) {
                                 (Cmd::Text(t), Some(Cmd::Text(prev))) => prev.push_str(t),
@@ -1377,7 +1386,7 @@ impl Lowerer {
                             }
                         }
                     } else {
-                        out.push(Cmd::Group { saves, body });
+                        out.push(Cmd::Group { saves, keeps, body });
                     }
                     // `\end` inside the group stops the whole run, as it does
                     // inside an `\input` file.
@@ -1507,6 +1516,7 @@ impl Lowerer {
                 lx.push_back(&[t]);
             }
         }
+        self.flush_keeps(&mut out);
         self.close_colour(&mut out, &mut colour_open);
         self.close_centre(&mut out, &mut centre_open);
         self.close_face(&mut out, &mut face_open);
@@ -4120,19 +4130,48 @@ impl Lowerer {
         }
     }
 
-    /// The registers a group closing here must save, given where its body
-    /// started adding to `globals`.
+    /// What a group closing here saves and what it keeps, given where its body
+    /// started adding to `globals`: `(saves, keeps)` for `Cmd::Group`.
     ///
-    /// Everything the body assigns, less everything it assigned GLOBALLY: a
-    /// global write is not undone by the group it sits in, and a `Cmd::Group`
-    /// has one save/restore pair for the whole body, so not restoring means not
-    /// saving.
-    fn saved_by_group(&self, body: &[Cmd], mark: usize) -> Vec<i64> {
-        let global = &self.globals[mark.min(self.globals.len())..];
-        assigned_counts(body)
-            .into_iter()
-            .filter(|r| !global.contains(r))
-            .collect()
+    /// A register the body assigns only locally is saved on entry and restored
+    /// at the `}`. One it ALSO assigns globally is kept instead: it gets a
+    /// scratch slot, and every `Cmd::KeepGlobal` for it in the body -- nested
+    /// groups and conditional arms included -- is told to refresh that slot.
+    #[allow(clippy::type_complexity)]
+    fn group_parts(&mut self, body: &mut [Cmd], mark: usize) -> R<(Vec<i64>, Vec<(i64, u16)>)> {
+        let global: std::collections::HashSet<i64> = self.globals[mark.min(self.globals.len())..]
+            .iter()
+            .copied()
+            .collect();
+        let mut saves = Vec::new();
+        let mut keeps = Vec::new();
+        for reg in assigned_counts(body) {
+            if !global.contains(&reg) {
+                saves.push(reg);
+                continue;
+            }
+            let scratch = self.next_keep_slot;
+            self.next_keep_slot = scratch.checked_add(1).ok_or_else(|| {
+                TexError(format!(
+                    "TeX capacity exceeded, sorry [save size={}]",
+                    u16::MAX - crate::compiler::TOTAL_SLOTS
+                ))
+            })?;
+            attach_keep(body, reg, scratch);
+            keeps.push((reg, scratch));
+        }
+        Ok((saves, keeps))
+    }
+
+    /// Write the `Cmd::KeepGlobal` marks the last command's `\global`
+    /// assignment is owed, now that everything it lowered to is in `out`.
+    fn flush_keeps(&mut self, out: &mut Vec<Cmd>) {
+        for reg in std::mem::take(&mut self.pending_keeps) {
+            out.push(Cmd::KeepGlobal {
+                reg,
+                into: Vec::new(),
+            });
+        }
     }
 
     /// Record `regs` as globally assigned when the assignment about to be
@@ -4149,11 +4188,11 @@ impl Lowerer {
         if !self.eng.take_global_prefix() {
             return;
         }
-        for reg in regs {
-            if !self.globals.contains(reg) {
-                self.globals.push(*reg);
-            }
-        }
+        // Pushed every time, not once per register: a group reads only the
+        // slice its own body added, so a register a LATER group writes
+        // globally must be in that slice even if an earlier one wrote it too.
+        self.pending_keeps.extend_from_slice(regs);
+        self.globals.extend_from_slice(regs);
     }
 }
 
@@ -4195,6 +4234,8 @@ fn scaled_num(d: crate::dimen::ScannedDimen) -> Num {
 /// and still depends on the branch. A `Cmd::ErrorSite` is carried with them
 /// because it produces nothing on its own: it says where a later arithmetic
 /// error would be reported from, and dropping it would leave one unplaced.
+/// A `Cmd::KeepGlobal` is carried for the same reason a group is: it is how a
+/// group kept in the preamble learns what a `\global` inside it left.
 fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
     fn filtered(cmds: &[Cmd]) -> Vec<Cmd> {
         let mut v = Vec::new();
@@ -4203,9 +4244,12 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
     }
     for cmd in cmds {
         match cmd {
-            Cmd::SetCount(..) | Cmd::Arith(..) | Cmd::ErrorSite(_) => out.push(cmd.clone()),
-            Cmd::Group { saves, body } => out.push(Cmd::Group {
+            Cmd::SetCount(..) | Cmd::Arith(..) | Cmd::ErrorSite(_) | Cmd::KeepGlobal { .. } => {
+                out.push(cmd.clone())
+            }
+            Cmd::Group { saves, keeps, body } => out.push(Cmd::Group {
                 saves: saves.clone(),
+                keeps: keeps.clone(),
                 body: filtered(body),
             }),
             Cmd::IfNum {
@@ -4376,9 +4420,11 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
         for c in cmds {
             match c {
                 // A line directive, a run of the document's text, a
-                // `\rust{ … }` compile, a file's closing paren, an error site
-                // and the transcript notice all write no register.
-                Cmd::Line(_)
+                // `\rust{ … }` compile, a file's closing paren, an error site,
+                // the transcript notice and a global's keep mark all write no
+                // register.
+                Cmd::KeepGlobal { .. }
+                | Cmd::Line(_)
                 | Cmd::Text(_)
                 | Cmd::RustCompile(_)
                 | Cmd::FileClose
@@ -4413,6 +4459,33 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     }
     walk(cmds, &mut regs);
     regs
+}
+
+/// Tell every `Cmd::KeepGlobal` for `reg` in `cmds` -- however deeply nested in
+/// groups, conditional arms, loops and colour runs -- to refresh `scratch` too.
+fn attach_keep(cmds: &mut [Cmd], reg: i64, scratch: u16) {
+    for c in cmds {
+        match c {
+            Cmd::KeepGlobal { reg: r, into } if *r == reg => into.push(scratch),
+            Cmd::IfNum {
+                then_branch,
+                else_branch,
+                ..
+            }
+            | Cmd::IfOdd {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                attach_keep(then_branch, reg, scratch);
+                attach_keep(else_branch, reg, scratch);
+            }
+            Cmd::Loop { body, .. } | Cmd::Color { body, .. } | Cmd::Group { body, .. } => {
+                attach_keep(body, reg, scratch)
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Default for Lowerer {
