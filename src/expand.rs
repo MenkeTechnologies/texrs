@@ -333,37 +333,6 @@ const ASSIGNMENTS: &[&str] = &[
     "DeclareRobustCommand",
 ];
 
-/// The primitives other than the conditionals that expand (§366): the
-/// `expand_after`, `no_expand`, `cs_name`, `convert`, `the`, `top_bot_mark`,
-/// `input` and `fi_or_else` commands, and e-TeX's additions to them.
-const EXPANDABLE_PRIMITIVES: &[&str] = &[
-    "expandafter",
-    "unless",
-    "noexpand",
-    "csname",
-    "number",
-    "romannumeral",
-    "string",
-    "meaning",
-    "fontname",
-    "jobname",
-    "csstring",
-    "the",
-    "detokenize",
-    "unexpanded",
-    "topmark",
-    "firstmark",
-    "botmark",
-    "splitfirstmark",
-    "splitbotmark",
-    "input",
-    "endinput",
-    "scantokens",
-    "fi",
-    "or",
-    "else",
-];
-
 const CONDITIONALS: &[&str] = &[
     "if",
     "ifcat",
@@ -1343,7 +1312,7 @@ impl Engine {
     }
 
     fn expandable_primitive(name: &str) -> bool {
-        CONDITIONALS.contains(&name) || EXPANDABLE_PRIMITIVES.contains(&name)
+        CONDITIONALS.contains(&name) || crate::primitives::expands(name)
     }
 
     /// §507: `\if` decides on the codes, `\ifcat` on the commands.

@@ -302,6 +302,43 @@ pub fn is_primitive(name: &str) -> bool {
     NAMES.contains(&name)
 }
 
+/// The primitives other than the conditionals that expand (§366): the
+/// `expand_after`, `no_expand`, `cs_name`, `convert`, `the`, `top_bot_mark`,
+/// `input` and `fi_or_else` commands, and e-TeX's additions to them.
+const EXPANDABLE: &[&str] = &[
+    "expandafter",
+    "unless",
+    "noexpand",
+    "csname",
+    "number",
+    "romannumeral",
+    "string",
+    "meaning",
+    "fontname",
+    "jobname",
+    "csstring",
+    "the",
+    "detokenize",
+    "unexpanded",
+    "topmark",
+    "firstmark",
+    "botmark",
+    "splitfirstmark",
+    "splitbotmark",
+    "input",
+    "endinput",
+    "scantokens",
+    "fi",
+    "or",
+    "else",
+];
+
+/// Whether the primitive `name` expands, the conditionals aside (those are
+/// `crate::expand`'s `CONDITIONALS`).
+pub fn expands(name: &str) -> bool {
+    EXPANDABLE.contains(&name)
+}
+
 /// What §296's `print_meaning` prints for the primitive `name` while it still
 /// means itself, `esc` being the `\escapechar` character (if any).
 ///
