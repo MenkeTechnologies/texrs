@@ -138,6 +138,8 @@ inside: INNER\ 2 after: OUTER\ 1 global: GLOBAL\ 3
 two other negative one const one
 #==# ifcase_selector.tex
 A B C C C [done]
+#==# ifeof_on_closed_streams.tex
+[c][c] [file level: c] [c] [c]! Bad number (16).l.10 \ifeof 16                \message{[c]}\else\message{[o]}\fi[c] )(see the transcript file for additional information
 #==# ifx_after_edef_conditional.tex
 SAME
 #==# ifx_undefined_against_primitive.tex

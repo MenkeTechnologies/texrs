@@ -1159,6 +1159,23 @@ impl Lowerer {
                     ops.extend(parts);
                     out.push(Cmd::Message(ops));
                 }
+                // §1275: `\openin` closes the stream and opens it again on the
+                // file the name finds -- `.tex` supplied as `\input` supplies it
+                // -- leaving it closed when nothing has it; `\closein` closes
+                // it. Neither waits for a shipout, and neither is undone by a
+                // group. The file is read while lowering, as `\input` is.
+                "openin" => {
+                    let n = self.eng.scan_stream_number(lx, false)?;
+                    self.eng.skip_equals_file(lx)?;
+                    let name = self.scan_file_name(lx)?;
+                    let text = Self::locate_input(&name).map(|(_, src)| src);
+                    self.eng.open_read_stream(n, text);
+                }
+                "closein" => {
+                    let n = self.eng.scan_stream_number(lx, false)?;
+                    self.eng.close_read_stream(n);
+                }
+                "read" => self.eng.compile_time_read(lx)?,
                 // §1375: `\immediate` reads the next token with `get_x_token`
                 // and, when it is `\write`, writes now. Anything else goes back
                 // to be read as if `\immediate` had not been there. `\openout`
@@ -3744,8 +3761,14 @@ impl Lowerer {
                 // The box conditionals are here for the same reason, one step
                 // further on: every box register is void (see `do_conditional`),
                 // so what they answer is known while lowering too.
-                "ifdefined" | "ifcsname" | "ifvoid" | "ifhbox" | "ifvbox" => {
+                "ifdefined" | "ifcsname" | "ifvoid" | "ifhbox" | "ifvbox" | "ifeof" => {
                     let truth = match n.name() {
+                        // Whether a `\read` stream is closed: the streams are
+                        // opened and read while lowering, so this is known now.
+                        "ifeof" => {
+                            let s = self.eng.scan_stream_number(work, true)?;
+                            self.eng.read_stream_closed(s)
+                        }
                         "ifcsname" => {
                             let built = self.eng.read_csname_pending(work)?;
                             let id = crate::token::CsId::intern(&built);
@@ -4129,6 +4152,16 @@ impl Lowerer {
                 "TeX capacity exceeded, sorry [text input levels={MAX_LEVELS}]"
             )));
         }
+        match Self::locate_input(name) {
+            Some((shown, src)) => Ok((shown, crate::latex::load::without_trailing_endinput(src))),
+            None => Err(TexError(format!("I can't find file `{name}'"))),
+        }
+    }
+
+    /// The file `name` names, as `open_input` searches for it: the path to
+    /// print and the text, or `None` when nothing has it. `\openin` finds a
+    /// file the same way (§1275 supplies `.tex` as §537 does).
+    fn locate_input(name: &str) -> Option<(String, String)> {
         let candidates = match std::path::Path::new(name).extension().is_some() {
             true => vec![name.to_string()],
             false => vec![format!("{name}.tex"), name.to_string()],
@@ -4147,7 +4180,7 @@ impl Lowerer {
                         Ok(rest) => format!("./{}", rest.display()),
                         Err(_) => full.display().to_string(),
                     };
-                    return Ok((shown, crate::latex::load::without_trailing_endinput(src)));
+                    return Some((shown, src));
                 }
             }
         }
@@ -4157,14 +4190,11 @@ impl Lowerer {
         for cand in &candidates {
             if let Some(path) = crate::latex::load::locate(cand) {
                 if let Ok(src) = std::fs::read_to_string(&path) {
-                    return Ok((
-                        path.display().to_string(),
-                        crate::latex::load::without_trailing_endinput(src),
-                    ));
+                    return Some((path.display().to_string(), src));
                 }
             }
         }
-        Err(TexError(format!("I can't find file `{name}'")))
+        None
     }
 
     /// Lower an `\input` file into the stream, sharing the Lowerer's state.

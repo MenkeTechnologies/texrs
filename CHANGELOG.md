@@ -8,6 +8,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Added
 
+- `\openin`, `\closein`, `\read` and `\ifeof` (§482-§486, §501, §1275): a
+  `\read` stream opens on the file `\input` would find, `\read` defines a macro
+  as its next line (more while a brace is open, a blank line a `\par`), and
+  `\ifeof` is true for a closed stream -- every stream until `\openin` finds a
+  file, and again once a read finds nothing left.
 - `\errmessage` (§1283): the text is expanded as a `\message` is and printed as
   an error, `! ` and the text and §82's `.` and context, and the run carries on
   to the transcript notice.

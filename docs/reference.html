@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">173</div>
+            <div class="stat-val">176</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -255,7 +255,7 @@
             <tr><td><code>\ifhmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifhmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifmmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifmmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifinner</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
-            <tr><td><code>\ifeof</code></td><td>RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifeof</code></td><td>True when a <code>\read</code> stream is closed (tex.web §501): every stream is, until <code>\openin</code> finds a file, and again once <code>\closein</code> closes it or a <code>\read</code> finds nothing left. The number is a four-bit integer, and one out of range is <code>Bad number</code> and reads as 0.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifcsname</code></td><td>Is the name built from these characters defined? etex.ch's <code>if_cs_code</code> reads them exactly as <code>\csname</code> does and then looks the name up with <code>no_new_control_sequence</code> still true, so a name it does not find is NOT entered — which is the whole difference from <code>\csname</code>, whose lookup DEFINES what it misses as <code>\relax</code> (tex.web §372) and so changes the answer for every later ask. Decided while lowering, in running text and inside a <code>\message</code> body alike, because the macro table is a frontend fact. LaTeX's <code>\@ifundefined</code> is built on this.</td><td><pre>\ifcsname &lt;characters&gt;\endcsname &lt;true&gt;\else &lt;false&gt;\fi
 \def\foo{F}
 \ifcsname foo\endcsname \message{[YES]}\else \message{[NO]}\fi   % =&gt; [YES]
@@ -381,8 +381,14 @@
         <table class="file-table">
           <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
           <tbody>
-            <tr><td><code>\input</code></td><td>Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a <code>\catcode</code> it sets stays set. The name runs to the first space or end of line (tex.web §537) and <code>.tex</code> is supplied when it carries no extension. texrs searches the working directory and then <code>TEXINPUTS</code>, and does not shell out to <code>kpsewhich</code>, so running a document never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.</td><td><pre>\input macros
+            <tr><td><code>\input</code></td><td>Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a <code>\catcode</code> it sets stays set. The name runs to the first space or end of line (tex.web §537) and <code>.tex</code> is supplied when it carries no extension. texrs searches the working directory and then <code>TEXINPUTS</code>, and asks <code>kpsewhich</code> only when both miss, so a document that reads the files beside it never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.</td><td><pre>\input macros
 \input chapters/one.tex</pre></td></tr>
+            <tr><td><code>\openin</code></td><td>Open a <code>\read</code> stream on a file (tex.web §1275): the stream is closed first, then opened on the file the name finds — searched for as <code>\input</code> searches, with <code>.tex</code> supplied — and left closed when nothing has it. It happens at once, whatever groups are open, and the file is read while lowering.</td><td><pre>\openin&lt;0-15&gt;=&lt;file name&gt;
+\openin3=data \ifeof3 \message{no data}\fi</pre></td></tr>
+            <tr><td><code>\closein</code></td><td>Close a <code>\read</code> stream (tex.web §1275), so <code>\ifeof</code> is true for it.</td><td><pre>\closein&lt;0-15&gt;
+\closein3</pre></td></tr>
+            <tr><td><code>\read</code></td><td>Define a macro as the next line of a stream (tex.web §482): the line is read with the category codes in force and ended by <code>\endlinechar</code>, and more lines are read while a brace is open. A blank line reads as <code>\par</code>, and so does the line a file that has run out did not have — which is when the stream closes. A closed stream would read the terminal, which nonstop mode does not have, so that stops the run.</td><td><pre>\read&lt;number&gt; to &lt;control sequence&gt;
+\openin3=data \read3 to\line \message{\meaning\line}</pre></td></tr>
           </tbody>
         </table>
       </section>
@@ -834,7 +840,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>TEXRS_PRELEX_STATS</code></td><td>Set to anything to print the pre-lexer's hit and miss counts when the run ends.</td></tr>
             <tr><td><code>TEXRS_STATICLIB</code></td><td>The <code>libtexrs.a</code> that <code>--aot</code> links against, when the installed copy is not the one you want.</td></tr>
             <tr><td><code>SOURCE_DATE_EPOCH</code></td><td>A Unix time to stamp a PDF with instead of the wall clock (reproducible-builds.org's specification, which LuaTeX honours too). Two runs of one document otherwise differ in their dates and nothing else, so this is what makes byte equality with LuaTeX a question that can be asked at all.</td></tr>
-            <tr><td><code>TEXINPUTS</code></td><td>Where <code>\input</code> looks after the working directory. texrs does NOT shell out to <code>kpsewhich</code>, so this and the directory the document sits in are the whole search path.</td></tr>
+            <tr><td><code>TEXINPUTS</code></td><td>Where <code>\input</code> and <code>\openin</code> look after the working directory. Only when neither has the file does texrs ask <code>kpsewhich</code> for the TeX tree, so a document that reads the files beside it needs no TeX installation.</td></tr>
             <tr><td><code>TEX_ORACLE</code></td><td>The <code>tex</code> binary the parity harnesses compare against, when it is not the one on <code>PATH</code>.</td></tr>
             <tr><td><code>TEX_VERSION_EXPECT</code></td><td>The oracle version the harnesses insist on, overriding the one pinned in <code>BUGS.md</code>. A deliberate cross-version run, and nothing else, wants this.</td></tr>
           </tbody>

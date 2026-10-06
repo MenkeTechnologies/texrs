@@ -1,0 +1,11 @@
+% \ifeof (tex.web S501) is true for a closed stream, and every stream is
+% closed until \openin finds a file. \openin on a name nothing has leaves the
+% stream closed (S1275), and so does \closein. The stream number is a
+% four-bit integer (S436): out of range is `Bad number' and reads as 0.
+\catcode`\{=1 \catcode`\}=2
+\message{[\ifeof 0 c\else o\fi][\ifeof 15 c\else o\fi]}
+\ifeof 3 \message{[file level: c]}\else \message{[file level: o]}\fi
+\openin3=no-such-file-anywhere \message{[\ifeof3 c\else o\fi]}
+\closein3 \closein 4 \message{[\ifeof3 c\else o\fi]}
+\ifeof 16 \message{[c]}\else\message{[o]}\fi
+\end

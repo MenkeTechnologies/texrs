@@ -351,7 +351,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\ifeof",
         "Conditionals",
-        "RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. Reaching one stops the run with `! Unsupported conditional \\NAME.` and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.",
+        "True when a `\\read` stream is closed (tex.web \u{a7}501): every stream is, until `\\openin` finds a file, and again once `\\closein` closes it or a `\\read` finds nothing left. The number is a four-bit integer, and one out of range is `Bad number` and reads as 0.",
         "\\ifeof<N> <true>\\else <false>\\fi",
     ),
     (
@@ -601,8 +601,26 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\input",
         "Files",
-        "Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. The name runs to the first space or end of line (tex.web \u{a7}537) and `.tex` is supplied when it carries no extension. texrs searches the working directory and then `TEXINPUTS`, and does not shell out to `kpsewhich`, so running a document never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.",
+        "Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. The name runs to the first space or end of line (tex.web \u{a7}537) and `.tex` is supplied when it carries no extension. texrs searches the working directory and then `TEXINPUTS`, and asks `kpsewhich` only when both miss, so a document that reads the files beside it never depends on a TeX Live installation being present. Fifteen text input levels are allowed, counting the document's own, which is tex's limit and tex's wording when it is passed.",
         "\\input macros\n\\input chapters/one.tex",
+    ),
+    (
+        "\\openin",
+        "Files",
+        "Open a `\\read` stream on a file (tex.web \u{a7}1275): the stream is closed first, then opened on the file the name finds \u{2014} searched for as `\\input` searches, with `.tex` supplied \u{2014} and left closed when nothing has it. It happens at once, whatever groups are open, and the file is read while lowering.",
+        "\\openin<0-15>=<file name>\n\\openin3=data \\ifeof3 \\message{no data}\\fi",
+    ),
+    (
+        "\\closein",
+        "Files",
+        "Close a `\\read` stream (tex.web \u{a7}1275), so `\\ifeof` is true for it.",
+        "\\closein<0-15>\n\\closein3",
+    ),
+    (
+        "\\read",
+        "Files",
+        "Define a macro as the next line of a stream (tex.web \u{a7}482): the line is read with the category codes in force and ended by `\\endlinechar`, and more lines are read while a brace is open. A blank line reads as `\\par`, and so does the line a file that has run out did not have \u{2014} which is when the stream closes. A closed stream would read the terminal, which nonstop mode does not have, so that stops the run.",
+        "\\read<number> to <control sequence>\n\\openin3=data \\read3 to\\line \\message{\\meaning\\line}",
     ),
     // ══ Inline Rust — rust_ffi.rs, fusevm::ffi ════════════════════════════
     (

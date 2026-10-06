@@ -223,3 +223,50 @@ fn a_file_in_the_tex_tree_is_found_when_nothing_beside_the_document_is() {
         "size10.clo must be found in the tree, got {err:?}"
     );
 }
+
+#[test]
+fn read_takes_a_line_at_a_time_and_ifeof_sees_the_stream_close() {
+    let Some(tex) = common::tex() else {
+        eprintln!("skipping: no pinned `tex` on PATH");
+        return;
+    };
+    // tex.web S482-S486: a line read with the catcodes in force and ended by
+    // \endlinechar, more lines while a brace is open, trailing blanks dropped,
+    // a blank line a \par, and the stream closed -- with a \par for the line it
+    // did not have -- only when a \read finds nothing left. \openin supplies
+    // `.tex', reads the first line lazily (an empty file is open until read),
+    // and is not undone by a group; \global\read defines globally.
+    let case = "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n\
+        \\message{[\\ifeof 3 closed\\else open\\fi]}\n\
+        \\openin3=nonexistentfile \\message{[\\ifeof 3 closed\\else open\\fi]}\n\
+        \\openin3=data \\message{[\\ifeof 3 closed\\else open\\fi]}\n\
+        \\read3 to \\x \\message{[\\meaning\\x]}\n\
+        \\read3 to \\x \\message{[\\meaning\\x]}\n\
+        \\read3 to \\x \\message{[\\meaning\\x]}\n\
+        \\read3 to \\x \\message{[\\meaning\\x]}\n\
+        \\message{[\\ifeof 3 closed\\else open\\fi]}\n\
+        \\read3 to \\x \\message{[\\meaning\\x][\\ifeof 3 closed\\else open\\fi]}\n\
+        \\openin4=one.tex \\read4 to\\y \\message{[\\meaning\\y][\\ifeof4 c\\else o\\fi]}\
+        \\read4 to\\y \\message{[\\meaning\\y][\\ifeof4 c\\else o\\fi]}\n\
+        \\openin5=empty \\message{[\\ifeof5 c\\else o\\fi]}\\read5 to\\z \
+        \\message{[\\meaning\\z][\\ifeof5 c\\else o\\fi]}\n\
+        \\openin6=one \\closein6 \\message{[\\ifeof6 c\\else o\\fi]}\n\
+        \\begingroup\\openin7=one \\endgroup\\message{[\\ifeof7 c\\else o\\fi]}\n\
+        \\endlinechar=-1 \\openin8=one \\read8 to\\w \\message{[\\meaning\\w]}\\endlinechar=13\n\
+        \\openin9=data \\global\\read9 to\\v {\\read9 to\\v}\\message{[\\meaning\\v]}\n\
+        \\end\n";
+    let dir = documents(
+        case,
+        &[
+            ("data.tex", "line one\n{a\nb} c\n\n  x  \n"),
+            ("one.tex", "only\n"),
+            ("empty.tex", ""),
+        ],
+    );
+    let (want, got) = both(&tex, dir.path());
+    assert!(
+        want.contains("[macro:->{a b} c ]"),
+        "the oracle read: {want}"
+    );
+    assert_eq!(got, want);
+}

@@ -143,6 +143,11 @@ impl Save {
     }
 }
 
+/// An open `\read` stream (§480): the lines not yet read.
+struct ReadStream {
+    lines: std::collections::VecDeque<String>,
+}
+
 pub struct Engine {
     pub cats: CatTable,
     /// What each control sequence means, keyed by interned id.
@@ -163,6 +168,9 @@ pub struct Engine {
     /// §236's integer parameters -- `\escapechar` among them, which is
     /// why `esc()` reads here.
     pub intpars: crate::intpar::IntPars,
+    /// §480's sixteen `\read` streams: `None` for one that is closed, which
+    /// is all of them until `\openin` finds a file.
+    read_streams: Vec<Option<ReadStream>>,
     /// One frame per open group; each holds the undo records for that group.
     groups: Vec<Vec<Save>>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
@@ -357,6 +365,7 @@ impl Engine {
             messages: Vec::new(),
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
+            read_streams: (0..16).map(|_| None).collect(),
             groups: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
@@ -1059,6 +1068,12 @@ impl Engine {
                     self.report(lx, &format!("Bad register code ({reg})"));
                 }
                 name == "ifvoid"
+            }
+            // §501: true when the stream is closed, which every one is until
+            // `\openin` finds a file and again once `\read` runs it out.
+            "ifeof" => {
+                let n = self.scan_stream_number(lx, pending_only)?;
+                self.read_stream_closed(n)
             }
             "ifcase" => {
                 let n = self.scan_number(lx, pending_only)?;
@@ -4496,6 +4511,112 @@ impl Engine {
     /// `global` is `\xdef`, or an `\edef` under a `\global` prefix: the
     /// definition survives every enclosing group, as `do_def` makes a `\gdef`.
     /// The prefixes are spent here for the reason `do_def` spends them.
+    /// §436's `scan_four_bit_int`, for a stream number: out of range is
+    /// reported and read as 0.
+    pub fn scan_stream_number(&mut self, lx: &mut Lexer, pending_only: bool) -> R<usize> {
+        let n = self.scan_number(lx, pending_only)?;
+        if !(0..=15).contains(&n) {
+            self.report(lx, &format!("Bad number ({n})"));
+            return Ok(0);
+        }
+        Ok(n as usize)
+    }
+
+    /// §1275's `\openin`: close stream `n`, then open it on `text` -- the file
+    /// the name found, or `None` when nothing has it, which leaves the stream
+    /// closed.
+    pub fn open_read_stream(&mut self, n: usize, text: Option<String>) {
+        self.read_streams[n] = text.map(|t| ReadStream {
+            lines: t.lines().map(str::to_string).collect(),
+        });
+    }
+
+    /// Whether stream `n` is closed, which is what `\ifeof` asks.
+    pub fn read_stream_closed(&self, n: usize) -> bool {
+        self.read_streams[n].is_none()
+    }
+
+    /// §1275's `\closein`.
+    pub fn close_read_stream(&mut self, n: usize) {
+        self.read_streams[n] = None;
+    }
+
+    /// `\read<number> to <cs>` (§1225): the next line or lines of the stream,
+    /// as tokens, become the macro's body.
+    pub fn compile_time_read(&mut self, lx: &mut Lexer) -> R<()> {
+        let out = self.do_read(lx);
+        self.spend_prefixes(out)
+    }
+
+    fn do_read(&mut self, lx: &mut Lexer) -> R<()> {
+        let global = self.global;
+        let n = self.scan_number(lx, false)?;
+        if !self.scan_keyword(lx, "to", false)? {
+            self.report(lx, "Missing `to' inserted");
+        }
+        // §1215's `get_r_token`: the next non-blank token, which must be a
+        // control sequence.
+        let name = loop {
+            match lx.next_token(&self.cats) {
+                Some(t) if t.is_space() => continue,
+                Some(Token::Cs(name)) => break name,
+                _ => return Err(TexError("Missing control sequence inserted".into())),
+            }
+        };
+        let body = self.read_toks(lx, n)?;
+        self.define_macro_with_params(name, Vec::new(), body, global)
+    }
+
+    /// §482's `read_toks`: a line from stream `n`, read with the category
+    /// codes in force and ended by `\endlinechar`, and more lines while its
+    /// braces are open. A `}` with no `{` before it ends the line there.
+    fn read_toks(&mut self, lx: &Lexer, n: i64) -> R<Vec<Token>> {
+        let m = usize::try_from(n).ok().filter(|m| *m < 16);
+        let mut toks = Vec::new();
+        // §483's `align_state`, less its 1000000.
+        let mut depth = 0i64;
+        loop {
+            // §484: there is no terminal to read in nonstop mode.
+            let Some(stream) = m.and_then(|m| self.read_streams[m].as_mut()) else {
+                return Err(TexError(
+                    "*** (cannot \\read from terminal in nonstop modes)".into(),
+                ));
+            };
+            let line = match stream.lines.pop_front() {
+                Some(line) => line,
+                // §485 and §486: a file that has run out is closed, and the
+                // line it gave is empty -- which reads as a `\par`. Running out
+                // with a brace still open is an error.
+                None => {
+                    self.read_streams[m.expect("an open stream")] = None;
+                    if depth != 0 {
+                        self.report(lx, "File ended within \\read");
+                        depth = 0;
+                    }
+                    String::new()
+                }
+            };
+            // §31's `input_ln` drops the line's trailing blanks.
+            let line = line.trim_end_matches([' ', '\t', '\r']);
+            let mut mouth = Lexer::new(&format!("{line}\n"));
+            while let Some(t) = mouth.next_token(&self.cats) {
+                match t {
+                    Token::Char(_, Cat::BeginGroup) => depth += 1,
+                    Token::Char(_, Cat::EndGroup) => depth -= 1,
+                    _ => {}
+                }
+                if depth < 0 {
+                    depth = 0;
+                    break;
+                }
+                toks.push(t);
+            }
+            if depth == 0 {
+                return Ok(toks);
+            }
+        }
+    }
+
     pub fn define_macro_with_params(
         &mut self,
         name: CsId,

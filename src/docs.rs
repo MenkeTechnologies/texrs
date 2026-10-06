@@ -566,7 +566,7 @@ const ENVIRONMENT: &[(&str, &str)] = &[
     ),
     (
         "TEXINPUTS",
-        "Where <code>\\input</code> looks after the working directory. texrs does NOT shell out to <code>kpsewhich</code>, so this and the directory the document sits in are the whole search path.",
+        "Where <code>\\input</code> and <code>\\openin</code> look after the working directory. Only when neither has the file does texrs ask <code>kpsewhich</code> for the TeX tree, so a document that reads the files beside it needs no TeX installation.",
     ),
     (
         "TEX_ORACLE",
