@@ -32,6 +32,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A delimited argument loses its braces only when it is one item and that item
+  is a group (§392, §400): `{x}{y}` and `{x} ` keep theirs, where texrs
+  stripped the first `{` and the last `}` of anything that began and ended with
+  them.
+- A `true` unit is divided by `\mag` (§457) and §288's `prepare_mag` pins it
+  (`Incompatible magnification`, `Illegal magnification`); it was read as the
+  plain unit whatever `\mag` said. A dimension of 16384pt or more reports
+  `Dimension too large` (§460) instead of clamping silently.
 - `\if` and `\ifcat` read an active character as §506 does: a macro expands
   and anything else is what it means, so `\let~=a` makes `\ifcat~a` true.
   `\noexpand` before an operand makes an expandable token `\relax` (§358), and

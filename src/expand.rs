@@ -61,6 +61,29 @@ pub enum Meaning {
 /// eTeX's division: round half AWAY from zero, which is not what `\divide`
 /// does (`tex.web` §1236 truncates). Measured -- 7/2 is 4, 5/2 is 3, -7/2 is
 /// -4, and 6/4 is 2.
+/// Whether `toks` is a single brace group and nothing else: §392 counts the
+/// items of a delimited argument (a group is one), and §400 strips braces
+/// only from an argument of one item that is a group.
+fn is_one_group(toks: &[Token]) -> bool {
+    if !matches!(toks.first(), Some(Token::Char(_, Cat::BeginGroup))) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, t) in toks.iter().enumerate() {
+        match t {
+            Token::Char(_, Cat::BeginGroup) => depth += 1,
+            Token::Char(_, Cat::EndGroup) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i == toks.len() - 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn round_div(a: i64, b: i64) -> i64 {
     let sign = match (a < 0) == (b < 0) {
         true => 1,
@@ -171,6 +194,9 @@ pub struct Engine {
     /// §480's sixteen `\read` streams: `None` for one that is closed, which
     /// is all of them until `\openin` finds a file.
     read_streams: Vec<Option<ReadStream>>,
+    /// §286's `mag_set`: the `\mag` the first `true` dimension used, which
+    /// every later one must agree with. Zero until then.
+    mag_set: i64,
     /// One frame per open group; each holds the undo records for that group.
     groups: Vec<Vec<Save>>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
@@ -366,6 +392,7 @@ impl Engine {
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
             read_streams: (0..16).map(|_| None).collect(),
+            mag_set: 0,
             groups: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
@@ -610,6 +637,14 @@ impl Engine {
     fn set_intpar(&mut self, i: usize, v: i64) {
         self.save(Save::IntPar(i, self.intpars.get(i)));
         self.store_intpar(i, v);
+    }
+
+    /// §279's `geq_word_define` for an integer parameter: assigned at the
+    /// outermost level, so no open group restores it.
+    fn set_intpar_globally(&mut self, i: usize, v: i64) {
+        let was = std::mem::replace(&mut self.global, true);
+        self.set_intpar(i, v);
+        self.global = was;
     }
 
     /// Write an integer parameter, keeping the mouth's copy of `\endlinechar`
@@ -1699,18 +1734,35 @@ impl Engine {
                     sign,
                     unit: crate::dimen::CountUnit::Points(v),
                 },
-                None => ScannedDimen::Constant(
-                    crate::dimen::scale_by_factor(sign * int, sign * frac, v)
-                        .clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-                ),
+                // §455's `nx_plus_y` raises §460's error rather than clamping
+                // quietly, so the product is formed whole and range-checked.
+                None => {
+                    let sp = int
+                        .saturating_mul(v)
+                        .saturating_add(crate::dimen::xn_over_d(v, frac, crate::dimen::UNITY));
+                    ScannedDimen::Constant(sign * self.in_dimen_range(lx, sp))
+                }
             });
         }
-        // `tex.web` §453 takes an optional `true` in front of the unit and
-        // divides by the magnification ratio. `\mag` is 1000 here and there is
-        // no way to change it, so a true unit IS the unit -- but the keyword
-        // still has to be eaten, or `1truept` reads as the unit `tr` and the
-        // document stops on an illegal unit of measure.
-        let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
+        // `tex.web` §453 takes an optional `true` in front of the unit, and
+        // §457 divides the factor by the magnification ratio before the unit
+        // converts it -- integer part and fraction, with the remainder carried.
+        let (mut int, mut frac) = (int, frac);
+        if self.scan_keyword(lx, "true", pending_only)? {
+            let mag = self.prepare_mag(lx);
+            if mag != 1000 {
+                if by_count.is_some() {
+                    return Err(TexError(
+                        "Unsupported `true' unit after a count register under \\mag".into(),
+                    ));
+                }
+                let whole = int * 1000;
+                int = whole / mag;
+                let f = (1000 * frac + crate::dimen::UNITY * (whole % mag)) / mag;
+                int += f / crate::dimen::UNITY;
+                frac = f % crate::dimen::UNITY;
+            }
+        }
         let mut unit = String::new();
         while unit.len() < 2 {
             let Some(t) = self.take(lx, pending_only) else {
@@ -1742,10 +1794,44 @@ impl Engine {
                 sign,
                 unit: crate::dimen::CountUnit::Points(sp),
             },
-            None => ScannedDimen::Constant(
-                (sign * sp).clamp(-crate::dimen::MAX_DIMEN, crate::dimen::MAX_DIMEN),
-            ),
+            None => ScannedDimen::Constant(sign * self.in_dimen_range(lx, sp)),
         })
+    }
+
+    /// §460: a dimension of 16384pt or more is `Dimension too large`, reported
+    /// where the scan stopped and replaced by `max_dimen`.
+    fn in_dimen_range(&mut self, lx: &Lexer, sp: i64) -> i64 {
+        if sp.abs() <= crate::dimen::MAX_DIMEN {
+            return sp;
+        }
+        self.report(lx, "Dimension too large");
+        crate::dimen::MAX_DIMEN
+    }
+
+    /// §288's `prepare_mag`, which every `true` unit runs first: `\mag` may not
+    /// change once a true dimension has used it, and must be 1 to 32768.
+    fn prepare_mag(&mut self, lx: &Lexer) -> i64 {
+        let mag = self.intpars.get(crate::intpar::MAG);
+        if self.mag_set > 0 && mag != self.mag_set {
+            self.report(
+                lx,
+                &format!(
+                    "Incompatible magnification ({mag}); the previous value will be retained ({})",
+                    self.mag_set
+                ),
+            );
+            self.set_intpar_globally(crate::intpar::MAG, self.mag_set);
+        }
+        let mag = self.intpars.get(crate::intpar::MAG);
+        if mag <= 0 || mag > 32768 {
+            self.report(
+                lx,
+                &format!("Illegal magnification has been changed to 1000 ({mag})"),
+            );
+            self.set_intpar_globally(crate::intpar::MAG, 1000);
+        }
+        self.mag_set = self.intpars.get(crate::intpar::MAG);
+        self.mag_set
     }
 
     /// `tex.web` §449's internal INTEGER in the factor's place, if one is what
@@ -3285,10 +3371,10 @@ impl Engine {
             // tested.
             if depth == 0 && out.len() >= delim.len() && out[out.len() - delim.len()..] == *delim {
                 out.truncate(out.len() - delim.len());
-                let wrapped = out.len() >= 2
-                    && matches!(out[0], Token::Char(_, Cat::BeginGroup))
-                    && matches!(out[out.len() - 1], Token::Char(_, Cat::EndGroup));
-                if wrapped {
+                // §400 strips the braces only when the argument is ONE item
+                // (§392's `m`, which counts a group as one) and that item is a
+                // group: `{x}` loses them, `{x}{y}` and `{x} ` keep them.
+                if is_one_group(&out) {
                     out.remove(0);
                     out.pop();
                 }

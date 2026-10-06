@@ -1,0 +1,8 @@
+% A delimited argument loses its braces only when it is ONE item and that
+% item is a group (tex.web S392 counts the items, a group as one; S400
+% strips). `{x}{y}', `{x} ' and `{x}y' are two items and keep theirs.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a#1;{[#1]}
+\message{\a{x};\a{x}{y};\a{x} ;\a {x};\a{{x}};\a{x}y;\a;\a{}{};}
+\def\b#1.#2.{[#1|#2]}\message{\b{a}.{b}c.\b{a}{b}.{}.}
+\end

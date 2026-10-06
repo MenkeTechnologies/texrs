@@ -88,6 +88,9 @@ pub fn index(name: &str) -> Option<usize> {
     NAMES.iter().position(|n| *n == name)
 }
 
+/// The position of `\mag`, which a `true` dimension is divided by (§457).
+pub const MAG: usize = 17;
+
 /// The position of `\escapechar`, which the printer reads on every control
 /// sequence it writes.
 pub const ESCAPE_CHAR: usize = 45;
@@ -208,6 +211,11 @@ mod tests {
     fn line_char_indices_name_their_parameters() {
         assert_eq!(index("endlinechar"), Some(END_LINE_CHAR));
         assert_eq!(index("newlinechar"), Some(NEW_LINE_CHAR));
+    }
+
+    #[test]
+    fn mag_index_names_mag() {
+        assert_eq!(index("mag"), Some(MAG));
     }
 
     #[test]

@@ -1,0 +1,18 @@
+% A `true' unit is divided by \mag/1000 before the unit converts it (tex.web
+% S457), integer part and fraction both. S288's prepare_mag then pins \mag:
+% a later true unit under a different \mag is `Incompatible magnification'
+% and the old value is kept. A dimension of 16384pt or more, in any unit,
+% is `Dimension too large' and becomes max_dimen (S460).
+\catcode`\{=1 \catcode`\}=2
+\mag=2000 \dimen0=1truept \message{[\the\dimen0]}
+\dimen0=1.5truein \message{[\the\dimen0]}
+\dimen0=3 true sp \dimen1=7truecm \message{[\the\dimen0][\the\dimen1]}
+\dimen0=1pt \message{[\the\dimen0]}
+\mag=1000 \dimen0=1truept \message{[\the\dimen0][\the\mag]}
+\dimen0=16384pt \message{[\the\dimen0]}
+\dimen0=-16384pt \message{[\the\dimen0]}
+\dimen0=1073741824sp \message{[\the\dimen0]}
+\dimen0=600cm \message{[\the\dimen0]}
+\dimen0=2000em \message{[\the\dimen0]}
+\dimen0=16383.99999pt \message{[\the\dimen0]}
+\end

@@ -58,6 +58,8 @@ VALUE
 <a>
 #==# def_prefixes.tex
 [A] [B] [C] [diff]
+#==# delimited_argument_braces.tex
+[x][{x}{y}][{x} ][x][{x}][{x}y][][{}{}] [a|{b}c][{a}{b}|]
 #==# delimited_params.tex
 [alpha|beta]
 #==# dimen_glue_token_parameters.tex
@@ -254,6 +256,8 @@ a1 m a2 m a3 [3]
 [b] [a][a]
 #==# true_units.tex
 [1.0pt][72.26999pt][71.13188pt] [1.0pt plus 2.0pt minus 3.0pt]
+#==# true_units_under_mag.tex
+[0.5pt] [54.2025pt] [0.00002pt][99.58464pt] [1.0pt]! Incompatible magnification (1000); the previous value will be retained (2000).l.11 \mag=1000 \dimen0=1true                            pt \message{[\the\dimen0][\the\mag]}[0.5pt][2000]! Dimension too large.l.12 \dimen0=16384pt                      \message{[\the\dimen0]}[16383.99998pt]! Dimension too large.l.13 \dimen0=-16384pt                       \message{[\the\dimen0]}[-16383.99998pt]! Dimension too large.l.14 \dimen0=1073741824sp                           \message{[\the\dimen0]}[16383.99998pt]! Dimension too large.l.15 \dimen0=600cm                    \message{[\the\dimen0]}[16383.99998pt]! Dimension too large.l.16 \dimen0=2000em                     \message{[\the\dimen0]}[16383.99998pt] [16383.99998pt] )(see the transcript file for additional information
 #==# undefined_cs.tex
 ! Undefined control sequence.l.2 \message{A\undefinedxx                           B}AB )(see the transcript file for additional information
 #==# xdef_survives_group.tex
