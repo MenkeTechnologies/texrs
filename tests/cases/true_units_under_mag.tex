@@ -3,6 +3,7 @@
 % a later true unit under a different \mag is `Incompatible magnification'
 % and the old value is kept. A dimension of 16384pt or more, in any unit,
 % is `Dimension too large' and becomes max_dimen (S460).
+% requires: cmr10 -- `2000em' is an installation's cmr10.tfm quad; see tests/parity.rs.
 \catcode`\{=1 \catcode`\}=2
 \mag=2000 \dimen0=1truept \message{[\the\dimen0]}
 \dimen0=1.5truein \message{[\the\dimen0]}
