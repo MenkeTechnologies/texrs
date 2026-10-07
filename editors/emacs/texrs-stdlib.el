@@ -36,6 +36,9 @@
     "\\expandafter"
     "\\noexpand"
     "\\message"
+    "\\immediate"
+    "\\write"
+    "\\errmessage"
     "\\relax"
     "\\par"
     "\\ignorespaces"
@@ -102,6 +105,10 @@
     "\\glueexpr"
     "\\muexpr"
     "\\input"
+    "\\endinput"
+    "\\openin"
+    "\\closein"
+    "\\read"
     "\\rust"
     "\\rustcall"
     "\\rustcompile"
@@ -210,6 +217,9 @@
     (puthash "\\expandafter" "\\expandafter  —  One token of lookahead: hold the next token back, expand what follows it once, then put the held token in front of the result. [Expansion]" table)
     (puthash "\\noexpand" "\\noexpand  —  Suppress expansion of the next token for one step — the token is used for its own sake rather than its meaning. [Expansion]" table)
     (puthash "\\message" "\\message  —  Write to the terminal. [Expansion]" table)
+    (puthash "\\immediate" "\\immediate  —  Do the `\\write` that follows now rather than at shipout (tex.web §1375). [Expansion]" table)
+    (puthash "\\write" "\\write  —  Write a line (tex.web §1350, §1370). [Expansion]" table)
+    (puthash "\\errmessage" "\\errmessage  —  Report an error of the document's own and carry on (tex.web §1283). [Expansion]" table)
     (puthash "\\relax" "\\relax  —  Do nothing. [Expansion]" table)
     (puthash "\\par" "\\par  —  End a paragraph. [Expansion]" table)
     (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow (tex.web §1060). [Expansion]" table)
@@ -234,7 +244,7 @@
     (puthash "\\ifhmode" "\\ifhmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifmmode" "\\ifmmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifinner" "\\ifinner  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
-    (puthash "\\ifeof" "\\ifeof  —  RECOGNISED BUT NOT EVALUATED: there is no file I/O yet. [Conditionals]" table)
+    (puthash "\\ifeof" "\\ifeof  —  True when a `\\read` stream is closed (tex.web §501): every stream is, until `\\openin` finds a file, and again once `\\closein` closes it or a `\\read` finds nothing left. [Conditionals]" table)
     (puthash "\\ifcsname" "\\ifcsname  —  Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered — which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web §372) and so changes the answer for every later ask. [Conditionals]" table)
     (puthash "\\count" "\\count  —  A count register. [Registers]" table)
     (puthash "\\advance" "\\advance  —  Add to a register. [Registers]" table)
@@ -276,6 +286,10 @@
     (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
     (puthash "\\muexpr" "\\muexpr  —  The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts — eTeX gives each unit its own primitive so the two cannot be mixed. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
+    (puthash "\\endinput" "\\endinput  —  End the file being read with the line `\\endinput` is on (tex.web §362): the rest of that line is still read, and nothing after it is. [Files]" table)
+    (puthash "\\openin" "\\openin  —  Open a `\\read` stream on a file (tex.web §1275): the stream is closed first, then opened on the file the name finds — searched for as `\\input` searches, with `.tex` supplied — and left closed when nothing has it. [Files]" table)
+    (puthash "\\closein" "\\closein  —  Close a `\\read` stream (tex.web §1275), so `\\ifeof` is true for it. [Files]" table)
+    (puthash "\\read" "\\read  —  Define a macro as the next line of a stream (tex.web §482): the line is read with the category codes in force and ended by `\\endlinechar`, and more lines are read while a brace is open. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)
     (puthash "\\rustcompile" "\\rustcompile  —  What a `\\rust{ … }` block becomes: compile and register the block whose base64 body follows, up to `\\endrust`. [Inline Rust]" table)
