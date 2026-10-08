@@ -1,0 +1,18 @@
+% tex.web S446: where S440's scan_int finds no number -- no digit after the
+% signs or after a radix mark, and no internal quantity -- it reports
+% `! Missing number, treated as zero.', puts what it read back to be read
+% again, and the value is 0.
+\catcode`\{=1 \catcode`\}=2
+\count1=\relax\message{[\the\count1]}
+\count1="\relax\message{[\the\count1]}
+\count1='\relax\message{[\the\count1]}
+\count1=-\relax\message{[\the\count1]}
+\count1=5 \advance\count1 by \relax\message{[\the\count1]}
+\count1=7 \multiply\count1\relax\message{[\the\count1]}
+\catcode`\Q=\relax\message{[\the\catcode`\Q]}
+\chardef\x=\relax\message{[\meaning\x]}
+\escapechar=\relax\message{[\the\escapechar]}
+\escapechar=`\\
+\def\a{\relax}\count1=\a\message{[\the\count1]}
+\count1=\par\message{[\the\count1]}
+\end

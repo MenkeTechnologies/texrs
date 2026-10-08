@@ -32,6 +32,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A number that is not there (§446) -- no digit after the signs or after `"` or
+  `'`, and no internal quantity -- is `Missing number, treated as zero`
+  reported with what was read put back to be read again, and 0 used; texrs
+  stopped the run.
 - An error's context shows the tokens a scanner read too far and put back
   (§325's `back_input`, §314) as `<to be read again>` above the file line, or
   `<recently read>` once read: the token that ends a constant or follows a

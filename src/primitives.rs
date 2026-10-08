@@ -302,6 +302,70 @@ pub fn is_primitive(name: &str) -> bool {
     NAMES.contains(&name)
 }
 
+/// §413's internal quantities that are not parameters: the primitives whose
+/// commands lie from §209's `min_internal` to `max_internal` -- `last_item`,
+/// `toks_register`, `assign_font_dimen`, `assign_font_int`, `set_aux`,
+/// `set_prev_graf`, `set_page_dimen`, `set_page_int`, `set_box_dimen`,
+/// `set_shape`, `def_code`, `def_family`, `set_font`, `def_font` and
+/// `register`. A `\chardef`, `\mathchardef` or register name is one too, by
+/// its meaning rather than by a name here.
+const INTERNAL: &[&str] = &[
+    "lastpenalty",
+    "lastkern",
+    "lastskip",
+    "inputlineno",
+    "badness",
+    "toks",
+    "fontdimen",
+    "hyphenchar",
+    "skewchar",
+    "spacefactor",
+    "prevdepth",
+    "prevgraf",
+    "pagegoal",
+    "pagetotal",
+    "pagestretch",
+    "pagefilstretch",
+    "pagefillstretch",
+    "pagefilllstretch",
+    "pageshrink",
+    "pagedepth",
+    "deadcycles",
+    "insertpenalties",
+    "wd",
+    "ht",
+    "dp",
+    "parshape",
+    "catcode",
+    "mathcode",
+    "lccode",
+    "uccode",
+    "sfcode",
+    "delcode",
+    "textfont",
+    "scriptfont",
+    "scriptscriptfont",
+    "nullfont",
+    "font",
+    "count",
+    "dimen",
+    "skip",
+    "muskip",
+];
+
+/// Whether the primitive `name` is an internal quantity (§413), which §440's
+/// `scan_int` reads through `scan_something_internal` rather than as the
+/// missing number it would otherwise be: one of [`INTERNAL`], or a glue,
+/// token-list, dimension (§226, §230, §248) or integer (§236) parameter.
+pub fn is_internal_quantity(name: &str) -> bool {
+    // The parameter sections open `NAMES` and §265's commands follow them,
+    // the first of those being the control space.
+    let parameters = NAMES.iter().position(|n| *n == " ").unwrap_or(0);
+    INTERNAL.contains(&name)
+        || NAMES[..parameters].contains(&name)
+        || crate::intpar::index(name).is_some()
+}
+
 /// The primitives other than the conditionals that expand (§366): the
 /// `expand_after`, `no_expand`, `cs_name`, `convert`, `the`, `top_bot_mark`,
 /// `input` and `fi_or_else` commands, and e-TeX's additions to them.

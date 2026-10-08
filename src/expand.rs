@@ -3981,7 +3981,16 @@ impl Engine {
                 lx.push_back(&toks);
                 return Ok(sign * self.scan_number(lx, pending_only)?);
             }
-            return Err(TexError(format!("Missing number, found \\{}", name.name())));
+            // §446: anything else is no number at all. An internal quantity
+            // texrs cannot read, or an undefined name, still stops the run.
+            let prim = self.primitive_meaning(name);
+            if crate::primitives::is_internal_quantity(prim.name())
+                || self.meaning_text(&cur) == "undefined"
+            {
+                return Err(TexError(format!("Missing number, found \\{}", name.name())));
+            }
+            lx.back_input(&[cur]);
+            return Ok(self.missing_number(lx));
         }
         // A constant may be octal or hexadecimal as well as decimal
         // (tex.web §445). The hex digits are UPPERCASE -- the opposite of `^^`
@@ -4024,7 +4033,7 @@ impl Engine {
                 }
             }
             if !any {
-                return Err(TexError("Missing number, treated as zero".into()));
+                return Ok(self.missing_number(lx));
             }
             return Ok(sign * value);
         }
@@ -4061,9 +4070,16 @@ impl Engine {
             }
         }
         if !any {
-            return Err(TexError("Missing number, treated as zero".into()));
+            return Ok(self.missing_number(lx));
         }
         Ok(sign * value)
+    }
+
+    /// §446's astonishment that no number was here: reported, with what was
+    /// read instead already put back to be read again, and zero in its place.
+    fn missing_number(&mut self, lx: &Lexer) -> i64 {
+        self.report(lx, "Missing number, treated as zero");
+        0
     }
 
     /// Fold one digit into a constant being scanned — `tex.web` §445's
