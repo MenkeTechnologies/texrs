@@ -278,6 +278,12 @@ fn main() -> ExitCode {
         };
         let built = texrs::run_dvi_fallback(keyed, &src, &chain, &layout);
         return match built {
+            // tex.web §642: a run that shipped no page writes no file, only
+            // the line saying so: the DVI is opened by the first `ship_out` (§617).
+            Ok(bytes) if texrs::dvi::Dvi::parse(&bytes).is_ok_and(|d| d.pages() == 0) => {
+                println!("No pages of output.");
+                ExitCode::SUCCESS
+            }
             Ok(bytes) => {
                 let out = output_path(&cli, &path, "dvi");
                 match std::fs::write(&out, &bytes) {

@@ -1461,3 +1461,26 @@ fn jobname_is_the_file_or_the_flag_and_the_cache_keeps_them_apart() {
     assert!(again.contains("[report] (report)"), "{again}");
     let _ = std::fs::remove_dir_all(&cache);
 }
+
+/// A run that ships no page writes no DVI, as tex does: `tex.web` §617 opens
+/// the file at the first `ship_out` and §642 says `No pages of output.` when
+/// there was none. A document that does set text still gets its file.
+#[test]
+fn a_dvi_run_with_no_pages_writes_no_file() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm, so --dvi cannot run");
+        return;
+    }
+    let dir = scratch_cache("dvi_no_pages");
+    let empty = dir.join("empty.tex");
+    std::fs::write(&empty, "\\catcode`\\{=1 \\catcode`\\}=2\n\\message{X}\n\\end\n").unwrap();
+    let said = stdout_of(texrs().current_dir(&dir).arg("--dvi").arg(&empty));
+    assert!(said.contains("No pages of output."), "{said}");
+    assert!(!dir.join("empty.dvi").exists(), "an empty run wrote a DVI");
+
+    let words = dir.join("words.tex");
+    std::fs::write(&words, "Some words.\n\\end\n").unwrap();
+    stdout_of(texrs().current_dir(&dir).arg("--dvi").arg(&words));
+    assert!(dir.join("words.dvi").exists(), "a run that set text wrote no DVI");
+    let _ = std::fs::remove_dir_all(&dir);
+}
