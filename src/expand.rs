@@ -61,6 +61,18 @@ pub enum Meaning {
 /// eTeX's division: round half AWAY from zero, which is not what `\divide`
 /// does (`tex.web` §1236 truncates). Measured -- 7/2 is 4, 5/2 is 3, -7/2 is
 /// -4, and 6/4 is 2.
+/// An argument as §392 read it, or what it held when a `\par` stopped it.
+enum Arg {
+    Read(Vec<Token>),
+    Par(Vec<Token>),
+}
+
+/// §392's `cur_tok=par_token`: the control sequence `\par` itself, whatever it
+/// means now.
+fn is_par(t: &Token) -> bool {
+    matches!(t, Token::Cs(n) if n.name() == "par")
+}
+
 /// Whether `toks` is a single brace group and nothing else: §392 counts the
 /// items of a delimited argument (a group is one), and §400 strips braces
 /// only from an argument of one item that is a group.
@@ -3467,14 +3479,17 @@ impl Engine {
             Some(default) => {
                 let first = self.read_optional(lx, &default, pending_only)?;
                 let mut args = vec![first];
-                args.extend(self.match_params(
-                    lx,
-                    m.params.get(2..).unwrap_or(&[]),
-                    pending_only,
-                )?);
+                let rest = m.params.get(2..).unwrap_or(&[]);
+                match self.match_params(lx, name, rest, m.long, pending_only)? {
+                    Some(more) => args.extend(more),
+                    None => return Ok(()),
+                }
                 args
             }
-            None => self.match_params(lx, &m.params, pending_only)?,
+            None => match self.match_params(lx, name, &m.params, m.long, pending_only)? {
+                Some(args) => args,
+                None => return Ok(()),
+            },
         };
         let mut out = Vec::with_capacity(m.body.len());
         let mut i = 0;
@@ -3573,12 +3588,17 @@ impl Engine {
         }
     }
 
+    /// §389-§399's arguments of a call to `name`, or `None` when the call was
+    /// abandoned: a `\par` in an argument of a macro that is not `\long` is
+    /// §396's runaway, reported, the `\par` put back, and no expansion.
     fn match_params(
         &mut self,
         lx: &mut Lexer,
+        name: CsId,
         params: &[Token],
+        long: bool,
         pending_only: bool,
-    ) -> R<Vec<Vec<Token>>> {
+    ) -> R<Option<Vec<Vec<Token>>>> {
         let mut args: Vec<Vec<Token>> = Vec::new();
         let mut i = 0;
         while i < params.len() {
@@ -3597,13 +3617,40 @@ impl Engine {
                 .cloned()
                 .collect();
             let arg = match delim.is_empty() {
-                true => self.read_undelimited(lx, pending_only)?,
-                false => self.read_delimited(lx, &delim, pending_only)?,
+                true => self.read_undelimited(lx, long, pending_only)?,
+                false => self.read_delimited(lx, &delim, long, pending_only)?,
             };
-            args.push(arg);
+            match arg {
+                Arg::Read(arg) => args.push(arg),
+                Arg::Par(partial) => {
+                    self.paragraph_ended(lx, name, &partial);
+                    return Ok(None);
+                }
+            }
             i += 2 + delim.len();
         }
-        Ok(args)
+        Ok(Some(args))
+    }
+
+    /// §396: `Runaway argument?` and what the argument had so far (§306),
+    /// then `Paragraph ended before \a was complete` with the `\par` put back
+    /// to be read again.
+    fn paragraph_ended(&mut self, lx: &mut Lexer, name: CsId, partial: &[Token]) {
+        self.note_mouth(lx);
+        // §306 shows the list to `error_line-10` characters, then `\ETC.`.
+        const LIMIT: usize = 79 - 10;
+        let mut shown = String::new();
+        for t in partial {
+            if shown.chars().count() >= LIMIT {
+                shown.push_str(&format!("{}ETC.", self.esc()));
+                break;
+            }
+            shown.push_str(&self.tokens_shown(std::slice::from_ref(t)));
+        }
+        self.errors.push(format!("Runaway argument?{shown}"));
+        lx.back_input(&[Token::cs("par")]);
+        let msg = format!("Paragraph ended before {} was complete", self.sprint_cs(name));
+        self.report(lx, &msg);
     }
 
     /// The `[...]` of a call to a macro whose first parameter has a default,
@@ -3638,7 +3685,8 @@ impl Engine {
         }
     }
 
-    fn read_undelimited(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Vec<Token>> {
+
+    fn read_undelimited(&mut self, lx: &mut Lexer, long: bool, pending_only: bool) -> R<Arg> {
         loop {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError(
@@ -3649,41 +3697,55 @@ impl Engine {
                 continue;
             }
             return match t {
-                Token::Char(_, Cat::BeginGroup) => self.read_balanced_from(lx, pending_only),
-                other => Ok(vec![other]),
+                Token::Char(_, Cat::BeginGroup) => self.read_group_arg(lx, t, long, pending_only),
+                t if is_par(&t) && !long => Ok(Arg::Par(Vec::new())),
+                other => Ok(Arg::Read(vec![other])),
             };
         }
     }
 
-    /// `read_balanced` for whichever source this context uses.
-    fn read_balanced_from(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Vec<Token>> {
-        if !pending_only {
-            return self.read_balanced(lx);
-        }
+    /// §399: an undelimited argument that is a group, read to its matching
+    /// `}` without the outer braces. The runaway it can be shows the `{`.
+    fn read_group_arg(
+        &mut self,
+        lx: &mut Lexer,
+        open: Token,
+        long: bool,
+        pending_only: bool,
+    ) -> R<Arg> {
         let mut depth = 1usize;
-        let mut out = Vec::new();
-        while let Some(t) = lx.pending.pop() {
+        let mut out = vec![open];
+        loop {
+            let t = match pending_only {
+                true => lx.pending.pop(),
+                false => self.take(lx, false),
+            };
+            let Some(t) = t else {
+                return Err(TexError("Runaway argument".into()));
+            };
             match &t {
                 Token::Char(_, Cat::BeginGroup) => depth += 1,
                 Token::Char(_, Cat::EndGroup) => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(out);
+                        out.remove(0);
+                        return Ok(Arg::Read(out));
                     }
                 }
+                t if is_par(t) && !long => return Ok(Arg::Par(out)),
                 _ => {}
             }
             out.push(t);
         }
-        Err(TexError("Runaway argument".into()))
     }
 
     fn read_delimited(
         &mut self,
         lx: &mut Lexer,
         delim: &[Token],
+        long: bool,
         pending_only: bool,
-    ) -> R<Vec<Token>> {
+    ) -> R<Arg> {
         let mut out: Vec<Token> = Vec::new();
         let mut depth = 0usize;
         loop {
@@ -3692,6 +3754,10 @@ impl Engine {
                     "Paragraph ended before argument was complete".into(),
                 ));
             };
+            // §392 checks for `\par` before the token is stored, at any depth.
+            if is_par(&t) && !long {
+                return Ok(Arg::Par(out));
+            }
             out.push(t);
             // `tex.web` §392 compares the token against the delimiter BEFORE it
             // touches the brace count, and the order is load-bearing twice: a
@@ -3708,7 +3774,7 @@ impl Engine {
                     out.remove(0);
                     out.pop();
                 }
-                return Ok(out);
+                return Ok(Arg::Read(out));
             }
             match &t {
                 Token::Char(_, Cat::BeginGroup) => depth += 1,

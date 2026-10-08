@@ -32,6 +32,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\long` is enforced (§392-§399): a `\par` in an argument of a macro that is
+  not `\long` is `Runaway argument?` with what the argument held, then
+  `Paragraph ended before \a was complete` with the `\par` put back, and the
+  call is dropped. texrs took the `\par` into the argument.
 - A dimension or glue component with no unit (§459) is `Illegal unit of
   measure (pt inserted)` (or `mu`) reported with what ended the scan to be read
   again, and read in points; texrs stopped the run. The units are keywords in

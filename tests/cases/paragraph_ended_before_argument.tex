@@ -1,0 +1,13 @@
+% tex.web S392-S399: a `\par' in an argument of a macro that is not \long --
+% undelimited, in a group, or delimited -- is a runaway (S306 shows what the
+% argument held, the brace of a group included, to error_line-10 characters)
+% and `! Paragraph ended before \a was complete.'; the \par is put back to be
+% read again and the call is abandoned (S396). A \long macro takes it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a#1{\message{[#1]}}
+{\a{x\par}\message{[b]}}
+\message{[c]}{\a\par\message{[d]}}
+\def\b#1#2{\message{[#1#2]}}{\b{q}{x{y\par}}}\message{[e]}
+{\a{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\par}}
+\long\def\c#1{\message{[\noexpand#1]}}\c{\par}
+\end

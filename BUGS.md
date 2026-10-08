@@ -570,15 +570,17 @@ because the file carries `/CreationDate` and an `/ID`.
 
 `\long` and `\outer` are recorded on the macro and are part of its meaning, so
 `\ifx` distinguishes a prefixed definition from a bare one exactly as tex does.
-The restrictions they describe are NOT enforced.
+`\long`'s restriction is enforced: a `\par` in an argument of a macro without
+it is §396's runaway, reported, the `\par` put back to be read again and the
+call dropped (`tests/cases/paragraph_ended_before_argument.tex`). `\outer`'s is
+not.
 
 `\outer` is only an error-detection feature: it forbids the macro in an
 argument, in a group being scanned as text, and in skipped conditional text, and
 every one of those is a position tex reports and recovers from while texrs
 stops. Enforcing it therefore could not reach parity either, and a false
 positive would refuse a document that works, so the difference is written down
-instead -- `tests/cases/outer_forbidden_use.tex` pins it. The same holds for the
-runaway-argument check `\long` lifts.
+instead -- `tests/cases/outer_forbidden_use.tex` pins it.
 
 ## Inline Rust
 

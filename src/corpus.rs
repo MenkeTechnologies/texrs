@@ -419,7 +419,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\long",
         "Macro definition",
-        "A definition prefix: the macro's arguments may contain `\\par`. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. texrs records the prefix and does not yet enforce the restriction it lifts.",
+        "A definition prefix: the macro's arguments may contain `\\par`. Without it a paragraph break inside an argument is a runaway, which is TeX's guard against a missing closing brace swallowing the rest of a document. A macro without it whose argument meets `\\par` reports `Runaway argument?` and `Paragraph ended before \\x was complete`, puts the `\\par` back and drops the call, as tex does.",
         "\\long\\def\\note#1{[#1]}",
     ),
     (
