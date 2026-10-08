@@ -1557,6 +1557,13 @@ impl Engine {
                 None => break,
             }
         }
+        // §448: a factor that does not open with a digit or a point is read
+        // by §440's `scan_int` -- a `"`, `'` or `` ` `` constant, or §446's
+        // missing number for anything else. What ended the scan above was put
+        // back, so `scan_number` reads it again.
+        if whole.is_empty() && !seen_point {
+            return Ok((self.scan_number(lx, pending_only)?, 0));
+        }
         let int: i64 = whole.parse().unwrap_or(0);
         Ok((int, crate::dimen::round_decimals(&fraction)))
     }
@@ -1669,6 +1676,24 @@ impl Engine {
         let f = f.unwrap_or(crate::tfm::FontUnits::NULL);
         self.font_units = Some(f);
         f
+    }
+
+    /// The unit §456 (`mu`) or §458 (`pt` and the rest) reads, as keywords in
+    /// tex's order. None there is §459's `Illegal unit of measure`, reported
+    /// with what ended the scan put back, and the unit inserted in its place.
+    fn scan_physical_unit(&mut self, lx: &mut Lexer, pending_only: bool) -> R<&'static str> {
+        let units: &[&'static str] = match self.mu_units {
+            true => &["mu"],
+            false => &["pt", "in", "pc", "cm", "mm", "bp", "dd", "cc", "sp"],
+        };
+        for unit in units {
+            if self.scan_keyword(lx, unit, pending_only)? {
+                return Ok(unit);
+            }
+        }
+        let inserted = units[0];
+        self.report(lx, &format!("Illegal unit of measure ({inserted} inserted)"));
+        Ok(inserted)
     }
 
     /// §454's complaint, which names the unit it would have inserted: `pt`
@@ -1904,21 +1929,12 @@ impl Engine {
                 frac = f % crate::dimen::UNITY;
             }
         }
-        let mut unit = String::new();
-        while unit.len() < 2 {
-            let Some(t) = self.take(lx, pending_only) else {
-                break;
-            };
-            match &t {
-                t if t.is_space() && unit.is_empty() => continue,
-                Token::Char(c, _) if c.is_ascii_alphabetic() => unit.push(c.to_ascii_lowercase()),
-                other => {
-                    lx.back_input(std::slice::from_ref(other));
-                    break;
-                }
-            }
-        }
-        let Some(sp) = self.finite_unit(int, frac, &unit) else {
+        // §456 and §458: each unit is a keyword, tried in tex's order, so a
+        // token that ends no unit is put back by the last `scan_keyword` and
+        // §459 reports it -- and then goes on in points (or `mu`), as if
+        // the unit had been written.
+        let unit = self.scan_physical_unit(lx, pending_only)?;
+        let Some(sp) = self.finite_unit(int, frac, unit) else {
             return Err(self.illegal_unit());
         };
         // One optional space is absorbed after a unit, as after a constant.
@@ -2711,20 +2727,9 @@ impl Engine {
             // but the word still has to come off the stream.
             let _true_prefix = self.scan_keyword(lx, "true", pending_only)?;
             // §456 and §458: `mu` alone in math units, otherwise the physical
-            // units in §458's order, each a keyword of its own.
-            let units: &[&str] = match self.mu_units {
-                true => &["mu"],
-                false => &["pt", "in", "pc", "cm", "mm", "bp", "dd", "cc", "sp"],
-            };
-            for u in units {
-                if self.scan_keyword(lx, u, pending_only)? {
-                    unit = u;
-                    break;
-                }
-            }
-            if unit.is_empty() {
-                return Err(self.illegal_unit());
-            }
+            // units in §458's order, each a keyword of its own; §459 reports
+            // none and goes on in points (or `mu`).
+            unit = self.scan_physical_unit(lx, pending_only)?;
         }
         let sp = match order {
             // An infinite component's number is not converted: `1fil` is one,

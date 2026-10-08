@@ -173,9 +173,8 @@ texrs output reached tracked lualatex references in
   error raised while one is being read lacks the `\a ->...` lines tex prints
   above the file line, and an error inside a `\message` body, which texrs
   reads to its `}` before expanding it, shows no file line at all. Every
-  other error path -- `Illegal unit of measure` and `Missing { inserted`
-  among them, and a `Missing number` where texrs meets an internal quantity
-  it cannot read -- still stops with one `TexError`, and `\outer` is not
+  other error path -- `Missing { inserted` among them, and a `Missing
+  number` where texrs meets an internal quantity it cannot read -- still stops with one `TexError`, and `\outer` is not
   policed at all.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a

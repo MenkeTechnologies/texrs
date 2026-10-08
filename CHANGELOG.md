@@ -32,6 +32,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A dimension or glue component with no unit (§459) is `Illegal unit of
+  measure (pt inserted)` (or `mu`) reported with what ended the scan to be read
+  again, and read in points; texrs stopped the run. The units are keywords in
+  §458's order, and a factor that opens with no digit or point is §440's
+  integer, so a missing one is `Missing number`.
 - A relation that is not a `<`, `=` or `>` of category 12 after `\ifnum` or
   `\ifdim` (§503) is `Missing = inserted` reported, put back to be read again,
   and read as `=`; texrs stopped the run. The relation is read with expansion.
