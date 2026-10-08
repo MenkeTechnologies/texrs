@@ -1134,6 +1134,22 @@ impl Lowerer {
                     };
                     self.eng.show_token(lx, &tok);
                 }
+                // §1297: `\showthe` prints `> `, what §465's `the_toks` makes
+                // of the quantity, and `.` with the context, as `\show` does.
+                // The quantity may be a register the run holds, so the text is
+                // built the way a `\message` with `\the` in it is.
+                "showthe" => {
+                    let quantity = self.the_operand(lx)?;
+                    let mut work = Lexer::new("");
+                    work.push_back(&quantity);
+                    let parts = self.msg_ops(&mut work, &[])?;
+                    let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
+                    let context = lx.context().unwrap_or_default().replace('\n', "");
+                    let mut ops = vec![MsgOp::Report("> ".into())];
+                    ops.extend(crate::ir::printed_ops(parts, nl));
+                    ops.push(MsgOp::Report(format!(".{context}")));
+                    self.queue_report(ops);
+                }
                 // §1283: the text is expanded as a `\message`'s is, printed as
                 // an error's (`! ` and the text), and §82's `error` follows
                 // with its `.` and the context. In nonstop mode the help goes to
@@ -3357,6 +3373,33 @@ impl Lowerer {
             lx.push_back(&[t]);
             return Ok(scaled_num(self.eng.scan_dimen_parts(lx, pending)?));
         }
+    }
+
+    /// What `\the` stands in front of, read from the file and spelt as a
+    /// token list beginning with `\the`, for [`Self::msg_ops`] to render.
+    ///
+    /// §465 reads the quantity with `get_x_token` and §413's
+    /// `scan_something_internal`. A register or code table takes a number,
+    /// which is read here and written back as digits; every other quantity is
+    /// the one token.
+    fn the_operand(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        let Some((t, _)) = self.eng.next_unexpandable(lx)? else {
+            return Err(TexError("Missing number, treated as zero".into()));
+        };
+        let mut spelt = vec![Token::cs("the"), t];
+        let takes_number = match t {
+            Token::Cs(n) => {
+                matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks" | "catcode")
+                    || crate::charcodes::Table::from_name(n.name()).is_some()
+            }
+            Token::Char(..) => false,
+        };
+        if takes_number {
+            let n = self.eng.scan_number_file(lx)?;
+            spelt.extend(n.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
+            spelt.push(Token::Char(' ', Cat::Space));
+        }
+        Ok(spelt)
     }
 
     /// `\immediate\write<number>{<text>}`: §1350 reads the stream number and

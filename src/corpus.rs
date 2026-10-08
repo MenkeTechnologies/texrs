@@ -132,6 +132,12 @@ pub const CORPUS: &[Entry] = &[
         "\\show<token>\n\\def\\a#1{x#1}\\show\\a   % => > \\a=macro:#1->x#1.",
     ),
     (
+        "\\showthe",
+        "Expansion",
+        "Print what `\\the` would make of an internal quantity (tex.web \u{a7}1297): `> `, the value as \u{a7}465 writes it \u{2014} a count as digits, a dimension as `3.5pt`, a glue with its stretch and shrink, a token list with each `#` doubled \u{2014} and a period, followed by the context an error shows, as `\\show` does. A register's value is the run's, so it is read when the run reaches the `\\showthe`.",
+        "\\showthe<internal quantity>\n\\count1=5 \\showthe\\count1   % => > 5.",
+    ),
+    (
         "\\inputlineno",
         "Expansion",
         "The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and `\\the` and `\\number` write it.",

@@ -1,0 +1,10 @@
+% \showthe (tex.web S1297) prints `> ', what \the makes of the quantity, and
+% `.' with the error context, as \show does. A register's value is the run's,
+% so it is read where the run reaches the \showthe, between the messages.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count1=5 \showthe\count1
+\skip3=1pt plus 2fil\showthe\skip3 \dimen2=-3.5pt \showthe\dimen2
+\toks0={a#b\x}\showthe\toks0 \showthe\catcode`\{ \showthe\lccode`A
+\countdef\c=7 \c=-4 \message{[x]}\showthe\c\message{[y]}
+\chardef\q=65 \showthe\q
+\end

@@ -260,8 +260,9 @@ than none.
 - `\def` with undelimited *and* delimited parameters (`\def\pair#1,#2.{...}`),
   `##`, and nested definitions.
 - `\csname`/`\endcsname`, `\string`, `\the`, `\number`, `\romannumeral`,
-  `\jobname`, `\expandafter`, `\inputlineno`, and `\show` (the meaning
-  and the error context tex prints after it).
+  `\jobname`, `\expandafter`, `\inputlineno`, `\show` (the meaning
+  and the error context tex prints after it) and `\showthe` (the value, the
+  same way).
 - `\let`, `\edef`/`\xdef`, `\gdef`, `\global`, `\begingroup`/`\endgroup`.
 - Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\if`, `\ifcat`, `\ifcase`
   with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.

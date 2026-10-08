@@ -27,6 +27,7 @@
     "\\endcsname"
     "\\string"
     "\\show"
+    "\\showthe"
     "\\inputlineno"
     "\\meaning"
     "\\uppercase"
@@ -208,6 +209,7 @@
     (puthash "\\endcsname" "\\endcsname  —  Terminate a `\\csname`. [Expansion]" table)
     (puthash "\\string" "\\string  —  Print a control sequence as text, escape character included — the inverse of `\\csname`. [Expansion]" table)
     (puthash "\\show" "\\show  —  Print what the next token means (tex.web §1294), read UNEXPANDED: `> `, the name and `=`, the same text `\\meaning` gives, and a period, followed by the context an error shows — `\\show` ends by calling `error`, so the run closes with the transcript notice as it does after an error. [Expansion]" table)
+    (puthash "\\showthe" "\\showthe  —  Print what `\\the` would make of an internal quantity (tex.web §1297): `> `, the value as §465 writes it — a count as digits, a dimension as `3.5pt`, a glue with its stretch and shrink, a token list with each `#` doubled — and a period, followed by the context an error shows, as `\\show` does. [Expansion]" table)
     (puthash "\\inputlineno" "\\inputlineno  —  The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and `\\the` and `\\number` write it. [Expansion]" table)
     (puthash "\\meaning" "\\meaning  —  What a token MEANS, as characters (tex.web §296's print_meaning). [Expansion]" table)
     (puthash "\\uppercase" "\\uppercase  —  Read the following group WITHOUT expanding it, replace every character by its `\\uccode` and put the result back to be read again (tex.web §1288). [Expansion]" table)
