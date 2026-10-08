@@ -119,6 +119,19 @@ pub struct GlueParts {
     pub shrink_order: i64,
 }
 
+/// `\the` or `\number` of a register, read where a quantity is scanned; see
+/// [`Engine::take_expanded_register`].
+pub struct ExpandedRegister {
+    /// `\the` rather than `\number`: an integer register writes the same
+    /// digits under either, a dimension `3.0pt` under one and `196608` under
+    /// the other.
+    pub the: bool,
+    /// The slot the register lives in.
+    pub slot: i64,
+    /// What was read, in order, for [`Engine::put_back`].
+    read: Vec<Token>,
+}
+
 /// One undo record. TeX's save stack restores individual changes at group end
 /// rather than snapshotting the whole state, which is what makes deep grouping
 /// affordable; the same choice is made here.
@@ -1676,6 +1689,26 @@ impl Engine {
             }
         }
         let sign = self.scan_optional_signs(lx, pending_only)?;
+        // §465: `\the` of a dimension register writes it as §103 prints it,
+        // the digits and `pt`, which §448 reads back as the same scaled points
+        // -- the register, whole, and §453's optional space after its unit.
+        if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
+            let dimension = reg.slot >= crate::compiler::DIMEN_BASE
+                && !crate::compiler::is_glue_slot(reg.slot);
+            if reg.the && dimension {
+                if let Some(t) = self.take(lx, pending_only) {
+                    if !t.is_space() {
+                        lx.push_back(std::slice::from_ref(&t));
+                    }
+                }
+                return Ok(ScannedDimen::Scaled {
+                    int: sign,
+                    frac: 0,
+                    reg: reg.slot,
+                });
+            }
+            self.put_back(lx, reg);
+        }
         // §449: an internal dimension standing where the NUMBER goes is the
         // whole dimension. `\@plus\p@` in size10.clo is one `\p@` and not none
         // of it, which is a factor of exactly one.
@@ -1834,6 +1867,154 @@ impl Engine {
         self.mag_set
     }
 
+    /// The slot a register reference names, reading the register number after
+    /// `\count`, `\dimen`, `\skip` or `\muskip`; `None`, with nothing consumed,
+    /// when `name` is not one. The reference comes back respelt as well -- the
+    /// name, then the number read and the space that ends it -- for a caller
+    /// that has to put it back.
+    pub fn register_slot(
+        &mut self,
+        lx: &mut Lexer,
+        name: CsId,
+        pending_only: bool,
+    ) -> R<Option<(i64, Vec<Token>)>> {
+        // Where the file starts, and how many slots one register of it takes:
+        // a glue is four and everything else is one.
+        let file = match name.name() {
+            "count" => Some((0, 1)),
+            "dimen" => Some((crate::compiler::DIMEN_BASE, 1)),
+            "skip" => Some((crate::compiler::SKIP_BASE, crate::compiler::SKIP_STRIDE)),
+            "muskip" => Some((crate::compiler::MUSKIP_BASE, crate::compiler::SKIP_STRIDE)),
+            _ => None,
+        };
+        let mut spelt = vec![Token::Cs(name)];
+        if let Some((base, stride)) = file {
+            let reg = self.scan_number(lx, pending_only)?;
+            spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
+            spelt.push(Token::Char(' ', Cat::Space));
+            return Ok(Some((base + reg * stride, spelt)));
+        }
+        // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name is that
+        // register, in every position the spelt-out form works.
+        match self.numeric_cs(name) {
+            Some(NumericCs::Register(r)) => Ok(Some((r, spelt))),
+            _ => Ok(None),
+        }
+    }
+
+    /// `\the` or `\number` and the register after it; `None`, with nothing
+    /// consumed, when that is not what comes next.
+    ///
+    /// Both are expandable (§465, §470), so where a number, a dimension or a
+    /// glue is scanned the scan reads the characters they produce. Those are
+    /// the register's value written out, and §103's `print_scaled` writes a
+    /// dimension so that reading it back gives the same scaled points -- so
+    /// what the scan makes of them is, in most positions, the register itself,
+    /// a slot whose value is the run's. Which positions is the caller's
+    /// question: it has the next tokens to look at, and [`Self::put_back`]
+    /// undoes the read when the characters would not be the register alone.
+    pub fn take_expanded_register(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+    ) -> R<Option<ExpandedRegister>> {
+        let Some(prefix) = self.take(lx, pending_only) else {
+            return Ok(None);
+        };
+        let the = match &prefix {
+            Token::Cs(n) if n.name() == "the" => true,
+            Token::Cs(n) if n.name() == "number" => false,
+            _ => {
+                lx.push_back(&[prefix]);
+                return Ok(None);
+            }
+        };
+        let Some(name) = self.take(lx, pending_only) else {
+            lx.push_back(&[prefix]);
+            return Ok(None);
+        };
+        let Token::Cs(cs) = name else {
+            lx.push_back(&[prefix, name]);
+            return Ok(None);
+        };
+        match self.register_slot(lx, cs, pending_only)? {
+            Some((slot, spelt)) => {
+                let mut read = vec![prefix];
+                read.extend(spelt);
+                Ok(Some(ExpandedRegister { the, slot, read }))
+            }
+            None => {
+                lx.push_back(&[prefix, name]);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Undo [`Self::take_expanded_register`]: the prefix and the register go
+    /// back as they were read, for the scanner to read as characters.
+    pub fn put_back(&self, lx: &mut Lexer, reg: ExpandedRegister) {
+        lx.push_back(&reg.read);
+    }
+
+    /// Whether the next token, which stays where it is, is a character that
+    /// §445's digit loop or §452's decimal fraction would go on reading into
+    /// the number in front of it.
+    ///
+    /// Both read with `get_x_token`, so a macro there is expanded to see what
+    /// it begins with, as the scan itself would. Only a macro: a conditional
+    /// belongs to whichever pass owns it, as in §445's radix loop below.
+    pub fn number_continues(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+        fraction: bool,
+    ) -> R<bool> {
+        let Some(t) = self.peek_past_macros(lx, pending_only)? else {
+            return Ok(false);
+        };
+        Ok(match t {
+            Token::Char(c, Cat::Other) => c.is_ascii_digit() || (fraction && matches!(c, '.' | ',')),
+            _ => false,
+        })
+    }
+
+    /// Whether a glue's written form would be read on past its end: §461's
+    /// `plus` and `minus` and §454's further `l` of a `fil` are keywords, which
+    /// §407 matches in either case after any spaces. So a letter next, even
+    /// one a macro there begins with, may belong to the glue in front of it.
+    pub fn glue_continues(&mut self, lx: &mut Lexer, pending_only: bool) -> R<bool> {
+        let mut spaces = Vec::new();
+        let next = loop {
+            match self.peek_past_macros(lx, pending_only)? {
+                Some(t) if t.is_space() => {
+                    let _ = self.take(lx, pending_only);
+                    spaces.push(t);
+                }
+                other => break other,
+            }
+        };
+        lx.push_back(&spaces);
+        Ok(matches!(next, Some(Token::Char(c, _)) if c.is_ascii_alphabetic()))
+    }
+
+    /// The next token once every macro in front of it has been expanded, left
+    /// where it is.
+    fn peek_past_macros(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<Token>> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Ok(None);
+            };
+            if let Token::Cs(n) = t {
+                if self.is_macro(n) {
+                    self.expand_macro(lx, n, pending_only)?;
+                    continue;
+                }
+            }
+            lx.push_back(std::slice::from_ref(&t));
+            return Ok(Some(t));
+        }
+    }
+
     /// `tex.web` §449's internal INTEGER in the factor's place, if one is what
     /// stands there. Nothing is consumed when it is not.
     ///
@@ -1854,6 +2035,22 @@ impl Engine {
             }
             if let Token::Cs(n) = &t {
                 let n = *n;
+                // `\the` or `\number` of a register writes its digits (§465,
+                // §470), which are the factor -- an integer's are, while a
+                // dimension's `3.0pt` under `\the` is the whole dimension and
+                // read above -- unless the digits go on in what follows.
+                if matches!(n.name(), "the" | "number") {
+                    lx.push_back(std::slice::from_ref(&t));
+                    if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
+                        let integer = !reg.the || reg.slot < crate::compiler::DIMEN_BASE;
+                        if integer && !self.number_continues(lx, pending_only, true)? {
+                            return Ok(Some(NumericCs::Register(reg.slot)));
+                        }
+                        self.put_back(lx, reg);
+                    }
+                    lx.push_back(&eaten);
+                    return Ok(None);
+                }
                 // §449 reads this position with `get_x_token`, as everywhere
                 // else in the scan.
                 if self.try_expand(lx, n, pending_only)? {

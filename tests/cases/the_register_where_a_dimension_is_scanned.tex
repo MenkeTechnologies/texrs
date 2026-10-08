@@ -1,0 +1,16 @@
+% Where a dimension or a glue is scanned, \the of a register writes it out
+% (tex.web S465): a dimension as S103 prints it, which S448 reads back to the
+% same scaled points, and a glue as S178 prints it, which S461 reads back to
+% the same glue. An integer's digits under \the or \number are S449's factor,
+% with the unit still to come.
+\catcode`\{=1 \catcode`\}=2
+\dimen1=3.3pt \count1=12 \skip1=3pt plus 1fil minus 2pt
+\dimen0=\the\dimen1 \message{[\the\dimen0]}
+\dimen0=-\the\dimen1\relax \message{[\the\dimen0]}
+\dimen0=\the\count1 pt \message{[\the\dimen0]}
+\dimen0=\number\count1\dimen1 \message{[\the\dimen0]}
+\message{[\ifdim\the\dimen1>3pt Y\else N\fi]}
+\skip0=\the\skip1\relax \message{[\the\skip0]}
+\skip0=\the\dimen1 plus 2fill \message{[\the\skip0]}
+\advance\skip0 by \the\skip1\relax \message{[\the\skip0]}
+\end
