@@ -16,6 +16,8 @@ A IN MARK B X MARK [5]
 [A][J][tA]
 #==# caret_in_control_sequence_name.tex
 [11]
+#==# caret_notation_in_error_context.tex
+xA! Bad character code (256).l.6 \def\A{x}\message{\A ^^41}\chardef\x=256                                              \message{z}z A! Bad character code (256).l.7 \message{^^41}\chardef\x=256                                  \message{z}z! Text line contains an invalid character.l.8 \message{[x^^?                  y]}\def\a{A^^?}\message{[\a]}[xy]! Text line contains an invalid character.l.8 \message{[x^^?y]}\def\a{A^^?                                }\message{[\a]}[A] )(see the transcript file for additional information
 #==# case_shift.tex
 ABC DEF 123 abc def 123 A+B x!y
 #==# case_shift_scans_left_brace.tex

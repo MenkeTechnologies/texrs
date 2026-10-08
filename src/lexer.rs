@@ -73,6 +73,11 @@ pub struct Lexer {
     /// Where a character `^^` notation produced was spliced into `chars`: a
     /// `^^M` written that way is the character 13, not a line end.
     decoded_at: Option<usize>,
+    /// Every position a character `^^` notation produced was spliced in at,
+    /// in order. It is behind the notation that wrote it, which stays where it
+    /// was: §352 decodes the character without touching the line, so the line
+    /// an error shows has the notation and not the character.
+    spliced: Vec<usize>,
     /// Pushed-back tokens (`\expandafter` and macro expansion feed these).
     pub pending: Vec<Token>,
     /// The error context at each invalid character the mouth skipped, for the
@@ -109,6 +114,7 @@ impl Lexer {
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
+            spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -181,6 +187,7 @@ impl Lexer {
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
+            spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -252,8 +259,14 @@ impl Lexer {
             .position(|c| *c == '\n')
             .map_or(self.chars.len(), |i| start + i);
         let split = pos.min(end);
-        let before: String = self.chars[start..split].iter().collect();
-        let after: String = self.chars[split..end].iter().collect();
+        let shown = |from: usize, to: usize| -> String {
+            (from..to)
+                .filter(|i| self.spliced.binary_search(i).is_err())
+                .map(|i| self.chars[i])
+                .collect()
+        };
+        let before = shown(start, split);
+        let after = shown(split, end);
         Some(Self::context_lines(&format!("l.{line} "), &before, &after))
     }
 
@@ -527,6 +540,7 @@ impl Lexer {
                 // Re-read the decoded character in place of the `^^X` triple.
                 self.chars.splice(self.pos..self.pos, [decoded]);
                 self.decoded_at = Some(self.pos);
+                self.spliced.push(self.pos);
                 continue;
             }
             let cat = cats.get(c);
@@ -584,9 +598,19 @@ impl Lexer {
     /// sequence name as much as in running text. plain.tex line 16 is
     /// `\catcode`\^^K=7`, where the name of the control sequence IS the
     /// control character, and reading it raw made it `\^` followed by junk.
+    ///
+    /// Inside a name the notation is REDUCED: §355 writes the character over
+    /// it in the line and reads the line again from there, so the line an
+    /// error shows has `\A` where the file had `\^^41`.
     fn decoded_char(&mut self, cats: &CatTable) -> Option<char> {
         let c = self.peek()?;
+        let at = self.pos;
         if let Some(decoded) = self.double_superscript(cats, c) {
+            self.chars.splice(at..self.pos, [decoded]);
+            self.pos = at + 1;
+            self.decoded_at = Some(at);
+            // The line count was taken over the characters as they were.
+            self.line_cache.set((0, 1));
             return Some(decoded);
         }
         self.pos += 1;

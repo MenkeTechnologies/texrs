@@ -1,0 +1,9 @@
+% The line an error shows is the line as the mouth left it. Outside a name
+% ^^ notation is decoded without touching the line (tex.web S352), so the
+% notation is what is shown; inside a name it is reduced in the line (S355),
+% so `\^^41' is shown as `\A' -- and the columns follow what is shown.
+\catcode`\{=1 \catcode`\}=2 \catcode`\^=7
+\def\^^41{x}\message{\^^41 ^^41}\chardef\x=256 \message{z}
+\message{^^41}\chardef\x=256 \message{z}
+\message{[x^^?y]}\def\a{A^^?}\message{[\a]}
+\end
