@@ -32,6 +32,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A relation that is not a `<`, `=` or `>` of category 12 after `\ifnum` or
+  `\ifdim` (§503) is `Missing = inserted` reported, put back to be read again,
+  and read as `=`; texrs stopped the run. The relation is read with expansion.
+- A report made while lowering the test of a conditional the run decides is
+  printed where it was made, and one made in an arm only when the run takes
+  that arm. Both were held for the next `\message`, which put them in the
+  first arm lowered, so a run that took the other lost them, and printed one
+  from an arm the run skipped. The transcript notice is decided by the run.
 - A number that is not there (§446) -- no digit after the signs or after `"` or
   `'`, and no internal quantity -- is `Missing number, treated as zero`
   reported with what was read put back to be read again, and 0 used; texrs

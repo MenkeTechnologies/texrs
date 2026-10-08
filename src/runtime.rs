@@ -109,6 +109,7 @@ fn push_report(text: &str) {
 
 /// A report the mouth or the lowerer made, carried to its place in the run.
 fn b_msg_report(vm: &mut VM, _argc: u8) -> Value {
+    REPORTED.with(|r| *r.borrow_mut() = true);
     push_report(&render(&vm.pop()));
     Value::Undef
 }

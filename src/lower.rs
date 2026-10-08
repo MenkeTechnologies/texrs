@@ -406,12 +406,13 @@ impl Lowerer {
             }
             return;
         }
+        // What is still held is printed where it stands, and the notice is
+        // the run's to decide: a report in an arm the run did not take was
+        // never printed, and tex never made it.
         if !held.is_empty() {
-            cmds.push(Cmd::Message(held));
+            cmds.push(Cmd::Reports(held));
         }
-        cmds.push(Cmd::Message(vec![MsgOp::Text(
-            ")(see the transcript file for additional information".into(),
-        )]));
+        cmds.push(Cmd::TranscriptNotice);
     }
 
     /// The reports waiting to be printed, as message pieces.
@@ -424,6 +425,17 @@ impl Lowerer {
         self.reported = self.reported || !fresh.is_empty() || !self.reports.is_empty();
         self.reports.extend(fresh.into_iter().map(MsgOp::Report));
         std::mem::take(&mut self.reports)
+    }
+
+    /// Print what was reported so far HERE, ahead of the arms of a conditional
+    /// the run decides. Held for the next message instead, the reports landed
+    /// in whichever arm was lowered first and were lost when the run took the
+    /// other; tex printed them while it scanned the test, before either arm.
+    fn flush_reports(&mut self, out: &mut Vec<Cmd>) {
+        let held = self.take_reports();
+        if !held.is_empty() {
+            out.push(Cmd::Reports(held));
+        }
     }
 
     /// Hold a report the lowerer built from pieces, behind whatever the
@@ -1266,12 +1278,13 @@ impl Lowerer {
                 }
                 "ifnum" => {
                     let left = self.number(lx)?;
-                    let rel = match self.eng.read_relation_file(lx)? {
+                    let rel = match self.eng.read_relation_file(lx, "ifnum")? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
                     let right = self.number(lx)?;
+                    self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
                         left,
@@ -1287,12 +1300,13 @@ impl Lowerer {
                 // real branch rather than being recognised and skipped.
                 "ifdim" => {
                     let left = self.dimen_number(lx, false)?;
-                    let rel = match self.eng.read_relation_file(lx)? {
+                    let rel = match self.eng.read_relation_file(lx, "ifdim")? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
                     let right = self.dimen_number(lx, false)?;
+                    self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
                         left,
@@ -1312,12 +1326,14 @@ impl Lowerer {
                 "ifcase" => match self.number(lx)? {
                     Num::Literal(n) => self.eng.ifcase_file(lx, n)?,
                     value => {
+                        self.flush_reports(&mut out);
                         let branches = self.case_arms(lx)?;
                         out.extend(case_chain_cmds(value, branches));
                     }
                 },
                 "ifodd" => {
                     let value = self.number(lx)?;
+                    self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfOdd {
                         value,
@@ -2952,7 +2968,7 @@ impl Lowerer {
         let mut cond_lx = Lexer::new("");
         cond_lx.push_back(&parts.cond);
         let left = self.number(&mut cond_lx)?;
-        let rel = match self.eng.read_relation_file(&mut cond_lx)? {
+        let rel = match self.eng.read_relation_file(&mut cond_lx, "ifnum")? {
             '<' => Rel::Less,
             '>' => Rel::Greater,
             _ => Rel::Equal,
@@ -3005,11 +3021,11 @@ impl Lowerer {
 
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
         let negated = self.eng.take_unless();
-        let then_branch = self.block(lx, Some(&["else", "fi"]))?;
+        let then_branch = self.arm_block(lx, &["else", "fi"])?;
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
             Some(Token::Cs(n)) if n.name() == "else" => {
-                else_branch = self.block(lx, Some(&["fi"]))?;
+                else_branch = self.arm_block(lx, &["fi"])?;
                 // Consume the `\fi`.
                 let _ = lx.next_token(&self.eng.cats);
             }
@@ -3028,16 +3044,25 @@ impl Lowerer {
         }
     }
 
+    /// One arm of a conditional the run decides, with what was reported while
+    /// lowering it printed at its end: in the arm, so only a run that takes
+    /// the arm prints it, as only a tex that takes it scans it.
+    fn arm_block(&mut self, lx: &mut Lexer, stop: &[&str]) -> R<Vec<Cmd>> {
+        let mut arm = self.block(lx, Some(stop))?;
+        self.flush_reports(&mut arm);
+        Ok(arm)
+    }
+
     /// The `\or`-separated cases of a file-level `\ifcase`, the last being
     /// `\else`'s (empty when there is none).
     fn case_arms(&mut self, lx: &mut Lexer) -> R<Vec<Vec<Cmd>>> {
         let mut arms = Vec::new();
         loop {
-            arms.push(self.block(lx, Some(&["or", "else", "fi"]))?);
+            arms.push(self.arm_block(lx, &["or", "else", "fi"])?);
             match lx.next_token(&self.eng.cats) {
                 Some(Token::Cs(n)) if n.name() == "or" => continue,
                 Some(Token::Cs(n)) if n.name() == "else" => {
-                    arms.push(self.block(lx, Some(&["fi"]))?);
+                    arms.push(self.arm_block(lx, &["fi"])?);
                     let _ = lx.next_token(&self.eng.cats);
                     return Ok(arms);
                 }
@@ -3885,7 +3910,7 @@ impl Lowerer {
                 }
                 "ifnum" => {
                     let left = self.msg_number(work)?;
-                    let rel = match self.eng.read_relation_pending(work)? {
+                    let rel = match self.eng.read_relation_pending(work, "ifnum")? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
@@ -3905,7 +3930,7 @@ impl Lowerer {
                 // the file-level dispatch.
                 "ifdim" => {
                     let left = self.dimen_number(work, true)?;
-                    let rel = match self.eng.read_relation_pending(work)? {
+                    let rel = match self.eng.read_relation_pending(work, "ifdim")? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
@@ -4473,6 +4498,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             // Output, or the compilation of a `\rust` block, which the document's
             // own pass compiles again where it is used.
             Cmd::Message(_)
+            | Cmd::Reports(_)
             | Cmd::Write(_)
             | Cmd::FileClose
             | Cmd::Text(_)
@@ -4639,7 +4665,7 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 Cmd::Loop { body, .. } | Cmd::Color { body, .. } | Cmd::Group { body, .. } => {
                     walk(body, regs)
                 }
-                Cmd::Message(_) | Cmd::Write(_) => {}
+                Cmd::Message(_) | Cmd::Reports(_) | Cmd::Write(_) => {}
             }
         }
     }

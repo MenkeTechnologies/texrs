@@ -180,6 +180,10 @@ pub enum Cmd {
     },
     /// `\message{...}` — built piece by piece at run time.
     Message(Vec<MsgOp>),
+    /// Reports the lowerer made, printed where they stand: added to the message
+    /// being built, as a report the VM makes is, so that what is printed next
+    /// begins hard against them -- tex ends an error's context with `print_ln`.
+    Reports(Vec<MsgOp>),
     /// `\immediate\write` to the terminal, built as a message is. §1370's
     /// `write_out` starts it with `print_nl` and ends it with `print_ln`, so it
     /// sits on a line of its own: nothing between it and what came before, and
@@ -284,6 +288,10 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             Cmd::FileClose => out.push_str(&format!("{pad}FileClose\n")),
             Cmd::Message(ops) => {
                 out.push_str(&format!("{pad}Message\n"));
+                render_msg(ops, depth + 1, out);
+            }
+            Cmd::Reports(ops) => {
+                out.push_str(&format!("{pad}Reports\n"));
                 render_msg(ops, depth + 1, out);
             }
             Cmd::Write(ops) => {

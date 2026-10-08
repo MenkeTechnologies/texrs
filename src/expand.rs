@@ -1141,7 +1141,7 @@ impl Engine {
             "iffalse" => false,
             "ifnum" => {
                 let a = self.scan_number(lx, pending_only)?;
-                let rel = self.read_relation(lx, pending_only)?;
+                let rel = self.read_relation(lx, pending_only, "ifnum")?;
                 let b = self.scan_number(lx, pending_only)?;
                 match rel {
                     '<' => a < b,
@@ -1153,7 +1153,7 @@ impl Engine {
             // dimensions -- only the scanner differs.
             "ifdim" => {
                 let a = self.scan_dimen(lx, pending_only)?;
-                let rel = self.read_relation(lx, pending_only)?;
+                let rel = self.read_relation(lx, pending_only, "ifdim")?;
                 let b = self.scan_dimen(lx, pending_only)?;
                 match rel {
                     '<' => a < b,
@@ -1319,15 +1319,25 @@ impl Engine {
         }
     }
 
-    fn read_relation(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
+    /// §503: the relation of an `\ifnum` or `\ifdim` (`test`), the first
+    /// non-blank token after expansion. It must be a `<`, `=` or `>` of
+    /// category 12; anything else is `Missing = inserted`, put back to be
+    /// read again, and the relation is `=`.
+    fn read_relation(&mut self, lx: &mut Lexer, pending_only: bool, test: &str) -> R<char> {
         loop {
             let Some(t) = self.take(lx, pending_only) else {
-                return Err(TexError("Missing = inserted for \\ifnum".into()));
+                return Err(TexError(format!("Missing = inserted for \\{test}")));
             };
             match &t {
                 t if t.is_space() => continue,
-                Token::Char(c, _) if *c == '<' || *c == '>' || *c == '=' => return Ok(*c),
-                _ => return Err(TexError("Missing = inserted for \\ifnum".into())),
+                Token::Char(c @ ('<' | '=' | '>'), Cat::Other) => return Ok(*c),
+                Token::Cs(n) if self.try_expand(lx, *n, pending_only)? => continue,
+                _ => {
+                    lx.back_input(&[t]);
+                    let msg = format!("Missing = inserted for {}{test}", self.esc());
+                    self.report(lx, &msg);
+                    return Ok('=');
+                }
             }
         }
     }
@@ -4555,8 +4565,8 @@ impl Engine {
         self.skip_by(lx)
     }
 
-    pub fn read_relation_file(&mut self, lx: &mut Lexer) -> R<char> {
-        self.read_relation(lx, false)
+    pub fn read_relation_file(&mut self, lx: &mut Lexer, test: &str) -> R<char> {
+        self.read_relation(lx, false, test)
     }
 
     /// `\ifcase` at the top of a file with a selector known while lowering:
@@ -4918,8 +4928,8 @@ impl Engine {
         self.scan_dimen(lx, pending_only)
     }
 
-    pub fn read_relation_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
-        self.read_relation(lx, pending_only)
+    pub fn read_relation_any(&mut self, lx: &mut Lexer, pending_only: bool, test: &str) -> R<char> {
+        self.read_relation(lx, pending_only, test)
     }
 }
 
@@ -4973,8 +4983,8 @@ impl Engine {
     pub fn read_csname_pending(&mut self, lx: &mut Lexer) -> R<String> {
         self.read_csname(lx, true)
     }
-    pub fn read_relation_pending(&mut self, lx: &mut Lexer) -> R<char> {
-        self.read_relation(lx, true)
+    pub fn read_relation_pending(&mut self, lx: &mut Lexer, test: &str) -> R<char> {
+        self.read_relation(lx, true, test)
     }
     /// §494's skip over pending tokens: to the matching `\else` (when
     /// `stop_at_else`) or `\fi`, consuming it, and saying whether it was an

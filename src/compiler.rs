@@ -281,6 +281,8 @@ impl Compiler {
                 self.b.emit(Op::CallBuiltin(ops::MSG_FLUSH, 0), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
+            // No flush: what is built so far waits for the next message.
+            Cmd::Reports(msg) => self.msg_ops(msg)?,
             Cmd::Write(msg) => {
                 self.msg_ops(msg)?;
                 self.b.emit(Op::CallBuiltin(ops::WRITE_FLUSH, 0), self.line);

@@ -1,0 +1,16 @@
+% tex.web S503: the relation of \ifnum or \ifdim is the first non-blank token
+% after expansion, a `<', `=' or `>' of category 12. Anything else is
+% `! Missing = inserted for \ifnum.', put back to be read again, and the
+% relation is `='. What is reported while the test is scanned is printed then,
+% whichever arm the run takes; what is reported in an arm is printed only if
+% the run takes that arm.
+\catcode`\{=1 \catcode`\}=2
+\ifnum 1 1 \message{[a]}\else\message{[b]}\fi
+\count1=3 \ifnum\count1 4 \message{[c]}\else\message{[d]}\fi
+\def\rel{<}\ifnum 1\rel 2 \message{[e]}\else\message{[f]}\fi
+\catcode`\<=11 \ifnum 1<2 \message{[g]}\else\message{[h]}\fi
+\catcode`\<=12
+\escapechar=`\! \ifnum 1 1 \message{[i]}\fi\escapechar=`\\
+\count1=2 \ifnum\count1=1 \count2=\relax\else\message{[j]}\fi
+\count1=1 \ifnum\count1=1 \else\count2=\relax\fi\message{[k]}
+\end
