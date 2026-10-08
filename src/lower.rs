@@ -3141,23 +3141,16 @@ impl Lowerer {
                 continue;
             }
             if let Token::Cs(n) = &t {
-                // Where the file starts, and how many slots one register of it
-                // takes: a glue is four and everything else is one.
-                let file = match n.name() {
-                    "count" => Some((0, 1)),
-                    "dimen" => Some((crate::compiler::DIMEN_BASE, 1)),
-                    "skip" => Some((crate::compiler::SKIP_BASE, crate::compiler::SKIP_STRIDE)),
-                    "muskip" => Some((crate::compiler::MUSKIP_BASE, crate::compiler::SKIP_STRIDE)),
-                    _ => None,
-                };
-                if let Some((base, stride)) = file {
-                    let reg = self.eng.scan_number_any(lx, pending)?;
-                    return Ok(Some(signed(negative, base + reg * stride)));
+                if let Some((slot, _)) = self.register_slot(lx, *n, pending)? {
+                    return Ok(Some(signed(negative, slot)));
                 }
-                // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name
-                // is that register, in every position the spelt-out form works.
-                if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
-                    return Ok(Some(signed(negative, r)));
+                if matches!(n.name(), "the" | "number") {
+                    eaten.push(t);
+                    if let Some(slot) = self.expanded_register(lx, n.name() == "the", pending)? {
+                        return Ok(Some(signed(negative, slot)));
+                    }
+                    lx.push_back(&eaten);
+                    return Ok(None);
                 }
             }
             // Not a register: everything read goes back in the order it was
@@ -3166,6 +3159,82 @@ impl Lowerer {
             lx.push_back(&eaten);
             return Ok(None);
         }
+    }
+
+    /// The slot a register reference names, reading the register number after
+    /// `\count`, `\dimen`, `\skip` or `\muskip`; `None`, with nothing consumed,
+    /// when `name` is not one. The register number read comes back as well,
+    /// `None` for a `\countdef`-style name, which is written with none.
+    fn register_slot(
+        &mut self,
+        lx: &mut Lexer,
+        name: CsId,
+        pending: bool,
+    ) -> R<Option<(i64, Option<i64>)>> {
+        // Where the file starts, and how many slots one register of it takes:
+        // a glue is four and everything else is one.
+        let file = match name.name() {
+            "count" => Some((0, 1)),
+            "dimen" => Some((crate::compiler::DIMEN_BASE, 1)),
+            "skip" => Some((crate::compiler::SKIP_BASE, crate::compiler::SKIP_STRIDE)),
+            "muskip" => Some((crate::compiler::MUSKIP_BASE, crate::compiler::SKIP_STRIDE)),
+            _ => None,
+        };
+        if let Some((base, stride)) = file {
+            let reg = self.eng.scan_number_any(lx, pending)?;
+            return Ok(Some((base + reg * stride, Some(reg))));
+        }
+        // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name is that
+        // register, in every position the spelt-out form works.
+        match self.eng.numeric_cs(name) {
+            Some(crate::expand::NumericCs::Register(r)) => Ok(Some((r, None))),
+            _ => Ok(None),
+        }
+    }
+
+    /// `\the` or `\number` of a register, standing where an integer is
+    /// scanned, as the register itself; `None`, with what it read put back,
+    /// when that is not what follows.
+    ///
+    /// Both are expandable (§465, §470), so `scan_int` (§440) reads the digits
+    /// they produce: `\count2=\the\count1` and `\ifnum\number\count1>5` take
+    /// the register's value. Only the digits of an INTEGER are that value --
+    /// `\the\dimen0` writes `1.0pt`, of which the scan keeps the `1` -- so
+    /// `\the` is taken here only for a count register, where `\number` coerces
+    /// any of the four (§430) exactly as the register alone would.
+    ///
+    /// When a digit follows, §444 goes on reading it into the same number, so
+    /// the value is the register's digits and those after it together, which
+    /// no slot holds; the tokens go back for the scanner to read instead.
+    fn expanded_register(&mut self, lx: &mut Lexer, the: bool, pending: bool) -> R<Option<i64>> {
+        let Some(t) = self.eng.take_any(lx, pending) else {
+            return Ok(None);
+        };
+        let Token::Cs(n) = t else {
+            lx.push_back(&[t]);
+            return Ok(None);
+        };
+        let Some((slot, number)) = self.register_slot(lx, n, pending)? else {
+            lx.push_back(&[t]);
+            return Ok(None);
+        };
+        let next = self.eng.take_any(lx, pending);
+        let digit_follows = matches!(next, Some(Token::Char(d, Cat::Other)) if d.is_ascii_digit());
+        if let Some(next) = next {
+            lx.push_back(&[next]);
+        }
+        if (the && slot >= crate::compiler::DIMEN_BASE) || digit_follows {
+            // The reference as it was written, its number respelt with the
+            // space that ends it, so the scanner reads the same register.
+            let mut spelt = vec![t];
+            if let Some(number) = number {
+                spelt.extend(number.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
+                spelt.push(Token::Char(' ', Cat::Space));
+            }
+            lx.push_back(&spelt);
+            return Ok(None);
+        }
+        Ok(Some(slot))
     }
 
     /// A number operand: a literal, a register read at run time, or a call into

@@ -1,0 +1,12 @@
+% \the and \number are expandable (tex.web S465, S470), so where S440's scan_int
+% reads a number they stand for the register's digits: an assignment, a
+% conditional's operand, \romannumeral and \number all take its value. A sign
+% before them applies to it as it would to the register itself.
+\catcode`\{=1 \catcode`\}=2
+\count1=12 \countdef\c=1
+\count2=\the\count1 \count3=\number\c \count4=-\the\count1
+\message{[\the\count2][\the\count3][\the\count4]}
+\message{[\ifnum\the\count1>5 Y\else N\fi][\romannumeral\the\c\relax][\number-\the\count1 ]}
+\ifnum\number\count1<13 \message{[LT]}\else\message{[GE]}\fi
+\dimen0=2pt \count5=\number\dimen0 \message{[\the\count5]}
+\end

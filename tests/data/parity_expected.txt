@@ -252,6 +252,8 @@ a! Bad character code (256).l.4 \message{a}\chardef\x=256                       
 a1 m a2 m a3 [3]
 #==# tail_loop_through_expandafter.tex
 5 10 7 4 1
+#==# the_register_where_a_number_is_scanned.tex
+[12][12][-12] [Y][xii\relax ][-12] [LT] [131072]
 #==# toks_assign_expands.tex
 [a##bc] [xy] [z] [Y\y ]
 #==# toks_registers.tex
