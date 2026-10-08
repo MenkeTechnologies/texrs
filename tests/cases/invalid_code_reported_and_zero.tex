@@ -1,0 +1,13 @@
+% tex.web S1232: a code past the table's largest legal value is reported --
+% `should be in the range 0..n', or for \delcode, where any negative value is
+% legal, `should be at most n' -- and 0 is stored in its place.
+\catcode`\{=1 \catcode`\}=2
+\catcode`\A=16 \message{[\the\catcode`\A]}
+\catcode`\B=-1 \message{[\the\catcode`\B]}
+\mathcode`\a="8001 \message{[\the\mathcode`\a]}
+\lccode`\a=256 \message{[\the\lccode`\a]}
+\uccode`\a=-1 \message{[\the\uccode`\a]}
+\sfcode`\a=32768 \message{[\the\sfcode`\a]}
+\delcode`\a=-5 \message{[\the\delcode`\a]}
+\delcode`\b="1000000 \message{[\the\delcode`\b]}
+\end

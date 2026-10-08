@@ -162,6 +162,8 @@ awb c d exyfA\a \a##[7][7]T\a via a macrogh[9][7]
 [11.0pt] [-1.0pt] [3.0pt] [7.0pt] [144.54pt] [7.0pt plus 7.0fil] [0.44289pt]
 #==# internal_quantity_as_a_number.tex
 [819200] [196608] [-163840] [37.0pt]
+#==# invalid_code_reported_and_zero.tex
+! Invalid code (16), should be in the range 0..15.l.5 \catcode`\A=16                    \message{[\the\catcode`\A]}[0]! Invalid code (-1), should be in the range 0..15.l.6 \catcode`\B=-1                    \message{[\the\catcode`\B]}[0]! Invalid code (32769), should be in the range 0..32768.l.7 \mathcode`\a="8001                        \message{[\the\mathcode`\a]}[0]! Invalid code (256), should be in the range 0..255.l.8 \lccode`\a=256                    \message{[\the\lccode`\a]}[0]! Invalid code (-1), should be in the range 0..255.l.9 \uccode`\a=-1                   \message{[\the\uccode`\a]}[0]! Invalid code (32768), should be in the range 0..32767.l.10 \sfcode`\a=32768                       \message{[\the\sfcode`\a]}[0] [-5]! Invalid code (16777216), should be at most 16777215.l.12 \delcode`\b="1000000                           \message{[\the\delcode`\b]}[0] )(see the transcript file for additional information
 #==# keyword_through_a_macro.tex
 [3.0pt plus 1.0pt minus 2.0pt][1.0pt][4.0pt minus 1.0pt]
 #==# let_alias.tex

@@ -46,17 +46,33 @@ impl Table {
         }
     }
 
-    /// The largest value TeX accepts, and the message it gives past it
-    /// (`tex.web` §1232).
-    fn limit(self) -> (i64, &'static str) {
+    /// The largest value TeX accepts (`tex.web` §1232's `n`).
+    fn largest(self) -> i64 {
         match self {
             // "8000 is the largest, and it means "active in math".
-            Table::Math => (0x8000, "Invalid code"),
-            Table::Lower | Table::Upper => (255, "Invalid code"),
-            Table::Space => (0x7FFF, "Invalid code"),
-            Table::Delimiter => (0xFFFFFF, "Invalid code"),
+            Table::Math => 0x8000,
+            Table::Lower | Table::Upper => 255,
+            Table::Space => 0x7FFF,
+            Table::Delimiter => 0xFF_FFFF,
         }
     }
+
+    /// §1232's complaint about `v`, or `None` when the table may hold it.
+    pub fn invalid(self, v: i64) -> Option<String> {
+        let n = self.largest();
+        match self {
+            // Any negative delimiter code is legal: it means "not a
+            // delimiter", which is what INITEX's -1 everywhere says.
+            Table::Delimiter => (v > n).then(|| format!("Invalid code ({v}), should be at most {n}")),
+            _ => invalid_in_range(v, n),
+        }
+    }
+}
+
+/// §1232's complaint for a table whose codes run 0 to `n`, the catcode table
+/// among them, or `None` when `v` is one of them.
+pub fn invalid_in_range(v: i64, n: i64) -> Option<String> {
+    (!(0..=n).contains(&v)).then(|| format!("Invalid code ({v}), should be in the range 0..{n}"))
 }
 
 /// The four tables, with INITEX's defaults.
@@ -145,9 +161,8 @@ impl CharCodes {
     }
 
     /// Set it, refusing a value the table cannot hold.
-    pub fn set(&mut self, table: Table, c: char, v: i64) -> Result<(), &'static str> {
-        let (limit, msg) = table.limit();
-        if !(0..=limit).contains(&v) && !(table == Table::Delimiter && v == -1) {
+    pub fn set(&mut self, table: Table, c: char, v: i64) -> Result<(), String> {
+        if let Some(msg) = table.invalid(v) {
             return Err(msg);
         }
         if (c as u32) < 256 {

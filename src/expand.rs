@@ -3617,10 +3617,13 @@ impl Engine {
     fn do_catcode(&mut self, lx: &mut Lexer) -> R<()> {
         let c = self.scan_char_code(lx, false)?;
         self.skip_equals(lx)?;
-        let val = self.scan_number(lx, false)?;
-        let Some(cat) = cat_from_i64(val) else {
-            return Err(TexError("Invalid code".into()));
-        };
+        let mut val = self.scan_number(lx, false)?;
+        // §1232: a code past the table's range is reported and 0 stored.
+        if let Some(msg) = crate::charcodes::invalid_in_range(val, 15) {
+            self.report(lx, &msg);
+            val = 0;
+        }
+        let cat = cat_from_i64(val).expect("0..15 is a category");
         self.set_cat(c, cat);
         Ok(())
     }
@@ -3630,11 +3633,14 @@ impl Engine {
     fn do_charcode(&mut self, lx: &mut Lexer, table: crate::charcodes::Table) -> R<()> {
         let c = self.scan_char_code(lx, false)?;
         self.skip_equals(lx)?;
-        let val = self.scan_number(lx, false)?;
+        let mut val = self.scan_number(lx, false)?;
+        // §1232: a code past the table's range is reported and 0 stored.
+        if let Some(msg) = table.invalid(val) {
+            self.report(lx, &msg);
+            val = 0;
+        }
         self.save(Save::CharCode(table, c, self.charcodes.get(table, c)));
-        self.charcodes
-            .set(table, c, val)
-            .map_err(|e| TexError(e.to_string()))
+        self.charcodes.set(table, c, val).map_err(TexError)
     }
 
     /// The same, for a caller that is lowering rather than expanding.
