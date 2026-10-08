@@ -1,0 +1,11 @@
+% tex.web S478 links \the\toks's list straight into an \edef body, past S479's
+% parameter scan, so a `#' in the register is an ordinary macro-parameter
+% character of the body: the meaning shows it doubled (S294), and expanding the
+% macro gives back one `#', which a message shows doubled again.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\toks0={a#b}
+\edef\x{\the\toks0}
+\message{[\meaning\x][\x]}
+\toks1={#1}\edef\y#1{(#1)\the\toks1}
+\message{[\meaning\y][\y z]}
+\end

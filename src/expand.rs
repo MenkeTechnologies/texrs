@@ -3892,7 +3892,7 @@ impl Engine {
                 // §478: `\the\toks` in an `\edef` body is the list itself, put
                 // in the body without being expanded again.
                 Token::Cs(name) if name.name() == "the" => match self.the_token_list(lx, true)? {
-                    Some(list) => out.extend(list),
+                    Some(list) => out.extend(as_body(&list)),
                     None => out.push(t),
                 },
                 Token::Cs(name) => {
@@ -3976,7 +3976,7 @@ impl Engine {
                 // different macro: see `the_token_list`.
                 if name.name() == "the" {
                     if let Some(list) = self.the_token_list(&mut lx, true)? {
-                        out.extend(list);
+                        out.extend(as_body(&list));
                         continue;
                     }
                 }
@@ -4785,6 +4785,24 @@ impl Engine {
         self.protected = false;
         Ok(())
     }
+}
+
+/// A token list as an `\edef` body holds it, for §478's `the_toks` arm.
+///
+/// §478 links `\the\toks`'s list straight into the body, past the parameter
+/// scan of §479, so a macro-parameter character in it is an ordinary `#` of the
+/// body: `\edef\x{\the\toks0}` over `a#b` means `macro:->a##b`, and `\x`
+/// expands to `a#b`. A body here is stored as written, where a lone `#` is the
+/// start of a parameter and `##` is one `#`, so each one is doubled.
+fn as_body(list: &[Token]) -> Vec<Token> {
+    let mut out = Vec::with_capacity(list.len());
+    for t in list {
+        if matches!(t, Token::Char(_, Cat::Param)) {
+            out.push(*t);
+        }
+        out.push(*t);
+    }
+    out
 }
 
 /// Check a macro's parameter text the way `tex.web` §476 does.

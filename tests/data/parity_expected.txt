@@ -90,6 +90,8 @@ ZERO
 [3-4] [2.5pt/7]
 #==# edef_over_a_dimension.tex
 [3.0pt][9.0pt]
+#==# edef_the_toks_keeps_parameter_character.tex
+[macro:->a##b][a##b] [macro:#1->(#1)##1][(z)##1]
 #==# edef_with_parameters.tex
 [A|B|7]
 #==# endinput_ends_after_the_line.tex
