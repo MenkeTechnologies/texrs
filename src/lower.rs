@@ -12,7 +12,7 @@
 //! instead of a Rust `if`.
 
 use crate::catcode::Cat;
-use crate::expand::{Engine, Macro, Meaning, TexError};
+use crate::expand::{Engine, GroupKind, Macro, Meaning, TexError};
 use crate::ir::{Arith, Cmd, MsgOp, Num, Rel};
 use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
@@ -623,7 +623,7 @@ impl Lowerer {
                         // A group scopes the macro table AND the registers it
                         // writes; the latter is run-time state, so the body is
                         // lowered and wrapped in save/restore.
-                        self.eng.compile_time_begin_group();
+                        self.eng.compile_time_begin_group(GroupKind::Simple);
                         let mark = self.globals.len();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
@@ -655,6 +655,17 @@ impl Lowerer {
                         } else {
                             out.push(Cmd::Group { saves, keeps, body });
                         }
+                    }
+                    // §1069: a `}` with no group open, or with a `\begingroup`'s
+                    // innermost, closes nothing; it is reported and dropped.
+                    Token::Char(_, Cat::EndGroup)
+                        if self.eng.innermost_group() != Some(GroupKind::Simple) =>
+                    {
+                        let msg = match self.eng.innermost_group() {
+                            None => "Too many }'s".to_string(),
+                            Some(_) => format!("Extra }}, or forgotten {}endgroup", self.eng.esc()),
+                        };
+                        self.eng.report(lx, &msg);
                     }
                     Token::Char(_, Cat::EndGroup) => {
                         self.close_colour(&mut out, &mut colour_open);
@@ -1440,7 +1451,7 @@ impl Lowerer {
                 // the two group forms disagreed: `{\count0=2}` restored and
                 // `\begingroup\count0=2\endgroup` did not.
                 "begingroup" => {
-                    self.eng.compile_time_begin_group();
+                    self.eng.compile_time_begin_group(GroupKind::SemiSimple);
                     let mark = self.globals.len();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
                     // The `\endgroup` that stopped the block was pushed back
@@ -1472,7 +1483,19 @@ impl Lowerer {
                         break;
                     }
                 }
+                // §1065 and §1064's `off_save`: an `\endgroup` with no group
+                // open is reported and dropped.
+                "endgroup" if self.eng.innermost_group().is_none() => {
+                    let msg = format!("Extra {}endgroup", self.eng.esc());
+                    self.eng.report(lx, &msg);
+                }
                 "endgroup" => self.eng.compile_time_end_group()?,
+                // §1135: an `\endcsname` with no `\csname` open is reported and
+                // dropped.
+                "endcsname" => {
+                    let msg = format!("Extra {}endcsname", self.eng.esc());
+                    self.eng.report(lx, &msg);
+                }
                 // `tex.web` §1288: read the group unexpanded, put every
                 // character through `\uccode`/`\lccode`, and push the result
                 // back to be read again. The catcodes travel unchanged, which

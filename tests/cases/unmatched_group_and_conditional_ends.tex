@@ -1,0 +1,12 @@
+% What closes nothing is reported and dropped, and the run goes on: an \else,
+% \or or \fi with no conditional open (tex.web S510), an \endcsname with no
+% \csname (S1135), a `}' or an \endgroup with no group open (S1069, S1064),
+% and a `}' where a \begingroup's group is the innermost (S1069).
+\catcode`\{=1 \catcode`\}=2
+\fi\message{[a]}\else\message{[b]}\or\message{[c]}
+\endcsname\message{[d]}
+}\message{[e]}
+\endgroup\message{[f]}
+\count1=1 \begingroup\count1=2 }\message{[\the\count1]}\endgroup\message{[\the\count1]}
+\escapechar=`\/ \fi\escapechar=`\\ \message{[g]}
+\end

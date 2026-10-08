@@ -119,6 +119,15 @@ pub struct GlueParts {
     pub shrink_order: i64,
 }
 
+/// What opened a group (`tex.web` §269): a brace, or `\begingroup`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupKind {
+    /// §269's `simple_group`, opened by `{`.
+    Simple,
+    /// §269's `semi_simple_group`, opened by `\begingroup`.
+    SemiSimple,
+}
+
 /// `\the` or `\number` of a register, read where a quantity is scanned; see
 /// [`Engine::take_expanded_register`].
 pub struct ExpandedRegister {
@@ -212,6 +221,9 @@ pub struct Engine {
     mag_set: i64,
     /// One frame per open group; each holds the undo records for that group.
     groups: Vec<Vec<Save>>,
+    /// What opened each of `groups`, innermost last: §269's `cur_group`, which
+    /// decides what a `}` or an `\endgroup` that does not match it is.
+    group_kinds: Vec<GroupKind>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
     conds: Vec<CondState>,
     /// Set by `\global`, cleared by the assignment it prefixes.
@@ -407,6 +419,7 @@ impl Engine {
             read_streams: (0..16).map(|_| None).collect(),
             mag_set: 0,
             groups: Vec::new(),
+            group_kinds: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
             toks: std::collections::HashMap::new(),
@@ -437,8 +450,15 @@ impl Engine {
 
     // ── grouping ─────────────────────────────────────────────────────────
 
-    fn begin_group(&mut self) {
+    fn begin_group(&mut self, kind: GroupKind) {
         self.groups.push(Vec::new());
+        self.group_kinds.push(kind);
+    }
+
+    /// What opened the innermost open group, or `None` at §269's
+    /// `bottom_level`.
+    pub fn innermost_group(&self) -> Option<GroupKind> {
+        self.group_kinds.last().copied()
     }
 
     /// `\aftergroup<token>` — hold the token and insert it after the `}`.
@@ -462,6 +482,7 @@ impl Engine {
         let Some(frame) = self.groups.pop() else {
             return Err(TexError("Too many }'s".into()));
         };
+        self.group_kinds.pop();
         // §282: the tokens `\aftergroup` held come out in the order they were
         // given, AFTER the group's own restores. Collected before the undo pass
         // so the reverse walk below does not reverse them too, and buffered
@@ -738,7 +759,7 @@ impl Engine {
     fn step(&mut self, lx: &mut Lexer, tok: Token) -> R<bool> {
         match &tok {
             Token::Char(_, Cat::BeginGroup) => {
-                self.begin_group();
+                self.begin_group(GroupKind::Simple);
                 return Ok(false);
             }
             Token::Char(_, Cat::EndGroup) => {
@@ -795,7 +816,7 @@ impl Engine {
                 self.global = false;
                 return out;
             }
-            "begingroup" => self.begin_group(),
+            "begingroup" => self.begin_group(GroupKind::SemiSimple),
             "endgroup" => {
                 self.end_group()?;
                 let after = self.take_after_group();
@@ -900,7 +921,7 @@ impl Engine {
                         self.skip_to(lx, false, pending_only)?;
                         Ok(true)
                     }
-                    None => Err(TexError("Extra \\else".into())),
+                    None => Ok(self.extra_fi_or_else(lx, "else")),
                 }
             }
             "or" => match self.conds.pop() {
@@ -908,11 +929,11 @@ impl Engine {
                     self.skip_to(lx, false, pending_only)?;
                     Ok(true)
                 }
-                None => Err(TexError("Extra \\or".into())),
+                None => Ok(self.extra_fi_or_else(lx, "or")),
             },
             "fi" => match self.conds.pop() {
                 Some(_) => Ok(true),
-                None => Err(TexError("Extra \\fi".into())),
+                None => Ok(self.extra_fi_or_else(lx, "fi")),
             },
             "expandafter" => {
                 self.do_expandafter(lx, pending_only)?;
@@ -1017,6 +1038,14 @@ impl Engine {
                 t
             }
         }
+    }
+
+    /// §510: an `\else`, `\or` or `\fi` with no conditional open is reported
+    /// and expands to nothing. Always `true`, the answer `try_expand` gives.
+    fn extra_fi_or_else(&mut self, lx: &Lexer, name: &str) -> bool {
+        let msg = format!("Extra {}{name}", self.esc());
+        self.report(lx, &msg);
+        true
     }
 
     /// `\expandafter\A\B` — hold `\A`, expand `\B` once, then put `\A` back.
@@ -4718,8 +4747,8 @@ impl Engine {
         }
         Err(TexError("Runaway \\intercept: missing {".into()))
     }
-    pub fn compile_time_begin_group(&mut self) {
-        self.begin_group();
+    pub fn compile_time_begin_group(&mut self, kind: GroupKind) {
+        self.begin_group(kind);
     }
     pub fn compile_time_end_group(&mut self) -> R<()> {
         self.end_group()
