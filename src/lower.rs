@@ -3019,13 +3019,21 @@ impl Lowerer {
         Ok(cmd)
     }
 
+    /// The arms of a conditional the run decides. What was reported while
+    /// lowering an arm is printed at its end, in the arm, so only a run that
+    /// takes the arm prints it, as only a tex that takes it scans it. Done in
+    /// line rather than in a helper: this recursion is what a mutually
+    /// recursive macro pair deepens, and the debug build's stack is what
+    /// `tests/recursive_macro.rs` holds it to.
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
         let negated = self.eng.take_unless();
-        let then_branch = self.arm_block(lx, &["else", "fi"])?;
+        let mut then_branch = self.block(lx, Some(&["else", "fi"]))?;
+        self.flush_reports(&mut then_branch);
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
             Some(Token::Cs(n)) if n.name() == "else" => {
-                else_branch = self.arm_block(lx, &["fi"])?;
+                else_branch = self.block(lx, Some(&["fi"]))?;
+                self.flush_reports(&mut else_branch);
                 // Consume the `\fi`.
                 let _ = lx.next_token(&self.eng.cats);
             }
@@ -3044,25 +3052,20 @@ impl Lowerer {
         }
     }
 
-    /// One arm of a conditional the run decides, with what was reported while
-    /// lowering it printed at its end: in the arm, so only a run that takes
-    /// the arm prints it, as only a tex that takes it scans it.
-    fn arm_block(&mut self, lx: &mut Lexer, stop: &[&str]) -> R<Vec<Cmd>> {
-        let mut arm = self.block(lx, Some(stop))?;
-        self.flush_reports(&mut arm);
-        Ok(arm)
-    }
-
     /// The `\or`-separated cases of a file-level `\ifcase`, the last being
     /// `\else`'s (empty when there is none).
     fn case_arms(&mut self, lx: &mut Lexer) -> R<Vec<Vec<Cmd>>> {
         let mut arms = Vec::new();
         loop {
-            arms.push(self.arm_block(lx, &["or", "else", "fi"])?);
+            let mut arm = self.block(lx, Some(&["or", "else", "fi"]))?;
+            self.flush_reports(&mut arm);
+            arms.push(arm);
             match lx.next_token(&self.eng.cats) {
                 Some(Token::Cs(n)) if n.name() == "or" => continue,
                 Some(Token::Cs(n)) if n.name() == "else" => {
-                    arms.push(self.arm_block(lx, &["fi"])?);
+                    let mut arm = self.block(lx, Some(&["fi"]))?;
+                    self.flush_reports(&mut arm);
+                    arms.push(arm);
                     let _ = lx.next_token(&self.eng.cats);
                     return Ok(arms);
                 }
