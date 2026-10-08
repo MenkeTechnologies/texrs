@@ -236,6 +236,8 @@ Runaway argument?{x! Paragraph ended before \a was complete.<to be read again>  
 [X]{Y}
 #==# param_brace_illegal_number.tex
 ! Illegal parameter number in definition of \greet.<to be read again>                    1l.2 \def\greet#{1HELLO-#1                         }1HELLO-##1{WORLD} )(see the transcript file for additional information
+#==# parameter_numbers_checked.tex
+! Parameters must be numbered consecutively.<to be read again>                    2l.9 \def\a#2            {}\message{[\meaning\a]}[macro:#12->]! Parameters must be numbered consecutively.<to be read again>                    3l.10 \gdef\a#1#3                {}\message{[\meaning\a]}[macro:#1#23->]! Parameters must be numbered consecutively.<to be read again>                    xl.11 \def\a#1#x               {[#1]}\message{[\meaning\a]}[macro:#1#2x->[#1]]! You already have nine parameters.l.12 \def\a#1#2#3#4#5#6#7#8#9#0                               {}\message{[\meaning\a]}[macro:#1#2#3#4#5#6#7#8#9->]! Illegal parameter number in definition of \a.<to be read again>                    2l.13 \def\a#1{#2                #1}\message{[\meaning\a]}[macro:#1->##2#1]! Illegal parameter number in definition of \a.<to be read again>                    \relax l.14 \def\a#1{#\relax                     }\message{[\meaning\a]}[macro:#1->##\relax ] [macro:#1->##1#1][##1q]! Illegal parameter number in definition of \a.<to be read again>                    1l.16 \def\a{#1              }\message{[\meaning\a]}[macro:->##1] )(see the transcript file for additional information
 #==# plain_count0.tex
 [1]
 #==# plain_loop_repeat.tex

@@ -3045,12 +3045,81 @@ impl Engine {
                     params.push(next);
                     return Ok((params, Some(next)));
                 }
+                // §476: parameters are numbered 1 to 9 in order. A tenth is
+                // reported and dropped with the token after it; a wrong
+                // number is reported, put back to be read again as text, and
+                // the parameter takes the number it should have had.
+                let count = params
+                    .iter()
+                    .filter(|p| matches!(p, Token::Char(_, Cat::Param)))
+                    .count() as u8;
+                if count == 9 {
+                    self.report(lx, "You already have nine parameters");
+                    continue;
+                }
+                let want = char::from(b'1' + count);
+                if !matches!(next, Token::Char(c, _) if c == want) {
+                    lx.back_input(&[next]);
+                    self.report(lx, "Parameters must be numbered consecutively");
+                }
                 params.push(t);
-                params.push(next);
+                params.push(Token::Char(want, Cat::Other));
                 continue;
             }
             params.push(t);
         }
+    }
+
+    /// §473's body of a `\def`, read to its matching `}` with §479's check on
+    /// each `#`: `##` and `#1` up to the parameter count stand, and anything
+    /// else is `Illegal parameter number in definition of \a`, the token put
+    /// back to be read again and the `#` kept as a macro parameter character
+    /// (`##` in texrs's spelling of one).
+    fn read_def_body(&mut self, lx: &mut Lexer, name: CsId, params: &[Token]) -> R<Vec<Token>> {
+        let count = params
+            .iter()
+            .filter(|p| matches!(p, Token::Char(_, Cat::Param)))
+            .count() as u32;
+        let mut depth = 1usize;
+        let mut out = Vec::new();
+        while let Some(t) = lx.next_token(&self.cats) {
+            match &t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(out);
+                    }
+                }
+                Token::Char(_, Cat::Param) => {
+                    let Some(next) = lx.next_token(&self.cats) else {
+                        break;
+                    };
+                    let legal = match next {
+                        Token::Char(_, Cat::Param) => true,
+                        Token::Char(c, _) => c.to_digit(10).is_some_and(|d| d >= 1 && d <= count),
+                        Token::Cs(_) => false,
+                    };
+                    out.push(t);
+                    match legal {
+                        true => out.push(next),
+                        false => {
+                            lx.back_input(&[next]);
+                            let msg = format!(
+                                "Illegal parameter number in definition of {}",
+                                self.sprint_cs(name)
+                            );
+                            self.report(lx, &msg);
+                            out.push(t);
+                        }
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(t);
+        }
+        Err(TexError("Runaway argument".into()))
     }
 
     fn do_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
@@ -3059,7 +3128,7 @@ impl Engine {
         let name = self.scan_defined_name(lx)?;
         let (params, hash_brace) = self.scan_parameter_text(lx)?;
         validate_params(&params)?;
-        let raw = self.read_balanced(lx)?;
+        let raw = self.read_def_body(lx, name, &params)?;
         let mut body = match expand_body {
             true => self.expand_to_tokens(lx, &raw)?,
             false => raw,

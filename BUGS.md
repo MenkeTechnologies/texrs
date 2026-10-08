@@ -136,10 +136,11 @@ texrs output reached tracked lualatex references in
   the parameter text at definition time and the crashing input is kept as
   `fuzz/corpus/lower/param_brace_zero_params.tex` — renamed out of its `crash_`
   prefix when it stopped crashing, which is how `tests/fuzz_smoke.rs` reports a
-  seed that has started compiling. What it now compiles to is a divergence of
-  its own: with `#{` there are no NUMBERED parameters, so tex reports
-  `! Illegal parameter number in definition of \greet.` where texrs accepts the
-  body. `tests/cases/param_brace_illegal_number.tex` pins it.
+  seed that has started compiling. With `#{` there are no NUMBERED parameters,
+  so `#1` in its body is §479's `! Illegal parameter number in definition of
+  \greet.`, reported and recovered from as tex does (the `#` kept, the `1`
+  read again); `tests/cases/param_brace_illegal_number.tex` and
+  `parameter_numbers_checked.tex` pin it with §476's two parameter-text errors.
 - **`\edef` does not freeze a conditional.** tex decides `\ifcase`/`\ifodd`
   inside an `\edef` body while READING it, so the body becomes the token run
   the branch produced and a later register change cannot move it. texrs keeps

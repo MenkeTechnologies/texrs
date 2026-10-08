@@ -50,18 +50,3 @@ outer_forbidden_use.tex
 #                  stops, so enforcing it cannot reach parity either. Recorded
 #                  rather than half-enforced: a false positive here would
 #                  refuse a document that works.
-param_brace_illegal_number.tex
-#                  `\def\greet#{1HELLO-#1}' -- `#{' takes NO numbered
-#                  parameter (tex.web 476 puts the brace in the parameter text
-#                  as a delimiter, and the macro has none), so `#1' in the body
-#                  is illegal. tex reports `! Illegal parameter number in
-#                  definition of \greet.', recovers by doubling the `#', and
-#                  prints `1HELLO-##1{WORLD}'; texrs accepts the body and reads
-#                  `#1' as the delimited argument, printing `1HELLO-{WORLD}'.
-#                  The recovery is the same error model recorded above, but the
-#                  DEFINITION is wrong here rather than only the recovery.
-#                  Found by `#{' being implemented: the input had been kept as
-#                  fuzz/corpus/lower/crash_param_brace.tex because it PANICKED,
-#                  and once it stopped panicking tests/fuzz_smoke.rs reported it
-#                  as a seed that now compiles cleanly. Renamed to
-#                  fuzz/corpus/lower/param_brace_zero_params.tex.

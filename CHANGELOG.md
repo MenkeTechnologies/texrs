@@ -32,6 +32,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A parameter text numbered out of order, a tenth parameter (§476) and a `#`
+  in a `\def` body before anything but `#` or a parameter's number (§479) are
+  reported and recovered from as tex does; texrs stopped the run, or took
+  `#1` in the body of a `#{` macro as an argument.
 - `\long` is enforced (§392-§399): a `\par` in an argument of a macro that is
   not `\long` is `Runaway argument?` with what the argument held, then
   `Paragraph ended before \a was complete` with the `\par` put back, and the
