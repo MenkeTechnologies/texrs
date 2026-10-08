@@ -84,6 +84,10 @@ pub struct Lexer {
     /// expander to report: the mouth has no error channel of its own. See
     /// [`Lexer::take_invalid`].
     invalid: std::cell::RefCell<Vec<String>>,
+    /// The levels §325's `back_input` made that no read has gone past,
+    /// innermost last: the depth of `pending` each sits on and its tokens, in
+    /// reading order. See [`Lexer::backed_up`].
+    backed: Vec<(usize, Vec<Token>)>,
 }
 
 impl Lexer {
@@ -116,6 +120,7 @@ impl Lexer {
             decoded_at: None,
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
+            backed: Vec::new(),
         }
     }
 
@@ -189,6 +194,7 @@ impl Lexer {
             decoded_at: None,
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
+            backed: Vec::new(),
         }
     }
 
@@ -206,6 +212,44 @@ impl Lexer {
         for t in toks.iter().rev() {
             self.pending.push(*t);
         }
+    }
+
+    /// §325's `back_input` (and §323's `back_list` for several): put tokens a
+    /// scanner read too far back to be read again, as a level of their own
+    /// that an error's context shows as `<to be read again>`. A token put
+    /// back by [`Lexer::push_back`] -- a macro body, a peek -- is not one.
+    pub fn back_input(&mut self, toks: &[Token]) {
+        let base = self.pending.len();
+        // A level something has read below is gone, whatever came after it.
+        self.backed.retain(|(b, _)| *b < base);
+        self.push_back(toks);
+        self.backed.push((base, toks.to_vec()));
+    }
+
+    /// The levels [`Lexer::back_input`] made that §311's `show_context` shows,
+    /// innermost first: each one's tokens and how many of them have been
+    /// read. A level read to its end is §314's `<recently read>`, and is shown
+    /// only while it is the innermost level, until the next read ends it.
+    ///
+    /// Judged by depth and by the tokens still being the ones put back, so a
+    /// peek that takes a token and returns it leaves the level as it was, and
+    /// a level something else was pushed over unread is not shown.
+    pub fn backed_up(&self) -> Vec<(&[Token], usize)> {
+        let depth = self.pending.len();
+        let mut out = Vec::new();
+        for (base, toks) in self.backed.iter().rev() {
+            let Some(above) = depth.checked_sub(*base) else {
+                continue;
+            };
+            let unread = above.min(toks.len());
+            // The unread tokens sit at `base..`, the list's last lowest.
+            let intact = (0..unread).all(|i| self.pending[base + i] == toks[toks.len() - 1 - i]);
+            let innermost = out.is_empty() && above == unread;
+            if intact && (unread > 0 || innermost) {
+                out.push((toks.as_slice(), toks.len() - unread));
+            }
+        }
+        out
     }
 
     /// The 1-based line the mouth has reached, for a diagnostic that has to
@@ -276,7 +320,7 @@ impl Lexer {
     /// and a cut front is marked `...`; line two begins there, so it is the
     /// HEAD that is kept and a cut tail is marked `...`. The widths are tex's
     /// own `error_line` and `half_error_line`.
-    fn context_lines(tag: &str, before: &str, after: &str) -> String {
+    pub fn context_lines(tag: &str, before: &str, after: &str) -> String {
         const ERROR_LINE: usize = 79;
         const HALF_ERROR_LINE: usize = 50;
         let l = tag.chars().count();
@@ -507,6 +551,11 @@ impl Lexer {
 
     /// One token, or `None` at end of input.
     pub fn next_token(&mut self, cats: &CatTable) -> Option<Token> {
+        // §357: a level read to its end is ended by the NEXT read, not by
+        // the one that took its last token; until then it is shown as
+        // `<recently read>`.
+        let depth = self.pending.len();
+        self.backed.retain(|(base, _)| *base < depth);
         if let Some(t) = self.pending.pop() {
             return Some(t);
         }

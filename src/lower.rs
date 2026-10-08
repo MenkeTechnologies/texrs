@@ -1159,7 +1159,7 @@ impl Lowerer {
                     work.push_back(&quantity);
                     let parts = self.msg_ops(&mut work, &[])?;
                     let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
-                    let context = lx.context().unwrap_or_default().replace('\n', "");
+                    let context = self.eng.error_context(lx).replace('\n', "");
                     let mut ops = vec![MsgOp::Report("> ".into())];
                     ops.extend(crate::ir::printed_ops(parts, nl));
                     ops.push(MsgOp::Report(format!(".{context}")));
@@ -1173,7 +1173,7 @@ impl Lowerer {
                     let parts = self.message_parts(lx)?;
                     self.eng.note_mouth(lx);
                     let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
-                    let context = lx.context().unwrap_or_default().replace('\n', "");
+                    let context = self.eng.error_context(lx).replace('\n', "");
                     let mut ops = vec![MsgOp::Report("! ".into())];
                     ops.extend(crate::ir::printed_ops(parts, nl));
                     ops.push(MsgOp::Report(format!(".{context}")));
@@ -1640,8 +1640,8 @@ impl Lowerer {
         if matches!(op, Arith::Add) {
             return;
         }
-        if let Some(site) = lx.context() {
-            out.push(Cmd::ErrorSite(site));
+        if lx.context().is_some() {
+            out.push(Cmd::ErrorSite(self.eng.error_context(lx)));
         }
     }
 

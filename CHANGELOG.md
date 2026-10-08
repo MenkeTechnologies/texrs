@@ -32,6 +32,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- An error's context shows the tokens a scanner read too far and put back
+  (§325's `back_input`, §314) as `<to be read again>` above the file line, or
+  `<recently read>` once read: the token that ends a constant or follows a
+  unit, the one that is not `=` and the one a keyword did not match.
+  `\errorcontextlines` limits the levels between, as §311 does.
 - A character code outside 0..255 where §434's `scan_char_num` reads one -- the
   character `\catcode`, `\lccode` and the other code tables assign or are read
   at -- is `Bad character code` reported and 0 used. texrs stopped with

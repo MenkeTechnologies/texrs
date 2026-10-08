@@ -581,9 +581,47 @@ impl Engine {
     /// which is what makes the two comparable at all.
     pub fn report(&mut self, lx: &Lexer, msg: &str) {
         self.note_mouth(lx);
-        let context = lx.context().unwrap_or_default();
+        let context = self.error_context(lx);
         self.errors
             .push(format!("! {msg}.{}", context.replace('\n', "")));
+    }
+
+    /// §311's `show_context` as far as texrs keeps the input stack: the
+    /// level §325's `back_input` made, if one is unread or was just read,
+    /// above the file line. Token lists a macro or an argument made are not
+    /// levels here, so they are not shown.
+    pub fn error_context(&self, lx: &Lexer) -> String {
+        let mut out = String::new();
+        // §311: the innermost level is always shown and the file line always
+        // is; a level between them only while fewer than `\errorcontextlines`
+        // levels have been (the innermost counts), and `...` once in place of
+        // the rest when exactly that many have.
+        let limit = crate::intpar::index("errorcontextlines")
+            .map_or(0, |i| self.intpars.get(i));
+        let mut shown = 0i64;
+        for (i, (toks, read)) in lx.backed_up().into_iter().enumerate() {
+            if i > 0 && shown >= limit {
+                if shown == limit {
+                    out.push_str("...\n");
+                    shown += 1;
+                }
+                continue;
+            }
+            shown += 1;
+            // §314: `<recently read>` once the list is read to its end.
+            let tag = match read == toks.len() {
+                true => "<recently read> ",
+                false => "<to be read again> ",
+            };
+            out.push_str(&Lexer::context_lines(
+                tag,
+                &self.tokens_text(&toks[..read]),
+                &self.tokens_text(&toks[read..]),
+            ));
+            out.push('\n');
+        }
+        out.push_str(&lx.context().unwrap_or_default());
+        out
     }
 
     /// §1294's `\show`: `> ` and what the token means, then the context an
@@ -604,7 +642,7 @@ impl Engine {
             _ => self.meaning_text(tok),
         };
         let shown = format!("> {name}{meaning}.");
-        let context = lx.context().unwrap_or_default();
+        let context = self.error_context(lx);
         self.errors
             .push(format!("{shown}{}", context.replace('\n', "")));
     }
@@ -1495,12 +1533,12 @@ impl Engine {
                 Token::Cs(n) => {
                     let n = *n;
                     if !self.try_expand(lx, n, pending_only)? {
-                        lx.push_back(std::slice::from_ref(&cur));
+                        lx.back_input(std::slice::from_ref(&cur));
                         break;
                     }
                 }
                 other => {
-                    lx.push_back(std::slice::from_ref(other));
+                    lx.back_input(std::slice::from_ref(other));
                     break;
                 }
             }
@@ -1865,7 +1903,7 @@ impl Engine {
                 t if t.is_space() && unit.is_empty() => continue,
                 Token::Char(c, _) if c.is_ascii_alphabetic() => unit.push(c.to_ascii_lowercase()),
                 other => {
-                    lx.push_back(std::slice::from_ref(other));
+                    lx.back_input(std::slice::from_ref(other));
                     break;
                 }
             }
@@ -1876,7 +1914,7 @@ impl Engine {
         // One optional space is absorbed after a unit, as after a constant.
         if let Some(t) = self.take(lx, pending_only) {
             if !t.is_space() {
-                lx.push_back(std::slice::from_ref(&t));
+                lx.back_input(std::slice::from_ref(&t));
             }
         }
         Ok(match by_count {
@@ -2739,13 +2777,16 @@ impl Engine {
                 }
                 let matched = matches!(&t, Token::Char(c, _)
                     if c.eq_ignore_ascii_case(&want));
-                seen.push(t);
                 if !matched {
-                    for t in seen.iter().rev() {
-                        lx.push_back(std::slice::from_ref(t));
+                    // §407: `back_input` of the token that failed, then
+                    // `back_list` of the letters that matched, above it.
+                    lx.back_input(&[t]);
+                    if !seen.is_empty() {
+                        lx.back_input(&seen);
                     }
                     return Ok(false);
                 }
+                seen.push(t);
                 break;
             }
         }
@@ -3804,7 +3845,13 @@ impl Engine {
             };
             eaten.push(t);
             if !matches!(&t, Token::Char(c, _) if c.eq_ignore_ascii_case(&want)) {
-                lx.push_back(&eaten);
+                // §407: `back_input` of the token that failed, then
+                // `back_list` of the letters that matched, above it.
+                let (matched, failed) = eaten.split_at(eaten.len() - 1);
+                lx.back_input(failed);
+                if !matched.is_empty() {
+                    lx.back_input(matched);
+                }
                 return Ok(());
             }
         }
@@ -3817,7 +3864,8 @@ impl Engine {
                 t if t.is_space() => continue,
                 Token::Char('=', _) => return Ok(()),
                 other => {
-                    lx.push_back(std::slice::from_ref(other));
+                    // §405: anything else is put back to be read again.
+                    lx.back_input(std::slice::from_ref(other));
                     return Ok(());
                 }
             }
@@ -3860,7 +3908,7 @@ impl Engine {
             // in `\endlinechar=`\Q`).
             match self.take(lx, pending_only) {
                 Some(t) if t.is_space() => {}
-                Some(t) => lx.push_back(std::slice::from_ref(&t)),
+                Some(t) => lx.back_input(std::slice::from_ref(&t)),
                 None => {}
             }
             return Ok(sign * code);
@@ -3969,7 +4017,8 @@ impl Engine {
                         self.expand_macro(lx, n, pending_only)?;
                     }
                     other => {
-                        lx.push_back(std::slice::from_ref(other));
+                        // §444: what ends the constant is read again.
+                        lx.back_input(std::slice::from_ref(other));
                         break;
                     }
                 }
@@ -4001,7 +4050,8 @@ impl Engine {
                     self.expand_macro(lx, n, pending_only)?;
                 }
                 other => {
-                    lx.push_back(std::slice::from_ref(other));
+                    // §444: what ends the constant is read again.
+                    lx.back_input(std::slice::from_ref(other));
                     break;
                 }
             }

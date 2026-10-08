@@ -1,0 +1,12 @@
+% tex.web S325: a token a scanner read too far is put back with back_input,
+% as a level of its own, and an error raised before it is read again shows
+% it above the file line as `<to be read again>' (S314). Here: the token that
+% ends a constant (S444) or a unit's optional space (S448), and the one that
+% is not `=' (S405) or not a keyword's letter (S407).
+\catcode`\{=1 \catcode`\}=2
+\dimen0=20000pt\message{[\the\dimen0]}
+\catcode256=11 \message{[\the\catcode0]}
+\lccode-1=`\a \message{[\the\lccode0]}
+\count1=100000 \multiply\count1 by 100000\relax\message{[\the\count1]}
+\chardef\x=256\relax\message{[\meaning\x]}
+\end

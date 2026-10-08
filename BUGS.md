@@ -148,22 +148,34 @@ texrs output reached tracked lualatex references in
   `tests/cases/edef_freezes_conditional.tex` and
   `tests/cases/ifx_after_edef_conditional.tex` pin both faces of it; found by
   `the parity-fuzz binary` at seed 77.
-- **Errors.** An undefined control sequence is not an error: texrs prints its
-  name into the message stream and exits 0, where tex reports `! Undefined
-  control sequence.` and expands it to nothing. `tests/cases/undefined_cs.tex`
+- **Errors.** An undefined control sequence is not reported as tex reports it.
+  Inside a `\message` texrs prints its name into the message stream and exits
+  0; met as a command it stops the run with one `TexError`, which the
+  embedding API (`tests/embed.rs`), the REPL and the LaTeX loader's `needs \x`
+  report are built on. tex reports `! Undefined control sequence.` and expands
+  it to nothing in both places, and goes on. `tests/cases/undefined_cs.tex`
   pins it, and the reason it is hard is that §1279 expands a `\message` body
   while reading it from the file, so tex's context display splits the line at
   the offending token while texrs has already read to the `}`.
 
-  Two conditions DO now report and carry on the way tex does: a constant above
-  2147483647 (§445) and a character or register code out of range (§433, §434).
-  Each writes `! <reason>.` followed by §311's two-line context display into the
-  message stream, clamps the value where tex clamps it, and the run continues;
+  Several conditions DO now report and carry on the way tex does: a constant
+  above 2147483647 (§445), a character or register code out of range (§433,
+  §434), arithmetic overflow (§1236), a dimension too large (§460), and an
+  `\else`, `\fi`, `\endcsname`, `\endgroup` or `}` that closes nothing. Each
+  writes `! <reason>.` followed by §311's context display into the message
+  stream, clamps the value where tex clamps it, and the run continues;
   `tests/cases/number_too_big.tex`, `chardef_bad_code.tex` and
   `error_context_trimmed.tex` pin all of it, including the `...` trimming at
-  `half_error_line` and `error_line`. Every other error path still stops with
-  one `TexError`: `\multiply` overflow is raised on the VM (`src/runtime.rs`)
-  rather than in the expander, and `\outer` is not policed at all.
+  `half_error_line` and `error_line`. The display has the file line and the
+  levels §325's `back_input` made -- `<to be read again>` and `<recently
+  read>`, pinned by `error_context_to_be_read_again.tex` -- but no level a
+  macro body or an argument made: texrs keeps no input stack for those, so an
+  error raised while one is being read lacks the `\a ->...` lines tex prints
+  above the file line, and an error inside a `\message` body, which texrs
+  reads to its `}` before expanding it, shows no file line at all. Every
+  other error path -- `Missing number`, `Illegal unit of measure`, `Missing {
+  inserted` among them -- still stops with one `TexError`, and `\outer` is not
+  policed at all.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).
