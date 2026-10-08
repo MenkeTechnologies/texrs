@@ -3669,9 +3669,16 @@ impl Engine {
     /// `tex.web` §434's `scan_char_num`: a number, read as a character. One
     /// copy because six callers want it -- the two writers, `\the`, and §413's
     /// reader in `scan_number`.
+    /// §434's `scan_char_num`: a number from 0 to 255, or `Bad character
+    /// code` reported and 0 used in its place -- whether the code is the
+    /// character an assignment changes or the one a code table is read at.
     fn scan_char_code(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
-        let ch = self.scan_number(lx, pending_only)?;
-        char::from_u32(ch as u32).ok_or_else(|| TexError("Invalid code".into()))
+        let mut ch = self.scan_number(lx, pending_only)?;
+        if !(0..=255).contains(&ch) {
+            self.report(lx, &format!("Bad character code ({ch})"));
+            ch = 0;
+        }
+        Ok(char::from(ch as u8))
     }
 
     fn do_catcode(&mut self, lx: &mut Lexer) -> R<()> {

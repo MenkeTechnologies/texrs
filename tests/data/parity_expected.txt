@@ -10,6 +10,8 @@
 A IN MARK B X MARK [5]
 #==# backtick_codes.tex
 65-66
+#==# bad_character_code_reported_and_zero_used.tex
+! Bad character code (300).l.5 \count1=\catcode300                         \message{[\the\count1]}[9]! Bad character code (999).l.6 \count1=\uccode 999                         \message{[\the\count1]}[0]! Bad character code (-1).l.7 \count1=\lccode-1                       \message{[\the\count1]}[0]! Bad character code (256).l.8 \catcode256                 =11 \message{[\the\catcode0]}[11]! Bad character code (1000).l.9 \lccode 1000                  =`\a \message{[\the\lccode0]}[97] [11] )(see the transcript file for additional information
 #==# box_conditionals.tex
 [VOID] [NOTHBOX] [NOTVBOX] [V][N][N]
 #==# caret_hex_notation.tex

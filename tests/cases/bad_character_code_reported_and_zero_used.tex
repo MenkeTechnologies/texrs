@@ -1,0 +1,11 @@
+% tex.web S434's scan_char_num: a character code outside 0..255 -- the
+% character an assignment changes, or the one a code table is read at -- is
+% `! Bad character code (N).', and 0 is used in its place.
+\catcode`\{=1 \catcode`\}=2
+\count1=\catcode300 \message{[\the\count1]}
+\count1=\uccode 999 \message{[\the\count1]}
+\count1=\lccode-1 \message{[\the\count1]}
+\catcode256 =11 \message{[\the\catcode0]}
+\lccode 1000 =`\a \message{[\the\lccode0]}
+\catcode`\Q=11 \count1=\catcode`\Q \message{[\the\count1]}
+\end

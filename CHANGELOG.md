@@ -32,6 +32,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A character code outside 0..255 where §434's `scan_char_num` reads one -- the
+  character `\catcode`, `\lccode` and the other code tables assign or are read
+  at -- is `Bad character code` reported and 0 used. texrs stopped with
+  `Invalid code`, or silently read the table at a character it does not have.
 - `\globaldefs` (§1214): a positive value makes every assignment global and a
   negative one every assignment local, `\global`, `\gdef` and `\xdef` included.
   texrs read the parameter and ignored it.
