@@ -108,7 +108,7 @@ fn a_group_names_the_registers_it_saves() {
 fn a_document_that_does_not_lower_reports_the_error_rather_than_printing_a_tree() {
     let path = write(
         "bad.tex",
-        &format!("{HEAD}\\count0=\\message{{x}}\n\\end\n"),
+        &format!("{HEAD}\\nosuchcontrolsequence\n\\end\n"),
     );
     let out = texrs().arg("--dump-ast").arg(&path).output().expect("run");
     assert!(!out.status.success(), "a broken document exited zero");
