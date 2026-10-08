@@ -91,6 +91,9 @@ pub fn index(name: &str) -> Option<usize> {
 /// The position of `\mag`, which a `true` dimension is divided by (§457).
 pub const MAG: usize = 17;
 
+/// The position of `\globaldefs`, which §1214 reads on every assignment.
+pub const GLOBAL_DEFS: usize = 43;
+
 /// The position of `\escapechar`, which the printer reads on every control
 /// sequence it writes.
 pub const ESCAPE_CHAR: usize = 45;

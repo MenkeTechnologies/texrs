@@ -636,7 +636,24 @@ impl Engine {
     /// kind of entry it is. A LOCAL assignment after it saves afresh, and that
     /// is the value its group restores.
     fn save(&mut self, rec: Save) {
-        if self.global {
+        self.save_as(rec, self.global_defs_applied(self.global));
+    }
+
+    /// §1214: a positive `\globaldefs` makes every assignment global and a
+    /// negative one makes every assignment local, `\global` and `\gdef`
+    /// included; zero leaves the prefix to decide. Applying it twice changes
+    /// nothing, so a caller that already applied it may pass the answer back.
+    pub fn global_defs_applied(&self, global: bool) -> bool {
+        match self.intpars.get(crate::intpar::GLOBAL_DEFS) {
+            0 => global,
+            g => g > 0,
+        }
+    }
+
+    /// [`Self::save`] with the scope decided by the caller: §279's
+    /// `geq_word_define` is global whatever `\globaldefs` says.
+    fn save_as(&mut self, rec: Save, global: bool) {
+        if global {
             for frame in &mut self.groups {
                 frame.retain(|s| !s.same_entry(&rec));
             }
@@ -690,9 +707,8 @@ impl Engine {
     /// §279's `geq_word_define` for an integer parameter: assigned at the
     /// outermost level, so no open group restores it.
     fn set_intpar_globally(&mut self, i: usize, v: i64) {
-        let was = std::mem::replace(&mut self.global, true);
-        self.set_intpar(i, v);
-        self.global = was;
+        self.save_as(Save::IntPar(i, self.intpars.get(i)), true);
+        self.store_intpar(i, v);
     }
 
     /// Write an integer parameter, keeping the mouth's copy of `\endlinechar`
@@ -4800,7 +4816,8 @@ impl Engine {
     /// lowerer read it through here rather than leaving it set to colour the
     /// next assignment as well.
     pub fn take_global_prefix(&mut self) -> bool {
-        std::mem::take(&mut self.global)
+        let prefix = std::mem::take(&mut self.global);
+        self.global_defs_applied(prefix)
     }
     /// `\ifx` equality over the CURRENT meanings — decidable while lowering,
     /// because a macro's meaning is a frontend fact and not VM state.

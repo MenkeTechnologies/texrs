@@ -1438,7 +1438,10 @@ impl Lowerer {
                 // the macros after it expand to.
                 "intercept" => self.eng.compile_time_intercept(lx)?,
                 "edef" | "xdef" => {
-                    let global = name.name() == "xdef" || self.eng.take_global_prefix();
+                    // The prefix is spent either way; `\globaldefs` decides
+                    // over both it and `\xdef`'s own globality (§1214).
+                    let prefix = self.eng.take_global_prefix();
+                    let global = self.eng.global_defs_applied(name.name() == "xdef" || prefix);
                     let snapshots = self.edef_snapshot(lx, global)?;
                     out.extend(snapshots);
                 }

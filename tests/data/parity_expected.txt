@@ -128,6 +128,8 @@ GLOBAL
 B A A \char"41undefined
 #==# global_then_local_in_group.tex
 [6]
+#==# globaldefs_overrides_the_prefix.tex
+3AA112.0pt1.0ptT\char"5113E0 0undefinedundefinedundefined0.0pt[]
 #==# glue_register_operand.tex
 [4.0pt plus 2.0fil minus 1.0fill] [2.0pt plus 2.0fil] [-1.0pt plus 1.0fill minus 1.0pt] [0.0pt plus 1.0fill minus 1.0fil] [-2.0pt plus -3.0fil minus -1.0pt]
 #==# glue_registers.tex

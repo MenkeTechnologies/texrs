@@ -1,0 +1,14 @@
+% tex.web S1214: a positive \globaldefs makes every assignment global, a
+% negative one makes every assignment local -- \global, \gdef and \xdef
+% included -- and zero leaves the prefix to decide.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+{\globaldefs=1 \count1=3 \def\a{A}\let\b=\a \catcode`\Q=11 \dimen0=2pt
+ \skip0=1pt \toks0={T}\chardef\c=5 \lccode`\Q=`\q \escapechar=`\! \edef\e{E}}
+\escapechar=`\\
+\message{\the\count1 \a\b\the\catcode`\Q \the\dimen0 \the\skip0 \the\toks0
+ \meaning\c \the\lccode`\Q \e \the\globaldefs}
+\globaldefs=-1
+{\global\count2=3 \gdef\f{F}\global\let\g=\relax \xdef\h{H}\global\dimen1=2pt
+ \global\toks1={T}}
+\message{\the\count2 \meaning\f\meaning\g\meaning\h \the\dimen1 [\the\toks1]}
+\end

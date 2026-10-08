@@ -32,6 +32,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\globaldefs` (§1214): a positive value makes every assignment global and a
+  negative one every assignment local, `\global`, `\gdef` and `\xdef` included.
+  texrs read the parameter and ignored it.
 - A dimension's factor may be any internal integer (§449): `\catcode`\a pt`,
   `\tolerance pt` and the other code tables and §236 parameters were
   `Illegal unit of measure`.
