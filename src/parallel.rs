@@ -186,9 +186,9 @@ pub fn prelex(chars: &[char], from: usize, cats: &CatTable, threads: usize) -> V
     }
     let bounds = line_starts(rest, threads.max(1));
     if bounds.len() == 1 {
-        return lex_slice(rest, from, cats);
+        return lex_slice(rest, from, cats).0;
     }
-    let mut parts: Vec<Vec<Placed>> = Vec::with_capacity(bounds.len());
+    let mut parts: Vec<(Vec<Placed>, bool)> = Vec::with_capacity(bounds.len());
     std::thread::scope(|s| {
         let mut hs = Vec::with_capacity(bounds.len());
         for (i, &start) in bounds.iter().enumerate() {
@@ -201,16 +201,33 @@ pub fn prelex(chars: &[char], from: usize, cats: &CatTable, threads: usize) -> V
             parts.push(h.join().unwrap_or_default());
         }
     });
-    parts.concat()
+    // Nothing past a slice that stopped at an invalid character: the mouth
+    // reads on from there itself, and its report has to be made in order.
+    let mut out = Vec::new();
+    for (toks, stopped) in parts {
+        out.extend(toks);
+        if stopped {
+            break;
+        }
+    }
+    out
 }
 
 /// The sequential mouth over one slice, tagging each token with its absolute
 /// end position.
-fn lex_slice(piece: &[char], base: usize, cats: &CatTable) -> Vec<Placed> {
+///
+/// It stops short at an invalid character, saying so: §346 reports one where
+/// the mouth meets it, which a worker reading ahead cannot do, so the tokens
+/// end in front of it and the mouth itself reads it when it gets there.
+fn lex_slice(piece: &[char], base: usize, cats: &CatTable) -> (Vec<Placed>, bool) {
     let mut lx = Lexer::from_chars(piece.to_vec());
     let mut out = Vec::new();
     while let Some(t) = lx.next_token(cats) {
+        if !lx.take_invalid().is_empty() {
+            return (out, true);
+        }
         out.push((t, base + lx.pos()));
     }
-    out
+    let stopped = !lx.take_invalid().is_empty();
+    (out, stopped)
 }

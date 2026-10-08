@@ -559,6 +559,7 @@ impl Engine {
     /// same reading `crate::parity::messages_of` takes of tex's own output,
     /// which is what makes the two comparable at all.
     pub fn report(&mut self, lx: &Lexer, msg: &str) {
+        self.note_mouth(lx);
         let context = lx.context().unwrap_or_default();
         self.errors
             .push(format!("! {msg}.{}", context.replace('\n', "")));
@@ -568,6 +569,7 @@ impl Engine {
     /// error shows -- `\show` ends by calling `error` -- so it lands in the
     /// stream exactly where a report does.
     pub fn show_token(&mut self, lx: &Lexer, tok: &Token) {
+        self.note_mouth(lx);
         let name = match tok {
             Token::Cs(n) => format!("{}{}=", self.esc(), n.name()),
             Token::Char(c, Cat::Active) => format!("{c}="),
@@ -584,6 +586,18 @@ impl Engine {
         let context = lx.context().unwrap_or_default();
         self.errors
             .push(format!("{shown}{}", context.replace('\n', "")));
+    }
+
+    /// §346's report of each invalid character the mouth skipped, in front of
+    /// anything reported after it. The mouth keeps them until asked, so every
+    /// caller that is about to report or print asks first.
+    pub fn note_mouth(&mut self, lx: &Lexer) {
+        for context in lx.take_invalid() {
+            self.errors.push(format!(
+                "! Text line contains an invalid character.{}",
+                context.replace('\n', "")
+            ));
+        }
     }
 
     /// The errors reported since the last call, clearing them.
@@ -999,6 +1013,7 @@ impl Engine {
             false => {
                 let t = lx.next_token(&self.cats);
                 self.note_input_line(lx, t.as_ref());
+                self.note_mouth(lx);
                 t
             }
         }

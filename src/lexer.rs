@@ -75,6 +75,10 @@ pub struct Lexer {
     decoded_at: Option<usize>,
     /// Pushed-back tokens (`\expandafter` and macro expansion feed these).
     pub pending: Vec<Token>,
+    /// The error context at each invalid character the mouth skipped, for the
+    /// expander to report: the mouth has no error channel of its own. See
+    /// [`Lexer::take_invalid`].
+    invalid: std::cell::RefCell<Vec<String>>,
 }
 
 impl Lexer {
@@ -105,6 +109,7 @@ impl Lexer {
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
+            invalid: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -176,7 +181,14 @@ impl Lexer {
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
+            invalid: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// The contexts of the invalid characters skipped since the last call,
+    /// each the two-line display §346's `error` shows.
+    pub fn take_invalid(&self) -> Vec<String> {
+        self.invalid.take()
     }
 
     /// Put a token stream back in front of the input, to be read next.
@@ -546,6 +558,12 @@ impl Lexer {
                     }
                 }
                 Cat::Ignored => {}
+                // §346: an invalid character is reported and skipped, and the
+                // scan restarts with the state it had.
+                Cat::Invalid => {
+                    let context = self.context().unwrap_or_default();
+                    self.invalid.borrow_mut().push(context);
+                }
                 _ => {
                     self.state = State::MidLine;
                     return Some(Token::Char(c, cat));

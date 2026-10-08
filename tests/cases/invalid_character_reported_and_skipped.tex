@@ -1,0 +1,9 @@
+% tex.web S346: a character of category 15 is reported where the mouth meets
+% it -- `Text line contains an invalid character' and the context there --
+% and skipped, so the line reads on as if it were not there; \string reads
+% through the mouth too, so it never sees one.
+\catcode`\{=1 \catcode`\}=2
+\catcode`\Q=15 \message{[aQb]}
+\message{[xQy]}\def\a{AQ}\message{[\a]}
+\message{[Q\string Q]}
+\end

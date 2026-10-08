@@ -371,6 +371,7 @@ impl Lowerer {
         let mut lx = Lexer::new(src);
         match self.block(&mut lx, None) {
             Ok(mut cmds) => {
+                self.eng.note_mouth(&lx);
                 self.close_reports(&mut cmds);
                 Ok(cmds)
             }
@@ -577,7 +578,9 @@ impl Lowerer {
         // here, AFTER every command it lowered to, so the mark sees its value.
         while let Some(tok) = {
             self.flush_keeps(&mut out);
-            lx.next_token(&self.eng.cats)
+            let tok = lx.next_token(&self.eng.cats);
+            self.eng.note_mouth(lx);
+            tok
         } {
             let line = lx.line();
             if line != marked {
@@ -1140,6 +1143,7 @@ impl Lowerer {
                 // built the way a `\message` with `\the` in it is.
                 "showthe" => {
                     let quantity = self.the_operand(lx)?;
+                    self.eng.note_mouth(lx);
                     let mut work = Lexer::new("");
                     work.push_back(&quantity);
                     let parts = self.msg_ops(&mut work, &[])?;
@@ -1156,6 +1160,7 @@ impl Lowerer {
                 // the log alone, so the terminal shows nothing more.
                 "errmessage" => {
                     let parts = self.message_parts(lx)?;
+                    self.eng.note_mouth(lx);
                     let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
                     let context = lx.context().unwrap_or_default().replace('\n', "");
                     let mut ops = vec![MsgOp::Report("! ".into())];
@@ -1165,6 +1170,7 @@ impl Lowerer {
                 }
                 "message" => {
                     let parts = self.message_parts(lx)?;
+                    self.eng.note_mouth(lx);
                     // Printed to the terminal: §59's `print`, with the
                     // `\newlinechar` in force now.
                     let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
@@ -3411,6 +3417,7 @@ impl Lowerer {
     fn immediate_write(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
         let stream = self.eng.scan_number_file(lx)?;
         let body = self.eng.read_write_text(lx)?;
+        self.eng.note_mouth(lx);
         let mut work = Lexer::new("");
         work.push_back(&body);
         let parts = self.msg_ops(&mut work, &[])?;
