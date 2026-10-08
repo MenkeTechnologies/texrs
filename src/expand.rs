@@ -3788,12 +3788,11 @@ impl Engine {
 
     /// The character one of the six code tables is being asked about.
     ///
-    /// `tex.web` §434's `scan_char_num`: a number, read as a character. One
-    /// copy because six callers want it -- the two writers, `\the`, and §413's
-    /// reader in `scan_number`.
-    /// §434's `scan_char_num`: a number from 0 to 255, or `Bad character
-    /// code` reported and 0 used in its place -- whether the code is the
-    /// character an assignment changes or the one a code table is read at.
+    /// `tex.web` §434's `scan_char_num`: a number from 0 to 255, or `Bad
+    /// character code` reported and 0 used in its place -- whether the code is
+    /// the character an assignment changes or the one a code table is read at.
+    /// One copy because six callers want it -- the two writers, `\the`, and
+    /// §413's reader in `scan_number`.
     fn scan_char_code(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
         let mut ch = self.scan_number(lx, pending_only)?;
         if !(0..=255).contains(&ch) {
