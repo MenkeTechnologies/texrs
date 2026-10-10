@@ -20,8 +20,8 @@
 
 A TeX engine in Rust: Knuth's **mouth** and **expander**, lowered onto
 [`fusevm`](https://github.com/MenkeTechnologies/fusevm) bytecode and run on the
-shared three-tier Cranelift JIT — the same engine behind `zshrs`, `stryke`,
-`rubylang`, `pythonrs` and `scalars`.
+shared three-tier Cranelift JIT — the same engine every other fusevm frontend
+runs on.
 
 ---
 
@@ -484,11 +484,12 @@ Pandoc-generated books of 16,000 lines and up, with fontspec, TikZ,
 including the ones written to be refused: **229 of 274 run to completion**, and
 say 75,627,678 bytes of text.
 
-Which 274, so the figure can be reproduced rather than believed: 167 from the
-publications tree `scripts/publications.sh` defaults to, 81 in `tests/cases`, 13
-in `examples/`, 10 in `tests/pdf_cases` and 3 in `tests/dvi_cases`. Point the
-sweep at a parent of both trees to get that set; point it at the default and you
-are measuring the 167 alone, which is a different number and a different claim.
+Which 274: 167 from the publications tree `scripts/publications.sh` defaults to,
+plus the `.tex` files then under `tests/cases`, `examples/`, `tests/pdf_cases`
+and `tests/dvi_cases`. `tests/cases` has grown since, so the set is not
+reproducible from HEAD alone. Point the sweep at a parent of both trees to
+sweep the whole set; point it at the default and you are measuring the
+publications tree alone, which is a different number and a different claim.
 
 That number went DOWN when Lua started running: the same corpus was 266 of 274
 before it. 42 of the 46 failures are one family of header fragments carrying an
@@ -895,7 +896,7 @@ pages, the generated reference page, two man pages, and the IntelliJ plugin's
 sentence said six while the list beside it named seven.) Nothing in a build or a test run notices when they
 disagree, which is how v0.1.0 once sat in the docs through v0.3.0. So
 `tests/version_sync.rs` fails when any of them drifts, and `scripts/bump.sh` is
-the one command that stamps all six, regenerates the two that are derived from
+the one command that stamps all seven, regenerates the two that are derived from
 the corpus rather than substituted, runs the full verify, then tags, pushes and
 publishes.
 

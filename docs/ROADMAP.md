@@ -79,9 +79,7 @@ handed line boxes built from broken strings rather than a node list with
 breakpoint indices, so `src/postline.rs`'s §877-§890 assembly and
 `src/page.rs`'s page builder remain a library beside the path a `--dvi` run
 takes rather than the path itself — `--dvi` still stacks a fixed number of lines
-on each page where `--pdf` prices the whole document. `\tolerance`,
-`\pretolerance` and the demerit weights are constants rather than registers a
-document sets. STRUCTURE to BYTES is now positional plus the encoding: the
+on each page where `--pdf` prices the whole document. STRUCTURE to BYTES is now positional plus the encoding: the
 writer does not choose tex's compact `w`/`x`/`y`/`z` movement reuse (§607-§615).
 The typesetter writes each font's `.tfm` checksum into `fnt_def`; only the round
 trip's rewrite writes zero, for a font it never read.
@@ -89,7 +87,7 @@ trip's rewrite writes zero, for a font it never read.
 The subsetter's own untested edge is nesting. `tests/glyf.rs`'s
 `an_accented_letter_brings_the_letter_with_it` pins one level — asking for
 e-acute keeps the `e` and the accent it is drawn from — but it walks
-`components` one deep, and `src/sfnt.rs:324` closes over "the parts a composite
+`components` one deep, and `src/sfnt.rs` closes over "the parts a composite
 is built out of, and the parts of those". A composite whose component is itself
 composite is the case no test asserts.
 
