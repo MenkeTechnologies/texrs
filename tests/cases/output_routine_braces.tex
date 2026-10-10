@@ -1,0 +1,16 @@
+% tex.web S1226: a token-list assignment to \output stores the text with its
+% braces added, so \the\output gives them back -- and an EMPTY text is no
+% routine at all, with nothing to give back. Other token parameters are
+% stored as written.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\output={a#b\relax}
+\message{[\the\output]}
+{\output={}\message{[\the\output]}}
+\message{[\the\output]}
+\everypar={a#b}
+\message{[\the\everypar]}
+\toks3=\output
+\message{[\the\toks3]}
+\output={}
+\message{[\the\output]}
+\end

@@ -6,11 +6,6 @@
 # Every case listed below diverges from tex 3.141592653 (TeX Live 2026); every
 # case in tests/cases that is NOT listed here is required to match it.
 
-undefined_cs.tex   An undefined control sequence is not an error. tex reports
-#                  `! Undefined control sequence.' and expands it to nothing;
-#                  texrs prints its NAME into the message stream and exits 0.
-#                  Found by the parity fuzzer (`cargo run --bin parity-fuzz`). Fixing it means an error
-#                  path through the expander that the milestone does not have.
 plain_count0.tex   The oracle is `tex' with the PLAIN format preloaded, where
 #                  \count0 is the page number and already holds 1. texrs starts
 #                  every register at zero, as INITEX does, and loads no format.

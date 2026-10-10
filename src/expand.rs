@@ -15,6 +15,16 @@ use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
 use std::collections::HashMap;
 
+/// The token a list keeps for one read from the stream: §358's `dont_expand`
+/// marker lives only in the stream, so a `\noexpand`ed control sequence is
+/// itself again once something stores it.
+fn unmarked(t: Token) -> Token {
+    match t {
+        Token::Cs(id) => Token::Cs(id.noexpand_origin().unwrap_or(id)),
+        other => other,
+    }
+}
+
 /// A `\def`'d macro: the parameter text as written, and the body.
 #[derive(Clone, PartialEq)]
 pub struct Macro {
@@ -309,6 +319,16 @@ pub struct Engine {
     /// message stream in front of whatever is printed next, which is where tex
     /// prints it.
     errors: Vec<String>,
+    /// Whether an undefined control sequence is what tex says it is -- an
+    /// error that is reported, expands to nothing, and lets the run go on --
+    /// rather than the stop an embedder's `Result` asks for. Off for the
+    /// library API, on for a run that is meant to read like tex's.
+    pub recover: bool,
+    /// §82's `error_count`: errors since the last paragraph ended. tex gives up
+    /// at 100, which is what ends a run that cannot stop reporting.
+    pub error_count: u32,
+    /// Whether that limit was reached and the run has stopped.
+    pub halted: bool,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -326,6 +346,11 @@ fn wrapped(body: &[Token]) -> Vec<Token> {
 /// the mouth cannot produce one.
 pub const ADVICE_IN: &str = "\u{0}advice-in";
 pub const ADVICE_OUT: &str = "\u{0}advice-out";
+
+/// The brace that ends a `\message` body, kept as the body's last token so a
+/// scanner that reads up to it puts it back, as tex puts back the real one.
+/// A NUL in the name keeps it out of reach of any document.
+pub const MESSAGE_END: &str = "\u{0}message-end";
 
 /// The font `em` and `ex` are measured in, and the size it is loaded at.
 ///
@@ -448,6 +473,9 @@ impl Engine {
             mu_units: false,
             font_units: None,
             errors: Vec::new(),
+            recover: false,
+            error_count: 0,
+            halted: false,
             after_group_tokens: Vec::new(),
             after_assignment: None,
         }
@@ -599,50 +627,185 @@ impl Engine {
     /// so the message stream reads `! Number too big.l.6 \count1=…`. It is the
     /// same reading `crate::parity::messages_of` takes of tex's own output,
     /// which is what makes the two comparable at all.
+    #[inline(never)]
     pub fn report(&mut self, lx: &Lexer, msg: &str) {
         self.note_mouth(lx);
         let context = self.error_context(lx);
         self.errors
             .push(format!("! {msg}.{}", context.replace('\n', "")));
+        self.tally_error();
     }
 
-    /// §311's `show_context` as far as texrs keeps the input stack: the
-    /// level §325's `back_input` made, if one is unread or was just read,
-    /// above the file line. Token lists a macro or an argument made are not
-    /// levels here, so they are not shown.
+    /// §311's `show_context`: every level of the input stack texrs keeps --
+    /// a macro's body with its parameters shown as written, an argument being
+    /// read, what §325's `back_input` and §327's `ins_error` put back -- above
+    /// the file line.
+    ///
+    /// A `\message` body is read before it is expanded, so its lexer carries a
+    /// [`crate::lexer::Site`]: the file line is the one the scanner had
+    /// reached, and the levels of whatever the body was read from follow.
     pub fn error_context(&self, lx: &Lexer) -> String {
-        let mut out = String::new();
+        use crate::lexer::LevelKind;
         // §311: the innermost level is always shown and the file line always
         // is; a level between them only while fewer than `\errorcontextlines`
         // levels have been (the innermost counts), and `...` once in place of
         // the rest when exactly that many have.
         let limit = crate::intpar::index("errorcontextlines").map_or(0, |i| self.intpars.get(i));
-        let mut shown = 0i64;
-        for (i, (toks, read, inserted)) in lx.backed_up().into_iter().enumerate() {
-            if i > 0 && shown >= limit {
-                if shown == limit {
-                    out.push_str("...\n");
-                    shown += 1;
-                }
+        // §311's `nn`, which starts at -1 so the innermost level brings it to 0.
+        let mut nn = -1i64;
+        let mut out = String::new();
+        let mut innermost = true;
+        let mut put = |text: String, out: &mut String, innermost: &mut bool| {
+            if *innermost || nn < limit {
+                *innermost = false;
+                nn += 1;
+                out.push_str(&text);
+                out.push('\n');
+            } else if nn == limit {
+                out.push_str("...\n");
+                nn += 1;
+            }
+        };
+        let mut site = None;
+        for view in lx.levels() {
+            if let LevelKind::Site(s) = view.kind {
+                site = Some(s.clone());
                 continue;
             }
-            shown += 1;
-            // §314: `<recently read>` once the list is read to its end. §314
-            // also labels inserted text, whatever has been read of it.
-            let tag = match (inserted, read == toks.len()) {
-                (true, _) => "<inserted text> ",
-                (false, true) => "<recently read> ",
-                (false, false) => "<to be read again> ",
-            };
-            out.push_str(&Lexer::context_lines(
-                tag,
+            for text in self.level_displays(view.kind, view.toks, view.read) {
+                put(text, &mut out, &mut innermost);
+            }
+        }
+        match site {
+            Some(site) => {
+                let body = site.body_len();
+                let read = lx.body_read(body);
+                for (toks, rd, kind) in site.parent_levels(read) {
+                    for text in self.level_displays(&kind, &toks, rd) {
+                        put(text, &mut out, &mut innermost);
+                    }
+                }
+                out.push_str(&site.context(read));
+            }
+            None => out.push_str(&lx.context().unwrap_or_default()),
+        }
+        out
+    }
+
+    /// A token list as §311's display prints it: §358's `dont_expand` marker
+    /// is a token of its own there, `\notexpanded:` in front of the control
+    /// sequence it guards.
+    fn context_text(&self, tokens: &[Token]) -> String {
+        let mut out = String::new();
+        for t in tokens {
+            match t {
+                Token::Cs(id) if id.noexpand_origin().is_some() => {
+                    out.push_str(&self.cs_text("notexpanded:"));
+                    out.push_str(&self.cs_text(id.name()));
+                }
+                other => out.push_str(&self.tokens_text(std::slice::from_ref(other))),
+            }
+        }
+        out
+    }
+
+    /// The display entries one level makes, innermost first: a macro level
+    /// stands for the argument being read from it as well.
+    fn level_displays(
+        &self,
+        kind: &crate::lexer::LevelKind,
+        toks: &[Token],
+        read: usize,
+    ) -> Vec<String> {
+        use crate::lexer::LevelKind;
+        match kind {
+            LevelKind::Site(_) => Vec::new(),
+            LevelKind::BackedUp | LevelKind::Inserted => {
+                // §314: `<recently read>` once the list is read to its end.
+                // §314 also labels inserted text, whatever has been read of it.
+                let tag = match (matches!(kind, LevelKind::Inserted), read == toks.len()) {
+                    (true, _) => "<inserted text> ",
+                    (false, true) => "<recently read> ",
+                    (false, false) => "<to be read again> ",
+                };
+                vec![Lexer::context_lines(
+                    tag,
+                    &self.context_text(&toks[..read]),
+                    &self.context_text(&toks[read..]),
+                )]
+            }
+            LevelKind::Macro { name, args } => self.macro_displays(*name, toks, read, args),
+        }
+    }
+
+    /// §314's display of a macro level: `\name <parameter text>->` and the
+    /// body as the DEFINITION wrote it -- `#1` where an argument goes -- split
+    /// where reading has got to. An argument that is partly or wholly read is a
+    /// level of its own above it (§390's `<argument>`).
+    ///
+    /// The substituted tokens in `toks` are what is read; the definition and
+    /// the length of each argument say which part of the body each belongs to.
+    fn macro_displays(&self, name: CsId, toks: &[Token], read: usize, args: &[u32]) -> Vec<String> {
+        let Some(Meaning::Macro(m)) = self.meanings.get(&name) else {
+            return vec![Lexer::context_lines(
+                &self.cs_text(name.name()),
                 &self.tokens_text(&toks[..read]),
                 &self.tokens_text(&toks[read..]),
+            )];
+        };
+        let mut out_idx = 0usize;
+        let mut bi = 0usize;
+        let mut argument: Option<(usize, usize, usize)> = None;
+        let split = loop {
+            let Some(tok) = m.body.get(bi) else {
+                break m.body.len();
+            };
+            let mut span = 1usize;
+            let mut width = 1usize;
+            if matches!(tok, Token::Char(_, Cat::Param)) {
+                match m.body.get(bi + 1) {
+                    Some(Token::Char(d, _)) if d.is_ascii_digit() && *d != '0' => {
+                        let idx = (*d as u8 - b'1') as usize;
+                        span = args.get(idx).copied().unwrap_or(0) as usize;
+                        width = 2;
+                        // An argument of no tokens is read through silently.
+                        if span == 0 {
+                            bi += 2;
+                            continue;
+                        }
+                        if read > out_idx && read <= out_idx + span {
+                            argument = Some((out_idx, span, read - out_idx));
+                            break bi + 2;
+                        }
+                    }
+                    Some(Token::Char(_, Cat::Param)) => width = 2,
+                    _ => {}
+                }
+            }
+            if read <= out_idx {
+                break bi;
+            }
+            out_idx += span;
+            bi += width;
+        };
+        let mut shown = Vec::new();
+        if let Some((from, span, consumed)) = argument {
+            let arg = &toks[from..from + span];
+            shown.push(Lexer::context_lines(
+                "<argument> ",
+                &self.context_text(&arg[..consumed]),
+                &self.context_text(&arg[consumed..]),
             ));
-            out.push('\n');
         }
-        out.push_str(&lx.context().unwrap_or_default());
-        out
+        let mut before = self.tokens_text(&m.params);
+        before.push_str("->");
+        before.push_str(&self.tokens_text(&m.body[..split]));
+        shown.push(Lexer::context_lines(
+            &self.cs_text(name.name()),
+            &before,
+            &self.tokens_text(&m.body[split..]),
+        ));
+        shown
     }
 
     /// §1294's `\show`: `> ` and what the token means, then the context an
@@ -666,6 +829,17 @@ impl Engine {
         let context = self.error_context(lx);
         self.errors
             .push(format!("{shown}{}", context.replace('\n', "")));
+        self.tally_error();
+    }
+
+    /// §82: every error counts, and the hundredth ends the run.
+    fn tally_error(&mut self) {
+        self.error_count += 1;
+        if self.error_count >= 100 && !self.halted {
+            self.halted = true;
+            self.errors
+                .push("(That makes 100 errors; please try again.".to_string());
+        }
     }
 
     /// §346's report of each invalid character the mouth skipped, in front of
@@ -677,6 +851,7 @@ impl Engine {
                 "! Text line contains an invalid character.{}",
                 context.replace('\n', "")
             ));
+            self.tally_error();
         }
     }
 
@@ -850,6 +1025,9 @@ impl Engine {
             return Ok(false);
         };
         let name = *name;
+        if name.noexpand_origin().is_some() {
+            return Ok(false);
+        }
         if self.try_expand(lx, name, false)? {
             return Ok(false);
         }
@@ -972,6 +1150,16 @@ impl Engine {
     /// body — in TeX they are the same machinery, and splitting them here would
     /// make `\ifnum` work in one place and not the other.
     fn try_expand(&mut self, lx: &mut Lexer, name: CsId, pending_only: bool) -> R<bool> {
+        // §358: a `\noexpand`ed control sequence is `\relax` to the expander.
+        if name.noexpand_origin().is_some() {
+            return Ok(false);
+        }
+        // §370: a control sequence with no meaning is reported and expands to
+        // nothing, wherever it is met in a scan that expands.
+        if self.recover && self.is_undefined(name) {
+            self.report(lx, "Undefined control sequence");
+            return Ok(true);
+        }
         if let Some(Meaning::Macro(_)) = self.meanings.get(&name) {
             self.expand_macro(lx, name, pending_only)?;
             return Ok(true);
@@ -1046,11 +1234,20 @@ impl Engine {
                 }
                 Ok(true)
             }
+            // §367: the next token goes back as itself if it would not expand,
+            // and as §358's `dont_expand` token -- `\relax` to whatever reads
+            // it, the same control sequence to whatever stores it -- if it
+            // would.
             "noexpand" => {
-                // The next token is passed through unexpanded. Reading it and
-                // pushing it back is enough here because nothing re-examines it.
                 if let Some(t) = self.take(lx, pending_only) {
-                    lx.push_back(&[t]);
+                    let t = match t {
+                        Token::Cs(n) if n.noexpand_origin().is_none() && self.is_expandable(n) => {
+                            Token::Cs(n.noexpanded())
+                        }
+                        other => other,
+                    };
+                    // §367's `back_input`, so a context display shows it.
+                    lx.back_input(&[t]);
                 }
                 Ok(true)
             }
@@ -1368,6 +1565,12 @@ impl Engine {
     /// `\ifx` equality: same meaning, or the same character token.
     fn meanings_equal(&self, a: Option<&Token>, b: Option<&Token>) -> bool {
         match (a, b) {
+            // §507: every `\noexpand`ed token is the one command (`\relax`, 257).
+            (Some(Token::Cs(x)), Some(Token::Cs(y)))
+                if x.noexpand_origin().is_some() || y.noexpand_origin().is_some() =>
+            {
+                x.noexpand_origin().is_some() && y.noexpand_origin().is_some()
+            }
             (Some(Token::Cs(x)), Some(Token::Cs(y))) => {
                 match (self.meanings.get(x), self.meanings.get(y)) {
                     // A name with no entry, or a `\let` copy of one, is the
@@ -1790,7 +1993,7 @@ impl Engine {
                             true => crate::compiler::SKIP_STRIDE,
                             false => 1,
                         };
-                        Some(base + self.scan_number(lx, pending_only)? * stride)
+                        Some(base + self.scan_register_any(lx, pending_only)? * stride)
                     }
                     // A `\dimendef`, `\skipdef` or `\muskipdef` name is the
                     // register it was given, in every position the spelt-out
@@ -2039,7 +2242,7 @@ impl Engine {
         };
         let mut spelt = vec![Token::Cs(name)];
         if let Some((base, stride)) = file {
-            let reg = self.scan_number(lx, pending_only)?;
+            let reg = self.scan_register_any(lx, pending_only)?;
             spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
             spelt.push(Token::Char(' ', Cat::Space));
             return Ok(Some((base + reg * stride, spelt)));
@@ -2213,7 +2416,9 @@ impl Engine {
                 // is 11pt. Their values are frontend state, known now.
                 let table = crate::charcodes::Table::from_name(n.name());
                 let found = match n.name() {
-                    "count" => Some(NumericCs::Register(self.scan_number(lx, pending_only)?)),
+                    "count" => Some(NumericCs::Register(
+                        self.scan_register_any(lx, pending_only)?,
+                    )),
                     "catcode" => {
                         let c = self.scan_char_code(lx, pending_only)?;
                         Some(NumericCs::Value(self.cats.get(c) as i64))
@@ -2302,6 +2507,10 @@ impl Engine {
             }
             return Self::char_meaning(*c, *cat);
         };
+        // §358: read where tex reads, it is `\relax`.
+        if name.noexpand_origin().is_some() {
+            return format!("{}relax", self.esc());
+        }
         match self.meanings.get(name) {
             Some(Meaning::Char(c, cat)) => Self::char_meaning(*c, *cat),
             Some(Meaning::CharDef(v)) => format!("{}char\"{v:X}", self.esc()),
@@ -2350,6 +2559,31 @@ impl Engine {
         match self.meanings.get(&name) {
             Some(Meaning::Primitive(p)) => *p,
             _ => name,
+        }
+    }
+
+    /// §372: a name `\csname` builds that has no meaning is made `\relax`, so it
+    /// is defined from then on.
+    pub fn define_if_undefined(&mut self, built: &str) {
+        let id = CsId::intern(built);
+        if self.is_undefined(id) {
+            self.meanings
+                .insert(id, Meaning::Primitive(CsId::intern("relax")));
+        }
+    }
+
+    /// Whether `name` means nothing at all: no definition, no primitive, and no
+    /// `\let` copy of either.
+    pub fn is_undefined(&self, name: CsId) -> bool {
+        // A `\noexpand`ed name is `\relax`, whatever it was.
+        if name.noexpand_origin().is_some() {
+            return false;
+        }
+        match self.meanings.get(&name) {
+            // A `\let` copy of a name is what that name is.
+            Some(Meaning::Primitive(p)) if *p != name => self.is_undefined(*p),
+            Some(Meaning::Primitive(_)) | None => !crate::primitives::is_known_name(name.name()),
+            Some(_) => false,
         }
     }
 
@@ -2438,7 +2672,25 @@ impl Engine {
             };
             match &t {
                 t if t.is_space() => continue,
-                Token::Char(_, Cat::BeginGroup) => break self.read_balanced(lx)?,
+                Token::Char(_, Cat::BeginGroup) => {
+                    break {
+                        let list = self.read_balanced(lx)?;
+                        // §1226: an `\output` routine is stored with its braces,
+                        // so `\the\output` writes them back.
+                        // An empty one is no routine at all, and has no braces.
+                        match Some(reg) == crate::params::toks_register("output")
+                            && !list.is_empty()
+                        {
+                            true => {
+                                let mut braced = vec![Token::Char('{', Cat::BeginGroup)];
+                                braced.extend(list);
+                                braced.push(Token::Char('}', Cat::EndGroup));
+                                braced
+                            }
+                            false => list,
+                        }
+                    };
+                }
                 // `\toks1=\toks0` copies, and `\toks1=\toksA` copies through a
                 // name defined by \toksdef -- or a token parameter, `\everypar`.
                 Token::Cs(n) => {
@@ -2518,6 +2770,7 @@ impl Engine {
     /// control sequence.
     pub fn sprint_cs(&self, name: CsId) -> String {
         let e = self.esc();
+        let name = name.noexpand_origin().unwrap_or(name);
         match name.name() {
             "" => format!("{e}csname{e}endcsname"),
             n => format!("{e}{n}"),
@@ -2531,6 +2784,12 @@ impl Engine {
     /// sequence prints as `\csname\endcsname `. `\string` is §263's
     /// `sprint_cs` instead, which never adds the space.
     pub fn cs_text(&self, name: &str) -> String {
+        if name == MESSAGE_END {
+            return "}".to_string();
+        }
+        let name = name
+            .strip_prefix(crate::token::NOEXPAND_PREFIX)
+            .unwrap_or(name);
         let e = self.esc();
         let mut chars = name.chars();
         match (chars.next(), chars.next()) {
@@ -3141,7 +3400,7 @@ impl Engine {
                 }
                 _ => {}
             }
-            out.push(t);
+            out.push(unmarked(t));
         }
         Err(TexError("Runaway argument".into()))
     }
@@ -3558,7 +3817,7 @@ impl Engine {
                 }
                 _ => {}
             }
-            out.push(t);
+            out.push(unmarked(t));
         }
         Err(TexError("Runaway argument".into()))
     }
@@ -3614,8 +3873,14 @@ impl Engine {
             }
             i += 1;
         }
+        let plain = out.len();
         let out = self.weave_advice(name, out)?;
-        lx.push_back(&out);
+        // Advice rewrites the expansion, so the body no longer lines up with
+        // the definition and the level is left out of the display.
+        match out.len() == plain {
+            true => lx.push_macro(name, args.iter().map(|a| a.len() as u32).collect(), out),
+            false => lx.push_back(&out),
+        }
         Ok(())
     }
 
@@ -3813,7 +4078,7 @@ impl Engine {
                 Token::Char(_, Cat::BeginGroup) => self.read_group_arg(lx, t, long, pending_only),
                 Token::Char(_, Cat::EndGroup) => Ok(Arg::ExtraBrace(Vec::new(), t)),
                 t if is_par(&t) && !long => Ok(Arg::Par(Vec::new())),
-                other => Ok(Arg::Read(vec![other])),
+                other => Ok(Arg::Read(vec![unmarked(other)])),
             };
         }
     }
@@ -3849,7 +4114,7 @@ impl Engine {
                 t if is_par(t) && !long => return Ok(Arg::Par(out)),
                 _ => {}
             }
-            out.push(t);
+            out.push(unmarked(t));
         }
     }
 
@@ -3868,7 +4133,7 @@ impl Engine {
                     "Paragraph ended before argument was complete".into(),
                 ));
             };
-            out.push(t);
+            out.push(unmarked(t));
             // `tex.web` §392 compares the token against the delimiter BEFORE it
             // touches the brace count, and the order is load-bearing twice: a
             // `{` can then BE the delimiter (the `#{` form), and the `}` that
@@ -4094,14 +4359,19 @@ impl Engine {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing number".into()));
             };
+            // §442: a control sequence of more than one character is no code at
+            // all -- `Improper alphabetic constant`, the token read again, and
+            // the code of `"0"` in its place.
             let code = match t {
                 Token::Char(c, _) => u32::from(c) as i64,
-                Token::Cs(n) => n
-                    .name()
-                    .chars()
-                    .next()
-                    .map(|c| u32::from(c) as i64)
-                    .unwrap_or(0),
+                Token::Cs(n) if n.name().chars().count() == 1 => {
+                    n.name().chars().next().map_or(0, |c| u32::from(c) as i64)
+                }
+                Token::Cs(_) => {
+                    lx.back_input(std::slice::from_ref(&t));
+                    self.report(lx, "Improper alphabetic constant");
+                    return Ok(sign * i64::from(b'0'));
+                }
             };
             // §442: "Scan an optional space" -- one space after the constant
             // is absorbed, and reading for it is what reads the NEXT line when
@@ -4121,7 +4391,7 @@ impl Engine {
                 return Ok(sign * self.scan_expr(lx, pending_only, false)?);
             }
             if name.name() == "count" {
-                let reg = self.scan_number(lx, pending_only)?;
+                let reg = self.scan_register_any(lx, pending_only)?;
                 return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
             }
             // `tex.web` §413: each of the six code tables is an INTERNAL
@@ -4406,7 +4676,7 @@ impl Engine {
     }
 
     fn expand_to_tokens(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<Vec<Token>> {
-        let saved: Vec<Token> = std::mem::take(&mut lx.pending);
+        let saved = std::mem::take(&mut lx.pending);
         lx.push_back(toks);
         let mut out = Vec::new();
         let mut steps = 0usize;
@@ -4439,7 +4709,7 @@ impl Engine {
                         Some(Meaning::Macro(m)) if m.protected
                     );
                     if protected || !self.try_expand(lx, name, true)? {
-                        out.push(t);
+                        out.push(unmarked(t));
                     }
                 }
                 _ => out.push(t),
@@ -4525,7 +4795,7 @@ impl Engine {
                 Some(Meaning::Macro(m)) if m.protected
             );
             if protected || !self.try_expand(&mut lx, name, true)? {
-                out.push(t);
+                out.push(unmarked(t));
             }
         }
         Ok(out)
@@ -4533,7 +4803,7 @@ impl Engine {
 
     /// Fully expand a token list and render it, for `\message`.
     fn expand_to_text(&mut self, lx: &mut Lexer, toks: &[Token]) -> R<String> {
-        let saved: Vec<Token> = std::mem::take(&mut lx.pending);
+        let saved = std::mem::take(&mut lx.pending);
         lx.push_back(toks);
         let mut out = String::new();
         let mut steps = 0usize;
@@ -4596,7 +4866,7 @@ impl Engine {
             return Ok(None);
         };
         let reg = match what.name() {
-            "toks" => self.scan_number(lx, pending_only)?,
+            "toks" => self.scan_register_any(lx, pending_only)?,
             _ => match self.toks_cs(what) {
                 Some(r) => r,
                 None => {
@@ -4638,7 +4908,7 @@ impl Engine {
         // is frontend state like a macro body -- see the `toks` field -- so it
         // is as knowable here as a catcode is.
         if what.name() == "toks" {
-            let reg = self.scan_number(lx, pending_only)?;
+            let reg = self.scan_register_any(lx, pending_only)?;
             return Ok(self.toks_text(reg));
         }
         if let Some(reg) = self.toks_cs(what) {
@@ -4810,36 +5080,58 @@ impl Engine {
     }
 
     /// Read `{...}` after `\message`, unexpanded — the pieces are split by the
-    /// lowering pass, which has to keep `\the` as a run-time read.
-    pub fn read_message_body(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+    /// lowering pass, which has to keep `\the` as a run-time read -- and where
+    /// in the file each token of the body ended: §473 expands a message's text
+    /// while it reads it, so an error met in the text is displayed at the
+    /// position the scanner had reached. The last token is [`MESSAGE_END`].
+    pub fn read_message_body_sited(
+        &mut self,
+        lx: &mut Lexer,
+    ) -> R<(Vec<Token>, crate::lexer::Site)> {
         self.scan_left_brace(lx)?;
         // §473: `\message` reads its text with `scan_toks(false, true)`,
         // EXPANDING as it goes, so a brace that `\string` turns into an other
         // character is never counted -- `\message{\string{}` prints `{`. A
-        // plain balanced read counted it and ran away.
+        // plain balanced read counted it and ran away. The same holds for
+        // `\meaning`, and for the two operands of `\ifx`: each takes its
+        // tokens unexpanded, braces included.
         let mut depth = 1usize;
         let mut out = Vec::new();
+        let mut ends = vec![lx.pos()];
+        let mut lens = vec![lx.pending.len()];
+        // How many following tokens the last one read takes for itself.
+        let mut raw = 0usize;
         while let Some(t) = lx.next_token(&self.cats) {
             self.note_input_line(lx, Some(&t));
+            if raw > 0 {
+                raw -= 1;
+                out.push(t);
+                ends.push(lx.pos());
+                lens.push(lx.pending.len());
+                continue;
+            }
             match &t {
                 Token::Char(_, Cat::BeginGroup) => depth += 1,
                 Token::Char(_, Cat::EndGroup) => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(out);
+                        out.push(Token::cs(MESSAGE_END));
+                        ends.push(lx.pos());
+                        lens.push(lx.pending.len());
+                        let site = lx.site(ends, lens);
+                        return Ok((out, site));
                     }
                 }
-                Token::Cs(n) if self.primitive_meaning(*n).name() == "string" => {
-                    out.push(t);
-                    match lx.next_token(&self.cats) {
-                        Some(next) => out.push(next),
-                        None => break,
-                    }
-                    continue;
-                }
+                Token::Cs(n) => match self.primitive_meaning(*n).name() {
+                    "string" | "meaning" => raw = 1,
+                    "ifx" => raw = 2,
+                    _ => {}
+                },
                 _ => {}
             }
             out.push(t);
+            ends.push(lx.pos());
+            lens.push(lx.pending.len());
         }
         Err(TexError("Runaway argument".into()))
     }
@@ -5103,6 +5395,30 @@ impl Engine {
 
     pub fn scan_number_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
         self.scan_number(lx, pending_only)
+    }
+
+    /// §433's `scan_eight_bit_int`: a register number, `Bad register code`
+    /// and zero in its place when it is outside 0..255.
+    ///
+    /// Reported where the number ends, so the token that ended it is the
+    /// `<to be read again>` of the display, as tex has it.
+    pub fn scan_register_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        let n = self.scan_number(lx, pending_only)?;
+        match (0..=255).contains(&n) {
+            true => Ok(n),
+            false => {
+                self.report(lx, &format!("Bad register code ({n})"));
+                Ok(0)
+            }
+        }
+    }
+
+    pub fn scan_register_file(&mut self, lx: &mut Lexer) -> R<i64> {
+        self.scan_register_any(lx, false)
+    }
+
+    pub fn scan_register_pending(&mut self, lx: &mut Lexer) -> R<i64> {
+        self.scan_register_any(lx, true)
     }
 
     pub fn scan_dimen_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {

@@ -1,0 +1,19 @@
+% tex.web S367 makes \noexpand's token a `dont_expand' token (S358): `\relax'
+% to whatever reads it next -- including the expander, so \csname is not run --
+% and the same control sequence again once anything stores it. Reaching
+% \noexpand through \expandafter is the case that hands the marked token to a
+% scanner other than the one that saw \noexpand itself.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\def\a{A}
+\message{[\expandafter\noexpand\csname relax\endcsname]}
+\message{[\expandafter\noexpand\expandafter\a\noexpand\a\noexpand\csname x\endcsname]}
+\message{[\ifx\noexpand\a\noexpand\csname\fi][\ifx\noexpand\a\relax T\else F\fi]}
+\message{[\if\noexpand\a\relax T\else F\fi\ifcat\noexpand\a\relax T\else F\fi]}
+\expandafter\def\expandafter\b\expandafter{\noexpand\a}
+\message{[\meaning\b]}
+\edef\c{\expandafter\noexpand\a\noexpand\a}
+\message{[\meaning\c]}
+\expandafter\show\noexpand\a
+\message{[end]\noexpand}
+\end

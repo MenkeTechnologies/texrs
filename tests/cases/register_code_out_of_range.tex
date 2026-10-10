@@ -1,0 +1,15 @@
+% tex.web S433: a register number is an eight-bit integer. Outside 0..255 it is
+% `Bad register code', reported where the number ends (so the token that ended
+% it is `<to be read again>'), and register 0 is used. Every register class
+% reads it the same way, in an assignment and wherever a value is read.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\count300=7 \message{[\the\count0]}
+\dimen-1=1pt \message{[\the\dimen0]}
+\skip256=2pt plus 1fil \message{[\the\skip0]}
+\muskip1000=3mu \message{[\the\muskip0]}
+\toks300={x}\message{[\the\toks0]}
+\count0=0 \message{[\the\count256][\number\count-5]}
+\advance\count300 by 5 \message{[\the\count0]}
+\message{[\the\dimen300][\the\toks300]}
+\end

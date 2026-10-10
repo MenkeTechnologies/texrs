@@ -63,6 +63,10 @@ static NAMES: Lazy<RwLock<Names>> = Lazy::new(|| {
     })
 });
 
+/// What the name of a `\noexpand`ed control sequence starts with. The NUL keeps
+/// it out of reach of any document.
+pub const NOEXPAND_PREFIX: &str = "\u{0}noexpand:";
+
 impl CsId {
     /// The id for a name, interning it if this is the first sighting.
     ///
@@ -117,6 +121,19 @@ impl CsId {
         self.0
     }
 
+    /// §358's `dont_expand`: the same control sequence as an id that the
+    /// expander does not see as what it is. A token `\noexpand` passed over is
+    /// `\relax`-like for whoever reads it next and is itself again when it is
+    /// stored (`\edef`, an argument, a token list).
+    pub fn noexpanded(self) -> CsId {
+        CsId::intern(&format!("{NOEXPAND_PREFIX}{}", self.0))
+    }
+
+    /// The control sequence a [`CsId::noexpanded`] id stands for.
+    pub fn noexpand_origin(self) -> Option<CsId> {
+        self.0.strip_prefix(NOEXPAND_PREFIX).map(CsId::intern)
+    }
+
     /// How many distinct control sequences have been seen. For tests and
     /// `--cache-stats`; a document's count is small and bounded.
     pub fn interned_count() -> usize {
@@ -167,7 +184,7 @@ impl Token {
         match self {
             Token::Char(c, _) => c.to_string(),
             Token::Cs(id) => {
-                let name = id.name();
+                let name = id.noexpand_origin().map_or(id.name(), CsId::name);
                 let single = name.chars().count() == 1;
                 match single {
                     true => format!("{escape}{name}"),

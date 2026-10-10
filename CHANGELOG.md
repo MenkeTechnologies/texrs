@@ -6,6 +6,23 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- An error's context shows the levels a macro call made (`\a #1->body` split at
+  the position read, `<argument>`), counted against `\errorcontextlines`, and an
+  error in a `\message` body shows the file line the scanner had reached.
+- `\noexpand` through `\expandafter` leaves a token that is `\relax` to the
+  expander and itself once stored (§358, §367).
+- A register number outside 0..255 is `Bad register code` for every register
+  class (§433); `\output` is stored with its braces (§1226); a control
+  sequence after a backquote is `Improper alphabetic constant` (§442).
+- An undefined control sequence is reported and expanded to nothing in a run
+  meant to read like tex's, and the hundredth error ends the run (§82).
+- `\the` and `\number` at the top level of a file.
+- `parity-fuzz` generates integer, dimension, glue and token parameters, code
+  tables, `\afterassignment`, `\aftergroup`, `\noexpand` chains, register range
+  and arithmetic overflow probes.
+
 ### Added
 
 - `\endinput` (§362): the file ends with the line being read, so the rest of

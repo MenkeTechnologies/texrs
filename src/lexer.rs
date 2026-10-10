@@ -8,7 +8,8 @@
 //! directly rather than approximated with trimming.
 
 use crate::catcode::{Cat, CatTable};
-use crate::token::Token;
+use crate::token::{CsId, Token};
+use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq)]
 enum State {
@@ -25,6 +26,169 @@ struct Ahead {
     toks: Vec<crate::parallel::Placed>,
     /// How many have been handed out.
     at: usize,
+}
+
+/// The tokens a mouth holds to read before the file, in reverse reading order.
+///
+/// A `Vec` with one addition: it remembers the shallowest it has ever been.
+/// A lexer holding a `\message` body keeps the body's tokens at the bottom and
+/// pushes expansions above them, so that mark is how many of the body's own
+/// tokens have been read -- which is where the file line an error shows is.
+#[derive(Default)]
+pub struct Pending {
+    v: Vec<Token>,
+    low: usize,
+}
+
+impl Pending {
+    /// Take the next token to read, noting how deep the stack has gone.
+    pub fn pop(&mut self) -> Option<Token> {
+        let t = self.v.pop();
+        self.low = self.low.min(self.v.len());
+        t
+    }
+}
+
+impl std::ops::Deref for Pending {
+    type Target = Vec<Token>;
+    fn deref(&self) -> &Vec<Token> {
+        &self.v
+    }
+}
+
+impl std::ops::DerefMut for Pending {
+    fn deref_mut(&mut self) -> &mut Vec<Token> {
+        &mut self.v
+    }
+}
+
+/// What made a level of tex's input stack that `pending` holds.
+#[derive(Clone)]
+pub enum LevelKind {
+    /// §325's `back_input`: `<to be read again>`, or `<recently read>` once
+    /// it has been read to its end.
+    BackedUp,
+    /// §327's `ins_error`: `<inserted text>`.
+    Inserted,
+    /// A macro call (§389): the control sequence, and how many tokens each
+    /// argument contributed to the substituted body, in parameter order.
+    Macro { name: CsId, args: Vec<u32> },
+    /// The file text a `\message` body was read from; see [`Site`].
+    Site(Rc<Site>),
+}
+
+/// One level of the input stack held in `pending`.
+struct Level {
+    /// The depth of `pending` below the level's first token.
+    base: usize,
+    /// The level's tokens, in reading order.
+    toks: Rc<Vec<Token>>,
+    kind: LevelKind,
+}
+
+/// A level as [`Lexer::levels`] reports it.
+pub struct LevelView<'a> {
+    pub toks: &'a Rc<Vec<Token>>,
+    /// How many of `toks` have been read.
+    pub read: usize,
+    pub kind: &'a LevelKind,
+}
+
+/// Where a `\message` body came from.
+///
+/// tex expands a message's text while it reads it from the file, so an error
+/// met there is displayed with the file line the scanner had reached. This
+/// engine reads the whole body first and expands it afterwards, so the
+/// positions are recorded as the body is read and the display is built from
+/// them: `ends[k]` is the file position after the body's k-th token.
+pub struct Site {
+    /// The characters of the lines the body spans, and where they start.
+    text: Vec<char>,
+    offset: usize,
+    /// The 1-based line number of `text`'s first line.
+    first_line: usize,
+    /// File positions a `^^` notation was spliced in at.
+    spliced: Vec<usize>,
+    /// The file position after the first k tokens of the body.
+    ends: Vec<usize>,
+    /// How deep the reading lexer's `pending` was after the first k tokens:
+    /// a body read out of a macro's expansion shows that macro's level.
+    parent_lens: Vec<usize>,
+    /// The reading lexer's own levels when the body was read.
+    parent: Vec<(usize, Rc<Vec<Token>>, LevelKind)>,
+}
+
+impl Site {
+    /// How many tokens the body had.
+    pub fn body_len(&self) -> usize {
+        self.ends.len().saturating_sub(1)
+    }
+
+    /// §311's two lines for the position after `k` tokens of the body.
+    pub fn context(&self, k: usize) -> String {
+        let k = k.min(self.ends.len().saturating_sub(1));
+        let pos = self.ends.get(k).copied().unwrap_or(self.offset);
+        let rel = pos.saturating_sub(self.offset).min(self.text.len());
+        context_display(&self.text, self.first_line, rel, &self.spliced, self.offset)
+    }
+
+    /// The levels of the lexer the body was read from, as they stood when the
+    /// first `k` tokens had been read: innermost first, with how many tokens of
+    /// each had been read.
+    pub fn parent_levels(&self, k: usize) -> Vec<(Rc<Vec<Token>>, usize, LevelKind)> {
+        let k = k.min(self.parent_lens.len().saturating_sub(1));
+        let depth = self.parent_lens.get(k).copied().unwrap_or(0);
+        let mut out = Vec::new();
+        let mut upper = depth;
+        for (base, toks, kind) in self.parent.iter().rev() {
+            let n = toks.len();
+            let unread = upper.saturating_sub(*base).min(n);
+            if unread > 0 || (out.is_empty() && *base >= upper && *base <= depth) {
+                out.push((toks.clone(), n - unread, kind.clone()));
+                upper = *base;
+            }
+        }
+        out
+    }
+}
+
+/// §317's pair of lines for the position `pos` in `chars`, whose first line is
+/// numbered `first_line`: `l.N` and the text read, then the text not yet read.
+fn context_display(
+    chars: &[char],
+    first_line: usize,
+    pos: usize,
+    spliced: &[usize],
+    offset: usize,
+) -> String {
+    let pos = pos.min(chars.len());
+    // tex reads a LINE at a time into `buffer` (§303) and `loc` may sit one
+    // past its end, with `line` still naming the line that ended. Taking
+    // the line of the last character CONSUMED rather than of the next one
+    // to read is what reproduces that: `\chardef\x=256` reports on its own
+    // line even though scanning the constant ate the line's end.
+    let last = pos.saturating_sub(1);
+    let line = first_line + chars[..last].iter().filter(|c| **c == '\n').count();
+    let start = chars[..last]
+        .iter()
+        .rposition(|c| *c == '\n')
+        .map_or(0, |i| i + 1);
+    // §318 stops at `end_line_char`: a line's own terminator is not part of
+    // what is shown.
+    let end = chars[start..]
+        .iter()
+        .position(|c| *c == '\n')
+        .map_or(chars.len(), |i| start + i);
+    let split = pos.min(end);
+    let shown = |from: usize, to: usize| -> String {
+        (from..to)
+            .filter(|i| spliced.binary_search(&(i + offset)).is_err())
+            .map(|i| chars[i])
+            .collect()
+    };
+    let before = shown(start, split);
+    let after = shown(split, end);
+    Lexer::context_lines(&format!("l.{line} "), &before, &after)
 }
 
 pub struct Lexer {
@@ -79,15 +243,15 @@ pub struct Lexer {
     /// an error shows has the notation and not the character.
     spliced: Vec<usize>,
     /// Pushed-back tokens (`\expandafter` and macro expansion feed these).
-    pub pending: Vec<Token>,
+    pub pending: Pending,
     /// The error context at each invalid character the mouth skipped, for the
     /// expander to report: the mouth has no error channel of its own. See
     /// [`Lexer::take_invalid`].
     invalid: std::cell::RefCell<Vec<String>>,
-    /// The levels §325's `back_input` made that no read has gone past,
-    /// innermost last: the depth of `pending` each sits on and its tokens, in
-    /// reading order. See [`Lexer::backed_up`].
-    backed: Vec<(usize, Vec<Token>, bool)>,
+    /// The levels of tex's input stack that sit in `pending`, innermost last:
+    /// what §325's `back_input` made and what a macro call made, each with
+    /// the depth of `pending` it sits on. See [`Lexer::levels`].
+    levels: Vec<Level>,
 }
 
 impl Lexer {
@@ -110,7 +274,7 @@ impl Lexer {
             chars,
             pos: 0,
             state: State::NewLine,
-            pending: Vec::new(),
+            pending: Pending::default(),
             line_cache: std::cell::Cell::new((0, 1)),
             ahead: None,
             ahead_disabled: true,
@@ -120,7 +284,7 @@ impl Lexer {
             decoded_at: None,
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
-            backed: Vec::new(),
+            levels: Vec::new(),
         }
     }
 
@@ -185,7 +349,7 @@ impl Lexer {
             pos: 0,
             line_cache: std::cell::Cell::new((0, 1)),
             state: State::NewLine,
-            pending: Vec::new(),
+            pending: Pending::default(),
             ahead: None,
             ahead_disabled: false,
             ahead_misses: 0,
@@ -194,7 +358,7 @@ impl Lexer {
             decoded_at: None,
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
-            backed: Vec::new(),
+            levels: Vec::new(),
         }
     }
 
@@ -214,52 +378,171 @@ impl Lexer {
         }
     }
 
+    /// Drop the levels whose tokens are all read and nothing sits above:
+    /// §325 and §390 end a finished token list before they begin another.
+    fn drop_finished(&mut self) {
+        let depth = self.pending.len();
+        while self
+            .levels
+            .last()
+            .is_some_and(|l| l.base >= depth && !matches!(l.kind, LevelKind::Site(_)))
+        {
+            self.levels.pop();
+        }
+    }
+
     /// §325's `back_input` (and §323's `back_list` for several): put tokens a
     /// scanner read too far back to be read again, as a level of their own
     /// that an error's context shows as `<to be read again>`. A token put
-    /// back by [`Lexer::push_back`] -- a macro body, a peek -- is not one.
+    /// back by [`Lexer::push_back`] -- a peek -- is not one.
     pub fn back_input(&mut self, toks: &[Token]) {
-        let base = self.pending.len();
-        // A level something has read below is gone, whatever came after it.
-        self.backed.retain(|(b, _, _)| *b < base);
-        self.push_back(toks);
-        self.backed.push((base, toks.to_vec(), false));
+        self.begin_level(toks, LevelKind::BackedUp);
     }
 
     /// §327's `ins_error`: tokens tex INSERTS as a level of their own, which
     /// an error's context shows as `<inserted text>` where [`Lexer::back_input`]
     /// shows `<to be read again>`.
     pub fn insert_input(&mut self, toks: &[Token]) {
-        self.back_input(toks);
-        if let Some(level) = self.backed.last_mut() {
-            level.2 = true;
-        }
+        self.begin_level(toks, LevelKind::Inserted);
     }
 
-    /// The levels [`Lexer::back_input`] made that §311's `show_context` shows,
-    /// innermost first: each one's tokens and how many of them have been
-    /// read. A level read to its end is §314's `<recently read>`, and is shown
-    /// only while it is the innermost level, until the next read ends it.
+    /// §389's `macro_call` ending: the macro's substituted body goes in front
+    /// of the input as a level that remembers which macro made it and how long
+    /// each argument was, so §314's `\a #1->body` display can be rebuilt from
+    /// the definition and the position.
     ///
-    /// Judged by depth and by the tokens still being the ones put back, so a
-    /// peek that takes a token and returns it leaves the level as it was, and
-    /// a level something else was pushed over unread is not shown.
-    pub fn backed_up(&self) -> Vec<(&[Token], usize, bool)> {
+    /// An empty body makes no level: tex pops an exhausted list before it
+    /// reads on, so no error can see it.
+    pub fn push_macro(&mut self, name: CsId, args: Vec<u32>, body: Vec<Token>) {
+        if body.is_empty() {
+            return;
+        }
+        self.drop_finished();
+        let base = self.pending.len();
+        self.push_back(&body);
+        self.levels.push(Level {
+            base,
+            toks: Rc::new(body),
+            kind: LevelKind::Macro { name, args },
+        });
+    }
+
+    fn begin_level(&mut self, toks: &[Token], kind: LevelKind) {
+        // A level something has read below is gone, whatever came after it.
+        self.drop_finished();
+        let base = self.pending.len();
+        self.push_back(toks);
+        self.levels.push(Level {
+            base,
+            toks: Rc::new(toks.to_vec()),
+            kind,
+        });
+    }
+
+    /// The input-stack levels §311's `show_context` shows, innermost first:
+    /// each one's tokens and how many of them have been read.
+    ///
+    /// A level is judged by where it sits in `pending` and by the tokens
+    /// there still being the ones it holds, so a peek that takes a token and
+    /// returns it leaves the level as it was, and a level something else was
+    /// pushed over unread, or read to its end under another, is not shown.
+    /// §314's `<recently read>` is the innermost level read to its end.
+    pub fn levels(&self) -> Vec<LevelView<'_>> {
         let depth = self.pending.len();
-        let mut out = Vec::new();
-        for (base, toks, inserted) in self.backed.iter().rev() {
-            let Some(above) = depth.checked_sub(*base) else {
+        let mut out: Vec<LevelView<'_>> = Vec::new();
+        // The top of the region of `pending` the level being judged can hold:
+        // the base of the nearest level shown above it.
+        let mut upper = depth;
+        for level in self.levels.iter().rev() {
+            if matches!(level.kind, LevelKind::Site(_)) {
+                out.push(LevelView {
+                    toks: &level.toks,
+                    read: 0,
+                    kind: &level.kind,
+                });
                 continue;
-            };
-            let unread = above.min(toks.len());
+            }
+            let n = level.toks.len();
+            let cap = upper.saturating_sub(level.base).min(n);
             // The unread tokens sit at `base..`, the list's last lowest.
-            let intact = (0..unread).all(|i| self.pending[base + i] == toks[toks.len() - 1 - i]);
-            let innermost = out.is_empty() && above == unread;
-            if intact && (unread > 0 || innermost) {
-                out.push((toks.as_slice(), toks.len() - unread, *inserted));
+            let unread = (0..cap)
+                .take_while(|i| self.pending[level.base + i] == level.toks[n - 1 - i])
+                .count();
+            // Nothing is shown above it and it is read to its end: the one
+            // case a level with no tokens left is still on tex's stack.
+            let innermost = out.is_empty() && unread == 0 && level.base >= upper;
+            if unread > 0 || innermost {
+                out.push(LevelView {
+                    toks: &level.toks,
+                    read: n - unread,
+                    kind: &level.kind,
+                });
+                upper = level.base;
             }
         }
         out
+    }
+
+    /// Give a lexer holding a `\message` body the source the body was read
+    /// from, so an error met while the body expands shows the file line the
+    /// scanner had reached. Call it with the body already pushed back.
+    pub fn attach_site(&mut self, site: Site) {
+        self.pending.low = self.pending.len();
+        self.levels.insert(
+            0,
+            Level {
+                base: 0,
+                toks: Rc::new(Vec::new()),
+                kind: LevelKind::Site(Rc::new(site)),
+            },
+        );
+    }
+
+    /// The source around a body this lexer read, as a [`Site`]: `ends[k]` is
+    /// where the mouth stood after the k-th token of the body, and
+    /// `parent_lens[k]` how deep `pending` was then.
+    pub fn site(&self, ends: Vec<usize>, parent_lens: Vec<usize>) -> Site {
+        let top = self.chars.len();
+        let lo = ends.iter().copied().min().unwrap_or(self.pos).min(top);
+        let hi = ends.iter().copied().max().unwrap_or(self.pos).min(top);
+        // The display names the line of the last character READ, so the first
+        // line needed is the one before `lo`.
+        let start = self.chars[..lo.saturating_sub(1)]
+            .iter()
+            .rposition(|c| *c == '\n')
+            .map_or(0, |i| i + 1);
+        let end = self.chars[hi..]
+            .iter()
+            .position(|c| *c == '\n')
+            .map_or(top, |i| hi + i);
+        // Counted back from the mouth's own line, which is cached: counting from
+        // the top of the file for every message is quadratic in the document.
+        let pos = self.pos.min(top);
+        let behind = self.chars[start.min(pos)..pos]
+            .iter()
+            .filter(|c| **c == '\n')
+            .count();
+        let first_line = (self.line() as usize).saturating_sub(behind).max(1);
+        Site {
+            text: self.chars[start..end].to_vec(),
+            offset: start,
+            first_line,
+            spliced: self.spliced.clone(),
+            ends,
+            parent_lens,
+            parent: self
+                .levels
+                .iter()
+                .filter(|l| !matches!(l.kind, LevelKind::Site(_)))
+                .map(|l| (l.base, l.toks.clone(), l.kind.clone()))
+                .collect(),
+        }
+    }
+
+    /// How many tokens of a lexer's body have been read from the bottom, by
+    /// the shallowest `pending` has ever been since [`Lexer::attach_site`].
+    pub fn body_read(&self, body_len: usize) -> usize {
+        body_len.saturating_sub(self.pending.low.min(body_len))
     }
 
     /// The 1-based line the mouth has reached, for a diagnostic that has to
@@ -294,34 +577,7 @@ impl Lexer {
         if self.chars.is_empty() {
             return None;
         }
-        let pos = self.pos.min(self.chars.len());
-        // tex reads a LINE at a time into `buffer` (§303) and `loc` may sit one
-        // past its end, with `line` still naming the line that ended. Taking
-        // the line of the last character CONSUMED rather than of the next one
-        // to read is what reproduces that: `\chardef\x=256` reports on its own
-        // line even though scanning the constant ate the line's end.
-        let last = pos.saturating_sub(1);
-        let line = 1 + self.chars[..last].iter().filter(|c| **c == '\n').count();
-        let start = self.chars[..last]
-            .iter()
-            .rposition(|c| *c == '\n')
-            .map_or(0, |i| i + 1);
-        // §318 stops at `end_line_char`: a line's own terminator is not part of
-        // what is shown.
-        let end = self.chars[start..]
-            .iter()
-            .position(|c| *c == '\n')
-            .map_or(self.chars.len(), |i| start + i);
-        let split = pos.min(end);
-        let shown = |from: usize, to: usize| -> String {
-            (from..to)
-                .filter(|i| self.spliced.binary_search(i).is_err())
-                .map(|i| self.chars[i])
-                .collect()
-        };
-        let before = shown(start, split);
-        let after = shown(split, end);
-        Some(Self::context_lines(&format!("l.{line} "), &before, &after))
+        Some(context_display(&self.chars, 1, self.pos, &self.spliced, 0))
     }
 
     /// `tex.web` §317's two-line display, trimmed the way tex trims it.
@@ -564,8 +820,7 @@ impl Lexer {
         // §357: a level read to its end is ended by the NEXT read, not by
         // the one that took its last token; until then it is shown as
         // `<recently read>`.
-        let depth = self.pending.len();
-        self.backed.retain(|(base, _, _)| *base < depth);
+        self.drop_finished();
         if let Some(t) = self.pending.pop() {
             return Some(t);
         }

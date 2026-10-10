@@ -1,0 +1,11 @@
+% tex.web S442: after a backquote one token is read, and a control sequence of
+% more than one character is no character code: `Improper alphabetic
+% constant', the token read again, and the code of "0" in its place.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\message{[\number`\ab]}
+\message{[\number`\ ][\number`\\]}
+\count1=`\foo \relax
+\message{[\the\count1]}
+\message{[\number`\csname relax\endcsname]}
+\end

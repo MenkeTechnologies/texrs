@@ -424,6 +424,23 @@ pub fn meaning(name: &str, esc: &str) -> String {
     }
 }
 
+/// Whether `name` is something tex starts out knowing: a TeX82 primitive, a §236
+/// parameter, or a command this engine documents. Anything else is undefined
+/// until a document defines it.
+///
+/// A set rather than a scan of the lists: the expander asks for every control
+/// sequence it expands.
+pub fn is_known_name(name: &str) -> bool {
+    use once_cell::sync::Lazy;
+    static KNOWN: Lazy<std::collections::HashSet<&'static str>> = Lazy::new(|| {
+        let mut set: std::collections::HashSet<&'static str> = NAMES.iter().copied().collect();
+        set.extend(crate::intpar::NAMES.iter().copied());
+        set.extend(crate::corpus::names().filter_map(|n| n.strip_prefix('\\')));
+        set
+    });
+    KNOWN.contains(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

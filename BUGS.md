@@ -149,15 +149,14 @@ texrs output reached tracked lualatex references in
   `tests/cases/edef_freezes_conditional.tex` and
   `tests/cases/ifx_after_edef_conditional.tex` pin both faces of it; found by
   `the parity-fuzz binary` at seed 77.
-- **Errors.** An undefined control sequence is not reported as tex reports it.
-  Inside a `\message` texrs prints its name into the message stream and exits
-  0; met as a command it stops the run with one `TexError`, which the
-  embedding API (`tests/embed.rs`), the REPL and the LaTeX loader's `needs \x`
-  report are built on. tex reports `! Undefined control sequence.` and expands
-  it to nothing in both places, and goes on. `tests/cases/undefined_cs.tex`
-  pins it, and the reason it is hard is that §1279 expands a `\message` body
-  while reading it from the file, so tex's context display splits the line at
-  the offending token while texrs has already read to the `}`.
+- **Errors.** An undefined control sequence is reported as tex reports it
+  (§370: `! Undefined control sequence.`, expanded to nothing, the run goes on)
+  in a run meant to read like tex's -- the parity harness and
+  `run_messages_tex` -- and stops the run with one `TexError` through the
+  library API (`tests/embed.rs`), the REPL and the LaTeX loader, whose `needs
+  \x` report is built on that stop. `Engine::recover` is the switch. The
+  hundredth error ends a run as §82 has it, `(That makes 100 errors; please try
+  again.)`. `tests/cases/undefined_cs.tex` pins it.
 
   Several conditions DO now report and carry on the way tex does: a constant
   above 2147483647 (§445), a character or register code out of range (§433,
@@ -176,16 +175,21 @@ texrs output reached tracked lualatex references in
   `error_context_trimmed.tex` pin all of it, including the `...` trimming at
   `half_error_line` and `error_line`. The display has the file line and the
   levels §325's `back_input` made -- `<to be read again>` and `<recently
-  read>`, pinned by `error_context_to_be_read_again.tex` -- but no level a
-  macro body or an argument made: texrs keeps no input stack for those, so an
-  error raised while one is being read lacks the `\a ->...` lines tex prints
-  above the file line, and an error inside a `\message` body, which texrs
-  reads to its `}` before expanding it, shows no file line at all. Every
+  read>`, pinned by `error_context_to_be_read_again.tex` -- and the levels a
+  macro call made: the macro's name, parameter text and body as defined split
+  where reading has got to, and `<argument>` for an argument being read
+  (`macro_levels_in_error_context.tex`). An error inside a `\message` body
+  shows the file line the scanner had reached
+  (`message_body_error_has_file_line.tex`): the body is read first and its
+  token positions recorded. The levels are judged by where their tokens sit in
+  the pending list, so tokens pushed back without a level of their own can
+  shift a split by a token. Every
   other error path -- a `Missing number` where texrs meets an internal
   quantity it cannot read, or a `Use of \a doesn't match its definition` --
   still stops with one `TexError`, `\end` with a conditional still open does
   not say `(\end occurred when \iftrue on line N was incomplete)`, and `\outer`
-  is not policed at all.
+  is not policed at all. Mode conditionals, box registers, `\halign`,
+  `\fontdimen` and the page builder's `[1]` are not implemented.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).

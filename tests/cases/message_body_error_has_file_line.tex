@@ -1,0 +1,13 @@
+% tex.web S1279 expands a \message's text while it reads it from the file, so an
+% error met there is displayed with the file line the scanner had reached --
+% after the token the scan was on, which is `}' when the error is the end of a
+% number -- and, for text read out of a macro, the macro's level above it.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\message{[\number"G][\the\dimen300]}
+\message{[\csname a\relax\endcsname]}
+\def\m{\message{[\number"Gx]}}
+\m
+\def\n#1{\message{[#1\the\dimen300]}}
+\n{ab}
+\end

@@ -202,6 +202,8 @@ pub struct Lowerer {
     /// boundary, which is what makes `-{}-` two hyphens: the spelling a LaTeX
     /// document has always used to ask for them.
     lig: Option<char>,
+    /// What is known of the registers; see [`Known`].
+    known: Known,
 }
 
 /// A list environment that is open, and how many items it has had.
@@ -272,6 +274,7 @@ impl Lowerer {
             listing_depth: 0,
             lig: None,
             toc_depth: 2,
+            known: Known::default(),
         }
     }
 
@@ -308,6 +311,13 @@ impl Lowerer {
     }
 
     /// Emit the document's own text as well as its messages.
+    /// Report what tex reports and carry on, where the library API would stop:
+    /// see [`Engine::recover`].
+    pub fn tex_errors(mut self, on: bool) -> Self {
+        self.eng.recover = on;
+        self
+    }
+
     pub fn with_text_output(mut self) -> Self {
         self.text_output = true;
         self
@@ -408,6 +418,13 @@ impl Lowerer {
     /// of the run -- so it is only visible at all once something follows it.
     fn close_reports(&mut self, cmds: &mut Vec<Cmd>) {
         let held = self.take_reports();
+        // A run that gave up closes nothing: no paren, no notice.
+        if self.eng.halted {
+            if !held.is_empty() {
+                cmds.push(Cmd::Reports(held));
+            }
+            return;
+        }
         if !self.reported {
             // Nothing was reported while LOWERING, which does not settle it:
             // §1236's checked arithmetic reports on the VM, and only the VM
@@ -619,9 +636,19 @@ impl Lowerer {
         let mut marked = 0u32;
         // A `\global` register assignment the last command made is marked
         // here, AFTER every command it lowered to, so the mark sees its value.
+        // How much of `out` the register tracker has followed.
+        let mut followed = 0usize;
+        // §82: the hundredth error ends the run.
         while let Some(tok) = {
             self.flush_keeps(&mut out);
-            let tok = lx.next_token(&self.eng.cats);
+            for cmd in &out[followed..] {
+                self.known.apply(cmd);
+            }
+            followed = out.len();
+            let tok = match self.eng.halted {
+                true => None,
+                false => lx.next_token(&self.eng.cats),
+            };
             self.eng.note_mouth(lx);
             tok
         } {
@@ -668,6 +695,7 @@ impl Lowerer {
                         // lowered and wrapped in save/restore.
                         self.eng.compile_time_begin_group(GroupKind::Simple);
                         let mark = self.globals.len();
+                        let known_mark = self.known.mark();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
                         // Whatever `\aftergroup` held for this group is read
@@ -675,6 +703,7 @@ impl Lowerer {
                         let after = self.eng.take_after_group();
                         lx.push_back(&after);
                         let (saves, keeps) = self.group_parts(&mut body, mark)?;
+                        self.known_after_group(known_mark, &saves, &keeps);
                         // A group exists to save registers and to scope the
                         // macro table. The macro table is a compile-time fact
                         // and is already handled above, so a group that assigns
@@ -743,6 +772,10 @@ impl Lowerer {
                 continue;
             };
             let name = *name;
+            // §358: a `\noexpand`ed control sequence is `\relax` here.
+            if name.noexpand_origin().is_some() {
+                continue;
+            }
             if let Some(stops) = stop {
                 if stops.contains(&name.name()) {
                     lx.push_back(&[Token::Cs(name)]);
@@ -998,7 +1031,7 @@ impl Lowerer {
                     self.eng.compile_time_intpar(lx, i)?
                 }
                 "count" => {
-                    let reg = self.eng.scan_number_file(lx)?;
+                    let reg = self.eng.scan_register_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
                     let v = self.number(lx)?;
                     self.note_global(&[reg]);
@@ -1012,7 +1045,7 @@ impl Lowerer {
                 // body, so it is stored while lowering rather than in a slot,
                 // and nothing in the braces expands.
                 "toks" => {
-                    let reg = self.eng.scan_number_file(lx)?;
+                    let reg = self.eng.scan_register_file(lx)?;
                     self.eng.do_toks_assign(lx, reg)?;
                 }
                 // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
@@ -1025,14 +1058,14 @@ impl Lowerer {
                         "muskip" => crate::compiler::MUSKIP_BASE,
                         _ => crate::compiler::SKIP_BASE,
                     };
-                    let reg = self.eng.scan_number_file(lx)?;
+                    let reg = self.eng.scan_register_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
                     let base = file + reg * crate::compiler::SKIP_STRIDE;
                     self.note_global(&[base, base + 1, base + 2, base + 3]);
                     out.extend(self.glue_assign(lx, base)?);
                 }
                 "dimen" => {
-                    let reg = self.eng.scan_number_file(lx)?;
+                    let reg = self.eng.scan_register_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
                     // `\dimen1=\dimen0` copies a register whose value is only
                     // known at run time, and `\dimen1=\skip0` takes a glue's
@@ -1108,17 +1141,19 @@ impl Lowerer {
                     let reg = match self.eng.numeric_cs(what) {
                         Some(crate::expand::NumericCs::Register(r)) => r,
                         _ => match what.name() {
-                            "count" => self.eng.scan_number_file(lx)?,
+                            "count" => self.eng.scan_register_file(lx)?,
                             "dimen" => {
-                                crate::compiler::DIMEN_BASE + self.eng.scan_number_file(lx)?
+                                crate::compiler::DIMEN_BASE + self.eng.scan_register_file(lx)?
                             }
                             "skip" => {
                                 crate::compiler::SKIP_BASE
-                                    + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE
+                                    + self.eng.scan_register_file(lx)?
+                                        * crate::compiler::SKIP_STRIDE
                             }
                             "muskip" => {
                                 crate::compiler::MUSKIP_BASE
-                                    + self.eng.scan_number_file(lx)? * crate::compiler::SKIP_STRIDE
+                                    + self.eng.scan_register_file(lx)?
+                                        * crate::compiler::SKIP_STRIDE
                             }
                             other => {
                                 return Err(TexError(format!("Unsupported register \\{other}")))
@@ -1283,6 +1318,8 @@ impl Lowerer {
                     let inner = self.input_pass(&src);
                     self.input_depth -= 1;
                     out.extend(inner?);
+                    // The file's own commands were followed as it was lowered.
+                    followed = out.len();
                     out.push(Cmd::FileClose);
                     // `\end` inside the file stops the whole run, not just the
                     // file: tex closes every open paren and finishes.
@@ -1506,6 +1543,7 @@ impl Lowerer {
                 "begingroup" => {
                     self.eng.compile_time_begin_group(GroupKind::SemiSimple);
                     let mark = self.globals.len();
+                    let known_mark = self.known.mark();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
                     // The `\endgroup` that stopped the block was pushed back
                     // for this arm to consume; at end of input there is none.
@@ -1516,6 +1554,7 @@ impl Lowerer {
                     let after = self.eng.take_after_group();
                     lx.push_back(&after);
                     let (saves, keeps) = self.group_parts(&mut body, mark)?;
+                    self.known_after_group(known_mark, &saves, &keeps);
                     // No register written means nothing is left for run time --
                     // the macro table was already scoped above -- so the body
                     // is spliced in rather than wrapped, which also keeps a
@@ -1580,6 +1619,11 @@ impl Lowerer {
                 // horizontal mode, so it has only its mouth-level effect --
                 // which is the whole of it for a `\message` stream.
                 "ignorespaces" => self.skip_spaces_in_text(lx),
+                // §465 and §470: expandable, so at the top level what they stand
+                // for is characters, which are read next like any other. A token
+                // register is tokens and is the expander's; any other quantity
+                // is written out here the way a message writes it.
+                "the" | "number" => self.expand_the_here(lx, name)?,
                 "global" => self.eng.set_global_prefix(true),
                 // The other two definition prefixes. Like `\global` they set a
                 // flag the definition that follows reads and spends.
@@ -1650,6 +1694,14 @@ impl Lowerer {
                         if self.text_output {
                             self.push_text_char(&mut out, ch);
                         }
+                        continue;
+                    }
+                    // §370: a name with no meaning is reported, expands to
+                    // nothing, and the run goes on. What is not undefined but
+                    // is not done here -- a primitive this engine has no arm
+                    // for -- still stops it.
+                    if self.eng.recover && self.eng.is_undefined(name) {
+                        self.eng.report(lx, "Undefined control sequence");
                         continue;
                     }
                     return Err(TexError(format!("Undefined control sequence \\{other}")));
@@ -3052,13 +3104,18 @@ impl Lowerer {
     /// line rather than in a helper: this recursion is what a mutually
     /// recursive macro pair deepens, and the debug build's stack is what
     /// `tests/recursive_macro.rs` holds it to.
+    #[inline(never)]
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
         let negated = self.eng.take_unless();
+        // Each arm starts from what was known before the conditional; which one
+        // runs is the run's, so what they assign is unknown afterwards.
+        let known_mark = self.known.mark();
         let mut then_branch = self.block(lx, Some(&["else", "fi"]))?;
         self.flush_reports(&mut then_branch);
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
             Some(Token::Cs(n)) if n.name() == "else" => {
+                self.known.undo_to(known_mark, None);
                 else_branch = self.block(lx, Some(&["fi"]))?;
                 self.flush_reports(&mut else_branch);
                 // Consume the `\fi`.
@@ -3069,9 +3126,13 @@ impl Lowerer {
                 if let Some(t) = other {
                     lx.push_back(&[t]);
                 }
+                if self.eng.halted {
+                    return Ok((then_branch, else_branch));
+                }
                 return Err(TexError("Incomplete \\ifnum; missing \\fi".into()));
             }
         }
+        self.known.undo_to(known_mark, None);
         // A negated conditional is this one with its arms exchanged.
         match negated {
             true => Ok((else_branch, then_branch)),
@@ -3082,17 +3143,20 @@ impl Lowerer {
     /// The `\or`-separated cases of a file-level `\ifcase`, the last being
     /// `\else`'s (empty when there is none).
     fn case_arms(&mut self, lx: &mut Lexer) -> R<Vec<Vec<Cmd>>> {
+        let known_mark = self.known.mark();
         let mut arms = Vec::new();
         loop {
             let mut arm = self.block(lx, Some(&["or", "else", "fi"]))?;
             self.flush_reports(&mut arm);
             arms.push(arm);
+            self.known.undo_to(known_mark, None);
             match lx.next_token(&self.eng.cats) {
                 Some(Token::Cs(n)) if n.name() == "or" => continue,
                 Some(Token::Cs(n)) if n.name() == "else" => {
                     let mut arm = self.block(lx, Some(&["fi"]))?;
                     self.flush_reports(&mut arm);
                     arms.push(arm);
+                    self.known.undo_to(known_mark, None);
                     let _ = lx.next_token(&self.eng.cats);
                     return Ok(arms);
                 }
@@ -3103,6 +3167,10 @@ impl Lowerer {
                 other => {
                     if let Some(t) = other {
                         lx.push_back(&[t]);
+                    }
+                    if self.eng.halted {
+                        arms.push(Vec::new());
+                        return Ok(arms);
                     }
                     return Err(TexError("Incomplete \\ifcase; missing \\fi".into()));
                 }
@@ -3374,7 +3442,7 @@ impl Lowerer {
             }
             if let Token::Cs(n) = &t {
                 if n.name() == want {
-                    let reg = self.eng.scan_number_file(lx)?;
+                    let reg = self.eng.scan_register_file(lx)?;
                     return Ok(Some((file + reg * crate::compiler::SKIP_STRIDE, negative)));
                 }
                 if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
@@ -3437,13 +3505,13 @@ impl Lowerer {
             let n = *n;
             match n.name() {
                 "dimen" => {
-                    let reg = self.eng.scan_number_any(lx, pending)?;
+                    let reg = self.eng.scan_register_any(lx, pending)?;
                     return Ok(Num::Count(crate::compiler::DIMEN_BASE + reg));
                 }
                 // A glue where a dimension is wanted is its NATURAL width
                 // (`tex.web` §430's coercion), which is the first of its slots.
                 "skip" => {
-                    let reg = self.eng.scan_number_any(lx, pending)?;
+                    let reg = self.eng.scan_register_any(lx, pending)?;
                     return Ok(Num::Count(
                         crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
                     ));
@@ -3484,11 +3552,145 @@ impl Lowerer {
             Token::Char(..) => false,
         };
         if takes_number {
-            let n = self.eng.scan_number_file(lx)?;
+            // A register number is §433's eight-bit integer; the code tables
+            // take a character code, which is checked where it is read.
+            let is_register = matches!(
+                t,
+                Token::Cs(n) if matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks")
+            );
+            let n = match is_register {
+                true => self.eng.scan_register_file(lx)?,
+                false => self.eng.scan_number_file(lx)?,
+            };
             spelt.extend(n.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
             spelt.push(Token::Char(' ', Cat::Space));
         }
         Ok(spelt)
+    }
+
+    /// `\the` or `\number` met at the top level; see the arm that calls it. A
+    /// function of its own so the dispatch loop's frame, which recursion
+    /// multiplies, does not carry its locals.
+    #[inline(never)]
+    fn expand_the_here(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
+        if self.eng.expand_in_text(lx, name)? {
+            return Ok(());
+        }
+        let tokens = match name.name() {
+            "the" => self.the_operand(lx)?,
+            _ => self.number_operand(lx)?,
+        };
+        let mut work = Lexer::new("");
+        work.push_back(&tokens);
+        let parts = self.msg_ops(&mut work, &[])?;
+        let text = self.static_text(&parts);
+        lx.push_back(&crate::expand::str_toks(&text));
+        Ok(())
+    }
+
+    /// What `\number` stands in front of, read from the file and spelt as a
+    /// token list beginning with `\number`, for [`Self::msg_ops`] to render.
+    fn number_operand(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        let digits = |v: i64| -> Vec<Token> {
+            v.to_string()
+                .chars()
+                .map(|c| Token::Char(c, Cat::Other))
+                .collect()
+        };
+        let mut toks = vec![Token::cs("number")];
+        match self.number(lx)? {
+            Num::Literal(v) => toks.extend(digits(v)),
+            Num::Count(slot) => toks.extend(self.register_tokens(slot)?),
+            Num::Neg(slot) => {
+                toks.push(Token::Char('-', Cat::Other));
+                toks.extend(self.register_tokens(slot)?);
+            }
+            _ => return Err(TexError("Unsupported \\number operand".into())),
+        }
+        Ok(toks)
+    }
+
+    /// The tokens that name the register in `slot`, as a document would spell
+    /// it.
+    fn register_tokens(&self, slot: i64) -> R<Vec<Token>> {
+        use crate::compiler::{DIMEN_BASE, MUSKIP_BASE, SKIP_BASE, SKIP_STRIDE};
+        if let Some(name) = crate::params::name_of_slot(slot) {
+            return Ok(vec![Token::cs(name)]);
+        }
+        let (word, n) = match slot {
+            s if s < DIMEN_BASE => ("count", s),
+            s if s < SKIP_BASE => ("dimen", s - DIMEN_BASE),
+            s if s < MUSKIP_BASE => ("skip", (s - SKIP_BASE) / SKIP_STRIDE),
+            s => ("muskip", (s - MUSKIP_BASE) / SKIP_STRIDE),
+        };
+        let mut toks = vec![Token::cs(word)];
+        toks.extend(n.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
+        toks.push(Token::Char(' ', Cat::Space));
+        Ok(toks)
+    }
+
+    /// A message's pieces as the text they stand for NOW, reading each register
+    /// as far as the lowerer has followed it. A message prints them at run
+    /// time; text that goes back into the mouth cannot wait for that.
+    fn static_text(&self, parts: &[MsgOp]) -> String {
+        let value = |n: &Num| self.known.num(n).unwrap_or(0);
+        let mut out = String::new();
+        for part in parts {
+            match part {
+                MsgOp::Text(t) => out.push_str(t),
+                MsgOp::Report(_) | MsgOp::Discard(_) => {}
+                MsgOp::Number(n) => out.push_str(&value(n).to_string()),
+                MsgOp::Dimen(n) => {
+                    out.push_str(&crate::dimen::print_scaled(value(n)));
+                    out.push_str("pt");
+                }
+                MsgOp::Roman(n) => out.push_str(&crate::expand::roman_int(value(n))),
+                MsgOp::Glue(s) | MsgOp::MuGlue(s) => {
+                    let unit = match part {
+                        MsgOp::Glue(_) => "pt",
+                        _ => "mu",
+                    };
+                    let packed = value(&s[3]);
+                    out.push_str(&crate::glue::print_glue_in(
+                        unit,
+                        value(&s[0]),
+                        value(&s[1]),
+                        packed / 4,
+                        value(&s[2]),
+                        packed % 4,
+                    ));
+                }
+                MsgOp::If {
+                    left,
+                    rel,
+                    right,
+                    then_ops,
+                    else_ops,
+                } => {
+                    let (l, r) = (value(left), value(right));
+                    let holds = match rel {
+                        Rel::Less => l < r,
+                        Rel::Equal => l == r,
+                        Rel::Greater => l > r,
+                    };
+                    let arm = if holds { then_ops } else { else_ops };
+                    out.push_str(&self.static_text(arm));
+                }
+                MsgOp::IfOdd {
+                    value: v,
+                    then_ops,
+                    else_ops,
+                } => {
+                    let arm = if value(v) % 2 != 0 {
+                        then_ops
+                    } else {
+                        else_ops
+                    };
+                    out.push_str(&self.static_text(arm));
+                }
+            }
+        }
+        out
     }
 
     /// `\immediate\write<number>{<text>}`: §1350 reads the stream number and
@@ -3521,9 +3723,10 @@ impl Lowerer {
     /// and conditionals do not: they read VM slots, so they become a slot read
     /// and a real branch.
     fn message_parts(&mut self, lx: &mut Lexer) -> R<Vec<MsgOp>> {
-        let body = self.eng.read_message_body(lx)?;
+        let (body, site) = self.eng.read_message_body_sited(lx)?;
         let mut work = Lexer::new("");
         work.push_back(&body);
+        work.attach_site(site);
         self.msg_ops(&mut work, &[])
     }
 
@@ -3546,6 +3749,9 @@ impl Lowerer {
             };
         }
         while let Some(t) = work.pending.pop() {
+            if self.eng.halted {
+                break;
+            }
             // Active characters are commands here too: `\message{~}` runs `~`.
             let t = match &t {
                 Token::Char(c, Cat::Active) => match self.eng.active_meaning(*c) {
@@ -3563,6 +3769,10 @@ impl Lowerer {
                 continue;
             };
             let n = *n;
+            // The brace that ended the body: nothing after it is the message's.
+            if n.name() == crate::expand::MESSAGE_END {
+                break;
+            }
             if stop.contains(&n.name()) && !(decided > 0 && matches!(n.name(), "else" | "fi")) {
                 work.push_back(&[Token::Cs(n)]);
                 break;
@@ -3582,7 +3792,7 @@ impl Lowerer {
                             // `\the\toks0` is the token list as text, and it
                             // is known while lowering because the table is.
                             Some(Token::Cs(w)) if w.name() == "toks" => {
-                                let reg = self.eng.scan_number_pending(work)?;
+                                let reg = self.eng.scan_register_pending(work)?;
                                 text.push_str(&self.eng.toks_shown(reg));
                                 continue;
                             }
@@ -3597,7 +3807,7 @@ impl Lowerer {
                                     true => crate::compiler::MUSKIP_BASE,
                                     false => crate::compiler::SKIP_BASE,
                                 };
-                                let reg = self.eng.scan_number_pending(work)?;
+                                let reg = self.eng.scan_register_pending(work)?;
                                 let base = file + reg * crate::compiler::SKIP_STRIDE;
                                 let slots = [
                                     Num::Count(base),
@@ -3612,7 +3822,7 @@ impl Lowerer {
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "dimen" => {
-                                let reg = self.eng.scan_number_pending(work)?;
+                                let reg = self.eng.scan_register_pending(work)?;
                                 out.push(MsgOp::Dimen(Num::Count(
                                     crate::compiler::DIMEN_BASE + reg,
                                 )));
@@ -3681,7 +3891,7 @@ impl Lowerer {
                             },
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
-                        let reg = self.eng.scan_number_pending(work)?;
+                        let reg = self.eng.scan_register_pending(work)?;
                         out.push(MsgOp::Number(Num::Count(reg)));
                         continue;
                     }
@@ -3702,7 +3912,7 @@ impl Lowerer {
                     // `\number\skip0` gives the natural component only.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "skip") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_number_pending(work)?;
+                        let reg = self.eng.scan_register_pending(work)?;
                         out.push(MsgOp::Number(Num::Count(
                             crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
                         )));
@@ -3710,7 +3920,7 @@ impl Lowerer {
                     }
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "muskip") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_number_pending(work)?;
+                        let reg = self.eng.scan_register_pending(work)?;
                         out.push(MsgOp::Number(Num::Count(
                             crate::compiler::MUSKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
                         )));
@@ -3719,7 +3929,7 @@ impl Lowerer {
                     // `\number\dimen0` gives the scaled points, unrendered.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "dimen") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_number_pending(work)?;
+                        let reg = self.eng.scan_register_pending(work)?;
                         out.push(MsgOp::Number(Num::Count(crate::compiler::DIMEN_BASE + reg)));
                         continue;
                     }
@@ -3785,7 +3995,12 @@ impl Lowerer {
                 // message prints a macro after it as §262's `print_cs` does.
                 "noexpand" => {
                     if let Some(next) = work.pending.pop() {
-                        text.push_str(&self.eng.tokens_shown(&[next]));
+                        match next {
+                            // The brace that ends the text is read by the
+                            // scanner as it is, and ends it.
+                            Token::Cs(m) if m.name() == crate::expand::MESSAGE_END => break,
+                            next => text.push_str(&self.eng.tokens_shown(&[next])),
+                        }
                     }
                 }
                 // `\jobname` is expandable: the job's name, as text.
@@ -3826,6 +4041,8 @@ impl Lowerer {
                 "csname" => {
                     // The name is built from text and macros, all compile-time.
                     let built = self.eng.read_csname_pending(work)?;
+                    // §372: a name with no meaning is made \relax.
+                    self.eng.define_if_undefined(&built);
                     work.push_back(&[Token::cs(&built)]);
                 }
                 "expandafter" => {
@@ -3996,6 +4213,9 @@ impl Lowerer {
                 }
                 _ if self.eng.is_macro(n) => self.eng.expand_macro_pending(work, n)?,
                 // An unexpandable control sequence prints as §262's `print_cs`.
+                _ if self.eng.recover && self.eng.is_undefined(n) => {
+                    self.eng.report(work, "Undefined control sequence");
+                }
                 _ => text.push_str(&self.eng.cs_text(n.name())),
             }
         }
@@ -4048,6 +4268,7 @@ impl Lowerer {
                     arms.push(Vec::new());
                     return Ok(arms);
                 }
+                _ if self.eng.halted => return Ok(arms),
                 _ => return Err(TexError("Incomplete \\ifcase".into())),
             }
         }
@@ -4064,6 +4285,7 @@ impl Lowerer {
                 let _ = work.pending.pop();
             }
             Some(Token::Cs(n)) if n.name() == "fi" => {}
+            _ if self.eng.halted => {}
             _ => return Err(TexError("Incomplete \\if; missing \\fi".into())),
         }
         match negated {
@@ -4403,6 +4625,18 @@ impl Lowerer {
             keeps.push((reg, scratch));
         }
         Ok((saves, keeps))
+    }
+
+    /// A group has ended: what it assigned locally is what it saved, so those
+    /// registers have their old values back, and what it kept through a
+    /// `\global` is the value its last global assignment left, which this does
+    /// not follow.
+    #[inline(never)]
+    fn known_after_group(&mut self, mark: usize, saves: &[i64], keeps: &[(i64, u16)]) {
+        self.known.undo_to(mark, Some(saves));
+        for (reg, _) in keeps {
+            self.known.set(*reg, None);
+        }
     }
 
     /// Write the `Cmd::KeepGlobal` marks the last command's `\global`
@@ -4779,6 +5013,104 @@ impl Lowerer {
         if *size_open > 0 {
             *size_open -= 1;
             self.push_text(out, &crate::typeset::SIZE_POP.to_string());
+        }
+    }
+}
+
+/// What the lowerer can say about a register's value at the point it is
+/// lowering.
+///
+/// A register is a VM slot, so its value is the run's -- except that a
+/// straight-line program is run in the order it is lowered, and `\dimen0=3pt`
+/// followed by `\kern\dimen0` is a kern of 3pt whatever else the program does.
+/// The boxes a document builds are measured while lowering, so this is what
+/// they measure with.
+///
+/// Three states per register. Never assigned, so INITEX's zero (the code
+/// generator writes zero into every slot first). Assigned to a value this
+/// tracked. Assigned to something it could not follow, which is unknown and
+/// makes whatever depends on it a refusal rather than a guess.
+#[derive(Default)]
+struct Known {
+    map: std::collections::HashMap<i64, Option<i64>>,
+    /// Every change, with what it replaced, so a group or a conditional arm
+    /// can put the state back without cloning the table.
+    trail: Vec<(i64, Option<Option<i64>>)>,
+}
+
+impl Known {
+    /// The value of `slot`, if it is known.
+    fn get(&self, slot: i64) -> Option<i64> {
+        match self.map.get(&slot) {
+            Some(v) => *v,
+            None => Some(0),
+        }
+    }
+
+    fn set(&mut self, slot: i64, value: Option<i64>) {
+        let old = self.map.insert(slot, value);
+        self.trail.push((slot, old));
+    }
+
+    /// Where the trail stands, for [`Known::undo_to`].
+    fn mark(&self) -> usize {
+        self.trail.len()
+    }
+
+    /// Put back everything changed since `mark`, or only `only` of it.
+    fn undo_to(&mut self, mark: usize, only: Option<&[i64]>) {
+        while self.trail.len() > mark {
+            let (slot, old) = self.trail.pop().expect("longer than the mark");
+            if only.is_some_and(|set| !set.contains(&slot)) {
+                continue;
+            }
+            match old {
+                Some(v) => self.map.insert(slot, v),
+                None => self.map.remove(&slot),
+            };
+        }
+    }
+
+    /// What a number is, if the register it reads is known.
+    fn num(&self, n: &Num) -> Option<i64> {
+        match n {
+            Num::Literal(v) => Some(*v),
+            Num::Count(s) => self.get(*s),
+            Num::Neg(s) => self.get(*s).map(|v| -v),
+            _ => None,
+        }
+    }
+
+    /// Follow one lowered command.
+    #[inline(never)]
+    fn apply(&mut self, cmd: &Cmd) {
+        const LIMIT: i64 = i32::MAX as i64;
+        match cmd {
+            Cmd::SetCount(reg, n) => {
+                let v = self.num(n);
+                self.set(*reg, v);
+            }
+            Cmd::Arith(op, reg, n) => {
+                let next = match (self.get(*reg), self.num(n)) {
+                    (Some(cur), Some(by)) => match op {
+                        Arith::Add => Some(cur.wrapping_add(by)),
+                        Arith::Mul => cur.checked_mul(by),
+                        Arith::Div if by != 0 => Some(cur / by),
+                        Arith::Div => None,
+                    },
+                    _ => None,
+                };
+                self.set(*reg, next.filter(|v| v.abs() <= LIMIT));
+            }
+            // A group puts its registers back itself, where it is lowered.
+            Cmd::Group { .. } => {}
+            // Which arm runs, and how often, is the run's.
+            Cmd::IfNum { .. } | Cmd::IfOdd { .. } | Cmd::Loop { .. } => {
+                for reg in assigned_counts(std::slice::from_ref(cmd)) {
+                    self.set(reg, None);
+                }
+            }
+            _ => {}
         }
     }
 }

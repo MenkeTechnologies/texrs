@@ -1,0 +1,21 @@
+% tex.web S314: an error's context shows every level of the input stack above
+% the file line. A macro level is the macro's name and its parameter text and
+% body AS DEFINED, split where reading has got to; an argument being read is a
+% level of its own above it. S311 counts the levels against \errorcontextlines.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\def\a{\count300=5 }
+\a
+\def\b#1{\count1=#1\relax\count300=300 }
+\def\c{\b{3}}
+\c
+\def\d#1#2{\count1=#1\relax\count300=#2 \relax}
+\d{4}{7}
+\def\e#1{\count1=#1\relax}
+\e{\undefinedcs}
+\errorcontextlines=1
+\c
+\errorcontextlines=0
+\c
+\message{[end]}
+\end

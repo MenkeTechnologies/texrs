@@ -1136,3 +1136,8 @@ pub const CORPUS: &[Entry] = &[
 pub fn lookup(name: &str) -> Option<&'static Entry> {
     CORPUS.iter().find(|(n, ..)| *n == name)
 }
+
+/// Every name the corpus documents, with its leading backslash.
+pub fn names() -> impl Iterator<Item = &'static str> {
+    CORPUS.iter().map(|(n, ..)| *n)
+}

@@ -205,6 +205,9 @@ impl Rng {
     fn pick<'a, T>(&mut self, xs: &'a [T]) -> &'a T {
         &xs[self.next(xs.len())]
     }
+    fn word<'a>(&mut self, xs: &[&'a str]) -> &'a str {
+        xs[self.next(xs.len())]
+    }
 }
 
 /// The registers a probe may touch.
@@ -229,7 +232,89 @@ fn letters(mut id: usize) -> String {
 }
 
 /// How many distinct constructs `probe` can emit.
-const PROBE_KINDS: usize = 35;
+const PROBE_KINDS: usize = 62;
+
+/// Parameters the probes may assign: none of them changes what the terminal
+/// shows, and none is read-only.
+const INT_PARAMS: &[&str] = &[
+    "pretolerance",
+    "tolerance",
+    "linepenalty",
+    "hyphenpenalty",
+    "exhyphenpenalty",
+    "clubpenalty",
+    "widowpenalty",
+    "displaywidowpenalty",
+    "brokenpenalty",
+    "binoppenalty",
+    "relpenalty",
+    "predisplaypenalty",
+    "postdisplaypenalty",
+    "interlinepenalty",
+    "doublehyphendemerits",
+    "finalhyphendemerits",
+    "adjdemerits",
+    "delimiterfactor",
+    "looseness",
+    "hbadness",
+    "vbadness",
+    "maxdeadcycles",
+    "hangafter",
+    "floatingpenalty",
+    "fam",
+    "defaulthyphenchar",
+    "defaultskewchar",
+    "language",
+    "lefthyphenmin",
+    "righthyphenmin",
+    "holdinginserts",
+    "uchyph",
+    "showboxbreadth",
+    "showboxdepth",
+    "outputpenalty",
+];
+
+const DIMEN_PARAMS: &[&str] = &[
+    "parindent",
+    "mathsurround",
+    "lineskiplimit",
+    "hsize",
+    "vsize",
+    "maxdepth",
+    "splitmaxdepth",
+    "boxmaxdepth",
+    "hfuzz",
+    "vfuzz",
+    "delimitershortfall",
+    "nulldelimiterspace",
+    "scriptspace",
+    "predisplaysize",
+    "displaywidth",
+    "displayindent",
+    "overfullrule",
+    "hangindent",
+    "hoffset",
+    "voffset",
+    "emergencystretch",
+];
+
+const GLUE_PARAMS: &[&str] = &[
+    "lineskip",
+    "baselineskip",
+    "parskip",
+    "abovedisplayskip",
+    "belowdisplayskip",
+    "abovedisplayshortskip",
+    "belowdisplayshortskip",
+    "leftskip",
+    "rightskip",
+    "topskip",
+    "splittopskip",
+    "tabskip",
+    "spaceskip",
+    "xspaceskip",
+    "parfillskip",
+];
 
 const WORDS: &[&str] = &[
     "ALPHA", "BETA", "GAMMA", "DELTA", "EPS", "ZETA", "ETA", "THETA",
@@ -382,6 +467,243 @@ fn probe(rng: &mut Rng, id: usize) -> String {
             a = rng.next(40) as i32 - 20,
             b = rng.next(10)
         ),
+        // §236 integer parameters: set, read through `\the` and `\number`,
+        // and changed by the three arithmetic commands.
+        35 => {
+            let p = rng.word(INT_PARAMS);
+            format!(
+                "\\{p}={a} \\advance\\{p} by {b} \\multiply\\{p} by {c} \\message{{p{id}:\\the\\{p} \\number\\{p} }}",
+                a = rng.next(3000) as i32 - 1000,
+                b = rng.next(100),
+                c = 1 + rng.next(5)
+            )
+        }
+        // §247 dimension parameters.
+        36 => {
+            let p = rng.word(DIMEN_PARAMS);
+            format!(
+                "\\{p}={a}.{f}pt \\advance\\{p} by {b}pt \\multiply\\{p} by {c} \\message{{p{id}:\\the\\{p} \\number\\{p} }}",
+                a = rng.next(100),
+                f = rng.next(1000),
+                b = rng.next(20),
+                c = 1 + rng.next(5)
+            )
+        }
+        // §224 glue parameters, and the math glue ones in mu.
+        37 => {
+            let p = rng.word(GLUE_PARAMS);
+            format!(
+                "\\{p}={a}pt plus {b}{fil} minus {c}pt \\advance\\{p} by {c}pt \\message{{p{id}:\\the\\{p} }}",
+                a = rng.next(30),
+                b = rng.next(30),
+                c = rng.next(30),
+                fil = rng.word(&["pt", "fil", "fill", "filll"])
+            )
+        }
+        38 => {
+            let p = rng.word(&["thinmuskip", "medmuskip", "thickmuskip"]);
+            format!(
+                "\\{p}={a}mu plus {b}{fil} minus {c}mu \\message{{p{id}:\\the\\{p} }}",
+                a = rng.next(30),
+                b = rng.next(30),
+                c = rng.next(30),
+                fil = rng.word(&["mu", "fil", "fill"])
+            )
+        }
+        // §230 token parameters and their registers.
+        39 => {
+            let p = rng.word(&["everypar", "everymath", "everydisplay", "everyhbox", "everyvbox", "everyjob", "everycr", "errhelp", "output"]);
+            format!(
+                "\\{p}={{{w}#{x}\\relax}}\\message{{p{id}:\\the\\{p} \\meaning\\{p} }}{{\\{p}={{}}\\message{{p{id}i:\\the\\{p}}}}}\\message{{p{id}o:\\the\\{p} }}",
+                x = rng.next(9)
+            )
+        }
+        // `\meaning` of a character of each category (§298), made by changing
+        // a character's category rather than by writing the token.
+        40 => {
+            let cat = rng.pick(&[1, 2, 3, 4, 6, 7, 8, 10, 11, 12, 13]);
+            format!(
+                "{{\\catcode`\\!={cat} \\message{{p{id}:\\meaning!}}}}\\message{{p{id}:\\meaning!}}"
+            )
+        }
+        // `\string` and `\meaning` of a control symbol, under `\escapechar`.
+        41 => {
+            let c = rng.word(&["\\relax", "\\par", "\\ ", "\\/", "\\-", "\\@", "\\:", "\\<", "\\(", "\\)", "\\[", "\\]"]);
+            let e = rng.word(&["`\\\\", "`\\!", "-1", "0", "`\\a", "`\\ "]);
+            format!(
+                "{{\\escapechar={e} \\message{{p{id}:\\string{c} \\meaning{c}}}}}"
+            )
+        }
+        // `\number` of a character constant (§442), including the ones that
+        // end in the optional space.
+        42 => {
+            let c = rng.word(&["a", "A", "0", "\\a", "\\\\", "\\ ", "\\{", "\\}", "\\#", "\\%", "^^A", "^^?", "^^7f", "\"", "'"]);
+            format!("\\catcode`\\^=7 \\message{{p{id}:\\number`{c} \\number`{c}\\relax x}}")
+        }
+        // Overflow in the three arithmetic commands (§1236), on integers.
+        43 => {
+            let v = rng.word(&["2147483647", "-2147483647", "1000000000", "65536", "46341", "-46341", "1"]);
+            let op = rng.word(&["multiply", "divide"]);
+            let by = rng.word(&["2", "3", "0", "-1", "46341", "2147483647", "65536"]);
+            format!(
+                "\\count{r}={v} \\{op}\\count{r} by {by} \\message{{p{id}:\\the\\count{r} }}"
+            )
+        }
+        // The same on dimensions and glue: §1236 reports `Arithmetic
+        // overflow`, and §460 `Dimension too large` where a constant is read.
+        44 => {
+            let v = rng.word(&["16383pt", "16383.99998pt", "-16383pt", "8192pt", "1sp", "10000pt"]);
+            let op = rng.word(&["multiply", "divide", "advance"]);
+            let by = match op {
+                "advance" => rng.word(&["1pt", "16383pt", "-16383pt", "1sp"]),
+                _ => rng.word(&["2", "3", "0", "-1", "65536", "7"]),
+            };
+            let kind = rng.word(&["dimen", "skip"]);
+            format!(
+                "\\{kind}{r}={v} \\{op}\\{kind}{r} by {by} \\message{{p{id}:\\the\\{kind}{r} }}"
+            )
+        }
+        45 => {
+            let t = rng.word(&["16384pt", "16383.999999pt", "16384.0pt", "1073741824sp", "1073741823sp", "99999pt", "1000000in", "2000mm", "300000cm", "1000000bp"]);
+            format!("\\dimen{r}={t} \\message{{p{id}:\\the\\dimen{r} }}")
+        }
+        // The five code tables (§1232), their range checks, and what
+        // `\uppercase` and `\lowercase` make of them.
+        46 => {
+            let table = rng.word(&["uccode", "lccode", "sfcode", "mathcode", "delcode", "catcode"]);
+            let v = rng.word(&["0", "1", "65", "255", "256", "1000", "32768", "32769", "-1", "16777215", "16777216", "15", "16"]);
+            format!(
+                "\\{table}`\\!={v} \\message{{p{id}:\\the\\{table}`\\!}}\\uccode`\\a=`\\Q \\lccode`\\a=`\\z \\uppercase{{\\message{{P{id}:abAB}}}}\\lowercase{{\\message{{p{id}:abAB}}}}"
+            )
+        }
+        47 => format!(
+            "{{\\uccode`\\b=`\\Y \\uppercase{{\\message{{p{id}:ab}}}}}}\\uppercase{{\\message{{p{id}:ab}}}}\\uppercase{{\\def{m}{{ab\\message{{p{id}:x}}}}}}\\message{{p{id}:\\meaning{m} }}"
+        ),
+        // `\afterassignment` against the kinds of assignment (§1269).
+        48 => {
+            let a = rng.word(&[
+                "\\def{h}{}",
+                "\\let{h}=\\relax",
+                "\\count1=5 ",
+                "\\advance\\count1 by 1 ",
+                "\\toks1={}",
+                "\\chardef{h}=65 ",
+                "\\global\\count1=3 ",
+                "\\relax\\count1=1 ",
+                "\\catcode`\\@=12 ",
+                "\\uccode`\\a=`\\A ",
+                "\\dimen1=1pt ",
+                "\\skip1=1pt ",
+                "\\tolerance=100 ",
+                "\\everypar={}",
+            ]);
+            let a = a.replace("{h}", &h);
+            format!(
+                "\\def{m}{{\\message{{p{id}:AFTER}}}}\\afterassignment{m}{a}\\message{{p{id}:NEXT}}\\afterassignment{m}\\afterassignment\\relax{a}\\message{{p{id}:END}}"
+            )
+        }
+        // `\aftergroup`, in order and across nested and `\begingroup` groups
+        // (§1271).
+        49 => {
+            let open = rng.word(&["{", "\\begingroup "]);
+            let close = if open == "{" { "}" } else { "\\endgroup " };
+            format!(
+                "\\def{m}{{\\message{{p{id}:A}}}}\\def{h}{{\\message{{p{id}:B}}}}{open}\\aftergroup{m}{{\\aftergroup{h}\\aftergroup{m}}}\\aftergroup{h}\\message{{p{id}:IN}}{close}\\message{{p{id}:OUT}}"
+            )
+        }
+        // `\expandafter` and `\noexpand` chains (§366, §367).
+        50 => {
+            let n = rng.next(30);
+            format!(
+                "\\def{m}#1{{[#1]}}\\expandafter\\message\\expandafter{{\\romannumeral{n} \\number{n}{m}{{{w}}}}}\\expandafter\\expandafter\\expandafter\\message\\expandafter\\expandafter\\expandafter{{\\csname relax\\endcsname {w}}}"
+            )
+        }
+        51 => format!(
+            "\\def{m}{{{w}}}\\edef{h}{{\\expandafter\\noexpand\\csname fzq{name}\\endcsname\\noexpand{m}\\noexpand\\noexpand{m}\\expandafter\\noexpand{m}}}\\message{{p{id}:\\meaning{h} }}",
+            name = letters(id)
+        ),
+        52 => format!(
+            "\\def{m}{{{w}}}\\message{{p{id}:\\noexpand{m}\\expandafter\\noexpand\\expandafter{m}\\noexpand\\csname relax\\endcsname\\noexpand}}\\message{{p{id}:\\ifx\\noexpand{m}{m}T\\else F\\fi \\if\\noexpand{m}\\relax T\\else F\\fi \\ifcat\\noexpand{m}\\relax T\\else F\\fi}}"
+        ),
+        // Register and character numbers out of range (§433, §434, §1224).
+        53 => {
+            let n = rng.word(&["-1", "256", "300", "32767", "255", "0", "32768"]);
+            let k = rng.word(&["count", "dimen", "skip", "toks", "muskip"]);
+            let body = match k {
+                "toks" => "{}",
+                "muskip" => "1mu",
+                "dimen" => "1pt",
+                "skip" => "1pt",
+                _ => "1",
+            };
+            format!(
+                "\\{k}{n}={body} \\message{{p{id}:\\the\\{k}{n} }}\\{k}def{m}={n} \\message{{p{id}:\\meaning{m} }}"
+            )
+        }
+        54 => {
+            let n = rng.word(&["\"7FFF", "\"8000", "\"8001", "\"FFFF", "\"10000", "\"1000", "0", "32768", "-1"]);
+            format!(
+                "\\mathchardef{m}={n} \\message{{p{id}:\\meaning{m} \\number{m} \\the{m} }}\\chardef{h}={n} \\message{{p{id}:\\meaning{h} \\number{h} }}"
+            )
+        }
+        // Number syntax: radix prefixes, signs, and what ends a number.
+        55 => {
+            let t = rng.word(&[
+                "\"FF", "\"ff", "'777", "'8", "\"G", "--5", "-+-5", "+-+7", "5.5", "\"7FFFFFFF", "\"80000000", "'17777777777", "'20000000000", "2147483648", "-2147483648", "\\relax5", " 12 ", "007", "`a", "`ab",
+            ]);
+            format!("\\message{{p{id}:\\number{t}x \\romannumeral{t}x}}")
+        }
+        // A control sequence name made by `\csname` out of odd characters.
+        56 => {
+            let name = rng.word(&["a b", " ", "", "\\string\\x", "12", "{", "a\\relax"]);
+            let name = if name.contains('{') { "a" } else { name };
+            format!(
+                "\\expandafter\\def\\csname {name}\\endcsname{{{w}}}\\expandafter\\message\\expandafter{{\\csname {name}\\endcsname \\expandafter\\string\\csname {name}\\endcsname}}"
+            )
+        }
+        // Registers read where a quantity of another kind is scanned (§413
+        // coercions), with signs.
+        57 => {
+            let a = rng.word(&["\\count{r} ", "\\dimen{r} ", "\\skip{r} ", "-\\count{r} ", "-\\dimen{r} ", "--\\skip{r} ", "\\catcode`\\a ", "\\hoffset ", "\\voffset "]);
+            let into = rng.word(&["count", "dimen", "skip"]);
+            let a = a.replace("{r}", &r.to_string());
+            format!(
+                "\\count{r}={x} \\dimen{r}={y}pt \\skip{r}={z}pt plus 1fil \\{into}{s}={a}\\message{{p{id}:\\the\\{into}{s} }}",
+                x = rng.next(100),
+                y = rng.next(100),
+                z = rng.next(100),
+                s = 1 + rng.next(9)
+            )
+        }
+        58 => format!(
+            "\\count{r}={a} \\dimen{r}=\\count{r}pt \\skip{r}=\\count{r}\\dimen{r} \\count{s}=\\dimen{r} \\message{{p{id}:\\the\\dimen{r} \\the\\skip{r} \\the\\count{s} }}",
+            a = rng.next(40) as i32 - 20,
+            s = 1 + rng.next(9)
+        ),
+        59 => format!(
+            "\\toks{r}={{{w}}}\\toks{s}={{\\the\\toks{r}\\the\\toks{r} #}}\\edef{m}{{\\the\\toks{s}}}\\message{{p{id}:\\the\\toks{s} \\meaning{m} }}\\toks{t}=\\toks{r} \\message{{p{id}:\\the\\toks{t}}}",
+            s = 1 + rng.next(9),
+            t = 1 + rng.next(9)
+        ),
+        60 => {
+            let l = rng.word(&["\\hfuzz=1pt", "\\count1=7", "\\toks1={a}", "\\catcode`\\a=11 ", "\\def\\x{}", "\\let\\x=\\relax"]);
+            format!(
+                "{{{l} \\global\\advance\\count{r} by 1 }}\\begingroup\\count{r}=9 {{\\count{r}=\\count{r}\\advance\\count{r} by -3 \\global\\count{s}=\\count{r}}}\\endgroup\\message{{p{id}:\\the\\count{r},\\the\\count{s}}}",
+                s = 1 + rng.next(9)
+            )
+        }
+        61 => {
+            let k = rng.word(&["\\skip", "\\muskip"]);
+            let u = if k == "\\skip" { "pt" } else { "mu" };
+            format!(
+                "{k}{r}=1{u} plus 2fil minus 3fill {k}{s}={a}{u} plus {b}{u} \\advance{k}{r} by {k}{s} \\multiply{k}{r} by {c} \\divide{k}{r} by {d} \\message{{p{id}:\\the{k}{r}}}",
+                s = 1 + rng.next(9),
+                a = rng.next(20),
+                b = rng.next(20),
+                c = 1 + rng.next(9),
+                d = 1 + rng.next(9)
+            )
+        }
         _ => unreachable!("probe kind out of range"),
     }
 }
@@ -395,7 +717,11 @@ fn generate(index: u64, count: usize) -> Vec<String> {
 /// The document a probe list becomes: the preamble every probe assumes, then
 /// the probes, then `\end`.
 fn document(probes: &[String]) -> String {
-    let mut src = String::from("\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n");
+    // `\errorcontextlines` and `\newlinechar` are plain's 5 and -1, which is
+    // what the oracle runs with; INITEX's are 0.
+    let mut src = String::from(
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6 \\errorcontextlines=5 \\newlinechar=-1\n",
+    );
     for p in probes {
         src.push_str(p);
         src.push('\n');

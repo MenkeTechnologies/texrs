@@ -546,6 +546,24 @@ pub fn run_dvi(
     Ok(crate::typeset::to_dvi(&text, &font, name, layout))
 }
 
+/// The `\message` stream a run produces when it is meant to read like tex's:
+/// an undefined control sequence is reported on the terminal and expands to
+/// nothing, as §370 has it, where [`run_messages`] hands an embedder the
+/// `Err` it asked for. A LaTeX document keeps the stop either way, because
+/// the loader reads that stop as "this package needs a macro texrs lacks".
+pub fn run_messages_tex(src: &str) -> Result<String, TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let latex = crate::latex::looks_like_latex(&src);
+    let mut lowerer = crate::lower::Lowerer::new().tex_errors(!latex);
+    if latex {
+        lowerer.preload(&crate::latex::preamble(&src))?;
+    }
+    let cmds = lowerer.lower(&src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(without_marks(&msgs.join(" ")))
+}
+
 pub fn run_messages(src: &str) -> Result<String, TexError> {
     let chunk = compile(src)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;

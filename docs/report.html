@@ -143,7 +143,7 @@
           </tbody>
         </table>
         <p>The oracle itself is pinned: both shell harnesses read the tex version out of <code>BUGS.md</code> and refuse a different engine. A mismatched oracle does not fail loudly — it reports a different divergence set, which reads exactly like a regression.</p>
-        <p>The fuzzer has already paid for itself: it found that <code>\edef</code> does not freeze a conditional in its body, that an undefined control sequence prints its own name instead of raising, and a panic in the argument reader on TeX's <code>#{</code> parameter form. Each is a committed case with its reason written down.</p>
+        <p>The fuzzer has already paid for itself: it found that <code>\edef</code> does not freeze a conditional in its body, that an undefined control sequence printed its own name instead of raising, and a panic in the argument reader on TeX's <code>#{</code> parameter form. Each is a committed case with its reason written down.</p>
       </section>
 
       <hr class="section-rule">
@@ -158,7 +158,7 @@
 
       <section class="tutorial-section">
         <h2>Gaps, stated plainly</h2>
-        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: a stomach that stops short of tex's — both outputs break by total demerits and hyphenate, <code>--pdf</code> breaks its pages by penalty where <code>--dvi</code> stacks a fixed number of lines on each, and <code>--dvi</code> sets no maths, so byte-identical DVI parity is not reached; box registers are read but there is no <code>\setbox</code> to fill one; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence inside a <code>\message</code> prints its name instead of raising, and in running text stops the run where tex recovers; a <code>#{</code> macro whose body names <code>#1</code> is accepted where tex reports an illegal parameter number; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
+        <p><code>BUGS.md</code> is the ledger, and every entry in it is pinned by a case the test suite gates on. In summary: a stomach that stops short of tex's — both outputs break by total demerits and hyphenate, <code>--pdf</code> breaks its pages by penalty where <code>--dvi</code> stacks a fixed number of lines on each, and <code>--dvi</code> sets no maths, so byte-identical DVI parity is not reached; box registers are read but there is no <code>\setbox</code> to fill one; no format preloaded, so registers start at INITEX zero while the reference tex has plain's values; an undefined control sequence stops the run through the library API where tex recovers; a <code>#{</code> macro whose body names <code>#1</code> is accepted where tex reports an illegal parameter number; and characters above U+00FF are one token here where TeX82 reads bytes.</p>
       </section>
 
       <hr class="section-rule">

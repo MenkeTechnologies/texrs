@@ -120,7 +120,7 @@ pub fn reference(oracle: &Oracle, case: &Path) -> String {
 
 /// What texrs prints for the same document, in process.
 pub fn subject(src: &str) -> String {
-    match crate::run_messages(src) {
+    match crate::run_messages_tex(src) {
         Ok(m) => m,
         Err(e) => format!("ERROR: {}", e.0),
     }

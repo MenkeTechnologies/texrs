@@ -46,7 +46,7 @@ fn every_case_matches_real_tex() {
     for case in &all {
         let want = common::reference(&tex, case);
         let src = std::fs::read_to_string(case).expect("read case");
-        let got = match texrs::run_messages(&src) {
+        let got = match texrs::run_messages_tex(&src) {
             Ok(m) => m,
             Err(e) => format!("ERROR: {}", e.0),
         };
