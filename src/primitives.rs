@@ -355,7 +355,7 @@ const INTERNAL: &[&str] = &[
 
 /// Whether the primitive `name` is an internal quantity (§413), which §440's
 /// `scan_int` reads through `scan_something_internal` rather than as the
-/// missing number it would otherwise be: one of [`INTERNAL`], or a glue,
+/// missing number it would otherwise be: one of `INTERNAL`, or a glue,
 /// token-list, dimension (§226, §230, §248) or integer (§236) parameter.
 pub fn is_internal_quantity(name: &str) -> bool {
     // The parameter sections open `NAMES` and §265's commands follow them,

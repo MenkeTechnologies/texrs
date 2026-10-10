@@ -82,7 +82,12 @@ fn a_pdftex_file_reads_though_its_objects_are_packed_inside_others() {
     let pages = document.pages();
     assert_eq!(pages.len(), 2, "{summary}");
     if let Some(report) = info(&dir.join("t.pdf")) {
-        assert!(report.contains("Pages:          2"), "{report}");
+        // pdfinfo pads its values to a column whose width varies by version.
+        let pages_line = report
+            .lines()
+            .find(|line| line.starts_with("Pages:"))
+            .expect("a page count");
+        assert_eq!(pages_line.split_whitespace().nth(1), Some("2"), "{report}");
         // pdfinfo prints the size in points, to two places.
         let stated = report
             .lines()
