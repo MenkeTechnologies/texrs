@@ -151,11 +151,14 @@ pub enum Cmd {
     /// `tex.web` §1335's `(see the transcript file for additional information)`,
     /// printed at the END of a run that reported anything.
     ///
+    /// Carries the `(\end occurred ...)` lines §1335 prints before it, which
+    /// are facts about where `\end` stood and so are known while lowering.
+    ///
     /// A command rather than text because §1335 consults `history`, which is a
     /// fact about the whole run: an error the VM reported is as much a reason
     /// to print it as one the lowerer reported, and only the VM knows whether
     /// one happened. Emits nothing when the run was clean.
-    TranscriptNotice,
+    TranscriptNotice(Vec<String>),
     /// A run of the document's own text.
     ///
     /// Ordinary characters -- the words of the document, as opposed to what
@@ -283,7 +286,9 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
             }
             Cmd::ErrorSite(site) => out.push_str(&format!("{pad}ErrorSite {site:?}\n")),
-            Cmd::TranscriptNotice => out.push_str(&format!("{pad}TranscriptNotice\n")),
+            Cmd::TranscriptNotice(notes) => {
+                out.push_str(&format!("{pad}TranscriptNotice {notes:?}\n"))
+            }
             Cmd::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),
             Cmd::FileClose => out.push_str(&format!("{pad}FileClose\n")),
             Cmd::Message(ops) => {

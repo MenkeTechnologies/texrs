@@ -1,0 +1,15 @@
+% A token register, a \toksdef name and a token-list parameter are internal
+% quantities of the wrong kind where a number is wanted: `! Missing number,
+% treated as zero`, the token put back to be read again (tex.web §413's
+% back_error), and the scan goes on -- so the assignment that token starts is
+% still made.
+\catcode`\{=1 \catcode`\}=2
+\errorcontextlines=100
+\count1=7 \count1=\number\everypar{x}
+\message{[\the\count1|\the\everypar]}
+\toksdef\t=3
+\count1=5 \count1=\t{y}
+\message{[\the\count1|\the\toks3]}
+\count1=\toks3{z}
+\message{[\the\toks3]}
+\end

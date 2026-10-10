@@ -1,0 +1,16 @@
+% A macro delimited by \par is ended by one (tex.web §392 compares the token
+% with the delimiter BEFORE it asks whether it is \par), so a blank line in the
+% argument is not a runaway there; in a macro without the delimiter it still
+% is, and \long lifts the check.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a#1\par{[#1]}
+\message{\a x
+
+}
+\long\def\b#1\par{[#1]}
+\message{\b x\par}
+\long\def\c#1{[#1]}
+\message{\c
+
+}
+\end

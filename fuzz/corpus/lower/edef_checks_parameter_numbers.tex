@@ -1,0 +1,16 @@
+% The body of an \edef is read with the same §476 scan as a \def's, so a `#`
+% not followed by a digit up to the parameter count is `! Illegal parameter
+% number in definition of \b`, the offending token put back, and the `#` kept
+% as a macro parameter character. `#{` ends a parameter text in an \edef as it
+% does in a \def.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=100
+\edef\b{a#b}
+\message{[\meaning\b]}
+\edef\c#1{#2}
+\message{[\meaning\c]}
+\edef\d#1{#1##}
+\message{[\meaning\d]}
+\edef\e#{[X]}
+\message{[\meaning\e]}
+\end

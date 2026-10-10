@@ -56,7 +56,8 @@ pub mod ops {
     /// argument, `tex.web` §311's context display for that point in the source.
     pub const ERR_SITE: u16 = 4012;
     /// §1335's `(see the transcript file for additional information)`, written
-    /// only if something was reported during the run. No arguments.
+    /// only if something was reported during the run, behind the `(\end
+    /// occurred ...)` lines its one argument carries.
     pub const TRANSCRIPT_NOTICE: u16 = 4013;
     /// A statement boundary, emitted only under `--dap`. The debug adapter
     /// stops here; an ordinary run carries none of these ops.
@@ -259,9 +260,11 @@ impl Compiler {
                 self.b.emit(Op::CallBuiltin(ops::ERR_SITE, 1), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
-            Cmd::TranscriptNotice => {
+            Cmd::TranscriptNotice(notes) => {
+                let k = self.str_const(&notes.concat())?;
+                self.b.emit(Op::LoadConst(k), self.line);
                 self.b
-                    .emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 0), self.line);
+                    .emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 1), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Color { rgb, body } => {

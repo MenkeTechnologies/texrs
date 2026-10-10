@@ -88,6 +88,10 @@ pub struct Lowerer {
     /// Whether anything was reported at all, for the line tex writes at the end
     /// of a run that had errors.
     reported: bool,
+    /// §1335's `(\end occurred ...)` lines, each already parenthesised: the
+    /// run-end notes for what `\end` found still open. Printed by the run's
+    /// closing notice, after the file's own `)`.
+    end_notes: Vec<String>,
     /// The typefaces the document asked for, by `\setmainfont` and its
     /// siblings.
     ///
@@ -254,6 +258,7 @@ impl Lowerer {
             prologue: Vec::new(),
             reports: Vec::new(),
             reported: false,
+            end_notes: Vec::new(),
             fonts: crate::typeset::Families::default(),
             colours: crate::colour::Colours::new(),
             page_colour: None,
@@ -375,7 +380,21 @@ impl Lowerer {
                 self.close_reports(&mut cmds);
                 Ok(cmds)
             }
-            Err(e) => Err((e, lx.line())),
+            Err(e) => {
+                // What was reported and recovered from before the run stopped
+                // was printed by tex before whatever stopped it, and is the
+                // reason a reader needs to make sense of a stop that follows.
+                self.eng.note_mouth(&lx);
+                let prior: String = self
+                    .take_reports()
+                    .into_iter()
+                    .filter_map(|op| match op {
+                        MsgOp::Report(text) => Some(text),
+                        _ => None,
+                    })
+                    .collect();
+                Err((TexError(format!("{prior}{}", e.0)), lx.line()))
+            }
         }
     }
 
@@ -401,8 +420,8 @@ impl Lowerer {
             // and a preamble of pure definitions has to stay empty, because
             // that is how `src/format.rs` knows a format has lost nothing by
             // dumping it.
-            if !cmds.is_empty() {
-                cmds.push(Cmd::TranscriptNotice);
+            if !cmds.is_empty() || !self.end_notes.is_empty() {
+                cmds.push(Cmd::TranscriptNotice(std::mem::take(&mut self.end_notes)));
             }
             return;
         }
@@ -412,7 +431,19 @@ impl Lowerer {
         if !held.is_empty() {
             cmds.push(Cmd::Reports(held));
         }
-        cmds.push(Cmd::TranscriptNotice);
+        cmds.push(Cmd::TranscriptNotice(std::mem::take(&mut self.end_notes)));
+    }
+
+    /// §1335: `\end` with groups still open says how many, once, as the run
+    /// closes. The level is the structural depth the lowering has reached.
+    fn note_open_groups(&mut self) {
+        let level = self.eng.group_level();
+        if level > 0 {
+            self.end_notes.push(format!(
+                "({}end occurred inside a group at level {level})",
+                self.eng.esc()
+            ));
+        }
     }
 
     /// The reports waiting to be printed, as message pieces.
@@ -942,6 +973,7 @@ impl Lowerer {
             }
             match name.name() {
                 "end" => {
+                    self.note_open_groups();
                     self.ended = true;
                     break;
                 }
@@ -1727,21 +1759,12 @@ impl Lowerer {
         let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
             return Err(TexError("Missing control sequence inserted".into()));
         };
-        // The parameter text, exactly as `\def` reads it. `\edef` differs from
-        // `\def` only in WHEN the body is expanded; dropping the parameters
-        // here left `\edef\pair#1,#2.{…}` matching nothing and its delimiters
-        // landing in the output. Found by `parity-fuzz`.
-        let mut params: Vec<Token> = Vec::new();
-        loop {
-            let Some(t) = lx.next_token(&self.eng.cats) else {
-                return Err(TexError("Runaway definition".into()));
-            };
-            if matches!(t, Token::Char(_, Cat::BeginGroup)) {
-                break;
-            }
-            params.push(t);
-        }
-        let raw = self.eng.read_balanced_pub(lx)?;
+        // The parameter text and body, exactly as `\def` reads them. `\edef`
+        // differs from `\def` only in WHEN the body is expanded; dropping the
+        // parameters here left `\edef\pair#1,#2.{…}` matching nothing and its
+        // delimiters landing in the output (found by `parity-fuzz`), and the
+        // numbering checks are the same ones.
+        let (params, raw, hash_brace) = self.eng.read_def_parts(lx, name)?;
         // `\edef` expands its body NOW, which is the whole difference from
         // `\def`. Only the macro calls: `\the\count<n>` has to reach the walk
         // below as tokens so it can be snapshotted into a scratch register.
@@ -1758,7 +1781,8 @@ impl Lowerer {
         // macro reads is visible; the freezing runs on the body as written, so
         // that `\unexpanded` still stops it.
         if self.reads_only_untouched_registers(&body) {
-            if let Ok(frozen) = self.eng.expand_edef_body(&raw) {
+            if let Ok(mut frozen) = self.eng.expand_edef_body(&raw) {
+                frozen.extend(hash_brace);
                 self.eng
                     .define_macro_with_params(name, params, frozen, global)?;
                 return Ok(Vec::new());
@@ -1818,6 +1842,7 @@ impl Lowerer {
                 other => new_body.push(*other),
             }
         }
+        new_body.extend(hash_brace);
         self.eng
             .define_macro_with_params(name, params, new_body, global)?;
         Ok(snapshots)
@@ -4506,7 +4531,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
-            | Cmd::TranscriptNotice
+            | Cmd::TranscriptNotice(_)
             | Cmd::Line(_)
             | Cmd::RustCompile(_) => {}
         }
@@ -4644,7 +4669,7 @@ fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::RustCompile(_)
                 | Cmd::FileClose
                 | Cmd::ErrorSite(_)
-                | Cmd::TranscriptNotice => {}
+                | Cmd::TranscriptNotice(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

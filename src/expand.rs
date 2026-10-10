@@ -65,6 +65,9 @@ pub enum Meaning {
 enum Arg {
     Read(Vec<Token>),
     Par(Vec<Token>),
+    /// A `}` where a parameter was being read, which §395 reports and treats
+    /// as a `\par`; carries what the argument held so far and the brace.
+    ExtraBrace(Vec<Token>, Token),
 }
 
 /// §392's `cur_tok=par_token`: the control sequence `\par` itself, whatever it
@@ -469,6 +472,11 @@ impl Engine {
 
     /// What opened the innermost open group, or `None` at §269's
     /// `bottom_level`.
+    /// How many groups are open, §1335's `cur_level-level_one`.
+    pub fn group_level(&self) -> usize {
+        self.group_kinds.len()
+    }
+
     pub fn innermost_group(&self) -> Option<GroupKind> {
         self.group_kinds.last().copied()
     }
@@ -611,7 +619,7 @@ impl Engine {
         let limit = crate::intpar::index("errorcontextlines")
             .map_or(0, |i| self.intpars.get(i));
         let mut shown = 0i64;
-        for (i, (toks, read)) in lx.backed_up().into_iter().enumerate() {
+        for (i, (toks, read, inserted)) in lx.backed_up().into_iter().enumerate() {
             if i > 0 && shown >= limit {
                 if shown == limit {
                     out.push_str("...\n");
@@ -620,10 +628,12 @@ impl Engine {
                 continue;
             }
             shown += 1;
-            // §314: `<recently read>` once the list is read to its end.
-            let tag = match read == toks.len() {
-                true => "<recently read> ",
-                false => "<to be read again> ",
+            // §314: `<recently read>` once the list is read to its end. §314
+            // also labels inserted text, whatever has been read of it.
+            let tag = match (inserted, read == toks.len()) {
+                (true, _) => "<inserted text> ",
+                (false, true) => "<recently read> ",
+                (false, false) => "<to be read again> ",
             };
             out.push_str(&Lexer::context_lines(
                 tag,
@@ -642,7 +652,7 @@ impl Engine {
     pub fn show_token(&mut self, lx: &Lexer, tok: &Token) {
         self.note_mouth(lx);
         let name = match tok {
-            Token::Cs(n) => format!("{}{}=", self.esc(), n.name()),
+            Token::Cs(n) => format!("{}=", self.sprint_cs(*n)),
             Token::Char(c, Cat::Active) => format!("{c}="),
             Token::Char(..) => String::new(),
         };
@@ -1086,7 +1096,9 @@ impl Engine {
                 self.meanings
                     .entry(id)
                     .or_insert_with(|| Meaning::Primitive(CsId::intern("relax")));
-                lx.push_back(&[Token::Cs(id)]);
+                // §372's `back_input`: an error in what reads it shows the
+                // name as `<recently read>`.
+                lx.back_input(&[Token::Cs(id)]);
                 Ok(true)
             }
             _ => Ok(false),
@@ -2436,12 +2448,20 @@ impl Engine {
                             // the brace expands: `\toks2=\expandafter{\the\toks1}`.
                             _ if self.primitive_meaning(n).name() == "relax" => continue,
                             _ if self.try_expand(lx, n, false)? => continue,
-                            _ => return Err(TexError("Missing { inserted".into())),
+                            _ => {
+                                lx.back_input(&[t]);
+                                self.report(lx, "Missing { inserted");
+                                break self.read_balanced(lx)?;
+                            }
                         },
                     };
                     break self.toks.get(&from).cloned().unwrap_or_default();
                 }
-                _ => return Err(TexError("Missing { inserted".into())),
+                _ => {
+                    lx.back_input(&[t]);
+                    self.report(lx, "Missing { inserted");
+                    break self.read_balanced(lx)?;
+                }
             }
         };
         self.save(Save::Toks(reg, self.toks.get(&reg).cloned()));
@@ -3339,7 +3359,13 @@ impl Engine {
                 Token::Char(_, Cat::BeginGroup) => return Ok(()),
                 Token::Cs(n) if self.primitive_meaning(n).name() == "relax" => continue,
                 Token::Cs(n) if self.try_expand(lx, n, false)? => continue,
-                _ => return Err(TexError("Missing { inserted".into())),
+                // §403: report, put the token back to be read again, and go on
+                // as if the brace had been there.
+                t => {
+                    lx.back_input(&[t]);
+                    self.report(lx, "Missing { inserted");
+                    return Ok(());
+                }
             }
         }
     }
@@ -3695,6 +3721,18 @@ impl Engine {
                     self.paragraph_ended(lx, name, &partial);
                     return Ok(None);
                 }
+                // §395: the brace goes back, a `\par` is INSERTED in front of
+                // it, and the scan reads that at once -- the white lie that
+                // makes even a `\long` macro's call a runaway.
+                Arg::ExtraBrace(partial, brace) => {
+                    lx.back_input(&[brace]);
+                    lx.insert_input(&[Token::cs("par")]);
+                    let msg = format!("Argument of {} has an extra }}", self.sprint_cs(name));
+                    self.report(lx, &msg);
+                    lx.pending.pop();
+                    self.paragraph_ended(lx, name, &partial);
+                    return Ok(None);
+                }
             }
             i += 2 + delim.len();
         }
@@ -3767,6 +3805,7 @@ impl Engine {
             }
             return match t {
                 Token::Char(_, Cat::BeginGroup) => self.read_group_arg(lx, t, long, pending_only),
+                Token::Char(_, Cat::EndGroup) => Ok(Arg::ExtraBrace(Vec::new(), t)),
                 t if is_par(&t) && !long => Ok(Arg::Par(Vec::new())),
                 other => Ok(Arg::Read(vec![other])),
             };
@@ -3823,10 +3862,6 @@ impl Engine {
                     "Paragraph ended before argument was complete".into(),
                 ));
             };
-            // §392 checks for `\par` before the token is stored, at any depth.
-            if is_par(&t) && !long {
-                return Ok(Arg::Par(out));
-            }
             out.push(t);
             // `tex.web` §392 compares the token against the delimiter BEFORE it
             // touches the brace count, and the order is load-bearing twice: a
@@ -3845,9 +3880,20 @@ impl Engine {
                 }
                 return Ok(Arg::Read(out));
             }
+            // §392 tests `\par` AFTER the delimiter, so a macro delimited by
+            // `\par` (`\def\a#1\par{..}`) is ended by one, and before the
+            // brace count, so it is a runaway at any depth.
+            if is_par(&t) && !long {
+                out.pop();
+                return Ok(Arg::Par(out));
+            }
             match &t {
                 Token::Char(_, Cat::BeginGroup) => depth += 1,
-                Token::Char(_, Cat::EndGroup) => depth = depth.saturating_sub(1),
+                Token::Char(_, Cat::EndGroup) if depth == 0 => {
+                    out.pop();
+                    return Ok(Arg::ExtraBrace(out, t));
+                }
+                Token::Char(_, Cat::EndGroup) => depth -= 1,
                 _ => {}
             }
         }
@@ -4133,8 +4179,15 @@ impl Engine {
             // §446: anything else is no number at all. An internal quantity
             // texrs cannot read, or an undefined name, still stops the run.
             let prim = self.primitive_meaning(name);
-            if crate::primitives::is_internal_quantity(prim.name())
-                || self.meaning_text(&cur) == "undefined"
+            // §413: a token list or a font family is an internal quantity of
+            // the wrong kind here, which is the same "Missing number" with
+            // the token put back as for any other command.
+            let wrong_kind = prim.name() == "toks"
+                || self.toks_cs(name).is_some()
+                || matches!(prim.name(), "textfont" | "scriptfont" | "scriptscriptfont");
+            if !wrong_kind
+                && (crate::primitives::is_internal_quantity(prim.name())
+                    || self.meaning_text(&cur) == "undefined")
             {
                 return Err(TexError(format!("Missing number, found \\{}", name.name())));
             }
@@ -4279,18 +4332,7 @@ impl Engine {
     // ── text production ──────────────────────────────────────────────────
 
     fn read_group_text(&mut self, lx: &mut Lexer) -> R<String> {
-        loop {
-            let Some(t) = lx.next_token(&self.cats) else {
-                return Err(TexError("Missing { inserted".into()));
-            };
-            if t.is_space() {
-                continue;
-            }
-            if !matches!(t, Token::Char(_, Cat::BeginGroup)) {
-                return Err(TexError("Missing { inserted".into()));
-            }
-            break;
-        }
+        self.scan_left_brace(lx)?;
         let body = self.read_balanced(lx)?;
         self.expand_to_text(lx, &body)
     }
@@ -4624,23 +4666,28 @@ impl Engine {
         }
     }
 
+    /// §372: the characters up to `\endcsname`, expanding as it goes. Anything
+    /// else unexpandable is `Missing \endcsname inserted`, the token put back
+    /// to be read again, and the name ends there.
     fn read_csname(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
         let mut name = String::new();
         loop {
             let Some(t) = self.take(lx, pending_only) else {
                 return Err(TexError("Missing \\endcsname inserted".into()));
             };
-            match &t {
-                Token::Cs(n) if n.name() == "endcsname" => return Ok(name),
-                Token::Char(c, _) => name.push(*c),
-                Token::Cs(n) => {
-                    let n = *n;
-                    if !self.try_expand(lx, n, pending_only)? {
-                        return Err(TexError(format!(
-                            "Missing \\endcsname before \\{}",
-                            n.name()
-                        )));
-                    }
+            let expandable = match &t {
+                Token::Char(c, Cat::Active) => Some(Self::active_cs(*c)),
+                Token::Cs(n) => Some(*n),
+                Token::Char(..) => None,
+            };
+            match (&t, expandable) {
+                (Token::Cs(n), _) if n.name() == "endcsname" => return Ok(name),
+                (Token::Char(c, cat), _) if *cat != Cat::Active => name.push(*c),
+                (_, Some(id)) if self.try_expand(lx, id, pending_only)? => {}
+                _ => {
+                    lx.back_input(&[t]);
+                    self.report(lx, "Missing \\endcsname inserted");
+                    return Ok(name);
                 }
             }
         }
@@ -4759,18 +4806,7 @@ impl Engine {
     /// Read `{...}` after `\message`, unexpanded — the pieces are split by the
     /// lowering pass, which has to keep `\the` as a run-time read.
     pub fn read_message_body(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
-        loop {
-            let Some(t) = lx.next_token(&self.cats) else {
-                return Err(TexError("Missing { inserted".into()));
-            };
-            if t.is_space() {
-                continue;
-            }
-            if !matches!(t, Token::Char(_, Cat::BeginGroup)) {
-                return Err(TexError("Missing { inserted".into()));
-            }
-            break;
-        }
+        self.scan_left_brace(lx)?;
         // §473: `\message` reads its text with `scan_toks(false, true)`,
         // EXPANDING as it goes, so a brace that `\string` turns into an other
         // character is never counted -- `\message{\string{}` prints `{`. A
@@ -5095,6 +5131,21 @@ impl Engine {
     }
     pub fn read_balanced_pub(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         self.read_balanced(lx)
+    }
+
+    /// A definition's parameter text and body exactly as `\def` reads them
+    /// (§473, §476, §479), for the `\edef` the lowerer snapshots: the same
+    /// numbering checks, the same recovery from a bad `#`, and the left brace
+    /// of a trailing `#{` returned so the caller can end the body with it.
+    pub fn read_def_parts(
+        &mut self,
+        lx: &mut Lexer,
+        name: CsId,
+    ) -> R<(Vec<Token>, Vec<Token>, Option<Token>)> {
+        let (params, hash_brace) = self.scan_parameter_text(lx)?;
+        validate_params(&params)?;
+        let body = self.read_def_body(lx, name, &params)?;
+        Ok((params, body, hash_brace))
     }
 
     /// §380's `get_x_token` for a caller outside the expander: the next token

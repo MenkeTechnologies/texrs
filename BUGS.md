@@ -162,7 +162,14 @@ texrs output reached tracked lualatex references in
   Several conditions DO now report and carry on the way tex does: a constant
   above 2147483647 (§445), a character or register code out of range (§433,
   §434), arithmetic overflow (§1236), a dimension too large (§460), and an
-  `\else`, `\fi`, `\endcsname`, `\endgroup` or `}` that closes nothing. Each
+  `\else`, `\fi`, `\endcsname`, `\endgroup` or `}` that closes nothing, a
+  token other than `{` where §403 wants one (`Missing { inserted`), a token
+  that is not a character inside `\csname` (`Missing \endcsname inserted`,
+  §372), a `#` in an `\edef` body that is not followed by a parameter number
+  (§476), a `}` where a macro argument is being read (`Argument of \a has an
+  extra }`, §395, with the `<inserted text>` level §327's `ins_error` makes),
+  and an `\end` with groups still open (§1335's `(\end occurred inside a group
+  at level N)`). Each
   writes `! <reason>.` followed by §311's context display into the message
   stream, clamps the value where tex clamps it, and the run continues;
   `tests/cases/number_too_big.tex`, `chardef_bad_code.tex` and
@@ -174,9 +181,11 @@ texrs output reached tracked lualatex references in
   error raised while one is being read lacks the `\a ->...` lines tex prints
   above the file line, and an error inside a `\message` body, which texrs
   reads to its `}` before expanding it, shows no file line at all. Every
-  other error path -- `Missing { inserted` among them, and a `Missing
-  number` where texrs meets an internal quantity it cannot read -- still stops with one `TexError`, and `\outer` is not
-  policed at all.
+  other error path -- a `Missing number` where texrs meets an internal
+  quantity it cannot read, or a `Use of \a doesn't match its definition` --
+  still stops with one `TexError`, `\end` with a conditional still open does
+  not say `(\end occurred when \iftrue on line N was incomplete)`, and `\outer`
+  is not policed at all.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).

@@ -1,0 +1,9 @@
+% \show prints a control sequence with §262's sprint_cs, so the null one is
+% `\csname\endcsname` and not an escape character with nothing after it; the
+% name \csname builds goes back with back_input, so the error context lists
+% it as `<recently read>`.
+\catcode`\{=1 \catcode`\}=2
+\errorcontextlines=100
+\expandafter\show\csname\endcsname
+\expandafter\show\csname ab\endcsname
+\end

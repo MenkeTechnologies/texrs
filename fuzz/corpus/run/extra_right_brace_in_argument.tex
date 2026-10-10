@@ -1,0 +1,20 @@
+% A `}` where a macro argument is being read is `! Argument of \a has an extra
+% }` (tex.web §395): the brace goes back, a \par is inserted in front of it,
+% and reading that \par is a runaway even for a \long macro. The call is
+% dropped and the stray `}` is then unmatched.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=100
+\def\a#1{[#1]}
+\a}
+\message{[1]}
+\long\def\b#1{[#1]}
+\b}
+\message{[2]}
+\def\c#1#2{[#1#2]}
+\c x}\relax
+\message{[3]}
+\let\stop=\relax
+\def\d#1\stop{[#1]}
+\d xy}\relax\stop
+\message{[4]}
+\end

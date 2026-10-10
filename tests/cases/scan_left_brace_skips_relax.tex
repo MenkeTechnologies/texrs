@@ -1,0 +1,14 @@
+% The text of \message, \uppercase and a token register is scanned by §403's
+% scan_left_brace: blanks and \relax before the brace are skipped silently,
+% anything else is `! Missing { inserted`, put back to be read again, and the
+% brace taken as present.
+\catcode`\{=1 \catcode`\}=2
+\errorcontextlines=100
+\message\relax{[a]}
+\message \relax \relax {[b]}
+\uppercase\relax{\message{[c]}}
+\toks0=\relax{x y}\message{[\the\toks0]}
+\def\q{Q}
+\toks1=\q}\message{[\the\toks1]}
+\message x}\message{[d]}
+\end

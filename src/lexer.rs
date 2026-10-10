@@ -87,7 +87,7 @@ pub struct Lexer {
     /// The levels §325's `back_input` made that no read has gone past,
     /// innermost last: the depth of `pending` each sits on and its tokens, in
     /// reading order. See [`Lexer::backed_up`].
-    backed: Vec<(usize, Vec<Token>)>,
+    backed: Vec<(usize, Vec<Token>, bool)>,
 }
 
 impl Lexer {
@@ -221,9 +221,19 @@ impl Lexer {
     pub fn back_input(&mut self, toks: &[Token]) {
         let base = self.pending.len();
         // A level something has read below is gone, whatever came after it.
-        self.backed.retain(|(b, _)| *b < base);
+        self.backed.retain(|(b, _, _)| *b < base);
         self.push_back(toks);
-        self.backed.push((base, toks.to_vec()));
+        self.backed.push((base, toks.to_vec(), false));
+    }
+
+    /// §327's `ins_error`: tokens tex INSERTS as a level of their own, which
+    /// an error's context shows as `<inserted text>` where [`Lexer::back_input`]
+    /// shows `<to be read again>`.
+    pub fn insert_input(&mut self, toks: &[Token]) {
+        self.back_input(toks);
+        if let Some(level) = self.backed.last_mut() {
+            level.2 = true;
+        }
     }
 
     /// The levels [`Lexer::back_input`] made that §311's `show_context` shows,
@@ -234,10 +244,10 @@ impl Lexer {
     /// Judged by depth and by the tokens still being the ones put back, so a
     /// peek that takes a token and returns it leaves the level as it was, and
     /// a level something else was pushed over unread is not shown.
-    pub fn backed_up(&self) -> Vec<(&[Token], usize)> {
+    pub fn backed_up(&self) -> Vec<(&[Token], usize, bool)> {
         let depth = self.pending.len();
         let mut out = Vec::new();
-        for (base, toks) in self.backed.iter().rev() {
+        for (base, toks, inserted) in self.backed.iter().rev() {
             let Some(above) = depth.checked_sub(*base) else {
                 continue;
             };
@@ -246,7 +256,7 @@ impl Lexer {
             let intact = (0..unread).all(|i| self.pending[base + i] == toks[toks.len() - 1 - i]);
             let innermost = out.is_empty() && above == unread;
             if intact && (unread > 0 || innermost) {
-                out.push((toks.as_slice(), toks.len() - unread));
+                out.push((toks.as_slice(), toks.len() - unread, *inserted));
             }
         }
         out
@@ -555,7 +565,7 @@ impl Lexer {
         // the one that took its last token; until then it is shown as
         // `<recently read>`.
         let depth = self.pending.len();
-        self.backed.retain(|(base, _)| *base < depth);
+        self.backed.retain(|(base, _, _)| *base < depth);
         if let Some(t) = self.pending.pop() {
             return Some(t);
         }

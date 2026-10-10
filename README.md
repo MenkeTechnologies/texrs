@@ -790,6 +790,12 @@ process start and format load, so one construct per invocation would spend the
 whole budget on startup. On a divergence the probe list is minimized to the one
 that actually diverges before it is reported, and every program is a pure
 function of its index, so a finding replays exactly with `--seed N --once`.
+The probes cover register arithmetic on counts, dimensions, glue and token
+registers, the `\if` family, `\afterassignment`, `\aftergroup`, `\futurelet`,
+`\expandafter`, `\csname`, case shifting, `\string`/`\meaning`, catcode and
+`\escapechar` changes inside groups, and `\edef` freezing. The oracle loads the
+plain format and texrs starts from INITEX, so a probe may not depend on a
+catcode or a macro only plain sets.
 
 `fuzz/` is a cargo-fuzz crate (targets `lex`, `lower`, `run`) looking for panics
 rather than divergences. `tests/fuzz_smoke.rs` replays each target on its seed

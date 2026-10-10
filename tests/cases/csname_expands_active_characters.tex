@@ -1,0 +1,12 @@
+% Inside \csname the tokens are fetched with get_x_token, so an active
+% character that is a macro expands into the name (tex.web §372); one that
+% means something unexpandable ends the name with `Missing \endcsname
+% inserted`.
+\catcode`\{=1 \catcode`\}=2 \catcode`\~=13
+\errorcontextlines=100
+\def~{T}
+\message{[\expandafter\string\csname a~b\endcsname]}
+\def\x{ab}
+\message{[\expandafter\string\csname \x c\endcsname]}
+\expandafter\show\csname a\relax\endcsname
+\end

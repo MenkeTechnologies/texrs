@@ -25,6 +25,11 @@
 //!   where it is the page number and holds 1), no conditional inside an `\edef`
 //!   body (texrs does not freeze it yet), no undefined control sequence (texrs
 //!   prints the name where tex raises). Generating a gap only re-finds it.
+//! * Nothing only plain sets: the oracle has plain loaded and texrs starts from
+//!   INITEX, so `~` is active in one and an other character in the other, `^`
+//!   and `$` differ the same way, and `\bgroup`, `\hp`, `\mp` and friends are
+//!   macros in one and undefined in the other. Probe macros carry a prefix no
+//!   plain macro starts with, and no probe uses a character plain makes active.
 //! * No probe can collide with another: every macro and register a probe uses
 //!   carries its own index, so packing forty into one document changes none of
 //!   their answers.
@@ -223,6 +228,9 @@ fn letters(mut id: usize) -> String {
     }
 }
 
+/// How many distinct constructs `probe` can emit.
+const PROBE_KINDS: usize = 35;
+
 const WORDS: &[&str] = &[
     "ALPHA", "BETA", "GAMMA", "DELTA", "EPS", "ZETA", "ETA", "THETA",
 ];
@@ -236,8 +244,9 @@ fn probe(rng: &mut Rng, id: usize) -> String {
     // every probe would define the same macro and the delimiters would decide
     // what expanded. The name is spelled in letters so forty probes really are
     // forty macros.
-    let m = format!("\\m{}", letters(id));
-    match rng.next(10) {
+    let m = format!("\\fzm{}", letters(id));
+    let h = format!("\\fzh{}", letters(id));
+    match rng.next(PROBE_KINDS) {
         0 => format!("\\count{r}={n} \\message{{p{id}:\\the\\count{r} }}", n = rng.next(2000)),
         1 => format!(
             "\\count{r}={a} \\advance\\count{r} by {b} \\multiply\\count{r} by {c} \\message{{p{id}:\\the\\count{r} }}",
@@ -273,11 +282,107 @@ fn probe(rng: &mut Rng, id: usize) -> String {
             a = rng.next(100),
             b = rng.next(100)
         ),
-        _ => format!(
-            "\\def{m}{{{w}}}\\message{{p{id}:\\string{m} \\number{n} \\csname m{name}\\endcsname }}",
+        9 => format!(
+            "\\def{m}{{{w}}}\\message{{p{id}:\\string{m} \\number{n} \\csname fzm{name}\\endcsname }}",
             n = rng.next(1000),
             name = letters(id)
         ),
+        10 => format!("\\uppercase{{\\message{{p{id}:{w} abc 12}}}}\\lowercase{{\\message{{P{id}:{w} ABC}}}}"),
+        11 => format!(
+            "\\def{m}{{\\message{{p{id}:AFTER\\the\\count{r} }}}}\\afterassignment{m}\\count{r}={a} \\message{{p{id}:SET\\the\\count{r} }}",
+            a = rng.next(100)
+        ),
+        12 => format!(
+            "\\def{m}{{\\futurelet{h}{h}z}}\\def{h}z{{\\message{{p{id}:\\meaning{h} }}}}{m}{x}",
+            x = rng.pick(&["\\relax", "\\par", "{}", "\\count1=0 "])
+        ),
+        13 => format!("\\def{m}#1#2.{{{w}#2#1}}\\message{{p{id}:\\meaning{m} }}\\message{{p{id}:{m} x y.}}"),
+        14 => format!(
+            "\\def{h}{{{w}}}\\def{m}{{\\expandafter\\def\\expandafter{h}\\expandafter{{X{h}}}}}{m}\\message{{p{id}:\\meaning{h} }}"
+        ),
+        15 => format!(
+            "\\def{m}#1#2{{\\if#1#2T\\else F\\fi \\ifcat#1#2T\\else F\\fi \\ifx#1#2T\\else F\\fi}}\\message{{p{id}:{m} {a}{b} }}",
+            a = rng.pick(&["a", "A", "1", "\\relax ", "@"]),
+            b = rng.pick(&["a", "b", "1", "\\relax ", "@"])
+        ),
+        16 => format!(
+            "\\dimen{r}={a}pt \\message{{p{id}:\\ifdim\\dimen{r}>{b}pt GT\\else LE\\fi \\ifdim\\dimen{r}={b}pt EQ\\fi }}",
+            a = rng.next(30),
+            b = rng.next(30)
+        ),
+        17 => format!(
+            "\\dimen{r}={a}.{f}pt \\multiply\\dimen{r} by {c} \\advance\\dimen{r} by -{b}pt \\divide\\dimen{r} by {d} \\message{{p{id}:\\the\\dimen{r} }}",
+            a = rng.next(100),
+            f = rng.next(1000),
+            b = rng.next(50),
+            c = 1 + rng.next(9),
+            d = 1 + rng.next(9)
+        ),
+        18 => format!(
+            "\\skip{r}={a}pt plus {b}fil minus {c}pt \\advance\\skip{r} by {c}pt plus {a}fil \\message{{p{id}:\\the\\skip{r} }}",
+            a = rng.next(20),
+            b = rng.next(20),
+            c = rng.next(20)
+        ),
+        19 => format!(
+            "\\toks{r}={{{w}#{x}}}\\edef{m}{{\\the\\toks{r}}}\\message{{p{id}:\\the\\toks{r} \\meaning{m} }}",
+            x = rng.next(9)
+        ),
+        20 => format!("\\message{{p{id}:\\romannumeral{n} \\number-{n} \\number\"{n:X} \\number'{n:o} }}", n = rng.next(4000)),
+        21 => format!(
+            "\\def{m}{{\\message{{p{id}:AG}}}}{{\\aftergroup{m}\\message{{p{id}:IN}}}}\\message{{p{id}:OUT}}"
+        ),
+        22 => format!(
+            "{{\\catcode`\\@=11 \\message{{p{id}:\\the\\catcode`\\@ \\string @x}}}}\\message{{p{id}:\\the\\catcode`\\@ }}"
+        ),
+        23 => format!(
+            "\\edef{m}{{\\noexpand{h}{w}\\string{h}}}\\message{{p{id}:\\meaning{m} }}"
+        ),
+        24 => format!(
+            "\\count{r}={a} \\message{{p{id}:\\ifcase\\count{r} A\\or B\\or\\ifcase\\count{r} x\\or y\\or Z\\fi\\else E\\fi }}",
+            a = rng.next(5) as i32 - 1
+        ),
+        25 => format!(
+            "{{\\escapechar={e} \\message{{p{id}:\\string{h} \\meaning{m} }}}}",
+            e = rng.pick(&["`\\!", "-1", "`\\A", "256"])
+        ),
+        26 => format!(
+            "\\lccode`\\{u}=`\\{l} \\uccode`\\{l}=`\\{u} \\lowercase{{\\message{{p{id}:{u}{l}{u} }}}}\\uppercase{{\\message{{P{id}:{u}{l}{u} }}}}",
+            u = rng.pick(&["X", "Y", "Z"]),
+            l = rng.pick(&["x", "y", "z"])
+        ),
+        27 => format!(
+            "\\count{r}=1 {{\\global\\advance\\count{r} by {a} \\count{r}=7 \\global\\count{r}=\\count{r} }}\\message{{p{id}:\\the\\count{r} }}",
+            a = rng.next(9)
+        ),
+        28 => format!(
+            "\\let{h}={a}\\def{m}{{{a}}}\\message{{p{id}:\\ifx{h}{m}S\\else D\\fi \\ifx{h}{a}S\\else D\\fi \\meaning{h} }}",
+            a = rng.pick(&["\\relax", "\\par", "\\undefinedprobe", "A", "\\count"])
+        ),
+        29 => format!(
+            "\\chardef{h}={n} \\countdef{m}={r} {m}={n} \\message{{p{id}:\\number{h} \\the{m} \\meaning{h} \\meaning{m} }}",
+            n = rng.next(256)
+        ),
+        30 => format!(
+            "\\expandafter\\ifx\\csname unprobe{n}\\endcsname\\relax \\message{{p{id}:UNDEF}}\\fi \\message{{p{id}:\\expandafter\\meaning\\csname unprobe{n}\\endcsname }}",
+            n = letters(id)
+        ),
+        31 => format!(
+            "\\def{m}#1{{\\ifx#1\\relax END\\else[#1]\\expandafter{m}\\fi}}\\message{{p{id}:{m} {w}\\relax }}"
+        ),
+        32 => format!(
+            "\\def{m}#1#{{\\message{{p{id}:#1|}}\\def{h}}}{m} {w}x{{Q}}\\message{{p{id}:\\meaning{h} }}"
+        ),
+        33 => format!(
+            "{{\\endlinechar={e} \\message{{p{id}:\\the\\endlinechar}}}}\\message{{p{id}:\\the\\endlinechar}}",
+            e = rng.pick(&["-1", "`\\A", "13"])
+        ),
+        34 => format!(
+            "\\count{r}={a} \\message{{p{id}:\\number\\count{r} \\ifnum\\count{r}<0 NEG\\fi \\ifnum-\\count{r}<{b} LT\\fi }}",
+            a = rng.next(40) as i32 - 20,
+            b = rng.next(10)
+        ),
+        _ => unreachable!("probe kind out of range"),
     }
 }
 

@@ -208,23 +208,34 @@ fn b_err_site(vm: &mut VM, _argc: u8) -> Value {
     Value::Int(0)
 }
 
-/// §1335: the transcript note, written only if the run reported something.
+/// §1335: what tex writes as a run closes. One argument: the `(\end occurred
+/// ...)` lines, already parenthesised, or an empty string.
 ///
-/// The `)` in front of it is the document's own closing paren, which tex writes
-/// when the file ends and which is otherwise the last character of the run.
-fn b_transcript_notice(_vm: &mut VM, _argc: u8) -> Value {
-    if REPORTED.with(|r| *r.borrow()) {
-        // What was held is glued (`record`); the notice is not -- tex writes the
-        // closing paren after a space.
-        let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
-        if !held.is_empty() {
-            record(held);
-        }
-        MESSAGES.with(|m| {
-            m.borrow_mut()
-                .push(")(see the transcript file for additional information".to_string())
-        });
+/// The `)` in front is the document's own closing paren, which tex writes when
+/// the file ends and which is otherwise the last character of the run, so a
+/// clean run with nothing to say writes nothing at all. When the run reported
+/// something `(see the transcript file ...)` follows; its own closing paren is
+/// left off, as the comparison against tex's output leaves it off.
+fn b_transcript_notice(vm: &mut VM, _argc: u8) -> Value {
+    let notes = render(&vm.pop());
+    let reported = REPORTED.with(|r| *r.borrow());
+    if !reported && notes.is_empty() {
+        return Value::Int(0);
     }
+    // What was held is glued (`record`); the notice is not -- tex writes the
+    // closing paren after a space.
+    let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    if !held.is_empty() {
+        record(held);
+    }
+    let mut text = format!("){notes}");
+    match reported {
+        true => text.push_str("(see the transcript file for additional information"),
+        false => {
+            text.pop();
+        }
+    }
+    MESSAGES.with(|m| m.borrow_mut().push(text));
     Value::Int(0)
 }
 

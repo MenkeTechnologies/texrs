@@ -8,6 +8,10 @@
 [-2147483648] [2147483647]
 #==# after_tokens.tex
 A IN MARK B X MARK [5]
+#==# afterassignment_spent_by_first_assignment.tex
+[A] [5] [6] [A] [B] [M] [A] [N] [A] [cd] [A] [in] [out]
+#==# aftergroup_runs_after_restore.tex
+[in] [A] [B] [out] [A] [mid] [out2] [1] [3] [1]
 #==# backtick_codes.tex
 65-66
 #==# bad_character_code_reported_and_zero_used.tex
@@ -56,6 +60,8 @@ in=99 out=1
 [10][10]
 #==# csname.tex
 XY
+#==# csname_expands_active_characters.tex
+[\aTb] [\abc]! Missing \endcsname inserted.<to be read again>                    \relax l.11 \expandafter\show\csname a\relax                                     \endcsname> \a=\relax.<recently read> \a                    <to be read again>                    \relax l.11 \expandafter\show\csname a\relax                                     \endcsname! Extra \endcsname.l.11 \expandafter\show\csname a\relax\endcsname                                                )(see the transcript file for additional information
 #==# csname_from_macro.tex
 VALUE
 #==# def_in_conditional_arm.tex
@@ -80,6 +86,8 @@ VALUE
 [1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
 #==# divide_by_zero.tex
 ! Arithmetic overflow.l.8 \divide\count1 by 0                       [7] [3] )(see the transcript file for additional information
+#==# edef_checks_parameter_numbers.tex
+! Illegal parameter number in definition of \b.<to be read again>                    bl.8 \edef\b{a#b               }[macro:->a##b]! Illegal parameter number in definition of \c.<to be read again>                    2l.10 \edef\c#1{#2                 }[macro:#1->##2] [macro:#1->#1##] [macro:{->[X]{] )(see the transcript file for additional information
 #==# edef_expands_now.tex
 4-9
 #==# edef_freezes_a_catcode.tex
@@ -98,6 +106,10 @@ ZERO
 [macro:->a##b][a##b] [macro:#1->(#1)##1][(z)##1]
 #==# edef_with_parameters.tex
 [A|B|7]
+#==# end_inside_group_is_noted.tex
+[a] [b] )(\end occurred inside a group at level 3
+#==# end_inside_group_with_an_error.tex
+! Number too big.l.5 {\count1=9999999999                       9 \message{[a]}[a] )(\end occurred inside a group at level 1)(see the transcript file for additional information
 #==# endinput_ends_after_the_line.tex
 a b
 #==# endlinechar.tex
@@ -120,10 +132,14 @@ Tilde \relax~
 [EQ] [NE]
 #==# expandafter_toplevel.tex
 BUILT
+#==# extra_right_brace_in_argument.tex
+! Argument of \a has an extra }.<inserted text>                 \par <to be read again>                    }l.8 \a}       Runaway argument?! Paragraph ended before \a was complete.<to be read again>                    \par <to be read again>                    }l.8 \a}       ! Too many }'s.<recently read> }                 l.8 \a}       [1]! Argument of \b has an extra }.<inserted text>                 \par <to be read again>                    }l.11 \b}        Runaway argument?! Paragraph ended before \b was complete.<to be read again>                    \par <to be read again>                    }l.11 \b}        ! Too many }'s.<recently read> }                 l.11 \b}        [2]! Argument of \c has an extra }.<inserted text>                 \par <to be read again>                    }l.14 \c x}          \relaxRunaway argument?! Paragraph ended before \c was complete.<to be read again>                    \par <to be read again>                    }l.14 \c x}          \relax! Too many }'s.<recently read> }                 l.14 \c x}          \relax[3]! Argument of \d has an extra }.<inserted text>                 \par <to be read again>                    }l.18 \d xy}           \relax\stopRunaway argument?xy! Paragraph ended before \d was complete.<to be read again>                    \par <to be read again>                    }l.18 \d xy}           \relax\stop! Too many }'s.<recently read> }                 l.18 \d xy}           \relax\stop[4] )(see the transcript file for additional information
 #==# factor_internal_unit.tex
 [10.0pt][0.5pt][-2.25pt][14.99995pt][-7.5pt] [3.0pt][21.0pt] [2.0pt plus 4.0pt minus 10.0pt][2.0pt plus 2.0pt minus 6.0pt]
 #==# fil_orders_are_keywords.tex
 1.0pt plus 1.0fill minus 2.0pt 0.0pt plus 2.0fill minus 1.0filll 0.0pt plus 3.0pt 144.54pt
+#==# futurelet_peeks_without_consuming.tex
+[\relax] [\par] [\def] [macro:->\relax ] [\par] [\relax]
 #==# gdef_survives_group.tex
 GLOBAL
 #==# global_and_local_in_one_group.tex
@@ -228,6 +244,8 @@ one two
 [107] [749] [107] [114] [13.0pt] [26.0pt] [30.0pt]
 #==# outer_forbidden_use.tex
 Runaway text?[! Forbidden control sequence found while scanning text of \message.<inserted text>                 }<to be read again>                    \x l.7 \message{[\x                ]}[ ! Too many }'s.l.7 \message{[\x]}                  [1] )(see the transcript file for additional information)Output written on case.dvi (1 page, 208 bytes
+#==# par_delimiter_ends_the_argument.tex
+[x ] [x] [\par ]
 #==# paragraph_ended_before_argument.tex
 Runaway argument?{x! Paragraph ended before \a was complete.<to be read again>                    \par l.8 {\a{x\par             }\message{[b]}}[b]! Too many }'s.l.8 {\a{x\par}\message{[b]}}                            [c]Runaway argument?! Paragraph ended before \a was complete.<to be read again>                    \par l.9 \message{[c]}{\a\par                        \message{[d]}}[d]Runaway argument?{x{y! Paragraph ended before \b was complete.<to be read again>                    \par l.10 \def\b#1#2{\message{[#1#2]}}{\b{q}{x{y\par                                               }}}\message{[e]}! Too many }'s.l.10 \def\b#1#2{\message{[#1#2]}}{\b{q}{x{y\par}}                                                 }\message{[e]}! Too many }'s.l.10 \def\b#1#2{\message{[#1#2]}}{\b{q}{x{y\par}}}                                                  \message{[e]}[e]Runaway argument?{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ETC.! Paragraph ended before \a was complete.<to be read again>                    \par l.11 ...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\par                                                  }}! Too many }'s.l.11 ...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\par}}                                                  [\par ] )(see the transcript file for additional information
 #==# param_brace_argument.tex
@@ -254,8 +272,12 @@ Runaway argument?{x! Paragraph ended before \a was complete.<to be read again>  
 a! Bad character code (256).l.4 \message{a}\chardef\x=256                               \message{b}\chardef\y=300b! Bad character code (300).l.4 ...{a}\chardef\x=256 \message{b}\chardef\y=300                                                   )(see the transcript file for additional information
 #==# romannumeral.tex
 [mcmlxxxiv][iv][ix][mmmcmxcix] [][][xl][xc][cd] [xiv][mmmmm] macro:->mcmlxxxiv [macro:->12] 12
+#==# scan_left_brace_skips_relax.tex
+[a] [b] [C] [x y]! Missing { inserted.<to be read again>                    Ql.12 \toks1=\q              }\message{[\the\toks1]}[Q]! Missing { inserted.<to be read again>                    xl.13 \message x               }\message{[d]}x [d] )(see the transcript file for additional information
 #==# show_meanings.tex
 > \a=macro:#1->x#1.l.5 \def\a#1{x#1}\show\a                        > \relax=\relax.l.6 \show\relax                \show a \show\undefinedfoo \def~{T}\show~> the letter a.l.6 \show\relax \show a                        \show\undefinedfoo \def~{T}\show~> \undefinedfoo=undefined.l.6 \show\relax \show a \show\undefinedfoo                                           \def~{T}\show~> ~=macro:->T.l.6 ...x \show a \show\undefinedfoo \def~{T}\show~                                                  after> \count=\count.l.7 \message{after}\show\count                               \let\b=c\show\b \long\def\c{}\show\c> \b=the letter c.l.7 \message{after}\show\count \let\b=c\show\b                                               \long\def\c{}\show\c> \c=\long macro:->.l.7 ...\count \let\b=c\show\b \long\def\c{}\show\c                                                   )(see the transcript file for additional information
+#==# show_of_the_null_control_sequence.tex
+> \csname\endcsname=\relax.<recently read> \csname\endcsname                                   l.7 \expandafter\show\csname\endcsname                                      > \ab=\relax.<recently read> \ab                     l.8 \expandafter\show\csname ab\endcsname                                          )(see the transcript file for additional information
 #==# showthe.tex
 > 5.l.5 \count1=5 \showthe\count1                             > 1.0pt plus 2.0fil.l.6 \skip3=1pt plus 2fil\showthe\skip3                                        \dimen2=-3.5pt \showthe\dimen2> -3.5pt.l.6 ...howthe\skip3 \dimen2=-3.5pt \showthe\dimen2                                                  > a##b\x .l.7 \toks0={a#b\x}\showthe\toks0                                  \showthe\catcode`\{ \showthe\lccode`A> 1.l.7 ...={a#b\x}\showthe\toks0 \showthe\catcode`\{                                                   \showthe\lccode`A> 97.l.7 ...toks0 \showthe\catcode`\{ \showthe\lccode`A                                                  [x]> -4.l.8 \countdef\c=7 \c=-4 \message{[x]}\showthe\c                                               \message{[y]}[y]> 65.l.9 \chardef\q=65 \showthe\q                             )(see the transcript file for additional information
 #==# sign_before_register.tex
@@ -280,6 +302,8 @@ a1 m a2 m a3 [3]
 [3.3pt] [-3.3pt] [12.0pt] [39.60004pt] [Y] [3.0pt plus 1.0fil minus 2.0pt] [3.3pt plus 2.0fill] [6.3pt plus 2.0fill minus 2.0pt]
 #==# the_register_where_a_number_is_scanned.tex
 [12][12][-12] [Y][xii\relax ][-12] [LT] [131072]
+#==# token_list_where_a_number_is_scanned.tex
+! Missing number, treated as zero.<to be read again>                    \everypar l.8 \count1=7 \count1=\number\everypar                                      {x}[0|x]! Missing number, treated as zero.<to be read again>                    \t l.11 \count1=5 \count1=\t                         {y}[0|y]! Missing number, treated as zero.<to be read again>                    \toks l.13 \count1=\toks                  3{z}[z] )(see the transcript file for additional information
 #==# toks_assign_expands.tex
 [a##bc] [xy] [z] [Y\y ]
 #==# toks_registers.tex

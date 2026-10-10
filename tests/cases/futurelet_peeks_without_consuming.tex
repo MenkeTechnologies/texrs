@@ -1,0 +1,18 @@
+% \futurelet\n\b X Y assigns \n the meaning of Y, then runs \b with X still
+% ahead (tex.web §1221): the peeked token is not consumed, a primitive keeps
+% its meaning, and the call that follows still sees it. \futurelet reads the
+% two tokens after the name WITHOUT expanding, so a macro there is peeked as
+% itself.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{\futurelet\n\b}
+\def\b{\message{[\meaning\n]}}
+\a\relax
+\a\par
+\a\def\z{}
+\def\m{\relax}
+\a\m
+\def\c#1{\futurelet\p\d}
+\def\d{\message{[\meaning\p]}}
+\c\relax\par
+\c{}\relax
+\end

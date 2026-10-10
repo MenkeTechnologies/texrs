@@ -1,0 +1,8 @@
+% \end with groups open says so (tex.web §1335): `(\end occurred inside a
+% group at level N)` after the file's closing paren, N counting both `{` and
+% \begingroup. The report is not an error, so it is NOT followed by the line
+% about the transcript file.
+\catcode`\{=1 \catcode`\}=2
+\message{[a]}
+{\begingroup{\message{[b]}
+\end

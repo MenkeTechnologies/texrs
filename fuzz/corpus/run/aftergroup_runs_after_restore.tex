@@ -1,0 +1,12 @@
+% \aftergroup tokens come back after the group's `}` in the order they were
+% given, once the group's assignments are undone (tex.web §1065, §282), and a
+% nested group releases its own at its own end.
+\catcode`\{=1 \catcode`\}=2
+\def\a{\message{[A]}}
+\def\b{\message{[B]}}
+{\aftergroup\a\aftergroup\b\message{[in]}}\message{[out]}
+{{\aftergroup\a}\message{[mid]}}\message{[out2]}
+\def\c{\message{[\the\count1]}}
+\count1=1 {\count1=2 \aftergroup\c}
+{\count1=3 \aftergroup\c \message{[\the\count1]}}
+\end

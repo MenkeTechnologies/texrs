@@ -32,6 +32,22 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A macro delimited by `\par` is ended by one (§392 compares the delimiter
+  before it asks whether the token is `\par`); it was a runaway.
+- An `\edef` reads its parameter text and body as `\def` does, so a bad `#`
+  in it is reported and recovered from (§476), and a `#{` parameter text
+  works.
+- `\message`, `\uppercase`, `\lowercase` and a token register skip `\relax`
+  before their `{` and report `Missing { inserted` with the token put back
+  (§403), where texrs stopped the run.
+- `\csname` expands an active character that is a macro, and a token that is
+  not a character ends the name with `Missing \endcsname inserted` (§372); the
+  name it builds is read back as `<recently read>`, and `\show` prints the null
+  control sequence as `\csname\endcsname`.
+- A `}` where a macro argument is read is `Argument of \a has an extra }`
+  (§395), with the `<inserted text>` level of the context display.
+- `\end` with groups open prints `(\end occurred inside a group at level N)`
+  (§1335).
 - A parameter text numbered out of order, a tenth parameter (§476) and a `#`
   in a `\def` body before anything but `#` or a parameter's number (§479) are
   reported and recovered from as tex does; texrs stopped the run, or took

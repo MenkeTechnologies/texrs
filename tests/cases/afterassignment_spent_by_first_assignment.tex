@@ -1,0 +1,14 @@
+% \afterassignment holds ONE token and inserts it after the very next
+% assignment -- count, \def, \let, token register alike (tex.web §1269) -- and
+% only that one: the second assignment finds nothing waiting. A token held
+% across a command that is not an assignment stays held, and a group's end does
+% not release it.
+\catcode`\{=1 \catcode`\}=2
+\def\a{\message{[A]}}
+\afterassignment\a \count1=5 \message{[\the\count1]}
+\count2=6 \message{[\the\count2]}
+\afterassignment\a \def\b{x}\message{[B]}
+\afterassignment\a \message{[M]}\count1=2 \message{[N]}
+\toks0={ab}\afterassignment\a \toks0={cd}\message{[\the\toks0]}
+{\afterassignment\a \count1=5 \message{[in]}}\message{[out]}
+\end
