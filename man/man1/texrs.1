@@ -12,6 +12,9 @@ texrs \- a TeX engine: Knuth's mouth and expander, lowered onto a bytecode VM
 [\fIOPTIONS\fR] \fB&\fIFMT\fR \fIARGS\fR
 .br
 .B texrs
+.br
+.B texrs
+\fB\-X\fR \fICOMMAND\fR [\fIARGS\fR]
 .SH DESCRIPTION
 Invoked the way
 .BR tex (1)
@@ -669,14 +672,15 @@ is a pipeline this engine has:
 or
 .BR disasm .
 There is no
-.BR bundle ,
 .BR tex_format ,
 .B shell_escape
 or
 .B synctex
-key, as there is in tectonic's schema: texrs has no package universe, one
-format, no shell and no page, and a key describing machinery that does not exist
-would be a promise the engine cannot keep.
+key, as there is in tectonic's schema: texrs has one format, no shell and no
+page, and a key describing machinery that does not exist would be a promise the
+engine cannot keep.  Its
+.B bundle
+key is a path to a local archive rather than a fetched one.
 .TP
 .B \-X new " [" \fIDIR\fR ]
 Write a
@@ -744,12 +748,12 @@ own spelling, with one dash or two and a value after either an
 .B =
 or a space, so an invocation written for
 .B tex
-drives texrs unchanged.  This milestone acts on
-.BR \-interaction ;
-the rest are recorded and reported by
-.B \-X show
-but change nothing yet, because what they configure \(em the log file, the
-format, the DVI \(em is the stomach texrs does not have.
+drives texrs unchanged.  Only
+.B \-interaction
+and
+.B \-output\-directory
+act; the rest are accepted and have no effect, because what they configure
+\(em the log file, the format \(em texrs does not have.
 .TP
 .BI \-interaction= MODE
 .BR batchmode ", " nonstopmode ", " scrollmode " or " errorstopmode .
@@ -761,8 +765,14 @@ differ only in what they would do at an error.
 Set the job name.
 .TP
 .BI \-output\-directory= DIR
-Write files in
-.IR DIR .
+Write the
+.B \-\-pdf ,
+.B \-\-dvi
+and
+.B \-\-aot
+output in
+.I DIR
+instead of beside the input.
 .TP
 .BI \-progname= NAME
 Set the program name.
@@ -871,11 +881,6 @@ tier compiled it, and the ops the block tier refuses with their counts.  The
 answers come from fusevm's own predicates, not from an assumption about them \(em
 enabling the JIT is not the same as being compiled by it.
 .TP
-.B \-\-build
-Compile the document into the bytecode cache and stop, without running it.  What
-a later run would have paid for is paid now, which is what a build step is for:
-the cache is warm before anyone is waiting on it.
-.TP
 .BI \-\-jobs= N
 Compile
 .I N
@@ -895,6 +900,12 @@ the document does at run time happens \(em no
 is written and no
 .B \erust
 block is compiled \(em because none of that is compilation.
+.TP
+.B \-\-pdf
+Typeset the document to
+.I FILE.pdf
+beside the source, in the typeface it asked for, and say where it went.  A
+document that sets no page writes no file.
 .TP
 .B \-\-dvi
 Typeset the document to
