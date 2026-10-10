@@ -1489,7 +1489,9 @@ impl Lowerer {
                     // The prefix is spent either way; `\globaldefs` decides
                     // over both it and `\xdef`'s own globality (§1214).
                     let prefix = self.eng.take_global_prefix();
-                    let global = self.eng.global_defs_applied(name.name() == "xdef" || prefix);
+                    let global = self
+                        .eng
+                        .global_defs_applied(name.name() == "xdef" || prefix);
                     let snapshots = self.edef_snapshot(lx, global)?;
                     out.extend(snapshots);
                 }
@@ -3474,8 +3476,10 @@ impl Lowerer {
         let mut spelt = vec![Token::cs("the"), t];
         let takes_number = match t {
             Token::Cs(n) => {
-                matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks" | "catcode")
-                    || crate::charcodes::Table::from_name(n.name()).is_some()
+                matches!(
+                    n.name(),
+                    "count" | "dimen" | "skip" | "muskip" | "toks" | "catcode"
+                ) || crate::charcodes::Table::from_name(n.name()).is_some()
             }
             Token::Char(..) => false,
         };

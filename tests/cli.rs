@@ -1473,7 +1473,11 @@ fn a_dvi_run_with_no_pages_writes_no_file() {
     }
     let dir = scratch_cache("dvi_no_pages");
     let empty = dir.join("empty.tex");
-    std::fs::write(&empty, "\\catcode`\\{=1 \\catcode`\\}=2\n\\message{X}\n\\end\n").unwrap();
+    std::fs::write(
+        &empty,
+        "\\catcode`\\{=1 \\catcode`\\}=2\n\\message{X}\n\\end\n",
+    )
+    .unwrap();
     let said = stdout_of(texrs().current_dir(&dir).arg("--dvi").arg(&empty));
     assert!(said.contains("No pages of output."), "{said}");
     assert!(!dir.join("empty.dvi").exists(), "an empty run wrote a DVI");
@@ -1481,6 +1485,9 @@ fn a_dvi_run_with_no_pages_writes_no_file() {
     let words = dir.join("words.tex");
     std::fs::write(&words, "Some words.\n\\end\n").unwrap();
     stdout_of(texrs().current_dir(&dir).arg("--dvi").arg(&words));
-    assert!(dir.join("words.dvi").exists(), "a run that set text wrote no DVI");
+    assert!(
+        dir.join("words.dvi").exists(),
+        "a run that set text wrote no DVI"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

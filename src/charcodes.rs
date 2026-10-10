@@ -63,7 +63,9 @@ impl Table {
         match self {
             // Any negative delimiter code is legal: it means "not a
             // delimiter", which is what INITEX's -1 everywhere says.
-            Table::Delimiter => (v > n).then(|| format!("Invalid code ({v}), should be at most {n}")),
+            Table::Delimiter => {
+                (v > n).then(|| format!("Invalid code ({v}), should be at most {n}"))
+            }
             _ => invalid_in_range(v, n),
         }
     }

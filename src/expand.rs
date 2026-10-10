@@ -616,8 +616,7 @@ impl Engine {
         // is; a level between them only while fewer than `\errorcontextlines`
         // levels have been (the innermost counts), and `...` once in place of
         // the rest when exactly that many have.
-        let limit = crate::intpar::index("errorcontextlines")
-            .map_or(0, |i| self.intpars.get(i));
+        let limit = crate::intpar::index("errorcontextlines").map_or(0, |i| self.intpars.get(i));
         let mut shown = 0i64;
         for (i, (toks, read, inserted)) in lx.backed_up().into_iter().enumerate() {
             if i > 0 && shown >= limit {
@@ -1716,7 +1715,10 @@ impl Engine {
             }
         }
         let inserted = units[0];
-        self.report(lx, &format!("Illegal unit of measure ({inserted} inserted)"));
+        self.report(
+            lx,
+            &format!("Illegal unit of measure ({inserted} inserted)"),
+        );
         Ok(inserted)
     }
 
@@ -1850,8 +1852,8 @@ impl Engine {
         // the digits and `pt`, which §448 reads back as the same scaled points
         // -- the register, whole, and §453's optional space after its unit.
         if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
-            let dimension = reg.slot >= crate::compiler::DIMEN_BASE
-                && !crate::compiler::is_glue_slot(reg.slot);
+            let dimension =
+                reg.slot >= crate::compiler::DIMEN_BASE && !crate::compiler::is_glue_slot(reg.slot);
             if reg.the && dimension {
                 if let Some(t) = self.take(lx, pending_only) {
                     if !t.is_space() {
@@ -2121,7 +2123,9 @@ impl Engine {
             return Ok(false);
         };
         Ok(match t {
-            Token::Char(c, Cat::Other) => c.is_ascii_digit() || (fraction && matches!(c, '.' | ',')),
+            Token::Char(c, Cat::Other) => {
+                c.is_ascii_digit() || (fraction && matches!(c, '.' | ','))
+            }
             _ => false,
         })
     }
@@ -3756,7 +3760,10 @@ impl Engine {
         }
         self.errors.push(format!("Runaway argument?{shown}"));
         lx.back_input(&[Token::cs("par")]);
-        let msg = format!("Paragraph ended before {} was complete", self.sprint_cs(name));
+        let msg = format!(
+            "Paragraph ended before {} was complete",
+            self.sprint_cs(name)
+        );
         self.report(lx, &msg);
     }
 
@@ -3791,7 +3798,6 @@ impl Engine {
             }
         }
     }
-
 
     fn read_undelimited(&mut self, lx: &mut Lexer, long: bool, pending_only: bool) -> R<Arg> {
         loop {
