@@ -3541,6 +3541,10 @@ impl Lowerer {
         let Some((t, _)) = self.eng.next_unexpandable(lx)? else {
             return Err(TexError("Missing number, treated as zero".into()));
         };
+        // §428: reported at the file position, the token spent, zero used.
+        if self.eng.cant_use_after_the(lx, &t) {
+            return Ok(vec![Token::cs("number"), Token::Char('0', Cat::Other)]);
+        }
         let mut spelt = vec![Token::cs("the"), t];
         let takes_number = match t {
             Token::Cs(n) => {
@@ -3785,7 +3789,14 @@ impl Lowerer {
                 "the" | "number" => {
                     flush!();
                     if n.name() == "the" {
-                        match work.pending.pop() {
+                        let target = self.the_target(work)?;
+                        if let Some(t) = &target {
+                            if self.eng.cant_use_after_the(work, t) {
+                                text.push('0');
+                                continue;
+                            }
+                        }
+                        match target {
                             // `\the\dimen0` is written as a DIMENSION -- 1.0pt,
                             // not 65536 -- which is the whole difference
                             // between the two registers at this level.
@@ -4223,6 +4234,36 @@ impl Lowerer {
             out.push(MsgOp::Text(text));
         }
         Ok(out)
+    }
+
+    /// The token `\the` reads in a message body: §465's `get_x_token`, so a
+    /// macro, an undefined name (§370, reported) or an expandable primitive
+    /// in front of the quantity expands first. A conditional is left alone --
+    /// in a message it is a run-time branch, not a decision taken now -- and
+    /// so is the brace that ends the body.
+    fn the_target(&mut self, work: &mut Lexer) -> R<Option<Token>> {
+        loop {
+            let Some(t) = work.pending.pop() else {
+                return Ok(None);
+            };
+            let n = match t {
+                Token::Char(c, Cat::Active) => match self.eng.active_meaning(c) {
+                    Some(id) if self.eng.is_macro(id) => id,
+                    _ => return Ok(Some(t)),
+                },
+                Token::Cs(n) => n,
+                Token::Char(..) => return Ok(Some(t)),
+            };
+            if n.name() == crate::expand::MESSAGE_END
+                || crate::expand::Engine::is_conditional(n)
+                || matches!(n.name(), "the" | "number")
+            {
+                return Ok(Some(t));
+            }
+            if !self.eng.expand_pending(work, n)? {
+                return Ok(Some(t));
+            }
+        }
     }
 
     /// `\ifcase` becomes a chain of equality branches -- one per `\or` arm, with

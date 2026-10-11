@@ -310,6 +310,8 @@ a! Bad character code (256).l.4 \message{a}\chardef\x=256                       
 a1 m a2 m a3 [3]
 #==# tail_loop_through_expandafter.tex
 5 10 7 4 1
+#==# the_not_an_internal_quantity.tex
+[3]! You can't use `the letter A' after \the.l.9 \message{[\the A                    ][\the\relax][\the\end]}! You can't use `\relax' after \the.l.9 \message{[\the A][\the\relax                                ][\the\end]}! You can't use `\end' after \the.l.9 \message{[\the A][\the\relax][\the\end                                          ]}[0][0][0]! You can't use `\message' after \the.l.11 \message{[\the\x                     ][\the\y][\the\undefinedname\count1]}! You can't use `the letter Z' after \the.l.11 \message{[\the\x][\the\y                             ][\the\undefinedname\count1]}! Undefined control sequence.l.11 \message{[\the\x][\the\y][\the\undefinedname                                                 \count1]}[0][0][3]! You can't use `\relax' after \the.<recently read> \notexpanded: \a                                  l.12 \message{[\the\noexpand\a                              ][\the\noexpand\count1]}[0][3]! You can't use `\relax' after \the.l.13 \showthe\relax                   > 0.l.13 \showthe\relax                   > 3.l.14 \showthe\b1                 )(see the transcript file for additional information
 #==# the_register_where_a_dimension_is_scanned.tex
 [3.3pt] [-3.3pt] [12.0pt] [39.60004pt] [Y] [3.0pt plus 1.0fil minus 2.0pt] [3.3pt plus 2.0fill] [6.3pt plus 2.0fill minus 2.0pt]
 #==# the_register_where_a_number_is_scanned.tex

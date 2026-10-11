@@ -8,6 +8,10 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\the` and `\showthe` read their operand with `get_x_token` (§465), so a macro
+  standing for a register expands first, and a command that is no internal
+  quantity is §428's `You can't use `X' after \the`, reported with zero used
+  rather than stopping the run.
 - An error's context shows the levels a macro call made (`\a #1->body` split at
   the position read, `<argument>`), counted against `\errorcontextlines`, and an
   error in a `\message` body shows the file line the scanner had reached.

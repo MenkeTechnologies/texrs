@@ -1,0 +1,15 @@
+% §465's \the reads its operand with get_x_token, so a macro standing for a
+% register expands first. §428: a command outside §413's internal quantities
+% -- a character, \relax, \end, \message, a \let copy of one -- is reported as
+% `You can't use `<print_cmd_chr>' after \the', the token is spent, and zero
+% is used. \showthe goes through the same scan, so it shows `> 0.'.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{\count}\def\b{\a}\count1=3
+\message{[\the\b1]}
+\message{[\the A][\the\relax][\the\end]}
+\let\x=\message \let\y=Z
+\message{[\the\x][\the\y][\the\undefinedname\count1]}
+\message{[\the\noexpand\a][\the\noexpand\count1]}
+\showthe\relax
+\showthe\b1
+\end

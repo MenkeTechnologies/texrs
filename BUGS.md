@@ -168,7 +168,8 @@ texrs output reached tracked lualatex references in
   (§476), a `}` where a macro argument is being read (`Argument of \a has an
   extra }`, §395, with the `<inserted text>` level §327's `ins_error` makes),
   and an `\end` with groups still open (§1335's `(\end occurred inside a group
-  at level N)`). Each
+  at level N)`), and a character or a non-internal command after `\the` or
+  `\showthe` (§428's `You can't use `\relax' after \the`, zero used). Each
   writes `! <reason>.` followed by §311's context display into the message
   stream, clamps the value where tex clamps it, and the run continues;
   `tests/cases/number_too_big.tex`, `chardef_bad_code.tex` and
@@ -181,7 +182,8 @@ texrs output reached tracked lualatex references in
   (`macro_levels_in_error_context.tex`). An error inside a `\message` body
   shows the file line the scanner had reached
   (`message_body_error_has_file_line.tex`): the body is read first and its
-  token positions recorded. The levels are judged by where their tokens sit in
+  token positions recorded. An error met while an `\edef` body expands shows
+  no file line at all, where tex shows `l.N` split at the body read so far. The levels are judged by where their tokens sit in
   the pending list, so tokens pushed back without a level of their own can
   shift a split by a token. Every
   other error path -- a `Missing number` where texrs meets an internal

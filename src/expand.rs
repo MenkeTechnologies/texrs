@@ -4901,7 +4901,21 @@ impl Engine {
         if bare {
             return Ok(self.scan_number(lx, pending_only)?.to_string());
         }
-        let Some(Token::Cs(what)) = self.take(lx, pending_only) else {
+        // §465: the quantity is read with `get_x_token`, so a macro that
+        // stands for one expands first.
+        let tok = loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("You can't use \\the here".into()));
+            };
+            match t {
+                Token::Cs(n) if self.try_expand(lx, n, pending_only)? => continue,
+                t => break t,
+            }
+        };
+        if self.cant_use_after_the(lx, &tok) {
+            return Ok("0".into());
+        }
+        let Token::Cs(what) = tok else {
             return Err(TexError("You can't use \\the here".into()));
         };
         // §478's `token_list` arm: the tokens, not a number. A token register
@@ -4939,6 +4953,57 @@ impl Engine {
             // scanner's "missing number": the name is the whole of what a
             // reader needs to know to port the next one.
             Err(_) => Err(TexError(format!("Unsupported \\the\\{}", what.name()))),
+        }
+    }
+
+    /// §428: `\the` (or `\showthe`) in front of a command that is no internal
+    /// quantity -- a character, or a primitive outside §413's
+    /// `min_internal..max_internal` such as `\relax` or `\end`. tex reports
+    /// `You can't use `<print_cmd_chr>' after \the`, keeps the token consumed,
+    /// and uses zero. Returns whether `tok` was such a command, the report
+    /// made.
+    ///
+    /// Only a TeX82 primitive is judged: a name this engine adds (e-TeX's,
+    /// LuaTeX's) keeps the path it had, so an extension is never refused here
+    /// for not being in §413's list.
+    pub fn cant_use_after_the(&mut self, lx: &Lexer, tok: &Token) -> bool {
+        if !self.not_internal(tok) {
+            return false;
+        }
+        let msg = format!(
+            "You can't use `{}' after {}the",
+            self.meaning_text(tok),
+            self.esc()
+        );
+        self.report(lx, &msg);
+        true
+    }
+
+    /// Whether `tok`, met where §413 wants an internal quantity, is a command
+    /// tex knows is none (see [`Self::cant_use_after_the`]).
+    fn not_internal(&self, tok: &Token) -> bool {
+        let n = match tok {
+            Token::Char(c, Cat::Active) => match self.active_meaning(*c) {
+                Some(id) => return self.not_internal(&Token::Cs(id)),
+                None => return false,
+            },
+            Token::Char(..) => return true,
+            Token::Cs(n) => *n,
+        };
+        // §358: a `\noexpand`ed name is `\relax` where it is read.
+        if n.noexpand_origin().is_some() {
+            return true;
+        }
+        match self.meanings.get(&n) {
+            Some(Meaning::Char(..)) => true,
+            Some(Meaning::Primitive(_)) | None => {
+                let p = self.primitive_meaning(n);
+                crate::primitives::is_primitive(p.name())
+                    && !crate::primitives::is_internal_quantity(p.name())
+                    && !crate::primitives::expands(p.name())
+                    && !Self::is_conditional(p)
+            }
+            _ => false,
         }
     }
 
