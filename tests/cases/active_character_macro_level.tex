@@ -1,0 +1,10 @@
+% §314 names a macro level with §262's print_cs, which prints an active
+% character as the character itself: no escape, and no trailing space even
+% before a parameter text. A \let copy shows its own name, not the macro's.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\catcode`\~=13 \def~{\undefinedy}\message{[~]}
+~
+\def\q#1{\undefinedz}\catcode`\!=13 \let!=\q
+!a
+\show~
+\end

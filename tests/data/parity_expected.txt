@@ -4,6 +4,8 @@
 # a changed block is a changed claim about what the reference engine does.
 #==# active_character.tex
 [tie] [A] [a][b]
+#==# active_character_macro_level.tex
+! Undefined control sequence.~->\undefinedy                l.5 \catcode`\~=13 \def~{\undefinedy}\message{[~                                                ]}[]! Undefined control sequence.~->\undefinedy                l.6 ~     ! Undefined control sequence.!#1->\undefinedz                  l.8 !a      > ~=macro:->\undefinedy .l.9 \show~           )(see the transcript file for additional information
 #==# advance_wraps_at_32_bits.tex
 [-2147483648] [2147483647]
 #==# after_tokens.tex

@@ -2790,6 +2790,11 @@ impl Engine {
         let name = name
             .strip_prefix(crate::token::NOEXPAND_PREFIX)
             .unwrap_or(name);
+        // §262: an active character prints as the character itself, no
+        // escape and no trailing space -- `~->body' in §314's macro level.
+        if let Some(c) = Self::active_char_of(name) {
+            return c.to_string();
+        }
         let e = self.esc();
         let mut chars = name.chars();
         match (chars.next(), chars.next()) {
@@ -3276,6 +3281,15 @@ impl Engine {
     /// interning under it keeps the two apart with no second table.
     pub fn active_cs(c: char) -> CsId {
         CsId::intern(&format!("active:{c}"))
+    }
+
+    /// The character an [`Self::active_cs`] name stands for.
+    fn active_char_of(name: &str) -> Option<char> {
+        let mut chars = name.strip_prefix("active:")?.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => Some(c),
+            _ => None,
+        }
     }
 
     /// The control sequence an active character stands for, if it HAS a

@@ -8,6 +8,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A macro level of an error's context names an active character as the
+  character itself (§262's `print_cs`): `~->body`, not `\active:~ ->body`.
 - `\the` and `\showthe` read their operand with `get_x_token` (§465), so a macro
   standing for a register expands first, and a command that is no internal
   quantity is §428's `You can't use `X' after \the`, reported with zero used
