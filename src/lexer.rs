@@ -468,9 +468,11 @@ impl Lexer {
             let unread = (0..cap)
                 .take_while(|i| self.pending[level.base + i] == level.toks[n - 1 - i])
                 .count();
-            // Nothing is shown above it and it is read to its end: the one
-            // case a level with no tokens left is still on tex's stack.
-            let innermost = out.is_empty() && unread == 0 && level.base >= upper;
+            // Nothing is shown above it and it is read to its end, with
+            // nothing below it read yet: the one case a level with no tokens
+            // left is still on tex's stack. A token read from beneath means
+            // §357's get_next ended it first.
+            let innermost = out.is_empty() && unread == 0 && level.base == upper;
             if unread > 0 || innermost {
                 out.push(LevelView {
                     toks: &level.toks,

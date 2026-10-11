@@ -1,0 +1,10 @@
+% §325's back_input level is ended by the next get_next that finds it empty
+% (§357), so once a token from below it has been read it is gone: the `]'
+% scan_int put back after `\count1' is not `<recently read>' when the
+% undefined name after it is reported.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count1=3
+\message{[\the\count1]\undefinedx}
+\count2=4 \undefinedw
+\message{[\the\count1 ]\undefinedv}
+\end

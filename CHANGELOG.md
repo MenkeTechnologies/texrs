@@ -8,6 +8,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A `<to be read again>` level read to its end is no longer shown as
+  `<recently read>` once a token from beneath it has been read (§357 ends it).
 - A macro level of an error's context names an active character as the
   character itself (§262's `print_cs`): `~->body`, not `\active:~ ->body`.
 - `\the` and `\showthe` read their operand with `get_x_token` (§465), so a macro
