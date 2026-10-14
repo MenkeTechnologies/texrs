@@ -333,6 +333,24 @@ and that could not be seen before `\titleformat` delivered anything at all.
   `\usepackage{fontspec}` — which is how every book in the corpus sets its
   fonts. The fonts still resolve; it is the package's own load that stops.
 
+- **A document that loads `graphicx` stops with no PDF.** Measured at 0.6.4,
+  built from main as of 2026-10-11:
+
+  ```
+  \documentclass{article}\usepackage{graphicx}\begin{document}word\end{document}
+  ```
+
+  `texrs --pdf -interaction=nonstopmode` prints
+  `! Undefined control sequence \AtBeginDvi.`, exits 1 and writes no `.pdf`;
+  `pdflatex` (pdfTeX 3.141592653-2.6-1.40.29, TeX Live 2026) sets the page and
+  exits 0. A `\message` placed after the `\usepackage` line never prints, so the
+  stop is inside the package load. The LaTeX kernel defines `\AtBeginDvi`, and
+  nothing under `src/` does; of `dvips.def`, `pdftex.def` and `luatex.def`, only
+  `dvips.def` calls it (lines 162, 163 and 176). The released 0.6.4 binary on
+  the same file prints `package graphicx is not loadable: Missing number,
+  treated as zero` and still writes the PDF, so the fatal stop is newer than
+  that release.
+
 - **`\textwidth` is 469.0pt where LaTeX makes it 345.0pt.** Measured on the
   same `\documentclass{article}` document through both engines:
 
