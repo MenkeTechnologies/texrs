@@ -386,6 +386,11 @@ pub const ADVICE_OUT: &str = "\u{0}advice-out";
 /// A NUL in the name keeps it out of reach of any document.
 pub const MESSAGE_END: &str = "\u{0}message-end";
 
+/// §222's `frozen_protection`: the control sequence `get_r_token` puts in the
+/// place of a name that is missing. Its name begins with a character the mouth
+/// never makes part of one, so no document can spell it.
+pub const INACCESSIBLE: &str = "\u{0}inaccessible";
+
 /// The font `em` and `ex` are measured in, and the size it is loaded at.
 ///
 /// Named here rather than passed in because it is not a choice the caller gets
@@ -1499,8 +1504,6 @@ impl Engine {
         }
     }
 
-    /// §510: an `\else`, `\or` or `\fi` with no conditional open is reported
-    /// and expands to nothing. Always `true`, the answer `try_expand` gives.
     /// Which of `fi`, `else` and `or` `name` means, when no conditional is open
     /// for it to end.
     pub fn stray_conditional_end(&self, name: CsId) -> Option<&'static str> {
@@ -1520,6 +1523,8 @@ impl Engine {
         self.extra_fi_or_else(lx, kind);
     }
 
+    /// §510: an `\else`, `\or` or `\fi` with no conditional open is reported
+    /// and expands to nothing. Always `true`, the answer `try_expand` gives.
     fn extra_fi_or_else(&mut self, lx: &Lexer, name: &str) -> bool {
         let msg = format!("Extra {}{name}", self.esc());
         self.report(lx, &msg);
@@ -3064,6 +3069,9 @@ impl Engine {
         if name == MESSAGE_END {
             return "}".to_string();
         }
+        if name == INACCESSIBLE {
+            return format!("{}inaccessible ", self.esc());
+        }
         let name = name
             .strip_prefix(crate::token::NOEXPAND_PREFIX)
             .unwrap_or(name);
@@ -3595,10 +3603,28 @@ impl Engine {
     /// character, which TeX's `get_r_token` accepts in the same position
     /// (`tex.web` §1215).
     fn scan_defined_name(&mut self, lx: &mut Lexer) -> R<CsId> {
-        match lx.next_token(&self.cats) {
-            Some(Token::Cs(name)) => Ok(name),
-            Some(Token::Char(c, Cat::Active)) => Ok(Self::active_cs(c)),
-            _ => Err(TexError("Missing control sequence inserted".into())),
+        self.get_r_token(lx, false)
+    }
+
+    /// §1215's `get_r_token`: the next non-blank token, which must be a control
+    /// sequence or an active character. Anything else is `Missing control
+    /// sequence inserted`: the token is read again, `\inaccessible` is
+    /// inserted in front of it, and the definition goes on naming that.
+    pub fn get_r_token(&mut self, lx: &mut Lexer, pending_only: bool) -> R<CsId> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing control sequence inserted".into()));
+            };
+            match t {
+                t if t.is_space() => continue,
+                Token::Cs(name) => return Ok(name),
+                Token::Char(c, Cat::Active) => return Ok(Self::active_cs(c)),
+                t => {
+                    lx.back_input(&[t]);
+                    lx.insert_input(&[Token::Cs(CsId::intern(INACCESSIBLE))]);
+                    self.report(lx, "Missing control sequence inserted");
+                }
+            }
         }
     }
 
@@ -3999,9 +4025,7 @@ impl Engine {
     }
 
     fn numeric_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
-        let Some(Token::Cs(name)) = self.take(lx, false) else {
-            return Err(TexError("Missing control sequence inserted".into()));
-        };
+        let name = self.get_r_token(lx, false)?;
         self.skip_equals_file(lx)?;
         let mut v = self.scan_number_file(lx)?;
         // Both are limited to 0..255, and tex names the limit differently for
@@ -4052,9 +4076,7 @@ impl Engine {
     }
 
     fn do_futurelet(&mut self, lx: &mut Lexer, pending_only: bool) -> R<()> {
-        let Some(Token::Cs(name)) = self.take(lx, pending_only) else {
-            return Err(TexError("Missing control sequence inserted".into()));
-        };
+        let name = self.get_r_token(lx, pending_only)?;
         let Some(first) = self.take(lx, pending_only) else {
             return Err(TexError("Missing token for \\futurelet".into()));
         };
@@ -5978,13 +6000,7 @@ impl Engine {
         }
         // §1215's `get_r_token`: the next non-blank token, which must be a
         // control sequence.
-        let name = loop {
-            match lx.next_token(&self.cats) {
-                Some(t) if t.is_space() => continue,
-                Some(Token::Cs(name)) => break name,
-                _ => return Err(TexError("Missing control sequence inserted".into())),
-            }
-        };
+        let name = self.get_r_token(lx, false)?;
         let body = self.read_toks(lx, n)?;
         self.define_macro_with_params(name, Vec::new(), body, global)
     }

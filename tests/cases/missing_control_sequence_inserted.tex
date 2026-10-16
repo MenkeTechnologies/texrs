@@ -1,0 +1,15 @@
+% tex.web 1215: a definition names its control sequence with get_r_token. Any
+% other token is `Missing control sequence inserted': it is read again,
+% \inaccessible is inserted in front of it, and the definition goes on naming
+% that. The inserted name is one no document can spell, so \inaccessible
+% typed here stays undefined.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\errorcontextlines=5
+\def 1{x}\message{A}
+\def\foo{x}\def{y}\message{B}
+\gdef $#1{}\message{C}
+\edef 3{z}\message{D}
+\message{[\meaning\inaccessible]}
+\def
+  \bar{ok}\message{[\meaning\bar]}
+\end

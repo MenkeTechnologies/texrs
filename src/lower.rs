@@ -1853,9 +1853,7 @@ impl Lowerer {
     /// spelling is `12.0pt` rather than a count of scaled points. That is what
     /// the refusal names.
     fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Vec<Cmd>> {
-        let Some(Token::Cs(name)) = lx.next_token(&self.eng.cats) else {
-            return Err(TexError("Missing control sequence inserted".into()));
-        };
+        let name = self.eng.get_r_token(lx, false)?;
         // The parameter text and body, exactly as `\def` reads them. `\edef`
         // differs from `\def` only in WHEN the body is expanded; dropping the
         // parameters here left `\edef\pair#1,#2.{…}` matching nothing and its

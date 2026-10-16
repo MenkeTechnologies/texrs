@@ -13,6 +13,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A definition whose name is missing is `Missing control sequence inserted`
+  (§1215): the token is read again and the definition names `\inaccessible`,
+  where it stopped the run.
 - A factor times an internal dimension outside the dimension range is
   `Dimension too large` (§455), reported where the dimension ends, with
   `max_dimen` used; it was clamped without a report.
