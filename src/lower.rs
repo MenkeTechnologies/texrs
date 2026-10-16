@@ -4057,6 +4057,11 @@ impl Lowerer {
                         }
                     }
                 }
+                // `\fontname` is expandable too (§472).
+                "fontname" => {
+                    let name = self.eng.fontname_text(work, true)?;
+                    text.push_str(&name);
+                }
                 // `\jobname` is expandable: the job's name, as text.
                 "jobname" => text.push_str(&crate::lua::jobname()),
                 // `\meaning` is expandable, so it reaches a message body as

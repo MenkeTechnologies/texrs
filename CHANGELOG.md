@@ -13,6 +13,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\fontname` expands (§472) for `\nullfont`, `\font` and the family tables, and
+  reports `Missing font identifier` for anything else.
 - An active character in an `\edef` or `\xdef` body expands as the macro it
   names (§366) instead of staying a character.
 - `\aftergroup` outside every group is dropped (§280), not inserted at once.

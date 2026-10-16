@@ -1442,6 +1442,13 @@ impl Engine {
                 lx.push_back(&toks);
                 Ok(true)
             }
+            // `\fontname` (§470, §472): the name of the font the next token
+            // identifies, as category-12 characters.
+            "fontname" => {
+                let name = self.fontname_text(lx, pending_only)?;
+                lx.push_back(&str_toks(&name));
+                Ok(true)
+            }
             "jobname" => {
                 let toks: Vec<Token> = crate::lua::jobname()
                     .chars()
@@ -2413,6 +2420,46 @@ impl Engine {
         }
         self.mag_set = self.intpars.get(crate::intpar::MAG);
         self.mag_set
+    }
+
+    /// §577's `scan_font_ident` and §472's `font_name_code`: the name of the font
+    /// the next non-blank, non-call token identifies.
+    ///
+    /// texrs loads no font, so the only identifiers are `\nullfont`, `\font` (the
+    /// current font, which is `\nullfont`) and the three family tables, whose
+    /// every entry is `\nullfont` until a `\font` fills one. Anything else is
+    /// `Missing font identifier`, read again, and `\nullfont` used.
+    pub fn fontname_text(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
+        let tok = loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Err(TexError("Missing font identifier".into()));
+            };
+            match t {
+                t if t.is_space() => continue,
+                Token::Cs(n) if self.try_expand(lx, n, pending_only)? => continue,
+                t => break t,
+            }
+        };
+        let family = match tok {
+            Token::Cs(n) => match self.primitive_meaning(n).name() {
+                "nullfont" | "font" => false,
+                "textfont" | "scriptfont" | "scriptscriptfont" => true,
+                _ => {
+                    lx.back_input(&[tok]);
+                    self.report(lx, "Missing font identifier");
+                    false
+                }
+            },
+            Token::Char(..) => {
+                lx.back_input(&[tok]);
+                self.report(lx, "Missing font identifier");
+                false
+            }
+        };
+        if family {
+            self.scan_stream_number(lx, pending_only)?;
+        }
+        Ok("nullfont".to_string())
     }
 
     /// The slot a register reference names, reading the register number after

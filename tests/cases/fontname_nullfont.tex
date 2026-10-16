@@ -1,0 +1,14 @@
+% tex.web 470, 472, 577: \fontname expands to the name of the font the next
+% token identifies. \nullfont is the one font a run without \font has; a token
+% that identifies none is `Missing font identifier', is read again, and the
+% null font's name is used. Spaces and macros before the identifier are skipped
+% and expanded.
+\catcode`\{=1 \catcode`\}=2
+\message{\fontname\nullfont}
+\message{\fontname a}
+\message{\fontname\relax}
+\def\id{\nullfont}
+\message{[\fontname \id]}
+\edef\x{\fontname\nullfont}
+\message{\meaning\x}
+\end
