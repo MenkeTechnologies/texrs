@@ -3801,6 +3801,12 @@ impl Lowerer {
                 self.close_decided(work, n.name(), &mut decided)?;
                 continue;
             }
+            // §510: a `\fi`, `\else` or `\or` that closes no conditional is
+            // `Extra`, reported and ignored -- here too, where it is expanded.
+            if let Some(kind) = self.eng.stray_conditional_end(n) {
+                self.eng.extra_conditional_end(work, kind);
+                continue;
+            }
             match n.name() {
                 "the" | "number" => {
                     flush!();

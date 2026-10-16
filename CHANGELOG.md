@@ -8,6 +8,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\or` outside a `\ifcase` case, a second `\else`, and a `\fi`, `\else` or
+  `\or` expanded in a `\message` with nothing open are `Extra` (§510),
+  reported and ignored.
 - A prefix governs one command (§1211-§1213): spaces and `\relax` after it are
   skipped, macros expand, a command no prefix may govern is `You can't use a
   prefix with`, the token is read again and the prefixes are dropped, and

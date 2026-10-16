@@ -1,0 +1,17 @@
+% tex.web 510: a \fi, \else or \or that matches no open conditional of its
+% kind is `Extra', reported and ignored. An \or belongs to \ifcase only, and
+% nothing may follow an \else but the \fi -- not another \else, not an \or.
+% The same holds where a \message expands its text (a \fi there is not a
+% character of the message).
+\catcode`\{=1 \catcode`\}=2
+\iftrue \or \message{A}\fi
+\iffalse \else \or \message{B}\fi
+\iffalse \else \else \message{C}\fi
+\ifcase 1 \or \message{D}\or \message{E}\fi
+\ifcase 0 \message{F}\or \else \fi
+\ifcase 0 \else \message{G}\or \fi
+\message{\fi}
+\message{\else}
+\message{\or}
+\message{\ifnum1=2 \else x\fi \else}
+\end

@@ -400,6 +400,9 @@ enum Stop {
 enum CondState {
     /// The true branch is running; an `\else` here starts skipping.
     Taken,
+    /// A `\ifcase` case is running: an `\or` as well as an `\else` ends it (§510's
+    /// `if_limit` is `or_code` rather than `else_code`).
+    TakenCase,
     /// A branch was skipped to get here; `\else` must not re-enter.
     Done,
 }
@@ -1302,23 +1305,25 @@ impl Engine {
                 self.do_conditional(lx, n, pending_only)?;
                 Ok(true)
             }
-            "else" => {
-                // Reaching `\else` in running text means the true branch ran;
-                // everything to the matching `\fi` is skipped.
-                match self.conds.pop() {
-                    Some(_) => {
-                        self.skip_to(lx, false, pending_only)?;
-                        Ok(true)
-                    }
-                    None => Ok(self.extra_fi_or_else(lx, "else")),
-                }
-            }
-            "or" => match self.conds.pop() {
-                Some(_) => {
+            // §510: a branch that is running ends at the `\else` (or, for a
+            // case, the `\or`) that follows it, and the rest to the `\fi` is
+            // skipped. An `\else` after an `\else`, or an `\or` where no case
+            // is running, is `if_limit` being too small: `Extra`, and ignored.
+            "else" => match self.conds.last() {
+                Some(CondState::Taken | CondState::TakenCase) => {
+                    self.conds.pop();
                     self.skip_to(lx, false, pending_only)?;
                     Ok(true)
                 }
-                None => Ok(self.extra_fi_or_else(lx, "or")),
+                _ => Ok(self.extra_fi_or_else(lx, "else")),
+            },
+            "or" => match self.conds.last() {
+                Some(CondState::TakenCase) => {
+                    self.conds.pop();
+                    self.skip_to(lx, false, pending_only)?;
+                    Ok(true)
+                }
+                _ => Ok(self.extra_fi_or_else(lx, "or")),
             },
             "fi" => match self.conds.pop() {
                 Some(_) => Ok(true),
@@ -1442,6 +1447,25 @@ impl Engine {
 
     /// §510: an `\else`, `\or` or `\fi` with no conditional open is reported
     /// and expands to nothing. Always `true`, the answer `try_expand` gives.
+    /// Which of `fi`, `else` and `or` `name` means, when no conditional is open
+    /// for it to end.
+    pub fn stray_conditional_end(&self, name: CsId) -> Option<&'static str> {
+        if !self.recover || !self.conds.is_empty() || name.noexpand_origin().is_some() {
+            return None;
+        }
+        match self.primitive_meaning(name).name() {
+            "fi" => Some("fi"),
+            "else" => Some("else"),
+            "or" => Some("or"),
+            _ => None,
+        }
+    }
+
+    /// §510's `Extra \fi`, `Extra \else` or `Extra \or`, reported.
+    pub fn extra_conditional_end(&mut self, lx: &Lexer, kind: &str) {
+        self.extra_fi_or_else(lx, kind);
+    }
+
     fn extra_fi_or_else(&mut self, lx: &Lexer, name: &str) -> bool {
         let msg = format!("Extra {}{name}", self.esc());
         self.report(lx, &msg);
@@ -1610,7 +1634,7 @@ impl Engine {
                 Stop::Fi => return Ok(()),
             }
         }
-        self.conds.push(CondState::Taken);
+        self.conds.push(CondState::TakenCase);
         Ok(())
     }
 
