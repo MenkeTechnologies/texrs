@@ -1085,9 +1085,11 @@ impl Lowerer {
                     // known at run time, and `\dimen1=\skip0` takes a glue's
                     // natural width (§430's coercion); reading a constant here
                     // refused both.
+                    self.eng.clear_scaling_sites();
                     let v = self.dimen_number(lx, false)?;
                     let slot = crate::compiler::DIMEN_BASE + reg;
                     self.note_global(&[slot]);
+                    self.note_scaling_site(&mut out, lx, &v);
                     out.push(Cmd::SetCount(slot, v));
                 }
                 // `\pageno=7`, where `\pageno` was `\countdef`'d: the name is
@@ -1122,11 +1124,13 @@ impl Lowerer {
                         let cmds = self.glue_assign(lx, reg)?;
                         out.extend(cmds);
                     } else {
+                        self.eng.clear_scaling_sites();
                         let v = match reg >= crate::compiler::DIMEN_BASE {
                             true => self.dimen_number(lx, false)?,
                             false => self.number(lx)?,
                         };
                         self.note_global(&[reg]);
+                        self.note_scaling_site(&mut out, lx, &v);
                         out.push(Cmd::SetCount(reg, v));
                     }
                 }
@@ -1222,10 +1226,12 @@ impl Lowerer {
                             }
                         }
                         (false, _) => {
+                            self.eng.clear_scaling_sites();
                             let v = match dimen && matches!(op, Arith::Add) {
                                 true => self.dimen_number(lx, false)?,
                                 false => self.number(lx)?,
                             };
+                            self.note_scaling_site(&mut out, lx, &v);
                             self.note_error_site(&mut out, lx, op);
                             out.push(Cmd::Arith(op, reg, v));
                         }
@@ -1770,6 +1776,17 @@ impl Lowerer {
         }
         if lx.context().is_some() {
             out.push(Cmd::ErrorSite(self.eng.error_context(lx)));
+        }
+    }
+
+    /// Carry §311's context display to the run for a value that can be out of
+    /// range when it is computed: a factor times an internal dimension, which
+    /// §455 reports as `Dimension too large` once the whole dimension is read.
+    fn note_scaling_site(&mut self, out: &mut Vec<Cmd>, lx: &Lexer, v: &Num) {
+        if matches!(v, Num::Scaled { .. } | Num::ByCount { .. }) && lx.context().is_some() {
+            if let Some(site) = self.eng.next_scaling_site() {
+                out.push(Cmd::ErrorSite(site));
+            }
         }
     }
 
@@ -3433,6 +3450,7 @@ impl Lowerer {
                 .map(|i| Cmd::SetCount(base + i, signed(negative && i < 3, from + i)))
                 .collect());
         }
+        self.eng.clear_scaling_sites();
         let g = match mu {
             true => self.eng.scan_muglue_parts(lx)?,
             false => self.eng.scan_glue_parts(lx)?,
@@ -3441,16 +3459,18 @@ impl Lowerer {
         // unit>` -- size10.clo's `\abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@`
         // is all three at once -- so each slot takes a `Num` rather than a
         // number. The fourth slot packs the two ORDERS, which are always known.
-        Ok([
+        let parts = [
             scaled_num(g.natural),
             scaled_num(g.stretch),
             scaled_num(g.shrink),
             Num::Literal(g.stretch_order * 4 + g.shrink_order),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, v)| Cmd::SetCount(base + i as i64, v))
-        .collect())
+        ];
+        let mut cmds = Vec::new();
+        for (i, part) in parts.into_iter().enumerate() {
+            self.note_scaling_site(&mut cmds, lx, &part);
+            cmds.push(Cmd::SetCount(base + i as i64, part));
+        }
+        Ok(cmds)
     }
 
     /// The base slot of a glue register standing where a glue is wanted, if

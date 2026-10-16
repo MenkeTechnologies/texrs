@@ -13,6 +13,9 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A factor times an internal dimension outside the dimension range is
+  `Dimension too large` (§455), reported where the dimension ends, with
+  `max_dimen` used; it was clamped without a report.
 - `\fontname` expands (§472) for `\nullfont`, `\font` and the family tables, and
   reports `Missing font identifier` for anything else.
 - An active character in an `\edef` or `\xdef` body expands as the macro it

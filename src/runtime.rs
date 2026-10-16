@@ -325,13 +325,19 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
 /// `tex.web` §453's `<factor><internal unit>`: the internal dimension, the
 /// factor's integer part, and its fraction in 65536ths.
 ///
-/// Cannot fail: §460 clamps an out-of-range product to the largest dimension
-/// rather than raising, so there is nothing to report from here.
+/// §455's `attach_sign` reports a product outside the dimension range as
+/// `Dimension too large` and carries on with the largest dimension.
 fn b_scale_dimen(vm: &mut VM, _argc: u8) -> Value {
     let frac = vm.pop().to_int();
     let int = vm.pop().to_int();
     let v = vm.pop().to_int();
-    Value::Int(crate::dimen::scale_by_factor(int, frac, v))
+    match crate::dimen::scale_by_factor_checked(int, frac, v) {
+        Ok(product) => Value::Int(product),
+        Err(clamped) => {
+            report("Dimension too large");
+            Value::Int(clamped)
+        }
+    }
 }
 
 /// Close an `\input` file: append `)` to the message already written.

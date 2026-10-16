@@ -88,6 +88,8 @@ VALUE
 [BIG] [GE] [EQ] [LT] [RATIO] [NATURAL] [INCH]
 #==# dimension_font_units.tex
 [10.00002pt][4.30554pt][5.0pt][10.76385pt] [-6.45831pt][0.0pt][1966083] [10.00002pt][10.00002pt][4.30554pt] [10.00002pt plus 5.0pt minus 4.30554pt][8.61108pt plus 1.0fill] [28.61111pt][1875058] [quad wider] [1.0pt]
+#==# dimension_too_large_product.tex
+! Dimension too large.l.9 \dimen7=\count5\dimen0                            \message{\the\dimen7}16383.99998pt! Dimension too large.l.10 \dimen1=-1.5\dimen0                          \message{\the\dimen1}-16383.99998pt! Dimension too large.l.11 \dimen2=1.5\dimen0                       16383.99998pt! Dimension too large.l.14 \dimen4=\count5\dimen0                             \message{\the\dimen4}-16383.99998pt 16383.0pt! Dimension too large.l.16 \advance\dimen1 by 2\dimen0                                  \message{\the\dimen1}0.0pt! Dimension too large.l.17 \skip0=2\dimen0                      \message{\the\skip0}16383.99998pt! Dimension too large.l.18 \skip1=1pt plus 2\dimen0                               \message{\the\skip1}1.0pt plus 16383.99998pt! Dimension too large.l.19 \dimendef\dd=9 \dd=3\dimen0                                  \message{\the\dd}16383.99998pt! Dimension too large.l.20 \hsize=2\dimen0                      \message{\the\hsize}16383.99998pt )(see the transcript file for additional information
 #==# dimension_units.tex
 [1.0pt][72.26999pt][28.45274pt][2.84526pt] [1.00374pt][12.0pt][1.07pt][12.8401pt][0.00002pt] [-3.25pt][-212992]
 #==# divide_by_zero.tex

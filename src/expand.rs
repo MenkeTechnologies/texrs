@@ -298,6 +298,7 @@ pub struct Engine {
     /// Whether a `\protected` prefix is.
     protected: bool,
     prefix_step: PrefixStep,
+    scaling_sites: std::collections::VecDeque<String>,
     /// Advice registered with `\intercept`, woven into matching expansions.
     pub intercepts: crate::intercepts::Registry,
     /// How deep inside an advice body expansion currently is.
@@ -504,6 +505,7 @@ impl Engine {
             outer: false,
             protected: false,
             prefix_step: PrefixStep::Idle,
+            scaling_sites: std::collections::VecDeque::new(),
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
             unless: false,
@@ -2240,6 +2242,39 @@ impl Engine {
         lx: &mut Lexer,
         pending_only: bool,
     ) -> R<crate::dimen::ScannedDimen> {
+        let d = self.scan_dimen_parts_inner(lx, pending_only)?;
+        self.note_scaling(lx, &d);
+        Ok(d)
+    }
+
+    /// Where §455 would find a product `Dimension too large`: right after the
+    /// dimension that holds it has been read. Kept for the lowerer, which
+    /// carries it to the run (see `Lowerer::note_scaling_site`).
+    fn note_scaling(&mut self, lx: &Lexer, d: &crate::dimen::ScannedDimen) {
+        if matches!(
+            d,
+            crate::dimen::ScannedDimen::Scaled { .. } | crate::dimen::ScannedDimen::ByCount { .. }
+        ) {
+            let site = self.error_context(lx);
+            self.scaling_sites.push_back(site);
+        }
+    }
+
+    /// The context display kept for the oldest product not yet claimed.
+    pub fn next_scaling_site(&mut self) -> Option<String> {
+        self.scaling_sites.pop_front()
+    }
+
+    /// Forget products no one claimed, before a scan whose products will be.
+    pub fn clear_scaling_sites(&mut self) {
+        self.scaling_sites.clear();
+    }
+
+    fn scan_dimen_parts_inner(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+    ) -> R<crate::dimen::ScannedDimen> {
         use crate::dimen::ScannedDimen;
         // `\dimexpr ...\relax` stands where a dimension does.
         if let Some(t) = self.take(lx, pending_only) {
@@ -3183,6 +3218,16 @@ impl Engine {
     /// cannot both match and the order that comes back with a `Scaled` is
     /// always the finite one.
     pub fn scan_dimen_or_fil_parts(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+    ) -> R<(crate::dimen::ScannedDimen, i64)> {
+        let (d, order) = self.scan_dimen_or_fil_parts_inner(lx, pending_only)?;
+        self.note_scaling(lx, &d);
+        Ok((d, order))
+    }
+
+    fn scan_dimen_or_fil_parts_inner(
         &mut self,
         lx: &mut Lexer,
         pending_only: bool,

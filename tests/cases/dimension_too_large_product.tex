@@ -1,0 +1,21 @@
+% tex.web 455: `<factor><internal unit>' is a product, and one that leaves the
+% dimension range is `Dimension too large' where the dimension ends, with
+% max_dimen (signed like the product) used. The factor may be a decimal, a
+% count register, or a sign; the unit a dimen or the natural width of a glue;
+% the destination a dimen, a glue component, \advance or a parameter.
+\catcode`\{=1 \catcode`\}=2
+\dimen0=16383pt
+\count5=65536
+\dimen7=\count5\dimen0 \message{\the\dimen7}
+\dimen1=-1.5\dimen0 \message{\the\dimen1}
+\dimen2=1.5\dimen0
+\message{\the\dimen2}
+\count5=-3
+\dimen4=\count5\dimen0 \message{\the\dimen4}
+\dimen5=1.0\dimen0 \message{\the\dimen5}
+\advance\dimen1 by 2\dimen0 \message{\the\dimen1}
+\skip0=2\dimen0 \message{\the\skip0}
+\skip1=1pt plus 2\dimen0 \message{\the\skip1}
+\dimendef\dd=9 \dd=3\dimen0 \message{\the\dd}
+\hsize=2\dimen0 \message{\the\hsize}
+\end

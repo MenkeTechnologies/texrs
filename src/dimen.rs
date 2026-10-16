@@ -160,9 +160,20 @@ pub fn xn_over_d(x: i64, n: i64, d: i64) -> i64 {
 /// point. §460 then clamps, so a factor big enough to leave the dimension range
 /// gives `MAX_DIMEN` rather than a wrapped number.
 pub fn scale_by_factor(int: i64, frac: i64, v: i64) -> i64 {
-    int.saturating_mul(v)
-        .saturating_add(xn_over_d(v, frac, UNITY))
-        .clamp(-MAX_DIMEN, MAX_DIMEN)
+    scale_by_factor_checked(int, frac, v).unwrap_or_else(|clamped| clamped)
+}
+
+/// [`scale_by_factor`], saying whether §455's `attach_sign` would find the
+/// product out of range: `Err` carries the value `max_dimen` stands in with,
+/// signed like the product, and the caller owes tex's `Dimension too large`.
+pub fn scale_by_factor_checked(int: i64, frac: i64, v: i64) -> Result<i64, i64> {
+    let product = int
+        .saturating_mul(v)
+        .saturating_add(xn_over_d(v, frac, UNITY));
+    match product.unsigned_abs() > MAX_DIMEN as u64 {
+        true => Err(MAX_DIMEN * product.signum()),
+        false => Ok(product),
+    }
 }
 
 #[cfg(test)]
