@@ -1,0 +1,15 @@
+% A prefix stands in front of ONE command (tex.web 1211-1213). Spaces and
+% \relax between them are skipped and macros expand, but what comes next must
+% be an assignment: anything else is `You can't use a prefix with', the token
+% is read again, and the prefixes are gone -- so the \def below is local.
+% \long and \outer mean something only before a definition (1213).
+\catcode`\{=1 \catcode`\}=2
+\begingroup \global \relax \message{A}\def\inner{x}\endgroup
+\message{[\meaning\inner]}
+\long\count1=2 \message{B}
+\outer\catcode`a=11 \message{C}
+\global\long\outer\def\kept{y}\message{[\meaning\kept]}
+\global\par \message{D}
+\global{\message{E}}
+\def\alias{\global}\alias\count1=3 \message{[\the\count1]}
+\end

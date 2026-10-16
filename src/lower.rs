@@ -669,6 +669,10 @@ impl Lowerer {
                 },
                 _ => tok,
             };
+            // §1211: the token after a prefix is judged before it is acted on.
+            if self.eng.recover && self.eng.prefix_gate(lx, &tok) {
+                continue;
+            }
             // Mathematics: `$…$`, `$$…$$`, LaTeX's `\(` and `\[`, and the
             // display environments. Caught HERE, before the macro table is
             // consulted, for the reason colour and the faces are: the prelude
@@ -1624,12 +1628,24 @@ impl Lowerer {
                 // register is tokens and is the expander's; any other quantity
                 // is written out here the way a message writes it.
                 "the" | "number" => self.expand_the_here(lx, name)?,
-                "global" => self.eng.set_global_prefix(true),
+                "global" => {
+                    self.eng.set_global_prefix(true);
+                    self.eng.await_prefixed_command();
+                }
                 // The other two definition prefixes. Like `\global` they set a
                 // flag the definition that follows reads and spends.
-                "long" => self.eng.set_long_prefix(true),
-                "outer" => self.eng.set_outer_prefix(true),
-                "protected" => self.eng.set_protected_prefix(true),
+                "long" => {
+                    self.eng.set_long_prefix(true);
+                    self.eng.await_prefixed_command();
+                }
+                "outer" => {
+                    self.eng.set_outer_prefix(true);
+                    self.eng.await_prefixed_command();
+                }
+                "protected" => {
+                    self.eng.set_protected_prefix(true);
+                    self.eng.await_prefixed_command();
+                }
                 // `\unless\ifnum ...` runs the ELSE arm when the test holds.
                 "unless" => self.eng.set_unless(true),
                 "relax" => {}

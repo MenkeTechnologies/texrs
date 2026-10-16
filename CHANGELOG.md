@@ -8,6 +8,11 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A prefix governs one command (§1211-§1213): spaces and `\relax` after it are
+  skipped, macros expand, a command no prefix may govern is `You can't use a
+  prefix with`, the token is read again and the prefixes are dropped, and
+  `\long` or `\outer` before anything but a definition is reported. A
+  prefix before a non-assignment no longer stays set for the next definition.
 - A `<to be read again>` level read to its end is no longer shown as
   `<recently read>` once a token from beneath it has been read (§357 ends it).
 - A macro level of an error's context names an active character as the

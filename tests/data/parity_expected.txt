@@ -274,6 +274,8 @@ Runaway argument?{x! Paragraph ended before \a was complete.<to be read again>  
 [1]
 #==# plain_loop_repeat.tex
 1 2 3 4 [\relax] (10) (7) (4) (1) in in
+#==# prefix_governs_one_command.tex
+! You can't use a prefix with `\message'.<to be read again>                    \message l.7 \begingroup \global \relax \message                                       {A}\def\inner{x}\endgroupA [undefined]! You can't use `\long' or `\outer' with `\count'.l.9 \long\count               1=2 \message{B}B! You can't use `\long' or `\outer' with `\catcode'.l.10 \outer\catcode                   `a=11 \message{C}C [\long\outer macro:->y]! You can't use a prefix with `\par'.<to be read again>                    \par l.12 \global\par                 \message{D}D! You can't use a prefix with `begin-group character {'.<to be read again>                    {l.13 \global{             \message{E}}E [3] )(see the transcript file for additional information
 #==# radix_constants.tex
 [255][511][8705] [8705]
 #==# radix_constants_at_the_limit.tex

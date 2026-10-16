@@ -118,6 +118,30 @@ fn round_div(a: i64, b: i64) -> i64 {
     sign * ((a + b / 2) / b)
 }
 
+/// Where the lowerer is in §1211's `prefixed_command`.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum PrefixStep {
+    /// No prefix is in force.
+    #[default]
+    Idle,
+    /// A prefix was read and the command it governs has not been.
+    Waiting,
+    /// The governed assignment is being lowered; its prefixes end with it.
+    Running,
+}
+
+/// What the token after a prefix is (§1211).
+enum AfterPrefix {
+    /// A space or `\relax`: skipped.
+    Skip,
+    /// Something `get_x_token` expands, or another prefix: the wait goes on.
+    Expands,
+    /// An assignment; `def` is whether it is a `\def` (§1213).
+    Assignment { def: bool },
+    /// Anything else: §1212's error.
+    Other,
+}
+
 /// What a control sequence contributes when a number is being scanned.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NumericCs {
@@ -265,6 +289,7 @@ pub struct Engine {
     outer: bool,
     /// Whether a `\protected` prefix is.
     protected: bool,
+    prefix_step: PrefixStep,
     /// Advice registered with `\intercept`, woven into matching expansions.
     pub intercepts: crate::intercepts::Registry,
     /// How deep inside an advice body expansion currently is.
@@ -467,6 +492,7 @@ impl Engine {
             long: false,
             outer: false,
             protected: false,
+            prefix_step: PrefixStep::Idle,
             intercepts: crate::intercepts::Registry::new(),
             advice_depth: 0,
             unless: false,
@@ -602,6 +628,106 @@ impl Engine {
     /// meaning table for that one.
     pub fn is_assignment(name: &str) -> bool {
         ASSIGNMENTS.contains(&name)
+    }
+
+    /// A `\global`, `\long` or `\outer` was just read: the next command is the
+    /// one it governs (§1211).
+    pub fn await_prefixed_command(&mut self) {
+        self.prefix_step = PrefixStep::Waiting;
+    }
+
+    /// §1211 and §1213 for the token `tok` the lowerer is about to dispatch.
+    ///
+    /// Reads past what `get_x_token` would skip or expand, then judges the
+    /// command the prefixes stand in front of. A command no prefix may govern
+    /// is `You can't use a prefix with`, the token is read again and the
+    /// prefixes are dropped; `\long` or `\outer` before anything but a
+    /// definition is reported and the command goes on. Prefixes end with the
+    /// command they governed, so the step after it clears them.
+    ///
+    /// Returns whether `tok` is consumed here.
+    pub fn prefix_gate(&mut self, lx: &mut Lexer, tok: &Token) -> bool {
+        match self.prefix_step {
+            PrefixStep::Idle => return false,
+            PrefixStep::Running => {
+                self.clear_prefixes();
+                return false;
+            }
+            PrefixStep::Waiting => {}
+        }
+        match self.after_prefix(tok) {
+            AfterPrefix::Skip => true,
+            AfterPrefix::Expands => false,
+            AfterPrefix::Assignment { def } => {
+                self.prefix_step = PrefixStep::Running;
+                if !def && (self.long || self.outer) {
+                    let msg = format!(
+                        "You can't use `{0}long' or `{0}outer' with `{1}'",
+                        self.esc(),
+                        self.meaning_text(tok)
+                    );
+                    self.report(lx, &msg);
+                }
+                false
+            }
+            AfterPrefix::Other => {
+                lx.back_input(std::slice::from_ref(tok));
+                let msg = format!("You can't use a prefix with `{}'", self.meaning_text(tok));
+                self.report(lx, &msg);
+                self.clear_prefixes();
+                true
+            }
+        }
+    }
+
+    fn clear_prefixes(&mut self) {
+        self.global = false;
+        self.long = false;
+        self.outer = false;
+        self.protected = false;
+        self.prefix_step = PrefixStep::Idle;
+    }
+
+    /// What `tok` is to §1211's loop over the tokens after a prefix.
+    fn after_prefix(&self, tok: &Token) -> AfterPrefix {
+        let n = match tok {
+            Token::Char(_, _) if tok.is_space() => return AfterPrefix::Skip,
+            Token::Char(..) => return AfterPrefix::Other,
+            Token::Cs(n) => *n,
+        };
+        if n.noexpand_origin().is_some() {
+            return AfterPrefix::Skip;
+        }
+        match self.meanings.get(&n) {
+            Some(Meaning::Macro(_)) => return AfterPrefix::Expands,
+            Some(Meaning::Char(_, Cat::Space)) => return AfterPrefix::Skip,
+            Some(Meaning::Char(..) | Meaning::CharDef(_) | Meaning::MathCharDef(_)) => {
+                return AfterPrefix::Other
+            }
+            Some(Meaning::ToksDef(_) | Meaning::CountDef(_)) => {
+                return AfterPrefix::Assignment { def: false }
+            }
+            _ => {}
+        }
+        if self.is_undefined(n) {
+            return AfterPrefix::Expands;
+        }
+        let p = self.primitive_meaning(n);
+        let name = p.name();
+        if name == "relax" {
+            return AfterPrefix::Skip;
+        }
+        if matches!(name, "global" | "long" | "outer" | "protected")
+            || crate::primitives::expands(name)
+            || Self::is_conditional(p)
+        {
+            return AfterPrefix::Expands;
+        }
+        let def = matches!(name, "def" | "gdef" | "edef" | "xdef");
+        match def || Self::is_assignment(name) || crate::primitives::is_prefixed_assignment(name) {
+            true => AfterPrefix::Assignment { def },
+            false => AfterPrefix::Other,
+        }
     }
 
     /// The tokens the group that just closed held for `\aftergroup`, in the

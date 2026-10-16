@@ -366,6 +366,54 @@ pub fn is_internal_quantity(name: &str) -> bool {
         || crate::intpar::index(name).is_some()
 }
 
+/// The primitives §1211's `prefixed_command` accepts that are neither a
+/// parameter nor one of `expand::ASSIGNMENTS`: every command code above
+/// `max_non_prefixed_command` (§209) that takes a `\global`.
+const PREFIXED_ASSIGNMENTS: &[&str] = &[
+    "fontdimen",
+    "hyphenchar",
+    "skewchar",
+    "spacefactor",
+    "prevdepth",
+    "prevgraf",
+    "pagegoal",
+    "pagetotal",
+    "pagestretch",
+    "pagefilstretch",
+    "pagefillstretch",
+    "pagefilllstretch",
+    "pageshrink",
+    "pagedepth",
+    "deadcycles",
+    "insertpenalties",
+    "wd",
+    "ht",
+    "dp",
+    "parshape",
+    "textfont",
+    "scriptfont",
+    "scriptscriptfont",
+    "nullfont",
+    "font",
+    "setbox",
+    "read",
+    "hyphenation",
+    "patterns",
+    "batchmode",
+    "nonstopmode",
+    "scrollmode",
+    "errorstopmode",
+];
+
+/// Whether the primitive `name` is a command a prefix may stand in front of
+/// (§1211): a parameter, or one of `PREFIXED_ASSIGNMENTS`.
+pub fn is_prefixed_assignment(name: &str) -> bool {
+    let parameters = NAMES.iter().position(|n| *n == " ").unwrap_or(0);
+    PREFIXED_ASSIGNMENTS.contains(&name)
+        || NAMES[..parameters].contains(&name)
+        || crate::intpar::index(name).is_some()
+}
+
 /// The primitives other than the conditionals that expand (§366): the
 /// `expand_after`, `no_expand`, `cs_name`, `convert`, `the`, `top_bot_mark`,
 /// `input` and `fi_or_else` commands, and e-TeX's additions to them.
