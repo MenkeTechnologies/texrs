@@ -1,0 +1,8 @@
+% tex.web 280: save_for_after saves nothing at level one, so an \aftergroup
+% outside every group is dropped -- the \message it names is never inserted,
+% and the group that follows is an ordinary one.
+\catcode`\{=1 \catcode`\}=2
+\aftergroup\message
+{\message{in}}
+\message{out}
+\end

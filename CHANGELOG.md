@@ -8,6 +8,7 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\aftergroup` outside every group is dropped (§280), not inserted at once.
 - `\or` outside a `\ifcase` case, a second `\else`, and a `\fi`, `\else` or
   `\or` expanded in a `\message` with nothing open are `Extra` (§510),
   reported and ignored.

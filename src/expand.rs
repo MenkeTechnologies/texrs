@@ -545,12 +545,11 @@ impl Engine {
     /// given and a nested group's tokens come out at ITS `}`. Keeping them in
     /// the group frame is the same arrangement.
     ///
-    /// Outside every group there is nothing to wait for and tex inserts the
-    /// token at once, which is what the empty-stack case does.
-    pub fn after_group(&mut self, lx: &mut Lexer, tok: Token) {
-        match self.groups.last_mut() {
-            Some(frame) => frame.push(Save::AfterGroup(tok)),
-            None => lx.push_back(&[tok]),
+    /// Outside every group there is no group end to wait for, and §280's
+    /// `save_for_after` saves nothing at level one: the token is dropped.
+    pub fn after_group(&mut self, tok: Token) {
+        if let Some(frame) = self.groups.last_mut() {
+            frame.push(Save::AfterGroup(tok));
         }
     }
 
@@ -1219,7 +1218,7 @@ impl Engine {
                 let Some(t) = lx.next_token(&self.cats) else {
                     return Err(TexError("Missing token for \\aftergroup".into()));
                 };
-                self.after_group(lx, t);
+                self.after_group(t);
             }
             // §1269: hold the next token and insert it after the assignment
             // that follows finishes.

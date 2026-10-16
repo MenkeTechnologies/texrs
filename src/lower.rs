@@ -1609,7 +1609,7 @@ impl Lowerer {
                     let Some(t) = self.eng.take_file(lx) else {
                         return Err(TexError("Missing token for \\aftergroup".into()));
                     };
-                    self.eng.after_group(lx, t);
+                    self.eng.after_group(t);
                 }
                 // §1269: hold the next token and insert it once the assignment
                 // that follows has finished.
