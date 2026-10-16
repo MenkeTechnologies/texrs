@@ -1,0 +1,29 @@
+% tex.web 400-401: with \tracingmacros positive each call shows the macro's
+% parameter text and body before its arguments are read, then each argument
+% as `#n<-text'. \tracingonline makes it reach the terminal, so it sits
+% between the messages around it with no space on either side. Expansion in
+% an \edef and in a \message body is traced like any other.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\~=13
+\tracingonline=1 \tracingmacros=1
+\def\one#1{[#1]}
+\def\two#1#2{#2#1}
+\def\dlm#1.#2\relax{(#2#1)}
+\def\nest#1{\one{#1}}
+\def~{\one{tilde}}
+\message{A}
+\edef\x{\one a\two bc}
+\message{B\one{x y}}
+\edef\y{\dlm p.q\relax}
+\edef\z{\nest{\two ab}}
+\edef\u{~}
+\escapechar=`\!
+\edef\t{\one z}
+\escapechar=-1
+\edef\s{\one z}
+\escapechar=`\\
+\long\def\lng#1{#1}
+\edef\r{\lng{}}
+\tracingmacros=0
+\edef\q{\one off}
+\message{C}
+\end

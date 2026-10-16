@@ -1,0 +1,15 @@
+% tex.web 366: an \edef expands its body the whole way, and an active
+% character is a control sequence to the expander -- so `~' below is the macro
+% it names, not the character. \string and \noexpand keep it as it is.
+\catcode`\{=1 \catcode`\}=2 \catcode`\~=13
+\def~{x}
+\edef\a{~y\string~}
+\message{\meaning\a}
+\xdef\b{~~}
+\message{\meaning\b}
+\def\c{~}
+\edef\d{\c\noexpand~}
+\message{\meaning\d}
+\edef\e{\noexpand\c~}
+\message{\meaning\e}
+\end

@@ -4,6 +4,8 @@
 # a changed block is a changed claim about what the reference engine does.
 #==# active_character.tex
 [tie] [A] [a][b]
+#==# active_character_edef.tex
+macro:->xy~ macro:->xx macro:->x~ macro:->\c x
 #==# active_character_macro_level.tex
 ! Undefined control sequence.~->\undefinedy                l.5 \catcode`\~=13 \def~{\undefinedy}\message{[~                                                ]}[]! Undefined control sequence.~->\undefinedy                l.6 ~     ! Undefined control sequence.!#1->\undefinedz                  l.8 !a      > ~=macro:->\undefinedy .l.9 \show~           )(see the transcript file for additional information
 #==# advance_wraps_at_32_bits.tex
@@ -334,6 +336,10 @@ a1 m a2 m a3 [3]
 [abc][a\b c][\.] [\x ][] [abc]
 #==# toks_scoping.tex
 [b] [a][a]
+#==# tracing_macros_log_only.tex
+A B[x y] C )(see the transcript file for additional information
+#==# tracing_macros_online.tex
+A\one #1->[#1]#1<-a\two #1#2->#2#1#1<-b#2<-c\one #1->[#1]#1<-x yB[x y]\dlm #1.#2\relax ->(#2#1)#1<-p#2<-q\nest #1->\one {#1}#1<-\two ab\one #1->[#1]#1<-\two ab\two #1#2->#2#1#1<-a#2<-b~->\one {tilde}\one #1->[#1]#1<-tilde!one #1->[#1]#1<-zone #1->[#1]#1<-z\lng #1->#1#1<-C
 #==# true_units.tex
 [1.0pt][72.26999pt][71.13188pt] [1.0pt plus 2.0pt minus 3.0pt]
 #==# true_units_under_mag.tex

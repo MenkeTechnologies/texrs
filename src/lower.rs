@@ -399,7 +399,13 @@ impl Lowerer {
                     .take_reports()
                     .into_iter()
                     .filter_map(|op| match op {
-                        MsgOp::Report(text) => Some(text),
+                        MsgOp::Report(text) => {
+                            Some(match text.strip_prefix(crate::expand::DIAGNOSTIC) {
+                                Some(shown) => shown.to_string(),
+                                None if text == crate::expand::WARNING_ISSUED => String::new(),
+                                None => text,
+                            })
+                        }
                         _ => None,
                     })
                     .collect();
@@ -470,7 +476,11 @@ impl Lowerer {
     /// next one.
     fn take_reports(&mut self) -> Vec<MsgOp> {
         let fresh = self.eng.take_errors();
-        self.reported = self.reported || !fresh.is_empty() || !self.reports.is_empty();
+        // Tracing output (§245) is not an error and leaves the run clean.
+        let errors = fresh
+            .iter()
+            .any(|r| !r.starts_with(crate::expand::DIAGNOSTIC));
+        self.reported = self.reported || errors || !self.reports.is_empty();
         self.reports.extend(fresh.into_iter().map(MsgOp::Report));
         std::mem::take(&mut self.reports)
     }
@@ -1838,7 +1848,11 @@ impl Lowerer {
         // `\edef` expands its body NOW, which is the whole difference from
         // `\def`. Only the macro calls: `\the\count<n>` has to reach the walk
         // below as tokens so it can be snapshotted into a scratch register.
+        // The body is expanded twice below -- once to find what it reads, once to
+        // freeze it -- and a \tracingmacros trace belongs to one expansion.
+        let mark = self.eng.report_mark();
         let body = self.eng.expand_macros_only(&raw)?;
+        let first_pass = self.eng.drain_diagnostics(mark);
         // `tex.web` §366 expands the body the WHOLE way while reading it, so a
         // conditional in it is decided now and `\the` becomes §478's
         // characters. That needs the registers, and the lowerer has them for
@@ -1851,13 +1865,20 @@ impl Lowerer {
         // macro reads is visible; the freezing runs on the body as written, so
         // that `\unexpanded` still stops it.
         if self.reads_only_untouched_registers(&body) {
-            if let Ok(mut frozen) = self.eng.expand_edef_body(&raw) {
-                frozen.extend(hash_brace);
-                self.eng
-                    .define_macro_with_params(name, params, frozen, global)?;
-                return Ok(Vec::new());
+            let mark = self.eng.report_mark();
+            match self.eng.expand_edef_body(&raw) {
+                Ok(mut frozen) => {
+                    frozen.extend(hash_brace);
+                    self.eng
+                        .define_macro_with_params(name, params, frozen, global)?;
+                    return Ok(Vec::new());
+                }
+                Err(_) => {
+                    self.eng.drain_diagnostics(mark);
+                }
             }
         }
+        self.eng.restore_diagnostics(first_pass);
         // Find `\the\count<n>` in the body; anything else stays literal.
         let mut work = Lexer::new("");
         work.push_back(&body);

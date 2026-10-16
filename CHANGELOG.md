@@ -6,8 +6,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `\tracingmacros` writes each macro call and its arguments (§400-§401), to the
+  terminal under `\tracingonline`, otherwise to the log alone.
+
 ### Fixed
 
+- An active character in an `\edef` or `\xdef` body expands as the macro it
+  names (§366) instead of staying a character.
 - `\aftergroup` outside every group is dropped (§280), not inserted at once.
 - `\or` outside a `\ifcase` case, a second `\else`, and a `\fi`, `\else` or
   `\or` expanded in a `\message` with nothing open are `Extra` (§510),

@@ -109,8 +109,19 @@ fn push_report(text: &str) {
 
 /// A report the mouth or the lowerer made, carried to its place in the run.
 fn b_msg_report(vm: &mut VM, _argc: u8) -> Value {
-    REPORTED.with(|r| *r.borrow_mut() = true);
-    push_report(&render(&vm.pop()));
+    let text = render(&vm.pop());
+    // Tracing output is printed but is no error; `warning_issued` prints
+    // nothing and only makes the run end with the transcript notice.
+    match text.strip_prefix(crate::expand::DIAGNOSTIC) {
+        Some(shown) => push_report(shown),
+        None if text == crate::expand::WARNING_ISSUED => {
+            REPORTED.with(|r| *r.borrow_mut() = true);
+        }
+        None => {
+            REPORTED.with(|r| *r.borrow_mut() = true);
+            push_report(&text);
+        }
+    }
     Value::Undef
 }
 

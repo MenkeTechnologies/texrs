@@ -1,0 +1,27 @@
+% tex.web 245: without \tracingonline the trace goes to the log alone, so the
+% terminal shows only the messages -- and the run ends with the transcript
+% notice, because begin_diagnostic left history at warning_issued.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\~=13
+\tracingonline=0 \tracingmacros=1
+\def\one#1{[#1]}
+\def\two#1#2{#2#1}
+\def\dlm#1.#2\relax{(#2#1)}
+\def\nest#1{\one{#1}}
+\def~{\one{tilde}}
+\message{A}
+\edef\x{\one a\two bc}
+\message{B\one{x y}}
+\edef\y{\dlm p.q\relax}
+\edef\z{\nest{\two ab}}
+\edef\u{~}
+\escapechar=`\!
+\edef\t{\one z}
+\escapechar=-1
+\edef\s{\one z}
+\escapechar=`\\
+\long\def\lng#1{#1}
+\edef\r{\lng{}}
+\tracingmacros=0
+\edef\q{\one off}
+\message{C}
+\end

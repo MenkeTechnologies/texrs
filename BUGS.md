@@ -92,6 +92,13 @@ document would need a current font in the mouth, which does not exist. Neither
 reaches `article.cls`, because `\setmainfont` comes after `\documentclass`
 there too.
 
+- **Tracing.** `\tracingmacros` shows each macro call and its arguments (§400,
+  §401) on the terminal when `\tracingonline` is positive, and a run that traced
+  to the log alone ends with the transcript notice (§245). The token-list lines
+  of `\tracingmacros=2`, `\tracingcommands`, `\tracingrestores`,
+  `\tracingparagraphs`, `\tracingpages` and `\tracingoutput` are not written:
+  they need the stomach or the save stack at run time.
+
 - **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
   `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
   to file I/O, neither of which exists yet.

@@ -142,6 +142,14 @@ enum AfterPrefix {
     Other,
 }
 
+/// Starts a report that is tracing output (§245), not an error: printed, but
+/// not counted against the run.
+pub const DIAGNOSTIC: char = '\u{1}';
+
+/// A report that prints nothing and only records that a diagnostic went to
+/// the log (`history=warning_issued`).
+pub const WARNING_ISSUED: &str = "\u{2}";
+
 /// What a control sequence contributes when a number is being scanned.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NumericCs {
@@ -762,6 +770,44 @@ impl Engine {
         self.errors
             .push(format!("! {msg}.{}", context.replace('\n', "")));
         self.tally_error();
+    }
+
+    /// §245's `begin_diagnostic` and `end_diagnostic` around `text`: tracing
+    /// output that is not an error. It reaches the terminal only when
+    /// `\tracingonline` is positive; otherwise it goes to the log alone, which
+    /// the terminal learns of as `history=warning_issued` -- the closing
+    /// "see the transcript file" line (§1335).
+    ///
+    /// Carried in the same list as the errors, marked, so it stays in order
+    /// with them and with the messages around it.
+    pub fn diagnostic(&mut self, text: &str) {
+        let line = match self.intpars.get(crate::intpar::TRACING_ONLINE) > 0 {
+            true => format!("{DIAGNOSTIC}{text}"),
+            false => WARNING_ISSUED.to_string(),
+        };
+        self.errors.push(line);
+    }
+
+    /// How many reports and diagnostics are waiting; see [`Self::drain_diagnostics`].
+    pub fn report_mark(&self) -> usize {
+        self.errors.len()
+    }
+
+    /// Remove the tracing output (§245) made since `mark` and return it, leaving
+    /// the errors in place. For a caller that expands the same text twice and
+    /// must show the trace of only one of the passes.
+    pub fn drain_diagnostics(&mut self, mark: usize) -> Vec<String> {
+        let tail = self.errors.split_off(mark.min(self.errors.len()));
+        let (traces, kept): (Vec<String>, Vec<String>) = tail
+            .into_iter()
+            .partition(|r| r.starts_with(DIAGNOSTIC) || r == WARNING_ISSUED);
+        self.errors.extend(kept);
+        traces
+    }
+
+    /// Put back what [`Self::drain_diagnostics`] took.
+    pub fn restore_diagnostics(&mut self, traces: Vec<String>) {
+        self.errors.extend(traces);
     }
 
     /// §311's `show_context`: every level of the input stack texrs keeps --
@@ -3991,6 +4037,18 @@ impl Engine {
         let Some(Meaning::Macro(m)) = self.meanings.get(&name).cloned() else {
             return Err(TexError(format!("\\{} is not a macro", name.name())));
         };
+        // §401: with `\tracingmacros` positive the call is shown before its
+        // arguments are read.
+        let traced = self.recover && self.intpars.get(crate::intpar::TRACING_MACROS) > 0;
+        if traced {
+            let shown = format!(
+                "{}{}->{}",
+                self.cs_text(name.name()),
+                self.tokens_text(&m.params),
+                self.tokens_text(&m.body)
+            );
+            self.diagnostic(&shown);
+        }
         // `\newcommand{\x}[n][default]` gives the FIRST parameter a default, and
         // a call may leave it out: `\includegraphics[width=1in]{f}` passes it,
         // `\includegraphics{f}` takes the default. TeX has no such parameter,
@@ -4012,6 +4070,13 @@ impl Engine {
                 None => return Ok(()),
             },
         };
+        // §400: each argument as it was read.
+        if traced {
+            for (n, arg) in args.iter().enumerate() {
+                let shown = format!("#{}<-{}", n + 1, self.tokens_shown(arg));
+                self.diagnostic(&shown);
+            }
+        }
         let mut out = Vec::with_capacity(m.body.len());
         let mut i = 0;
         while i < m.body.len() {
@@ -4832,6 +4897,18 @@ impl Engine {
                         false => out.push(t),
                     }
                 }
+                // An active character is a control sequence to the expander
+                // (§366), so `\edef\x{~}` calls the macro `~` means.
+                Token::Char(c, Cat::Active) => {
+                    let name = Self::active_cs(*c);
+                    match matches!(
+                        self.meanings.get(&name),
+                        Some(Meaning::Macro(m)) if !m.protected
+                    ) {
+                        true => self.expand_macro(&mut work, name, true)?,
+                        false => out.push(t),
+                    }
+                }
                 _ => out.push(t),
             }
         }
@@ -4875,6 +4952,16 @@ impl Engine {
                         out.push(unmarked(t));
                     }
                 }
+                Token::Char(c, Cat::Active) => {
+                    let name = Self::active_cs(*c);
+                    let protected = matches!(
+                        self.meanings.get(&name),
+                        Some(Meaning::Macro(m)) if m.protected
+                    );
+                    if protected || !self.try_expand(lx, name, true)? {
+                        out.push(t);
+                    }
+                }
                 _ => out.push(t),
             }
         }
@@ -4906,11 +4993,15 @@ impl Engine {
             if steps > 200_000 {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
-            let Token::Cs(name) = &t else {
-                out.push(t);
-                continue;
+            // An active character expands like a control sequence (§366).
+            let name = match &t {
+                Token::Cs(name) => *name,
+                Token::Char(c, Cat::Active) => Self::active_cs(*c),
+                _ => {
+                    out.push(t);
+                    continue;
+                }
             };
-            let name = *name;
             // §367: the token after `\noexpand` goes into the body as itself,
             // so `\edef\b{\noexpand\a}` defines a call of `\a`.
             if name.name() == "noexpand" {

@@ -88,6 +88,13 @@ pub fn index(name: &str) -> Option<usize> {
     NAMES.iter().position(|n| *n == name)
 }
 
+/// The position of `\tracingonline`, which decides whether a diagnostic reaches
+/// the terminal or only the log (§245).
+pub const TRACING_ONLINE: usize = 29;
+
+/// The position of `\tracingmacros`, which §401 reads on every macro call.
+pub const TRACING_MACROS: usize = 30;
+
 /// The position of `\mag`, which a `true` dimension is divided by (§457).
 pub const MAG: usize = 17;
 
@@ -232,5 +239,20 @@ mod tests {
         assert_eq!(at("newlinechar"), 0);
         assert_eq!(at("pretolerance"), 0);
         assert!((1..=12).contains(&at("month")));
+    }
+
+    #[test]
+    fn named_positions_match_the_table() {
+        for (name, at) in [
+            ("tracingonline", TRACING_ONLINE),
+            ("tracingmacros", TRACING_MACROS),
+            ("mag", MAG),
+            ("globaldefs", GLOBAL_DEFS),
+            ("escapechar", ESCAPE_CHAR),
+            ("endlinechar", END_LINE_CHAR),
+            ("newlinechar", NEW_LINE_CHAR),
+        ] {
+            assert_eq!(index(name), Some(at), "{name}");
+        }
     }
 }
