@@ -6284,6 +6284,12 @@ pub const REF_NUMBER: char = 'n';
 /// A `\pageref`: the page this key fell on.
 pub const REF_PAGE: char = 'p';
 
+/// latex.ltx's `\@currentlabel`, set by something other than a sectioning
+/// unit: the span holds the number itself -- an equation's `2.1`, a `\tag`'s
+/// `A` -- and every `\label` after it names that number until the next unit
+/// starts. `src/math.rs` writes one for each place a display numbers.
+pub const REF_VALUE: char = 'v';
+
 /// What LaTeX sets for a reference whose label it has not got: `??`, from
 /// latex.ltx's `\@setref`, which sets that and warns.
 ///
@@ -6434,10 +6440,17 @@ fn has_ref(text: &str, code: char) -> bool {
 /// A label standing before any heading has no unit to be numbered by and is
 /// left out, so a `\ref` to it sets `??`, which is what LaTeX sets for a
 /// reference it cannot resolve.
+///
+/// A label after a `REF_VALUE` span names that span's number instead -- an
+/// equation's, which `src/math.rs` numbered as the display was read -- until
+/// the next unit begins, as `\@currentlabel` does under LaTeX.
 fn unit_numbers(text: &str) -> std::collections::HashMap<String, String> {
     // Chapter, section, subsection: the three levels `toc_level` names.
     let mut counters = [0usize; 3];
     let mut current = String::new();
+    // A number standing as `\@currentlabel` since the last unit: see
+    // `REF_VALUE`.
+    let mut value: Option<String> = None;
     let mut numbers = std::collections::HashMap::new();
     let mut chars = text.chars();
     while let Some(ch) = chars.next() {
@@ -6458,14 +6471,26 @@ fn unit_numbers(text: &str) -> std::collections::HashMap<String, String> {
                     .map(usize::to_string)
                     .collect::<Vec<String>>()
                     .join(".");
+                // The unit's `\refstepcounter` takes `\@currentlabel` back.
+                value = None;
             }
             REF => {
                 let Some(code) = chars.next() else { break };
                 let key: String = chars.by_ref().take_while(|c| *c != REF).collect();
-                // The last definition of a key wins, which is what a rerun
-                // over LaTeX's own `.aux` does with a duplicated label.
-                if code == REF_LABEL && !current.is_empty() {
-                    numbers.insert(key, current.clone());
+                match code {
+                    REF_VALUE => value = Some(key),
+                    // The last definition of a key wins, which is what a rerun
+                    // over LaTeX's own `.aux` does with a duplicated label.
+                    REF_LABEL => match &value {
+                        Some(v) => {
+                            numbers.insert(key, v.clone());
+                        }
+                        None if !current.is_empty() => {
+                            numbers.insert(key, current.clone());
+                        }
+                        None => {}
+                    },
+                    _ => {}
                 }
             }
             _ => {}

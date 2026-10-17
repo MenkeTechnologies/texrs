@@ -55,6 +55,10 @@ pub struct Formula {
     pub labels: Vec<(usize, Vec<Token>)>,
     /// The rows `\nonumber` or `\notag` took the equation number from.
     pub unnumbered: Vec<usize>,
+    /// amsmath's `\tag{..}` and `\tag*{..}`: the row, the tag's tokens, and
+    /// whether it was starred (set without the parentheses). A tagged row
+    /// steps no counter; the tag is its number and what its `\label` names.
+    pub tags: Vec<(usize, Vec<Token>, bool)>,
 }
 
 impl Formula {
@@ -88,6 +92,7 @@ pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Formula> {
         number_left: false,
         labels: Vec::new(),
         unnumbered: Vec::new(),
+        tags: Vec::new(),
     };
     let last = scanner.mlist(lx, stop)?;
     scanner.cells.push(last);
@@ -98,6 +103,7 @@ pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Formula> {
         number_left: scanner.number_left,
         labels: scanner.labels,
         unnumbered: scanner.unnumbered,
+        tags: scanner.tags,
     })
 }
 
@@ -116,6 +122,7 @@ struct Scanner<'a> {
     number_left: bool,
     labels: Vec<(usize, Vec<Token>)>,
     unnumbered: Vec<usize>,
+    tags: Vec<(usize, Vec<Token>, bool)>,
 }
 
 const MAX_DEPTH: usize = 48;
@@ -637,6 +644,13 @@ impl Scanner<'_> {
             }
             // amsmath's: the row's equation number is not taken.
             "nonumber" | "notag" => self.unnumbered.push(self.rows.len()),
+            // amsmath's `\tag`: read by name for the reason `\label` is, since
+            // the number it gives a row is not mathematics the row sets.
+            "tag" => {
+                let starred = self.eng.skip_optional_star(lx);
+                let tag = self.raw_argument(lx);
+                self.tags.push((self.rows.len(), tag, starred));
+            }
             // §688's style nodes.
             "displaystyle" => out.push(Noad::Style(DISPLAY_STYLE)),
             "textstyle" => out.push(Noad::Style(TEXT_STYLE)),

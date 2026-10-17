@@ -376,6 +376,16 @@
 % amsmath: \eqref{...} is \ref in parentheses, through \tagform@.
 \def\eqref#1{\textup{\tagform@{\ref{#1}}}}
 \def\tagform@#1{(#1)}
+% amsmath.sty:
+%   \providecommand{\numberwithin}[3][\arabic]{...\@addtoreset{#2}{#3}%
+%     \@xp\xdef\csname the#2\endcsname{\@xp\@nx\csname the#3\endcsname .\@nx#1{#2}}}
+% The same, without the two \@ifundefined checks on the counters' names: the
+% counter is reset by the unit and numbered under it. `src/math/number.rs'
+% reads both macros to number a display in the typesetting run.
+\def\numberwithin{\@ifnextchar[\@numberwithin{\@numberwithin[\arabic]}}
+\def\@numberwithin[#1]#2#3{\@addtoreset{#2}{#3}%
+  \expandafter\xdef\csname the#2\endcsname{%
+    \expandafter\noexpand\csname the#3\endcsname.\noexpand#1{#2}}}
 \def\textup#1{#1}
 % latex.ltx:
 %   \def\label#1{...\protected@write\@auxout{}%

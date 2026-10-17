@@ -811,3 +811,133 @@ fn the_font_units_resolve_while_a_class_file_is_being_preloaded() {
     let messages = texrs::runtime::run(chunk).expect("run");
     assert_eq!(messages.join(" "), "[5.0pt][25.00003pt]");
 }
+
+/// A numbered display's settings, from the run's marked text: each row's
+/// glyphs, in the order the rows were written.
+fn display_settings(marked: &str) -> Vec<texrs::math::set::Setting> {
+    marked
+        .split("\u{1}M")
+        .skip(1)
+        .filter_map(|rest| texrs::math::set::decode(&rest[..rest.find('\u{2}')?]))
+        .collect()
+}
+
+/// The equation numbers the typesetting run sets and the references it
+/// resolves to them, against pdflatex (pdfTeX 1.40.29, TeX Live 2026, two
+/// runs, measured on this document): `equation` steps once, `align` once per
+/// row but the `\nonumber` one, `equation*` never, `\tag{A}` replaces its
+/// row's number without stepping, and `\eqref` is the number in parentheses.
+/// The run used to set `See ??.` and no `(1)` at all: `\ref` was answered
+/// from the sectioning units only.
+#[test]
+fn a_display_is_numbered_and_a_reference_to_it_resolves() {
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\section{First}\n\
+               \\begin{equation} E = mc^2 \\label{eq:one} \\end{equation}\n\
+               See \\ref{eq:one} and \\eqref{eq:one}.\n\
+               \\begin{align}\n a &= b \\label{eq:a}\\\\\n c &= d \\nonumber\\\\\n\
+               e &= f \\label{eq:e}\n\\end{align}\n\
+               \\begin{equation*} x = y \\end{equation*}\n\
+               \\begin{gather}\n p = q \\tag{A}\\label{eq:t}\\\\\n r = s \\label{eq:r}\n\\end{gather}\n\
+               \\section{Second}\n\
+               \\begin{equation} u = v \\label{eq:u}\\end{equation}\n\
+               Refs \\eqref{eq:a}, \\eqref{eq:e}, \\eqref{eq:t}, \\eqref{eq:r}, \\ref{eq:u}.\n\
+               \\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    assert!(got.contains("See 1 and (1)."), "{got}");
+    assert!(got.contains("Refs (2), (3), (A), (4), 5."), "{got}");
+    // Each number stands beside the row it numbers, and nowhere else.
+    for row in ["E=mc²(1)", "a=b(2)", "e=f(3)", "p=q(A)", "r=s(4)", "u=v(5)"] {
+        assert!(got.contains(row), "{row} in {got}");
+    }
+    for unnumbered in ["c=d(", "x=y("] {
+        assert!(!got.contains(unnumbered), "{unnumbered} in {got}");
+    }
+    // What the page draws is the setting, and the setting carries the number.
+    let marked = texrs::run_text_marked(src).expect("run");
+    let settings = display_settings(&marked);
+    if settings.is_empty() {
+        eprintln!("skipping the settings: no TeX installation, so no math fonts");
+        return;
+    }
+    let drawn: Vec<String> = settings
+        .iter()
+        .map(|s| s.glyphs.iter().map(|g| g.ch).collect())
+        .collect();
+    assert!(drawn.iter().any(|d| d.ends_with("(1)")), "{drawn:?}");
+    assert!(drawn.iter().any(|d| d.ends_with("(A)")), "{drawn:?}");
+    assert!(!drawn.iter().any(|d| d.contains("(6)")), "{drawn:?}");
+}
+
+/// `\numberwithin{equation}{section}` resets the counter at every numbered
+/// section and puts the section in front of it; a starred section steps
+/// nothing; `\setcounter` and `\appendix` move the unit the number reads; and
+/// the class's `leqno` option puts the number at the left. pdflatex (pdfTeX
+/// 1.40.29, two runs) sets `(1.1) (1.2) (1.3) (2.1) (5.1) (A.1)` for this
+/// document, each number at the left margin.
+#[test]
+fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
+    let src = "\\documentclass[leqno]{article}\n\
+               \\numberwithin{equation}{section}\n\\begin{document}\n\
+               \\section{A}\n\
+               \\begin{equation} a = b \\label{e1}\\end{equation}\n\
+               \\begin{equation} c = d \\label{e2}\\end{equation}\n\
+               \\section*{Star}\n\
+               \\begin{equation} e = f \\label{e3}\\end{equation}\n\
+               \\section{B}\n\
+               \\begin{align} g &= h \\label{e4}\\\\ i &= j\\end{align}\n\
+               \\setcounter{section}{4}\n\\section{C}\n\
+               \\begin{equation} k = l \\label{e5}\\end{equation}\n\
+               \\appendix\n\\section{D}\n\
+               \\begin{equation} m = n \\label{e6}\\end{equation}\n\
+               Refs \\eqref{e1} \\eqref{e2} \\eqref{e3} \\eqref{e4} \\eqref{e5} \\eqref{e6}.\n\
+               \\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    assert!(
+        got.contains("Refs (1.1) (1.2) (1.3) (2.1) (5.1) (A.1)."),
+        "{got}"
+    );
+    assert!(got.contains("i=j(2.2)"), "{got}");
+    let marked = texrs::run_text_marked(src).expect("run");
+    let settings = display_settings(&marked);
+    if settings.is_empty() {
+        eprintln!("skipping the settings: no TeX installation, so no math fonts");
+        return;
+    }
+    // leqno.clo: the number is drawn to the LEFT of the formula.
+    let first = &settings[0];
+    let x_of = |c: char| first.glyphs.iter().find(|g| g.ch == c).map(|g| g.x);
+    assert!(x_of('(') < x_of('a'), "{:?}", first.glyphs);
+}
+
+/// The numbers are decided as the formulas are READ, in document order, and
+/// the settings carrying them are made on the pool: the text must not depend
+/// on how many threads made them. Past `BATCH` formulas, so whole batches go
+/// to workers.
+#[test]
+fn equation_numbers_are_the_same_on_one_thread_and_many() {
+    let mut src = String::from("\\documentclass{article}\n\\begin{document}\n\\section{S}\n");
+    for k in 1..=80 {
+        src.push_str(&format!(
+            "Before $x_{k}$.\n\\begin{{equation}} y = \\frac{{{k}}}{{2}} \\label{{e{k}}}\\end{{equation}}\n"
+        ));
+    }
+    src.push_str("Last \\eqref{e80}, first \\ref{e1}.\n\\end{document}\n");
+    let marked = |threads: usize| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("pool")
+            .install(|| texrs::run_text_marked(&src).expect("run"))
+    };
+    let serial = marked(1);
+    for threads in [2, 8] {
+        assert!(
+            serial == marked(threads),
+            "text differs at {threads} threads"
+        );
+    }
+    let text = texrs::text_without_marks(&texrs::typeset::refs_numbered(&serial));
+    assert!(text.contains("Last (80), first 1."), "{text}");
+    assert!(text.contains("(79)"), "{text}");
+}

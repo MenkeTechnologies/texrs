@@ -40,14 +40,14 @@
 //!   in this engine reaches `\halign` from a formula, and the preambles the
 //!   environments use are written in package macros this port does not run.
 //!   [`align`] says exactly what that costs.
-//! - LaTeX's `equation` counter. `\eqno` and `\leqno` are read and placed by
-//!   §1204-§1206, but `\begin{equation}` cannot put a NUMBER beside its
-//!   display: a counter is a `\count` register (`src/latex/counters.rs`), a
-//!   register is run-time state, and a formula is SET from what lowering
-//!   read, before the document runs -- so the digits do not exist yet when
-//!   the glyphs are placed.
-//!   Numbering it needs either a marker that carries a register into a set
-//!   formula or a right-flush line in `src/typeset.rs`; neither is here.
+//! - LaTeX's `equation` counter as a REGISTER. A counter is a `\count`
+//!   (`src/latex/counters.rs`), a register is run-time state, and a formula
+//!   is SET from what lowering read, before the document runs. So the
+//!   typesetting run numbers a display from [`number::Numbering`], which
+//!   follows the same counters while lowering from the macros that define
+//!   them (`\the<counter>`, the `\cl@` reset lists); a `\setcounter` whose
+//!   value is not a literal number, or a step made inside a macro this does
+//!   not see, is not followed.
 //! - The penalties of §761 and §767 are inserted -- `\binoppenalty` after a
 //!   Bin and `\relpenalty` after a Rel -- but nothing reads them: a set
 //!   formula reaches the paragraph breaker as ONE word, so no line breaks
@@ -64,6 +64,7 @@ pub mod align;
 pub mod font;
 pub mod mlist;
 pub mod noad;
+pub mod number;
 pub mod parse;
 pub mod set;
 
@@ -176,16 +177,32 @@ pub fn set_display(
     Some(display_rows(
         fonts_at(size)?,
         f,
+        &eqno(f),
+        f.number_left,
         style,
         environment,
         measure,
     ))
 }
 
-/// [`set_display`] in families already loaded.
+/// The number a `\eqno` or `\leqno` put on `f`, beside its last row: §1204
+/// places ONE display, so `$$…\eqno(3)$$` numbers the row it ends.
+fn eqno(f: &parse::Formula) -> Vec<(usize, Vec<Noad>)> {
+    f.number
+        .iter()
+        .map(|n| (f.rows.len().saturating_sub(1), n.clone()))
+        .collect()
+}
+
+/// [`set_display`] in families already loaded, with each of `numbers` -- a
+/// row and its number's mlist -- set beside the row it names, at the left
+/// when `left`.
+#[allow(clippy::too_many_arguments)]
 fn display_rows(
     fonts: &font::MathFonts,
     f: &parse::Formula,
+    numbers: &[(usize, Vec<Noad>)],
+    left: bool,
     style: Style,
     environment: &str,
     measure: f64,
@@ -193,18 +210,18 @@ fn display_rows(
     let widest = f.rows.iter().map(|r| r.len()).max().unwrap_or(1);
     let columns = align::columns(environment, widest);
     let mut boxes = align::rows(fonts, &f.rows, style, &columns);
-    if let Some(number) = &f.number {
+    let z = (measure * 65536.0).round() as noad::Scaled;
+    for (row, number) in numbers {
+        let Some(at) = boxes.get_mut(*row) else {
+            continue;
+        };
         // §1199: the equation number is an mlist of its own, set at TEXT
         // style whatever style the display is in, and packed at its natural
-        // width before §1204 places it.
+        // width before §1204 places it -- on every row it numbers, since a
+        // row of an amsmath `align` is a display line of its own.
         let a = mlist::set(fonts, number, TEXT_STYLE);
-        let z = (measure * 65536.0).round() as noad::Scaled;
-        // §1204 places ONE display. A numbered `align` numbers each row; the
-        // number this path carries came from a single `\eqno`, so it goes
-        // beside the last row, which is where `$$…\eqno(3)$$` puts it.
-        if let Some(last) = boxes.pop() {
-            boxes.push(align::numbered(fonts, last, a, z, f.number_left));
-        }
+        let body = std::mem::take(at);
+        *at = align::numbered(fonts, body, a, z, left);
     }
     boxes
         .iter()
@@ -306,11 +323,77 @@ pub fn lower_math(
     out: &mut Vec<Cmd>,
     deferred: &mut Formulas,
 ) -> Result<bool, TexError> {
+    // A sectioning command or a `\setcounter` moves the counters an equation
+    // number reads; it is followed here and left for the lowerer to act on.
+    deferred.numbering.watch(eng, lx, tok);
     let Some((f, style, display, environment)) = read(eng, lx, tok)? else {
         return Ok(false);
     };
-    emit(out, deferred, f, style, size, display, environment, measure);
+    let numbers = numbered(eng, out, &mut deferred.numbering, &f, environment);
+    let left = number::left(eng);
+    emit(
+        out,
+        deferred,
+        f,
+        numbers,
+        left,
+        style,
+        size,
+        display,
+        environment,
+        measure,
+    );
     Ok(true)
+}
+
+/// Number `f`'s places as latex.ltx does -- [`number::places`], the question
+/// the label pass asks too -- and write into `out` what each `\label` in it
+/// names. Returns each numbered row and the number set beside it.
+///
+/// The labels go in as `typeset::REF_VALUE` spans: the number, then the
+/// label, which `typeset::unit_numbers` reads as `\@currentlabel` followed by
+/// a `\label`. A place with no number writes its labels alone and they name
+/// whatever was current, as LaTeX's do.
+fn numbered(
+    eng: &Engine,
+    out: &mut Vec<Cmd>,
+    numbering: &mut number::Numbering,
+    f: &parse::Formula,
+    environment: &str,
+) -> Vec<(usize, String)> {
+    use crate::typeset::{ref_mark, REF_LABEL, REF_VALUE};
+    let mut numbers = Vec::new();
+    let mut marks = String::new();
+    for place in number::places(f, environment) {
+        let shown = match place.number {
+            number::Number::Step => {
+                numbering.step(eng, "equation");
+                let n = numbering.the(eng, "equation");
+                marks.push_str(&ref_mark(REF_VALUE, &n));
+                Some(format!("({n})"))
+            }
+            number::Number::Tag(tag, starred) => {
+                let t = number::spelled(tag);
+                marks.push_str(&ref_mark(REF_VALUE, &t));
+                Some(match starred {
+                    true => t,
+                    false => format!("({t})"),
+                })
+            }
+            number::Number::Unnumbered => None,
+        };
+        for key in place.labels {
+            marks.push_str(&ref_mark(REF_LABEL, &number::spelled(key)));
+        }
+        // A `\eqno` the document wrote is the number already.
+        if let (Some(shown), None) = (shown, &f.number) {
+            numbers.push((place.row, shown));
+        }
+    }
+    if !marks.is_empty() {
+        push(out, &marks);
+    }
+    numbers
 }
 
 /// Whether `tok` opens a formula, and if so read it and set nothing -- the
@@ -326,6 +409,8 @@ pub fn lower_math(
 /// amsmath's `align`, `gather`, `multline`, and `eqnarray`). Those are put
 /// back in front of the input as `\refstepcounter{equation}` and `\label{..}`,
 /// in the order latex.ltx meets them, for the pass to run as it runs any other.
+/// Which places step is [`number::places`]'s answer, the one the typesetting
+/// run numbers its displays by.
 pub fn pass_over_math(eng: &mut Engine, lx: &mut Lexer, tok: &Token) -> Result<bool, TexError> {
     let Some((f, _, _, environment)) = read(eng, lx, tok)? else {
         return Ok(false);
@@ -335,34 +420,23 @@ pub fn pass_over_math(eng: &mut Engine, lx: &mut Lexer, tok: &Token) -> Result<b
         .map(|c| Token::Char(c, crate::catcode::Cat::Letter))
         .collect();
     let mut back = Vec::new();
-    let step = |back: &mut Vec<Token>| call(back, "refstepcounter", &equation);
-    let labels_in = |back: &mut Vec<Token>, row: Option<usize>| {
-        for (_, key) in f
-            .labels
-            .iter()
-            .filter(|(r, _)| row.is_none_or(|row| *r == row))
-        {
-            call(back, "label", key);
-        }
-    };
-    match environment {
-        // One number for the whole display, whichever row says `\nonumber`.
-        "equation" | "multline" => {
-            if f.unnumbered.is_empty() {
-                step(&mut back);
+    for place in number::places(&f, environment) {
+        match place.number {
+            number::Number::Step => call(&mut back, "refstepcounter", &equation),
+            // amsmath's `\tag` makes the tag what a `\label` writes, and
+            // steps nothing.
+            number::Number::Tag(tag, _) => {
+                back.push(Token::cs("def"));
+                back.push(Token::cs("@currentlabel"));
+                back.push(Token::Char('{', crate::catcode::Cat::BeginGroup));
+                back.extend_from_slice(tag);
+                back.push(Token::Char('}', crate::catcode::Cat::EndGroup));
             }
-            labels_in(&mut back, None);
+            number::Number::Unnumbered => {}
         }
-        // A number per row: amsmath's `\label` names its own row's.
-        "align" | "alignat" | "gather" | "eqnarray" => {
-            for row in 0..f.rows.len() {
-                if !f.unnumbered.contains(&row) {
-                    step(&mut back);
-                }
-                labels_in(&mut back, Some(row));
-            }
+        for key in place.labels {
+            call(&mut back, "label", key);
         }
-        _ => labels_in(&mut back, None),
     }
     lx.push_back(&back);
     Ok(true)
@@ -517,6 +591,8 @@ fn emit(
     out: &mut Vec<Cmd>,
     deferred: &mut Formulas,
     f: parse::Formula,
+    numbers: Vec<(usize, String)>,
+    left: bool,
     style: Style,
     size: f64,
     display: bool,
@@ -530,27 +606,50 @@ fn emit(
         return;
     };
     let index = deferred.next_index();
+    // LaTeX's numbers when the display has any, else the `\eqno` it wrote:
+    // each with its mlist and as a reader of the text gets it.
+    let (numbers, left): (Vec<(usize, Vec<Noad>, String)>, bool) = match numbers.is_empty() {
+        true => (
+            eqno(&f)
+                .into_iter()
+                .map(|(row, n)| {
+                    let spelled = set::plain(&n);
+                    (row, n, spelled)
+                })
+                .collect(),
+            f.number_left,
+        ),
+        false => (
+            numbers
+                .into_iter()
+                // Joined to the row with no space, as a `\eqno` is: a space
+                // would split the marker into two words on the way to the
+                // page.
+                .map(|(row, n)| (row, number::mlist(&n), n))
+                .collect(),
+            left,
+        ),
+    };
     // The ordinary case, and the only one before `&` and `\eqno` meant
     // anything: one row, one column, no number.
-    if f.is_single() && f.number.is_none() {
+    if f.is_single() && numbers.is_empty() {
         push_setting(out, &slot(index, 0), &set::plain(&f.flat()), display);
     } else {
         // `display_rows` sets one line per row.
-        let last = f.rows.len().saturating_sub(1);
         for (at, row) in f.rows.iter().enumerate() {
             let mut spelled: String = row.iter().map(|cell| set::plain(cell)).collect();
             // The equation number goes beside the row it was placed beside,
             // so a reader gets it where the page draws it.
-            if at == last {
-                if let Some(number) = &f.number {
-                    spelled.push_str(&set::plain(number));
-                }
+            for (_, _, number) in numbers.iter().filter(|(r, _, _)| *r == at) {
+                spelled.push_str(number);
             }
             push_setting(out, &slot(index, at), &spelled, display);
         }
     }
     deferred.push(Deferred {
         formula: f,
+        numbers: numbers.into_iter().map(|(row, n, _)| (row, n)).collect(),
+        left,
         fonts,
         style,
         display,
@@ -573,6 +672,11 @@ fn emit(
 /// of them, and written into their slots by [`Formulas::fill`].
 pub struct Deferred {
     formula: parse::Formula,
+    /// The numbered rows, each with the mlist set beside it, and whether at
+    /// the left: fixed where the formula was read, so the setting is the
+    /// same whichever thread makes it.
+    numbers: Vec<(usize, Vec<Noad>)>,
+    left: bool,
     fonts: &'static font::MathFonts,
     style: Style,
     display: bool,
@@ -584,9 +688,17 @@ impl Deferred {
     /// The encoded spec of each row, in the order [`emit`] wrote the slots.
     fn specs(&self) -> Vec<String> {
         let f = &self.formula;
-        let settings = match f.is_single() && f.number.is_none() {
+        let settings = match f.is_single() && self.numbers.is_empty() {
             true => vec![set_formula(self.fonts, &f.flat(), self.style, self.display)],
-            false => display_rows(self.fonts, f, self.style, self.environment, self.measure),
+            false => display_rows(
+                self.fonts,
+                f,
+                &self.numbers,
+                self.left,
+                self.style,
+                self.environment,
+                self.measure,
+            ),
         };
         settings.iter().map(set::encode).collect()
     }
@@ -668,6 +780,9 @@ pub struct Formulas {
     /// Where each batch is ALSO reported as it comes back, for a reader that
     /// fills slots before the join does: see [`Formulas::tap`].
     tap: Option<Tap>,
+    /// LaTeX's counters, followed in reading order: the equation numbers are
+    /// decided as the formulas are read, never on a worker.
+    numbering: number::Numbering,
 }
 
 impl Formulas {

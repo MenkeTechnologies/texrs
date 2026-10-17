@@ -240,23 +240,24 @@ start at the shallowest level the CLASS declares -- `report` and `book` declare
 `chapter` and `article` does not -- which is a fact `src/latex.rs` already reads
 for `\thesection`.
 
-## A reference to an equation is `??` in the typeset run
+## A reference to an equation was `??` in the typeset run -- fixed
 
-The `.aux` is right: the label pass reads every formula with the math parser
-(`math::pass_over_math`), steps `equation` once per numbered display -- per row
-for `align`, `gather` and `eqnarray`, skipping a `\nonumber` row -- and writes
-`\newlabel{eq:one}{{1}{1}}` where pdflatex writes `{{1}{1}{}{equation.1}{}}`.
-The page does not use it. `\ref` is answered in the run itself by
-`lower_cross_ref` from `typeset::unit_numbers`, which knows sectioning units
-only, and a `\label` inside a display never reaches it (the math parser reads
-it by name and sets nothing), so
-
-```
-\begin{equation} E = mc^2 \label{eq:one} \end{equation} See \ref{eq:one}.
-```
-sets `See ??.` here and `See 1.` under `pdflatex`, and the display carries no
-`(1)` either. The fix is for the typesetting run to number displays and to
-answer a reference it has no unit for from the `.aux`.
+The label pass wrote the right `.aux`, and the page did not use it: `\ref` was
+answered from `typeset::unit_numbers`, which knew sectioning units only, and no
+display carried a `(1)`. The typesetting run now numbers a display as it reads
+it. `math::number::places` decides which places of a display take a number --
+once for `equation` and `multline`, per row for `align`, `alignat`, `gather`
+and `eqnarray`, none for a starred form or a `\nonumber` row, a `\tag`'s text
+in place of a step -- and the label pass (`math::pass_over_math`) asks the same
+function, so the two cannot disagree. `math::number::Numbering` follows the
+counters while lowering from the class's own macros (`\theequation`, the
+`\cl@` reset lists, `\numberwithin`), the number is set beside its row by
+§1204's placement (at the left under `leqno`), and each `\label` in the display
+reaches `unit_numbers` behind a `REF_VALUE` span carrying the number, as
+`\@currentlabel` does. `tests/latex.rs` pins the numbers and references against
+pdflatex for `equation`, `align`, `gather`, `\tag`, `\numberwithin`, `leqno`,
+`\setcounter` and `\appendix`, and 1-vs-N thread identity. What is not
+followed: a `\setcounter{equation}` whose value is not a literal number.
 
 ## Divergences from tex
 

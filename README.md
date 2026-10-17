@@ -334,7 +334,10 @@ than none.
   `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
   to a page, and no maths (a formula's scripts are dropped; `--pdf` sets them).
 - `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
-  pages — `\ref` gives the sectioning number, `\pageref` the page it fell on.
+  pages — `\ref` gives the sectioning number or, for a label in a numbered
+  display, the equation number the display sets beside it (`equation`, the
+  `align` family per row, `\tag`, `\eqref`, `\numberwithin`, `leqno`);
+  `\pageref` gives the page it fell on.
   Worth knowing what this is NOT evidence of: the corpus has 88,341 `\label{`
   and zero `\ref{` or `\pageref{`, because Pandoc writes labels and never
   references them. So this moves no book in the sweep. It is correctness for
