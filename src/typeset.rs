@@ -211,7 +211,10 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
     let lines = broken_lines(&text, chain, layout);
     let per_page = ((layout.height / layout.leading).floor() as usize).max(1);
 
-    for (page, chunk) in lines.chunks(per_page).enumerate() {
+    // A page here is its own lines and its number, nothing a page before it
+    // left behind, so each is built and encoded independently and the pages
+    // are joined in order: the file is the same whatever the thread count.
+    let encode = |(page, chunk): (usize, &[BrokenLine])| {
         let counts = [page as i32 + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         // The page is a BOX now, and `shipout` draws it: every position in the
         // file below comes out of `hpack`/`vpack`'s arithmetic rather than
@@ -220,13 +223,26 @@ pub fn to_dvi_chain(text: &str, chain: &FontChain, layout: &Layout) -> Vec<u8> {
         // (`tex.web` §625) -- which is the reason this path could not use a
         // breaker that prices glue before.
         let page_box = page_box(chunk, page + 1, chain, layout);
+        let mut one = Writer::page();
         crate::shipout::ship_out(
-            &mut w,
+            &mut one,
             &page_box,
             counts,
             sp(layout.margin),
             sp(layout.margin),
         );
+        one.into_page()
+    };
+    let work: Vec<_> = lines.chunks(per_page).enumerate().collect();
+    let pages: Vec<_> = match work.len() >= PARALLEL_PAGES {
+        true => {
+            use rayon::prelude::*;
+            work.into_par_iter().map(encode).collect()
+        }
+        false => work.into_iter().map(encode).collect(),
+    };
+    for page in pages {
+        w.append_page(page);
     }
     w.finish()
 }

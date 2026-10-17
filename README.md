@@ -905,6 +905,15 @@ of only a few pages is drawn on the calling thread. Each page also shares its
 fonts by reference (`Arc`) instead of copying a font program per drawn run,
 which was the larger share of this stage before the fan-out.
 
+**DVI pages.** On the `--dvi` path a page is its own lines and its number, so
+each page's box is built and its `bop`..`eop` commands are encoded by a writer
+of its own, in parallel; the pages are then appended in order, which is where
+each `bop`'s pointer to the previous page is filled in and the postamble's
+maximum height, width and stack depth are taken over the pages. The preamble,
+font definitions and postamble are written serially. The file is byte-identical
+to the single-writer output at any thread count, and a document of only a few
+pages is encoded on the calling thread.
+
 **Iteration depth.** `\def\r{... \ifnum ... \r \fi}` is TeX's loop, and
 `tex` recurses through it — one input-stack level per turn, giving up at
 `[input stack size=10000]`. texrs lowers that shape to a backward jump, so its

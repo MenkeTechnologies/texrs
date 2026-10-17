@@ -592,6 +592,15 @@ pub struct Writer {
     max_stack: u16,
 }
 
+/// One page's commands from `bop` to `eop`, and the extents it reached, as a
+/// [`Writer::page`] wrote them.
+pub struct EncodedPage {
+    bytes: Vec<u8>,
+    max_h: i32,
+    max_v: i32,
+    max_stack: u16,
+}
+
 /// The units tex writes: `num`/`den` say that one DVI unit is
 /// 25400000/473628672 metres, which is 1/100000 of an inch.
 const NUM: u32 = 25_400_000;
@@ -609,7 +618,27 @@ impl Writer {
     /// A writer whose preamble carries `comment` -- where tex stamps the format
     /// it used and the date it ran.
     pub fn new(comment: &str) -> Writer {
-        let mut w = Writer {
+        let mut w = Writer::page();
+        w.byte(247);
+        w.byte(VERSION);
+        w.unsigned(NUM, 4);
+        w.unsigned(DEN, 4);
+        w.unsigned(1000, 4); // mag
+        let comment: Vec<u8> = comment.bytes().take(255).collect();
+        w.byte(comment.len() as u8);
+        w.bytes.extend(&comment);
+        w
+    }
+
+    /// A writer for ONE page and nothing else: no preamble, no fonts. What it
+    /// writes between `begin_page` and `end_page` reads nothing that an
+    /// earlier page left behind -- `begin_page` zeroes the position and the
+    /// stack -- except the pointer back to the previous `bop`, which
+    /// [`Writer::append_page`] fills in. So pages can be encoded on separate
+    /// threads and joined in order into the file a single writer would have
+    /// produced.
+    pub fn page() -> Writer {
+        Writer {
             bytes: Vec::new(),
             previous_page: -1,
             pages: 0,
@@ -620,16 +649,37 @@ impl Writer {
             max_v: 0,
             stack: Vec::new(),
             max_stack: 0,
-        };
-        w.byte(247);
-        w.byte(VERSION);
-        w.unsigned(NUM, 4);
-        w.unsigned(DEN, 4);
-        w.unsigned(1000, 4); // mag
-        let comment: Vec<u8> = comment.bytes().take(255).collect();
-        w.byte(comment.len() as u8);
-        w.bytes.extend(&comment);
-        w
+        }
+    }
+
+    /// The page a [`Writer::page`] wrote, `bop` to `eop`.
+    pub fn into_page(self) -> EncodedPage {
+        debug_assert_eq!(self.pages, 1, "a page writer holds exactly one page");
+        EncodedPage {
+            bytes: self.bytes,
+            max_h: self.max_h,
+            max_v: self.max_v,
+            max_stack: self.max_stack,
+        }
+    }
+
+    /// Put a page encoded on its own at the end of this file: its `bop` is
+    /// pointed at the page before it, and the extents it reached join the
+    /// postamble's maxima, which are maxima over pages because every page
+    /// starts at the origin with an empty stack.
+    pub fn append_page(&mut self, page: EncodedPage) {
+        // `bop`, then ten four-byte counts, then the back-pointer.
+        const BACK_POINTER: usize = 1 + 10 * 4;
+        let here = self.bytes.len() as i32;
+        let start = self.bytes.len();
+        self.bytes.extend(&page.bytes);
+        self.bytes[start + BACK_POINTER..start + BACK_POINTER + 4]
+            .copy_from_slice(&self.previous_page.to_be_bytes());
+        self.previous_page = here;
+        self.pages += 1;
+        self.max_h = self.max_h.max(page.max_h);
+        self.max_v = self.max_v.max(page.max_v);
+        self.max_stack = self.max_stack.max(page.max_stack);
     }
 
     fn byte(&mut self, b: u8) {
@@ -1288,5 +1338,48 @@ mod tests {
         let dvi = Dvi::parse(&[253]).unwrap();
         assert_eq!(dvi.ops, vec![Op::Extension(253)]);
         assert!(dvi.summary().contains("XeTeX"), "{}", dvi.summary());
+    }
+
+    /// Pages that reach different extents and stack depths, written by `draw`.
+    fn draw(w: &mut Writer, page: i32) {
+        w.begin_page([page, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        w.font(0);
+        for _ in 0..page {
+            w.push();
+        }
+        w.down(1000 * page);
+        w.set_char(65, 300 * (5 - page));
+        w.rule(200 * page, 50, true);
+        w.special("color pop");
+        for _ in 0..page {
+            w.pop();
+        }
+        w.end_page();
+    }
+
+    #[test]
+    fn pages_encoded_apart_and_appended_are_the_file_one_writer_writes() {
+        // The file a single writer produces, page after page.
+        let mut whole = Writer::new("texrs");
+        whole.define_font(0, "cmr10", 655360, 0x1234_5678, 655360);
+        for page in 1..=4 {
+            draw(&mut whole, page);
+        }
+        let whole = whole.finish();
+
+        // The same pages, each encoded by a writer of its own, joined in
+        // order. The back-pointers and the postamble's maxima are the parts
+        // that depend on more than one page, and the byte comparison covers
+        // both: page 4 is the deepest and tallest, page 1 the widest.
+        let mut joined = Writer::new("texrs");
+        joined.define_font(0, "cmr10", 655360, 0x1234_5678, 655360);
+        for page in 1..=4 {
+            let mut one = Writer::page();
+            draw(&mut one, page);
+            joined.append_page(one.into_page());
+        }
+        assert_eq!(joined.finish(), whole);
+        let dvi = Dvi::parse(&whole).unwrap();
+        assert_eq!(dvi.pages(), 4);
     }
 }
