@@ -107,7 +107,11 @@ pub enum Field {
     /// `math_type = math_char`.
     Char(MathChar),
     /// `math_type = sub_box`: a box already built.
-    Box(crate::node::BoxNode),
+    ///
+    /// Boxed, as `Noad::Choice` is: a box is several times the size of every
+    /// other field, and held inline it made every field of every atom that
+    /// size, though only the setting ever builds one.
+    Box(Box<crate::node::BoxNode>),
     /// `math_type = sub_mlist`: a formula that must be converted first. An
     /// EMPTY list here is not the same as `Empty` (§681): `$P_{}$` and `$P$`
     /// differ.

@@ -269,7 +269,7 @@ impl<'a> Converter<'a> {
             // shift is repackaged below, which is what turns `\sum`'s
             // centring on the axis into height and depth the limits above it
             // can be measured against.
-            Field::Box(b) => vec![Node::Box(b.clone())],
+            Field::Box(b) => vec![Node::Box(b.as_ref().clone())],
             Field::Char(c) => {
                 let save = self.style;
                 let list =
@@ -288,9 +288,10 @@ impl<'a> Converter<'a> {
         };
         // §720's `found`: a list that is already ONE unshifted box is clean as
         // it stands, and anything else is packaged.
-        let mut x = match q.as_slice() {
-            [Node::Box(b)] if b.shift_amount == 0 => b.clone(),
-            _ => hpack(q, NATURAL, Tolerances::plain(), None).node,
+        let mut x = match <[Node; 1]>::try_from(q) {
+            Ok([Node::Box(b)]) if b.shift_amount == 0 => b,
+            Ok(one) => hpack(one.into(), NATURAL, Tolerances::plain(), None).node,
+            Err(q) => hpack(q, NATURAL, Tolerances::plain(), None).node,
         };
         // §721: a character followed by nothing but its italic correction does
         // not need the correction, because the box is about to be measured
@@ -452,7 +453,7 @@ impl<'a> Converter<'a> {
     fn make_over(&mut self, a: &mut Atom) {
         let t = self.default_rule_thickness();
         let b = self.clean_box(&a.nucleus, cramped_style(self.style));
-        a.nucleus = Field::Box(self.overbar(b, 3 * t, t));
+        a.nucleus = Field::Box(Box::new(self.overbar(b, 3 * t, t)));
     }
 
     /// `make_under(q)` (§735).
@@ -465,7 +466,7 @@ impl<'a> Converter<'a> {
         let delta = y.height + y.depth + t;
         y.height = x_height;
         y.depth = delta - y.height;
-        a.nucleus = Field::Box(y);
+        a.nucleus = Field::Box(Box::new(y));
     }
 
     /// `make_radical(q)` (§737).
@@ -486,7 +487,9 @@ impl<'a> Converter<'a> {
         let y_height = y.height;
         let bar = self.overbar(x, clr, y_height);
         let list = vec![Node::Box(y), Node::Box(bar)];
-        r.nucleus.nucleus = Field::Box(hpack(list, NATURAL, Tolerances::plain(), None).node);
+        r.nucleus.nucleus = Field::Box(Box::new(
+            hpack(list, NATURAL, Tolerances::plain(), None).node,
+        ));
     }
 
     /// `\root n \of {x}`, which is what `\sqrt[n]{x}` means
@@ -511,7 +514,7 @@ impl<'a> Converter<'a> {
     /// is the style this is already being converted in.
     fn make_root(&mut self, r: &mut Radical, index: &[Noad]) {
         let z = match &r.nucleus.nucleus {
-            Field::Box(b) => b.clone(),
+            Field::Box(b) => b.as_ref().clone(),
             _ => return,
         };
         let mut root = self.clean_box(&Field::List(index.to_vec()), SCRIPT_SCRIPT_STYLE);
@@ -528,7 +531,9 @@ impl<'a> Converter<'a> {
             kern(self.mu_mult(-10 * 65536)),
             Node::Box(z),
         ];
-        r.nucleus.nucleus = Field::Box(hpack(list, NATURAL, Tolerances::plain(), None).node);
+        r.nucleus.nucleus = Field::Box(Box::new(
+            hpack(list, NATURAL, Tolerances::plain(), None).node,
+        ));
     }
 
     /// `make_vcenter(q)` (§736): the box, centred on the axis.
@@ -539,7 +544,7 @@ impl<'a> Converter<'a> {
     /// formula inside it asks for.
     fn make_vcenter(&mut self, a: &mut Atom) {
         let mut v = match &a.nucleus {
-            Field::Box(b) if b.vertical => b.clone(),
+            Field::Box(b) if b.vertical => b.as_ref().clone(),
             other => {
                 let inner = self.clean_box(other, self.style);
                 vpack(vec![Node::Box(inner)], NATURAL, Tolerances::plain()).node
@@ -548,7 +553,7 @@ impl<'a> Converter<'a> {
         let delta = v.height + v.depth;
         v.height = self.axis_height() + half(delta);
         v.depth = delta - v.height;
-        a.nucleus = Field::Box(v);
+        a.nucleus = Field::Box(Box::new(v));
     }
 
     /// `make_math_accent(q)` (§738-§742).
@@ -618,7 +623,7 @@ impl<'a> Converter<'a> {
             y.list.insert(0, kern(gap));
             y.height = h;
         }
-        acc.atom.nucleus = Field::Box(y);
+        acc.atom.nucleus = Field::Box(Box::new(y));
     }
 
     /// "Compute the amount of skew" (§742).
@@ -758,7 +763,7 @@ impl<'a> Converter<'a> {
                 x.width -= delta;
             }
             x.shift_amount = half(x.height - x.depth) - self.axis_height();
-            a.nucleus = Field::Box(x);
+            a.nucleus = Field::Box(Box::new(x));
         }
         if a.limits != Limits::Above {
             return (delta, None);
@@ -1238,7 +1243,7 @@ impl<'a> Converter<'a> {
                 }
             }
             Field::Empty => Vec::new(),
-            Field::Box(b) => vec![Node::Box(b.clone())],
+            Field::Box(b) => vec![Node::Box(b.as_ref().clone())],
             Field::List(l) => {
                 // §754: `mlist_penalties := false` here too -- the list is
                 // about to become one box, so nothing inside it can break.
