@@ -104,9 +104,7 @@ fn entry_stub(page: &[u8]) -> String {
         };
         let _ = write!(c, "{sep}{b},");
     }
-    c.push_str(
-        "\n};\nint main(void){return (int)texrs_aot_main(page, sizeof page);}\n",
-    );
+    c.push_str("\n};\nint main(void){return (int)texrs_aot_main(page, sizeof page);}\n");
     c
 }
 

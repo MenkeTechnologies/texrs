@@ -85,8 +85,10 @@ fn run(dir: &Path, threads: &str) -> Step {
 
 /// First run, unchanged rerun, renumbering edit -- in one fresh directory.
 fn history(threads: &str) -> Vec<Step> {
-    let dir: PathBuf =
-        std::env::temp_dir().join(format!("texrs_aux_overlap_{}_{threads}", std::process::id()));
+    let dir: PathBuf = std::env::temp_dir().join(format!(
+        "texrs_aux_overlap_{}_{threads}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     std::fs::write(dir.join("doc.tex"), document(false)).expect("write source");
@@ -108,14 +110,30 @@ fn overlapping_the_label_pass_changes_no_byte_of_any_run() {
     assert!(one[0].stderr.contains(RERUN), "{}", one[0].stderr);
     assert!(!one[1].stderr.contains(RERUN), "{}", one[1].stderr);
     assert!(one[2].stderr.contains(RERUN), "{}", one[2].stderr);
-    assert!(one[1].aux.contains("\\newlabel{sec:7}{{7}"), "{}", one[1].aux);
-    assert!(one[2].aux.contains("\\newlabel{sec:7}{{8}"), "{}", one[2].aux);
+    assert!(
+        one[1].aux.contains("\\newlabel{sec:7}{{7}"),
+        "{}",
+        one[1].aux
+    );
+    assert!(
+        one[2].aux.contains("\\newlabel{sec:7}{{8}"),
+        "{}",
+        one[2].aux
+    );
     assert!(one[1].aux.contains("\\bibcite{k7}{7}"), "{}", one[1].aux);
     assert!(one[2].aux.contains("\\bibcite{k7}{8}"), "{}", one[2].aux);
     // The equations are numbered by the displays alone, and the inserted
     // section has none, so eq:7 is 7 before the edit and after it.
-    assert!(one[1].aux.contains("\\newlabel{eq:7}{{7}"), "{}", one[1].aux);
-    assert!(one[2].aux.contains("\\newlabel{eq:7}{{7}"), "{}", one[2].aux);
+    assert!(
+        one[1].aux.contains("\\newlabel{eq:7}{{7}"),
+        "{}",
+        one[1].aux
+    );
+    assert!(
+        one[2].aux.contains("\\newlabel{eq:7}{{7}"),
+        "{}",
+        one[2].aux
+    );
     assert!(one.iter().all(|s| !s.pdf.is_empty()));
 
     for threads in ["2", "8"] {
