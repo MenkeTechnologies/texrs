@@ -4455,7 +4455,9 @@ impl Engine {
         pending_only: bool,
     ) -> R<Arg> {
         let mut depth = 1usize;
-        let mut out = vec![open];
+        // The braces are not part of the argument, so the `{` is not kept in
+        // front of it to be taken out again: only a runaway shows it.
+        let mut out = Vec::new();
         loop {
             let t = match pending_only {
                 true => lx.pending.pop(),
@@ -4469,11 +4471,13 @@ impl Engine {
                 Token::Char(_, Cat::EndGroup) => {
                     depth -= 1;
                     if depth == 0 {
-                        out.remove(0);
                         return Ok(Arg::Read(out));
                     }
                 }
-                t if is_par(t) && !long => return Ok(Arg::Par(out)),
+                t if is_par(t) && !long => {
+                    out.insert(0, open);
+                    return Ok(Arg::Par(out));
+                }
                 _ => {}
             }
             out.push(unmarked(t));
