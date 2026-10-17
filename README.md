@@ -895,6 +895,16 @@ object packing and serialisation measured as a small fraction of a document's
 time and stay sequential; output is byte-identical across runs and thread counts
 (set `SOURCE_DATE_EPOCH` to pin the creation date).
 
+**Page drawing.** Page breaking is sequential, but once the lines are broken
+and cut into pages, drawing a page reads only its own lines, the colour, face
+and size stacks as they stood where the page begins, and its folio. One cheap
+serial pass over the lines records those per page; the pages are then drawn
+independently and collected in page order, so a single document's page content
+scales across cores and the file is identical at any thread count. A document
+of only a few pages is drawn on the calling thread. Each page also shares its
+fonts by reference (`Arc`) instead of copying a font program per drawn run,
+which was the larger share of this stage before the fan-out.
+
 **Iteration depth.** `\def\r{... \ifnum ... \r \fi}` is TeX's loop, and
 `tex` recurses through it — one input-stack level per turn, giving up at
 `[input stack size=10000]`. texrs lowers that shape to a backward jump, so its

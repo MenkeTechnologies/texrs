@@ -3061,28 +3061,39 @@ pub fn to_pdf(
     // in force until its group closes and a book says `\color{textPrim}` ONCE,
     // above everything. Restarting it per line put that colour back to black
     // on the second line of the document.
-    let mut colours: Vec<Spec> = vec![(
+    let colours: Vec<Spec> = vec![(
         DEFAULT_COLOUR.0.to_string(),
         DEFAULT_COLOUR.1.to_string(),
         DEFAULT_COLOUR.2.to_string(),
     )];
     // The face stack, for the same reason: `\ttfamily` holds until its group
     // closes, and a group can hold a paragraph.
-    let mut faces: Vec<Face> = vec![Face::MAIN];
+    let faces: Vec<Face> = vec![Face::MAIN];
     // Seeded with the document's own size, which is the entry never popped:
     // an unbalanced size marker leaves the body size in force.
-    let mut sizes: Vec<TypeSize> = vec![TypeSize {
+    let sizes: Vec<TypeSize> = vec![TypeSize {
         size: layout.size,
         leading: layout.leading,
     }];
 
-    // The printed page number. It counts from one and starts again after a
-    // title page, which is what `\end{titlepage}` does to LaTeX's counter.
-    let mut folio: usize = 1;
-    let mut pages = Vec::new();
-    for chunk in paginate(&lines, layout) {
-        // Asked before the lines are drawn, because drawing consumes them.
-        let restarts = restarts_here(&chunk);
+    // Page BREAKING is sequential, but drawing a page is not: it reads only its
+    // own lines, the style stacks as they stood where the page begins, and its
+    // folio. A serial pass over the lines records those three per page, and
+    // the pages are then drawn independently and collected in page order, so
+    // the file is the same whatever the thread count.
+    let chunks = paginate(&lines, layout);
+    let starts = page_starts(&chunks, colours, faces, sizes);
+    let draw_page = |(chunk, start): (&Vec<&str>, &PageStart)| -> Page {
+        let PageStart {
+            mut colours,
+            mut faces,
+            mut sizes,
+            folio,
+        } = start.clone();
+        let picture_metrics = FaceMetrics {
+            measure: &width_of,
+            size: layout.size,
+        };
         let mut page = Page::letter();
         // The page is painted first, and only first: a fill drawn after the
         // text covers it, and a document that sets a dark page sets light
@@ -3094,7 +3105,7 @@ pub fn to_pdf(
             ));
         }
         let mut y = layout.height + layout.margin - layout.leading;
-        for line in chunk {
+        for &line in chunk {
             // Which part of a table a line is was a question for `paginate`,
             // which has answered it: the page draws the line.
             let line = without_longtable(line);
@@ -3305,7 +3316,9 @@ pub fn to_pdf(
                     for (glyph, gx, gy, size) in crate::math::glyphs(&set) {
                         for piece in drawn(&glyph, &|c| covers(c, face), &outside) {
                             let font = match piece.from {
-                                Source::Symbol => std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string())),
+                                Source::Symbol => {
+                                    std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string()))
+                                }
                                 Source::Outside(at) => match fallbacks.font(at) {
                                     Some(font) => std::sync::Arc::clone(font),
                                     None => continue,
@@ -3342,7 +3355,9 @@ pub fn to_pdf(
                 // by what it just drew.
                 for piece in drawn(&plain, &|c| covers(c, face), &outside) {
                     let font = match piece.from {
-                        Source::Symbol => std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string())),
+                        Source::Symbol => {
+                            std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string()))
+                        }
                         // The face the chain answered with, carried in the file
                         // as the glyphs this document borrowed from it.
                         Source::Outside(at) => match fallbacks.font(at) {
@@ -3397,9 +3412,6 @@ pub fn to_pdf(
         // Numbered the way the contents numbers it (`heading_pages`), so the
         // page a contents entry names is the number printed on that page: a
         // title page resets the count, since `\end{titlepage}` does.
-        if restarts {
-            folio = 1;
-        }
         let shown = folio.to_string();
         let width = width_of(&shown, Face::MAIN, layout.size);
         page.text_in(
@@ -3409,9 +3421,17 @@ pub fn to_pdf(
             page.height - layout.margin - layout.height - FOOTSKIP,
             &shown,
         );
-        folio += 1;
-        pages.push(page);
-    }
+        page
+    };
+    // Fanning out costs more than a few pages of drawing are worth.
+    let work: Vec<_> = chunks.iter().zip(&starts).collect();
+    let pages: Vec<Page> = match work.len() >= PARALLEL_PAGES {
+        true => {
+            use rayon::prelude::*;
+            work.into_par_iter().map(draw_page).collect()
+        }
+        false => work.into_iter().map(draw_page).collect(),
+    };
     document(&pages)
 }
 
@@ -4048,6 +4068,66 @@ fn sets_text(para: &str) -> bool {
     // drawing was welded to the prose above it, since every character of a
     // picture span is an instruction and none of them prints.
     is_block_para(para) || printing_chars(para).any(|c| !c.is_whitespace())
+}
+
+/// Fewer pages than this are drawn on the calling thread: fanning out costs
+/// more than a handful of pages are worth.
+const PARALLEL_PAGES: usize = 8;
+
+/// What drawing one page needs to know that a serial walk over the pages
+/// before it would have left behind.
+#[derive(Clone)]
+struct PageStart {
+    colours: Vec<Spec>,
+    faces: Vec<Face>,
+    sizes: Vec<TypeSize>,
+    /// The printed page number.
+    folio: usize,
+}
+
+/// The style stacks and folio each page begins with.
+///
+/// A `\color`, `\ttfamily` or size change holds until its group closes, which
+/// may be pages later, so the stacks cross page boundaries; the folio counts
+/// from one and starts again after a title page. Both are advanced here in
+/// page order by the same line routing `to_pdf` draws with: lines that are
+/// space, images, pictures or table rules never reach the style splitter, and
+/// the rest walk the stacks exactly once.
+fn page_starts(
+    chunks: &[Vec<&str>],
+    mut colours: Vec<Spec>,
+    mut faces: Vec<Face>,
+    mut sizes: Vec<TypeSize>,
+) -> Vec<PageStart> {
+    let mut folio = 1;
+    let mut starts = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        if restarts_here(chunk) {
+            folio = 1;
+        }
+        starts.push(PageStart {
+            colours: colours.clone(),
+            faces: faces.clone(),
+            sizes: sizes.clone(),
+            folio,
+        });
+        folio += 1;
+        for &line in chunk {
+            let line = without_longtable(line);
+            if is_space_line(line)
+                || image_parts(line).is_some()
+                || picture_parts(line).is_some()
+                || line.starts_with(TABLE_MARK)
+            {
+                continue;
+            }
+            let line = line.strip_prefix(CENTRE).unwrap_or(line);
+            let line = line.strip_prefix(JUSTIFY).unwrap_or(line);
+            let (_, line) = strip_indent(line);
+            styled_runs(line, &mut colours, &mut faces, &mut sizes);
+        }
+    }
+    starts
 }
 
 /// Split broken lines into pages: at a forced break, and otherwise wherever
