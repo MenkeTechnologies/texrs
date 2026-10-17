@@ -637,12 +637,13 @@ impl Lowerer {
         while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
             at -= 1;
         }
-        // The last character of the run in progress, which is all that is asked
-        // of it below: read once rather than by a suffix compare per question.
-        let last = at.checked_sub(1).and_then(|i| match &out[i] {
-            Cmd::Text(t) => t.chars().next_back(),
+        // The run in progress, found once: its last character is all that is
+        // asked of it below, and the character goes on the end of it.
+        let mut run = match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+            Some(Cmd::Text(t)) => Some(t),
             _ => None,
-        });
+        };
+        let last = run.as_ref().and_then(|t| t.chars().next_back());
         // A text command's face arrives as characters, so it is seen here: the
         // marker, the one character naming the face, and the closing marker.
         if c == crate::typeset::FACE_POP {
@@ -664,15 +665,15 @@ impl Lowerer {
         };
         let mut c = c;
         if let Some(j) = joined {
-            if let Some(Cmd::Text(t)) = at.checked_sub(1).and_then(|i| out.get_mut(i)) {
+            if let Some(t) = run.as_mut() {
                 t.pop();
             }
             c = j;
         }
         self.lig = (!code).then_some(c);
-        match at.checked_sub(1).and_then(|i| out.get_mut(i)) {
-            Some(Cmd::Text(t)) => t.push(c),
-            _ => out.push(Cmd::Text(c.to_string())),
+        match run {
+            Some(t) => t.push(c),
+            None => out.push(Cmd::Text(c.to_string())),
         }
     }
 
