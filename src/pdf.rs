@@ -1023,7 +1023,14 @@ impl Page {
     /// The text is bytes rather than characters: a code in a TeX font means
     /// whatever the font's own encoding says, and 11 is an `ff` ligature and
     /// not a vertical tab.
-    pub fn text_in(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str) {
+    pub fn text_in(
+        &mut self,
+        font: impl Into<std::sync::Arc<Font>>,
+        size: f64,
+        x: f64,
+        y: f64,
+        text: &str,
+    ) {
         self.draw(font, size, x, y, text, 0.0);
     }
 
@@ -1039,7 +1046,15 @@ impl Page {
     /// to the advance of every code 32 in a simple font, which all three of the
     /// fonts here are. Text with no space in it cannot be set to a width at
     /// all, and is drawn where it stands rather than drawn wrong.
-    pub fn text_set(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str, set: Set) {
+    pub fn text_set(
+        &mut self,
+        font: impl Into<std::sync::Arc<Font>>,
+        size: f64,
+        x: f64,
+        y: f64,
+        text: &str,
+        set: Set,
+    ) {
         let font = font.into();
         // A composite font's codes are two bytes and none of them is the
         // single-byte 32 that `Tw` widens, so there is no space here to share
@@ -1056,10 +1071,22 @@ impl Page {
     }
 
     /// One `BT ... ET`, with `word_space` added to every space in it.
-    fn draw(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str, word_space: f64) {
+    fn draw(
+        &mut self,
+        font: impl Into<std::sync::Arc<Font>>,
+        size: f64,
+        x: f64,
+        y: f64,
+        text: &str,
+        word_space: f64,
+    ) {
         let font = font.into();
         let name = format!("F{}", self.fonts.len() + 1);
-        let name = match self.fonts.iter().find(|(_, used)| std::sync::Arc::ptr_eq(used, &font) || **used == *font) {
+        let name = match self
+            .fonts
+            .iter()
+            .find(|(_, used)| std::sync::Arc::ptr_eq(used, &font) || **used == *font)
+        {
             Some((existing, _)) => existing.clone(),
             None => {
                 self.fonts.push((name.clone(), font));
@@ -2096,7 +2123,10 @@ mod tests {
         assert_eq!(page.fonts.len(), 2);
         assert_eq!(
             page.fonts[0],
-            ("F1".to_string(), Font::Base14("Helvetica".to_string()).into())
+            (
+                "F1".to_string(),
+                Font::Base14("Helvetica".to_string()).into()
+            )
         );
         assert_eq!(page.content.matches("/F1").count(), 2);
         // The parentheses in the text are escaped, or the stream ends early.

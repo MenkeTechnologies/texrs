@@ -37,7 +37,6 @@ pub struct Chunk {
     pub tokens: Vec<Token>,
 }
 
-
 static CONFIGURED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 
 /// The thread count asked for with `--jobs` or `TEXRS_THREADS` (the flag wins),
@@ -60,7 +59,9 @@ fn requested(jobs: Option<usize>) -> Option<usize> {
 pub fn configure(jobs: Option<usize>) {
     let Some(n) = requested(jobs) else { return };
     if CONFIGURED.set(n).is_ok() {
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .build_global();
     }
 }
 
