@@ -44,6 +44,12 @@
     "\\par"
     "\\ignorespaces"
     "\\end"
+    "\\fontname"
+    "\\nullfont"
+    "\\font"
+    "\\textfont"
+    "\\scriptfont"
+    "\\scriptscriptfont"
     "\\ifnum"
     "\\ifodd"
     "\\ifcase"
@@ -226,6 +232,12 @@
     (puthash "\\par" "\\par  —  End a paragraph. [Expansion]" table)
     (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow (tex.web §1060). [Expansion]" table)
     (puthash "\\end" "\\end  —  Stop the run, and ship what it built. [Expansion]" table)
+    (puthash "\\fontname" "\\fontname  —  Expands to the name of the font the next token identifies, as category-12 characters (tex.web §470, §472). [Expansion]" table)
+    (puthash "\\nullfont" "\\nullfont  —  The null font (tex.web §552), the only font texrs has: it is the font identifier `\\fontname` accepts,. [Expansion]" table)
+    (puthash "\\font" "\\font  —  A font identifier as far as `\\fontname` is concerned (tex.web §470): `\\fontname\\font` names the current font, which in texrs is always the null font. [Expansion]" table)
+    (puthash "\\textfont" "\\textfont  —  A math family slot for text style (tex.web §230), named by a family number 0–15. [Expansion]" table)
+    (puthash "\\scriptfont" "\\scriptfont  —  A math family slot for script style (tex.web §230), named by a family number 0–15. [Expansion]" table)
+    (puthash "\\scriptscriptfont" "\\scriptscriptfont  —  A math family slot for scriptscript style (tex.web §230), named by a family number 0–15. [Expansion]" table)
     (puthash "\\ifnum" "\\ifnum  —  Compare two numbers with `<`, `=` or `>`. [Conditionals]" table)
     (puthash "\\ifodd" "\\ifodd  —  True when a number is odd. [Conditionals]" table)
     (puthash "\\ifcase" "\\ifcase  —  Switch on a number: the first case is 0, each `\\or` starts the next, and `\\else` catches everything past the last. [Conditionals]" table)

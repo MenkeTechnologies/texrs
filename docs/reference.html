@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">178</div>
+            <div class="stat-val">184</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -206,6 +206,18 @@
 \def\a{\ignorespaces}
 \a   X   % the spaces before X are gone</pre></td></tr>
             <tr><td><code>\end</code></td><td>Stop the run, and ship what it built. A document that set text comes out as <code>Output written on NAME.pdf (N pages, N bytes).</code>; one that only sent messages reports <code>No pages of output.</code>, which is what real tex says for every case in the parity corpus and why the contract for those is still the <code>\message</code> stream.</td><td><pre>\end</pre></td></tr>
+            <tr><td><code>\fontname</code></td><td>Expands to the name of the font the next token identifies, as category-12 characters (tex.web §470, §472). texrs loads no fonts: every font identifier and every family slot is <code>\nullfont</code>, so the result is always <code>nullfont</code>. A token that is not a font identifier reports <code>Missing font identifier</code>, is read again, and <code>\nullfont</code> is used.</td><td><pre>\fontname&lt;font identifier&gt;
+\message{\fontname\nullfont}   % nullfont</pre></td></tr>
+            <tr><td><code>\nullfont</code></td><td>The null font (tex.web §552), the only font texrs has: it is the font identifier <code>\fontname</code> accepts,.</td><td><pre>\nullfont
+\message{\fontname\nullfont}   % nullfont</pre></td></tr>
+            <tr><td><code>\font</code></td><td>A font identifier as far as <code>\fontname</code> is concerned (tex.web §470): <code>\fontname\font</code> names the current font, which in texrs is always the null font. texrs does not load font files.</td><td><pre>\fontname\font
+\message{\fontname\font}   % nullfont</pre></td></tr>
+            <tr><td><code>\textfont</code></td><td>A math family slot for text style (tex.web §230), named by a family number 0–15. <code>\fontname\textfont&lt;n&gt;</code> reads the number and gives the font in that slot, which is <code>nullfont</code> in texrs. Used as a number it is the wrong kind of quantity and gives <code>Missing number</code>.</td><td><pre>\fontname\textfont0
+\message{\fontname\textfont0}   % nullfont</pre></td></tr>
+            <tr><td><code>\scriptfont</code></td><td>A math family slot for script style (tex.web §230), named by a family number 0–15. <code>\fontname\scriptfont&lt;n&gt;</code> gives the font in that slot, which is <code>nullfont</code> in texrs. Used as a number it gives <code>Missing number</code>.</td><td><pre>\fontname\scriptfont1
+\message{\fontname\scriptfont1}   % nullfont</pre></td></tr>
+            <tr><td><code>\scriptscriptfont</code></td><td>A math family slot for scriptscript style (tex.web §230), named by a family number 0–15. <code>\fontname\scriptscriptfont&lt;n&gt;</code> gives the font in that slot, which is <code>nullfont</code> in texrs. Used as a number it gives <code>Missing number</code>.</td><td><pre>\fontname\scriptscriptfont2
+\message{\fontname\scriptscriptfont2}   % nullfont</pre></td></tr>
             <tr><td><code>\detokenize</code></td><td>The tokens of <code>{...}</code> written as text, by the token-list rule: a control word carries a trailing space, a one-character control sequence does not. Nothing in the group expands. An eTeX primitive.</td><td><pre>\message{\detokenize{\a b}}   % =&gt; \a b</pre></td></tr>
             <tr><td><code>\csstring</code></td><td><code>\string</code> without the escape character: <code>\csstring\foo</code> is <code>foo</code> where <code>\string\foo</code> is <code>\foo</code>. A LuaTeX primitive.</td><td><pre>\message{\csstring\foo}   % =&gt; foo</pre></td></tr>
             <tr><td><code>\romannumeral</code></td><td>A number as lowercase roman numerals, by tex.web §69's <code>print_roman_int</code>: <code>\romannumeral 1984</code> is <code>mcmlxxxiv</code>. Zero and negative numbers produce NOTHING, which is why <code>\romannumeral0</code> or <code>\romannumeral-</code>0<code> is the classic way to force expansion: the number scan expands everything up to the first non-digit and then vanishes. Expandable, so it works in running text, in a number position and inside a </code>\message<code>.</code></td><td><pre>\romannumeral&lt;number&gt;

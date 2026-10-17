@@ -233,6 +233,42 @@ pub const CORPUS: &[Entry] = &[
         "Stop the run, and ship what it built. A document that set text comes out as `Output written on NAME.pdf (N pages, N bytes).`; one that only sent messages reports `No pages of output.`, which is what real tex says for every case in the parity corpus and why the contract for those is still the `\\message` stream.",
         "\\end",
     ),
+    (
+        "\\fontname",
+        "Expansion",
+        "Expands to the name of the font the next token identifies, as category-12 characters (tex.web \u{a7}470, \u{a7}472). texrs loads no fonts: every font identifier and every family slot is `\\nullfont`, so the result is always `nullfont`. A token that is not a font identifier reports `Missing font identifier`, is read again, and `\\nullfont` is used.",
+        "\\fontname<font identifier>\n\\message{\\fontname\\nullfont}   % nullfont",
+    ),
+    (
+        "\\nullfont",
+        "Expansion",
+        "The null font (tex.web \u{a7}552), the only font texrs has: it is the font identifier `\\fontname` accepts,.",
+        "\\nullfont\n\\message{\\fontname\\nullfont}   % nullfont",
+    ),
+    (
+        "\\font",
+        "Expansion",
+        "A font identifier as far as `\\fontname` is concerned (tex.web \u{a7}470): `\\fontname\\font` names the current font, which in texrs is always the null font. texrs does not load font files.",
+        "\\fontname\\font\n\\message{\\fontname\\font}   % nullfont",
+    ),
+    (
+        "\\textfont",
+        "Expansion",
+        "A math family slot for text style (tex.web \u{a7}230), named by a family number 0\u{2013}15. `\\fontname\\textfont<n>` reads the number and gives the font in that slot, which is `nullfont` in texrs. Used as a number it is the wrong kind of quantity and gives `Missing number`.",
+        "\\fontname\\textfont0\n\\message{\\fontname\\textfont0}   % nullfont",
+    ),
+    (
+        "\\scriptfont",
+        "Expansion",
+        "A math family slot for script style (tex.web \u{a7}230), named by a family number 0\u{2013}15. `\\fontname\\scriptfont<n>` gives the font in that slot, which is `nullfont` in texrs. Used as a number it gives `Missing number`.",
+        "\\fontname\\scriptfont1\n\\message{\\fontname\\scriptfont1}   % nullfont",
+    ),
+    (
+        "\\scriptscriptfont",
+        "Expansion",
+        "A math family slot for scriptscript style (tex.web \u{a7}230), named by a family number 0\u{2013}15. `\\fontname\\scriptscriptfont<n>` gives the font in that slot, which is `nullfont` in texrs. Used as a number it gives `Missing number`.",
+        "\\fontname\\scriptscriptfont2\n\\message{\\fontname\\scriptscriptfont2}   % nullfont",
+    ),
     // ══ Conditionals — expand::do_conditional, lower's branch emission ═════
     (
         "\\ifnum",
