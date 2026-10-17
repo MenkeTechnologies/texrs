@@ -300,18 +300,17 @@ fn deflate(data: &[u8]) -> Vec<u8> {
 }
 
 /// A name for these bytes: the first sixteen of their SHA-256, which is what
-/// goes in the trailer's `/ID`.
+/// goes in the trailer's `/ID`, from a digest that has
+/// been fed them.
 ///
 /// The spec suggests MD5 (§14.4) and MD5 is not in the tree; the digest's
 /// algorithm is not part of the format -- what a reader does with an `/ID` is
 /// compare it with another one -- and `sha2` is already a dependency for the
 /// input digests in `io.rs`. Sixteen bytes because that is the length every
 /// writer uses and the length a reader's field is sized for.
-fn file_identifier(bytes: &[u8]) -> Vec<u8> {
+fn file_identifier(digest: sha2::Sha256) -> Vec<u8> {
     use sha2::Digest as _;
-    let mut hash = sha2::Sha256::new();
-    hash.update(bytes);
-    hash.finalize()[..16].to_vec()
+    digest.finalize()[..16].to_vec()
 }
 
 /// The moment a document is stamped with: `SOURCE_DATE_EPOCH` when the
@@ -654,8 +653,15 @@ impl Pdf {
         // objects themselves, one after another. `First` is where the pairs
         // stop -- the offsets are measured from there and not from the start
         // of the data, so a reader adds the two.
-        let mut objstm_offset = 0;
-        if let Some(number) = objstm {
+        //
+        // The identifier below digests everything written before the table,
+        // and most of that is the streams already written: so they are
+        // digested while the object stream is packed and deflated, and the
+        // object stream after them -- the same bytes in the same order.
+        let pack = |located: &mut Vec<Where>| -> Vec<u8> {
+            let Some(number) = objstm else {
+                return Vec::new();
+            };
             let mut head = String::new();
             let mut body = Vec::new();
             let mut packed = 0usize;
@@ -677,8 +683,7 @@ impl Pdf {
             let first = head.len();
             let mut data = head.into_bytes();
             data.append(&mut body);
-            objstm_offset = out.len();
-            out.extend(format!("{number} 0 obj\n").as_bytes());
+            let mut written = format!("{number} 0 obj\n").into_bytes();
             Object::Stream {
                 dict: Dict::from([
                     ("Type".to_string(), Object::name("ObjStm")),
@@ -688,9 +693,22 @@ impl Pdf {
                 ]),
                 data: deflate(&data),
             }
-            .write(&mut out);
-            out.extend(b"\nendobj\n");
-        }
+            .write(&mut written);
+            written.extend(b"\nendobj\n");
+            written
+        };
+        let (mut digest, packed) = rayon::join(
+            || {
+                use sha2::Digest as _;
+                let mut digest = sha2::Sha256::new();
+                digest.update(&out);
+                digest
+            },
+            || pack(&mut located),
+        );
+        let objstm_offset = out.len();
+        out.extend(&packed);
+        sha2::Digest::update(&mut digest, &packed);
 
         // §7.5.8: the table, as one row an object of three fields -- what kind
         // of entry it is, and two fields meaning different things per kind.
@@ -773,7 +791,7 @@ impl Pdf {
         // instead -- everything written above this table -- so the identifier
         // is what the spec says it is, a name for these bytes, and a
         // reproducible build stays reproducible.
-        let id = file_identifier(&out);
+        let id = file_identifier(digest);
         dict.insert(
             "ID".to_string(),
             Object::Array(vec![Object::Hex(id.clone()), Object::Hex(id)]),
@@ -1177,6 +1195,91 @@ fn same<T: PartialEq>(a: &T, b: &T) -> bool {
     std::ptr::eq(a, b) || a == b
 }
 
+/// Fewer pages, or pictures, than this are built and compared on the calling
+/// thread: fanning out costs more than a handful of them are worth.
+const PARALLEL_PAGES: usize = 8;
+
+/// Which distinct picture each of each page's pictures is, the classes
+/// numbered in the order they are first used: what a walk over the pages
+/// asking `same` of every picture written so far answers.
+///
+/// Asked that way it is the whole pixel buffer compared, on one thread, for
+/// every use of a picture after its first -- a document that repeats its
+/// figures spends its time there. So the walk matches pictures by what is
+/// cheap to read -- size, depth, how long the data are -- and the comparisons
+/// that confirm those matches are made in parallel. Equal pictures always
+/// match, so a confirmed walk is the one the slow walk makes; two that match
+/// and still differ send it the slow way, which is what it always was.
+fn picture_classes(pages: &[Page]) -> Vec<Vec<usize>> {
+    use crate::image::Image;
+    use rayon::prelude::*;
+    let key = |image: &Image| {
+        (
+            image.width,
+            image.height,
+            image.bits,
+            image.data.len(),
+            image.alpha.as_ref().map(Vec::len),
+            image.palette.as_ref().map(Vec::len),
+        )
+    };
+    let mut firsts: Vec<&Image> = Vec::new();
+    let mut by_key = std::collections::HashMap::new();
+    let classes: Vec<Vec<usize>> = pages
+        .iter()
+        .map(|page| {
+            page.images
+                .iter()
+                .map(|(_, image)| {
+                    *by_key.entry(key(image)).or_insert_with(|| {
+                        firsts.push(image);
+                        firsts.len() - 1
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    let uses: Vec<(&Image, usize)> = pages
+        .iter()
+        .zip(&classes)
+        .flat_map(|(page, classes)| {
+            page.images
+                .iter()
+                .map(|(_, image)| image)
+                .zip(classes.iter().copied())
+        })
+        .collect();
+    let confirmed = match uses.len() >= PARALLEL_PAGES {
+        true => uses
+            .par_iter()
+            .all(|&(image, class)| same(firsts[class], image)),
+        false => uses
+            .iter()
+            .all(|&(image, class)| same(firsts[class], image)),
+    };
+    if confirmed {
+        return classes;
+    }
+    let mut firsts: Vec<&Image> = Vec::new();
+    pages
+        .iter()
+        .map(|page| {
+            page.images
+                .iter()
+                .map(
+                    |(_, image)| match firsts.iter().position(|seen| same(*seen, image)) {
+                        Some(class) => class,
+                        None => {
+                            firsts.push(image);
+                            firsts.len() - 1
+                        }
+                    },
+                )
+                .collect()
+        })
+        .collect()
+}
+
 /// Write a document of `pages`.
 ///
 /// This is `pdfdoc.c`'s shape: a catalogue naming a page tree, a page tree
@@ -1192,7 +1295,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     // 144-page book carrying an embedded Arimo came out at 72 MB, one whole
     // copy of the font per page.
     let mut font_objects: Vec<(&Font, Object)> = Vec::new();
-    let mut image_objects: Vec<(&crate::image::Image, Object)> = Vec::new();
+    let mut image_objects: Vec<Object> = Vec::new();
 
     // Which codes each font was asked for anywhere in the document. A font is
     // written once, so what it has to carry is the union over the pages -- and
@@ -1217,12 +1320,16 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             .unwrap_or_default()
     };
 
-    let mut kids = Vec::with_capacity(pages.len());
-    for page in pages {
-        let content = pdf.add(Object::Stream {
-            dict: Dict::new(),
-            data: page.content.clone().into_bytes(),
-        });
+    let pictures = picture_classes(pages);
+
+    // Numbers are handed out in the order a single walk over the pages would
+    // add the objects -- the content, the fonts and pictures first used on the
+    // page, the page -- and the content and the page are only RESERVED here:
+    // what goes in them reads nothing another page decides, so they are built
+    // afterwards, in parallel, and filled in.
+    let mut numbered = Vec::with_capacity(pages.len());
+    for (page, classes) in pages.iter().zip(&pictures) {
+        let content = pdf.reserve();
         let mut fonts = Dict::new();
         for (name, font) in &page.fonts {
             let font: &Font = font;
@@ -1237,17 +1344,20 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             fonts.insert(name.clone(), object);
         }
         let mut images = Dict::new();
-        for (name, image) in &page.images {
-            let object = match image_objects.iter().find(|(seen, _)| same(*seen, image)) {
-                Some((_, object)) => object.clone(),
-                None => {
-                    let object = add_image(&mut pdf, image);
-                    image_objects.push((image, object.clone()));
-                    object
-                }
-            };
-            images.insert(name.clone(), object);
+        for ((name, image), &class) in page.images.iter().zip(classes) {
+            // A class is numbered by the picture that first uses it, so the
+            // next new class is always the next one to be written.
+            if class == image_objects.len() {
+                image_objects.push(add_image(&mut pdf, image));
+            }
+            images.insert(name.clone(), image_objects[class].clone());
         }
+        numbered.push((content, fonts, images, pdf.reserve()));
+    }
+
+    // One page's two objects, which read only the page and the numbers the
+    // walk above gave it.
+    let build = |page: &Page, (content, fonts, images, number): (u32, Dict, Dict, u32)| {
         let mut resources = Dict::from([("Font".to_string(), Object::Dict(fonts))]);
         if !images.is_empty() {
             resources.insert("XObject".to_string(), Object::Dict(images));
@@ -1280,9 +1390,9 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         // 3 0 R /Resources 1 0 R /MediaBox [ 0 0 612 792 ] /Parent 5 0 R >>`
         // -- since a dictionary's keys reach the file in the order they were
         // put in and two orders share no run of bytes.
-        kids.push(pdf.add(Object::dict([
+        let page_object = Object::dict([
             ("Type", Object::name("Page")),
-            ("Contents", content),
+            ("Contents", Object::Reference(content)),
             ("Resources", resources),
             (
                 "MediaBox",
@@ -1294,7 +1404,34 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
                 ]),
             ),
             ("Parent", Object::Reference(tree)),
-        ])));
+        ]);
+        let content_object = Object::Stream {
+            dict: Dict::new(),
+            data: page.content.clone().into_bytes(),
+        };
+        [(content, content_object), (number, page_object)]
+    };
+    let kids: Vec<Object> = numbered
+        .iter()
+        .map(|(_, _, _, number)| Object::Reference(*number))
+        .collect();
+    let built: Vec<[(u32, Object); 2]> = match pages.len() >= PARALLEL_PAGES {
+        true => {
+            use rayon::prelude::*;
+            pages
+                .par_iter()
+                .zip(numbered.into_par_iter())
+                .map(|(page, numbers)| build(page, numbers))
+                .collect()
+        }
+        false => pages
+            .iter()
+            .zip(numbered)
+            .map(|(page, numbers)| build(page, numbers))
+            .collect(),
+    };
+    for (number, object) in built.into_iter().flatten() {
+        pdf.fill(number, object);
     }
 
     pdf.fill(

@@ -893,12 +893,37 @@ batch, not the engine. Line breaking, page drawing, and page encoding on the
 finds an already-written one by address before comparing contents, so a font
 shared by every page costs one pointer comparison per use rather than a read of
 the whole font program. Measured on a synthetic 600-page document with 40
-embedded faces, that lookup went from about 1.9 s to about 0.13 s. Subsetting,
-object packing and serialisation measured as a small fraction of a document's
-time and stay sequential; output is byte-identical across runs and thread counts
-(set `SOURCE_DATE_EPOCH` to pin the creation date).
+embedded faces, that lookup went from about 1.9 s to about 0.13 s. A picture
+repeated by value (each page holding its own copy) is matched first by size,
+depth and data length, and the full comparisons that confirm those matches run
+in parallel; two pictures that match that way and still differ send the
+document back to the one-by-one comparison. Object numbers are handed out by a
+serial walk in the order the old single loop added objects, and each page's
+content stream and page dictionary are then built in parallel into the numbers
+reserved for them. The SHA-256 for `/ID` digests the streams while the object
+stream is packed and deflated. Subsetting and the cross-reference table stay
+sequential; output is byte-identical across runs and thread counts (set
+`SOURCE_DATE_EPOCH` to pin the creation date). Medians of interleaved runs
+at 8 threads, `pdf::document` alone: 55 to 16 ms on a 1401-page document
+repeating twenty pictures 4000 times, 59 to 43 ms on a 3328-page mixed one, 14
+to 13 ms on the 1001-page LaTeX document below, where the digest is most of
+what is left.
 
-**Page drawing.** Page breaking is sequential, but once the lines are broken
+**Page breaking.** `plan_pages` picks the least-cost sequence of page breaks
+backwards from the end of the document, and only that choice is serial: where
+a page started at a given line may end, and what each end costs before what
+follows it is added, depend on that start alone. On more than one thread
+those offers are gathered in parallel a block of starts at a time into
+buffers kept from block to block, while the calling thread chooses from the
+block gathered before it; on one thread each start's offers are gathered into one reused
+buffer just before they are chosen from. The break penalties and the leading
+of each line are read per line in parallel, and the walks that join them run
+in order. The plan is the one the single walk made: the same page boundaries,
+feet and repeated heads. On the 1001-page LaTeX document below, medians of
+interleaved runs: the planner 21 to 11 ms at one thread and to 5 ms at 8, the
+penalties 11 to 2 ms and the leadings 5 to 1 ms at 8.
+
+**Page drawing.** Once the lines are broken
 and cut into pages, drawing a page reads only its own lines, the colour, face
 and size stacks as they stood where the page begins, and its folio. What a
 run of lines does to a stack does not depend on what the stack holds: it pops
@@ -1113,7 +1138,9 @@ the finished PDF, once in `main.rs` `write_pdf` and again in
 `pdf_output_line` (since this measurement it is the writer's own count,
 carried beside the bytes in `texrs::Pdf`, and nothing is inflated);
 `paginate` is sequential by definition (since this measurement `page_starts`
-reads each page in parallel and only applies the per-page effects in series).
+reads each page in parallel and only applies the per-page effects in series,
+and `paginate` gathers its page-break offers, penalties and leadings in
+parallel; see **Page breaking** above).
 
 **Scaling with `TEXRS_THREADS`**, median wall in ms:
 

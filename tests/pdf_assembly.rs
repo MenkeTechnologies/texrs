@@ -100,3 +100,55 @@ fn a_resource_is_written_once_however_the_pages_hold_it() {
 
     assert_eq!(document(&by_address), document(&by_value));
 }
+
+/// A grey picture of `len` bytes all `fill`: two of these with the same `len`
+/// agree in everything but their pixels.
+fn grey(len: usize, fill: u8) -> texrs::image::Image {
+    texrs::image::Image {
+        width: 4,
+        height: 4,
+        bits: 8,
+        colours: texrs::image::Colours::Gray,
+        palette: None,
+        data: vec![fill; len],
+        alpha: None,
+        compression: texrs::image::Compression::Flate,
+    }
+}
+
+/// How many pictures the file writes: each is a stream, and a stream is
+/// never packed, so its dictionary is in the file as written.
+fn pictures_in(file: &[u8]) -> usize {
+    file.windows(b"/Subtype /Image".len())
+        .filter(|w| w == b"/Subtype /Image")
+        .count()
+}
+
+#[test]
+fn pictures_alike_in_size_but_not_in_pixels_are_written_apart() {
+    std::env::set_var("SOURCE_DATE_EPOCH", "1700000000");
+    // Every page repeats one picture by value, and every third page adds a
+    // second one of the same size and length whose pixels differ: matching
+    // by size alone would write it as the first.
+    let document_of = |second: u8| -> Vec<Page> {
+        (0..40)
+            .map(|n| {
+                let mut page = Page::letter();
+                page.content.push_str("q 10 0 0 10 72 72 cm /Im1 Do Q\n");
+                page.images.push(("Im1".to_string(), grey(64, 1)));
+                if n % 3 == 0 {
+                    page.images.push(("Im2".to_string(), grey(64, second)));
+                    page.images.push(("Im3".to_string(), grey(65, 1)));
+                }
+                page
+            })
+            .collect()
+    };
+    let apart = document_of(2);
+    let one = in_pool(1, &apart);
+    assert_eq!(pictures_in(&one), 3);
+    assert_eq!(one, in_pool(8, &apart), "1 thread against 8");
+    // The same second picture as the first is the first, written once.
+    let alike = document_of(1);
+    assert_eq!(pictures_in(&in_pool(8, &alike)), 2);
+}

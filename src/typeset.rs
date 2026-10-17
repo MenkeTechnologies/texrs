@@ -4281,15 +4281,47 @@ fn is_break_line(line: &str) -> bool {
 /// A line is led on the LARGEST size standing anywhere on it, which is what
 /// keeps a body line holding one `\large` word from being set into the line
 /// above it.
+///
+/// Only a line holding a size marker moves the stack, and one without any is
+/// led on whatever stands at its head -- `leading_on` with nothing to read. So
+/// which lines hold one is asked of every line on its own, in parallel, and
+/// the walk in order reads only those.
 fn line_leadings(lines: &[String], layout: &Layout) -> Vec<f64> {
+    // Both markers are ASCII, and no byte of a longer UTF-8 sequence is.
+    let marked = per_line(lines.len(), |i| {
+        lines[i]
+            .bytes()
+            .any(|b| b == SIZE_PUSH as u8 || b == SIZE_POP as u8)
+    });
     let mut sizes: Vec<TypeSize> = vec![TypeSize {
         size: layout.size,
         leading: layout.leading,
     }];
     lines
         .iter()
-        .map(|line| leading_on(line, &mut sizes))
+        .zip(marked)
+        .map(|(line, marked)| match marked {
+            true => leading_on(line, &mut sizes),
+            false => current_size(&sizes).leading,
+        })
         .collect()
+}
+
+/// Fewer lines or page starts than this are read on the calling thread: the
+/// question asked of each is a scan of one line or one page, and fanning out
+/// costs more than a short document's worth of them.
+const PARALLEL_LINES: usize = 2048;
+
+/// `read` of every index below `count`, in index order: on the pool for a
+/// long run, on the calling thread for a short one or a pool of one. What
+/// `read` answers must depend on its index alone, which is what makes the two
+/// the same vector.
+fn per_line<T: Send>(count: usize, read: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
+    use rayon::prelude::*;
+    match count >= PARALLEL_LINES && rayon::current_num_threads() > 1 {
+        true => (0..count).into_par_iter().map(read).collect(),
+        false => (0..count).map(read).collect(),
+    }
 }
 
 /// The leading one line is set on, advancing `sizes` by the markers it holds.
@@ -4753,7 +4785,8 @@ struct Stop {
     forced: bool,
 }
 
-/// Every place a page filled from `from` may end, in order.
+/// Every place a page filled from `from` may end, in order, put at the end of
+/// `stops`.
 ///
 /// The last of them is where the old paginator broke -- the first break that
 /// did not fit -- and the ones before it are what it never offered.
@@ -4763,11 +4796,11 @@ fn page_stops(
     layout: &Layout,
     leadings: &[f64],
     from: usize,
-) -> Vec<Stop> {
+    stops: &mut Vec<Stop>,
+) {
     // Float slack, so a page that comes to exactly its height is not one line
     // short of it.
     const SLACK: f64 = 1e-6;
-    let mut stops = Vec::new();
     let mut used = match items[from].repeat_head {
         true => run_height(lines, items[from].head, leadings),
         false => 0.0,
@@ -4787,7 +4820,7 @@ fn page_stops(
                     foot: None,
                     forced: true,
                 });
-                return stops;
+                return;
             }
             Kind::Held => j += 1,
             Kind::Set(tall) => {
@@ -4805,7 +4838,7 @@ fn page_stops(
                     });
                     // Nothing further down the page can fit either.
                     if used + below > layout.height + SLACK {
-                        return stops;
+                        return;
                     }
                 }
                 used += tall;
@@ -4820,7 +4853,6 @@ fn page_stops(
         foot: None,
         forced: true,
     });
-    stops
 }
 
 /// The three penalties the page builder charges between the lines of a
@@ -4907,38 +4939,58 @@ const SLACK_COST: f64 = 100.0;
 /// run too and is treated as a paragraph -- leaving one line of a program
 /// alone at the top of a page is the same fault as leaving one line of prose
 /// there.
+///
+/// What each line IS -- space, text, a heading, a line that broke inside a
+/// word -- is a question of that line alone, so it is asked of every line in
+/// parallel, and the walk in order over paragraphs reads the answers.
 fn break_penalties(lines: &[String], params: &PageParams) -> Vec<f64> {
     let n = lines.len();
     let mut cost = vec![0.0f64; n + 1];
-    let space: Vec<bool> = lines.iter().map(|l| is_space_line(l)).collect();
-    let text: Vec<bool> = lines
-        .iter()
-        .enumerate()
-        .map(|(i, l)| !space[i] && !is_break_line(l) && longtable_code(l).is_none())
-        .collect();
+    let is_text =
+        |line: &str| !is_space_line(line) && !is_break_line(line) && longtable_code(line).is_none();
+    // Heading is only ever read of a text line, and hyphen of a text line with
+    // another under it in the same paragraph, so only those are scanned for
+    // them: a line's own scan is the cost here, and the walk below asked it of
+    // exactly those lines.
+    let class = per_line(n, |i| {
+        let line = lines[i].as_str();
+        let space = is_space_line(line);
+        let text = is_text(line);
+        let continued = text && lines.get(i + 1).is_some_and(|next| is_text(next));
+        (
+            space,
+            text,
+            text && heading_line(line),
+            continued && printing_chars(line).last() == Some('-'),
+        )
+    });
+    let space = |k: usize| class[k].0;
+    let text = |k: usize| class[k].1;
+    let heading = |k: usize| class[k].2;
+    let hyphen = |k: usize| class[k].3;
     let mut i = 0;
     while i < n {
-        if !text[i] {
+        if !text(i) {
             i += 1;
             continue;
         }
         let from = i;
         let mut upto = i;
-        while upto < n && text[upto] {
+        while upto < n && text(upto) {
             upto += 1;
         }
         i = upto;
-        if (from..upto).any(|k| heading_line(&lines[k])) {
+        if (from..upto).any(heading) {
             // `\@xsect`: `\par \nobreak` after the title (latex.ltx:17282) and
             // `\clubpenalty\@M` on the paragraph under it (latex.ltx:17322), so
             // the heading, the space below it and the first two lines of that
             // paragraph are one block. `\interlinepenalty\@M` (latex.ltx:17259)
             // is what forbids a break inside a title that took two lines.
             let mut below = upto;
-            while below < n && space[below] {
+            while below < n && space(below) {
                 below += 1;
             }
-            let held = match below < n && text[below] {
+            let held = match below < n && text(below) {
                 true => below + 1,
                 false => below,
             };
@@ -4948,7 +5000,7 @@ fn break_penalties(lines: &[String], params: &PageParams) -> Vec<f64> {
             // is ONE `\vskip` -- so it is one breakpoint, at its head, and not
             // one per line of it.
             let mut above = from;
-            while above > 0 && space[above - 1] {
+            while above > 0 && space(above - 1) {
                 above -= 1;
             }
             // `.min(from)` because a heading with NO space above it -- one at
@@ -4972,7 +5024,7 @@ fn break_penalties(lines: &[String], params: &PageParams) -> Vec<f64> {
             if e == upto - 1 {
                 cost[e] += params.widow;
             }
-            if printing_chars(&lines[e - 1]).last() == Some('-') {
+            if hyphen(e - 1) {
                 cost[e] += params.broken;
             }
         }
@@ -4994,6 +5046,53 @@ fn heading_line(line: &str) -> bool {
     }
     false
 }
+
+/// What a run of consecutive page starts offers: every place a page from each
+/// may end, one start after another; the ones it may be CHOSEN to end at, with
+/// what each costs on its own -- the room it leaves, charged unless the end was
+/// forced, and the penalty of the break; and per start, where its share of
+/// those ends and the stop it falls back on when none of them is open.
+#[derive(Default)]
+struct Offers {
+    stops: Vec<Stop>,
+    eligible: Vec<Eligible>,
+    starts: Vec<Start>,
+}
+
+impl Offers {
+    fn clear(&mut self) {
+        self.stops.clear();
+        self.eligible.clear();
+        self.starts.clear();
+    }
+}
+
+/// One start of an [`Offers`] run.
+struct Start {
+    /// Where this start's offers end in `eligible`; the start before it ends
+    /// where they begin.
+    eligible: usize,
+    /// Which of `stops` the page ends at when nothing eligible is, and the
+    /// room it leaves as `empty` charges it.
+    fallback: (usize, f64),
+}
+
+/// A stop that fits and that no penalty forbids, as the choice reads it.
+struct Eligible {
+    /// Which of the run's `stops` this is.
+    index: usize,
+    next: usize,
+    empty: f64,
+    broken: f64,
+}
+
+/// How many page starts have their offers gathered at once, and how many of
+/// them one task gathers. A start offers about a page of lines, so the block
+/// bounds what is held at a time to a few megabytes however long the document
+/// is; the run keeps a task's buffers its own, so the threads do not allocate
+/// per start.
+const PLAN_BLOCK: usize = 2048;
+const PLAN_RUN: usize = 16;
 
 /// Where the pages end: the plan that costs the document least.
 ///
@@ -5018,38 +5117,127 @@ fn plan_pages(items: &[Item], lines: &[String], layout: &Layout, leadings: &[f64
     let mut best = vec![f64::INFINITY; count + 1];
     let mut chosen: Vec<Option<Stop>> = vec![None; count + 1];
     best[count] = 0.0;
-    for from in (0..count).rev() {
-        // A page has to hold something and the document has to have a plan, so
-        // where every break is forbidden or none of them fits, the fullest is
-        // taken anyway -- which is what the old paginator did with all of them.
-        let mut fallback: Option<(Stop, f64)> = None;
-        for stop in page_stops(items, lines, layout, leadings, from) {
-            let room = layout.height - stop.used;
-            let fits = room >= -SLACK;
-            let empty = match stop.forced {
-                true => 0.0,
-                false => SLACK_COST * room.max(0.0) / layout.leading,
-            };
-            let rest = best[stop.next] + empty;
-            if fits || fallback.is_none() {
-                fallback = Some((stop, rest));
+    // Where a page started at `from` may end, and what each end costs before
+    // what follows it is added, depend on `from` alone; only the choice reads
+    // `best`. So with more than one thread the offers are gathered for a block
+    // of starts at a time, in parallel runs of consecutive starts, and the
+    // choice walks back through the block in order; with one, each start's
+    // offers are gathered into the same buffer just before they are chosen
+    // from. Either way the choice makes the same sums in the same order.
+    let gather = |run: &mut Offers, starts: std::ops::Range<usize>| {
+        for from in starts {
+            let first = run.stops.len();
+            page_stops(items, lines, layout, leadings, from, &mut run.stops);
+            // A page has to hold something and the document has to have a
+            // plan, so where every break is forbidden or none of them fits,
+            // the fullest is taken anyway -- which is what the old paginator
+            // did with all of them: the last stop that fits, or the first.
+            let mut fallback: Option<(usize, f64)> = None;
+            for (index, stop) in run.stops.iter().enumerate().skip(first) {
+                let room = layout.height - stop.used;
+                let fits = room >= -SLACK;
+                let empty = match stop.forced {
+                    true => 0.0,
+                    false => SLACK_COST * room.max(0.0) / layout.leading,
+                };
+                if fits || fallback.is_none() {
+                    fallback = Some((index, empty));
+                }
+                let broken = match stop.forced {
+                    true => 0.0,
+                    false => penalty[items[stop.next].at],
+                };
+                if fits && broken < FORBID_PENALTY {
+                    run.eligible.push(Eligible {
+                        index,
+                        next: stop.next,
+                        empty,
+                        broken,
+                    });
+                }
             }
-            let broken = match stop.forced {
-                true => 0.0,
-                false => penalty[items[stop.next].at],
+            run.starts.push(Start {
+                eligible: run.eligible.len(),
+                fallback: fallback.expect("a page start has at least one stop"),
+            });
+        }
+    };
+    // The run's starts are `base..`, chosen from last to first: the cheapest
+    // eligible stop, the first of them on a tie, or the fallback when there
+    // is none.
+    let choose = |run: &Offers, base: usize, best: &mut [f64], chosen: &mut [Option<Stop>]| {
+        for (at, start) in run.starts.iter().enumerate().rev() {
+            let first = match at {
+                0 => 0,
+                _ => run.starts[at - 1].eligible,
             };
-            if !fits || broken >= FORBID_PENALTY {
-                continue;
+            let mut least = f64::INFINITY;
+            let mut pick = None;
+            for offer in &run.eligible[first..start.eligible] {
+                let cost = best[offer.next] + offer.empty + offer.broken;
+                if cost < least {
+                    least = cost;
+                    pick = Some(offer.index);
+                }
             }
-            if rest + broken < best[from] {
-                best[from] = rest + broken;
-                chosen[from] = Some(stop);
+            let index = pick.unwrap_or_else(|| {
+                let (index, empty) = start.fallback;
+                least = best[run.stops[index].next] + empty;
+                index
+            });
+            best[base + at] = least;
+            chosen[base + at] = Some(run.stops[index]);
+        }
+    };
+    match count >= PARALLEL_LINES && rayon::current_num_threads() > 1 {
+        true => {
+            use rayon::prelude::*;
+            // The blocks, from the end of the document back to its start.
+            let blocks: Vec<std::ops::Range<usize>> = (0..count.div_ceil(PLAN_BLOCK))
+                .rev()
+                .map(|b| b * PLAN_BLOCK..((b + 1) * PLAN_BLOCK).min(count))
+                .collect();
+            let fill = |runs: &mut [Offers], block: &std::ops::Range<usize>| {
+                runs.par_iter_mut().enumerate().for_each(|(k, run)| {
+                    run.clear();
+                    let start = block.start + k * PLAN_RUN;
+                    if start < block.end {
+                        gather(run, start..(start + PLAN_RUN).min(block.end));
+                    }
+                });
+            };
+            // Two sets of buffers, kept from block to block so that no thread
+            // allocates after the first two: while one block is chosen from
+            // on this thread, the pool gathers the next one into the other.
+            let fresh = || -> Vec<Offers> {
+                (0..PLAN_BLOCK / PLAN_RUN)
+                    .map(|_| Offers::default())
+                    .collect()
+            };
+            let (mut here, mut next) = (fresh(), fresh());
+            fill(&mut here, &blocks[0]);
+            for (b, block) in blocks.iter().enumerate() {
+                rayon::join(
+                    || {
+                        for (k, run) in here.iter().enumerate().rev() {
+                            choose(run, block.start + k * PLAN_RUN, &mut best, &mut chosen);
+                        }
+                    },
+                    || {
+                        if let Some(after) = blocks.get(b + 1) {
+                            fill(&mut next, after);
+                        }
+                    },
+                );
+                std::mem::swap(&mut here, &mut next);
             }
         }
-        if chosen[from].is_none() {
-            if let Some((stop, cost)) = fallback {
-                best[from] = cost;
-                chosen[from] = Some(stop);
+        false => {
+            let mut run = Offers::default();
+            for from in (0..count).rev() {
+                run.clear();
+                gather(&mut run, from..from + 1);
+                choose(&run, from, &mut best, &mut chosen);
             }
         }
     }
@@ -5067,6 +5255,177 @@ fn plan_pages(items: &[Item], lines: &[String], layout: &Layout, leadings: &[f64
         at = stop.next;
     }
     plan
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    /// xorshift64*, so the documents are the same on every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % n
+        }
+    }
+
+    /// Broken lines of every kind the paginator reads: prose that sometimes
+    /// broke inside a word, vertical space, forced breaks, headings, size
+    /// changes, longtables with heads, repeated heads, feet and wrapped rows.
+    fn document(seed: u64, count: usize) -> Vec<String> {
+        let mut rng = Rng(seed);
+        let mut lines = Vec::new();
+        while lines.len() < count {
+            match rng.below(40) {
+                0 => lines.push(PAGE_BREAK.to_string()),
+                1..=3 => {
+                    lines.push(VERTICAL_SPACE.to_string().repeat(1 + rng.below(3)));
+                    lines.push(format!("{TOC}{TOC_SECTION}Heading"));
+                    lines.push(VERTICAL_SPACE.to_string());
+                }
+                4 => lines.push(size_span(14.4, 18.0, "Larger")),
+                5 => {
+                    let code = |c: char, text: &str| format!("{LONGTABLE}{c}{text}");
+                    lines.push(code(LT_HEAD, "head"));
+                    lines.push(code(LT_REPEAT, "head again"));
+                    lines.push(code(LT_FOOT, "foot"));
+                    for _ in 0..rng.below(120) {
+                        lines.push(code(LT_ROW, "row"));
+                        for _ in 0..rng.below(3) {
+                            lines.push(code(LT_CONT, "row, wrapped"));
+                        }
+                    }
+                }
+                _ => {
+                    for _ in 0..1 + rng.below(9) {
+                        lines.push(match rng.below(6) {
+                            0 => "a line that broke inside a hyph-".to_string(),
+                            _ => "an ordinary line of prose".to_string(),
+                        });
+                    }
+                    lines.push(VERTICAL_SPACE.to_string());
+                }
+            }
+        }
+        lines
+    }
+
+    /// `plan_pages` before its offers were gathered apart from the choice:
+    /// one walk back over the starts, asking each for its stops as it goes.
+    fn reference(
+        items: &[Item],
+        lines: &[String],
+        layout: &Layout,
+        leadings: &[f64],
+    ) -> Vec<(usize, usize, Option<(usize, usize)>)> {
+        const SLACK: f64 = 1e-6;
+        let penalty = break_penalties(lines, &layout.paging);
+        let count = items.len();
+        let mut best = vec![f64::INFINITY; count + 1];
+        let mut chosen: Vec<Option<Stop>> = vec![None; count + 1];
+        best[count] = 0.0;
+        for from in (0..count).rev() {
+            let mut fallback: Option<(Stop, f64)> = None;
+            let mut stops = Vec::new();
+            page_stops(items, lines, layout, leadings, from, &mut stops);
+            for stop in stops {
+                let room = layout.height - stop.used;
+                let fits = room >= -SLACK;
+                let empty = match stop.forced {
+                    true => 0.0,
+                    false => SLACK_COST * room.max(0.0) / layout.leading,
+                };
+                let rest = best[stop.next] + empty;
+                if fits || fallback.is_none() {
+                    fallback = Some((stop, rest));
+                }
+                let broken = match stop.forced {
+                    true => 0.0,
+                    false => penalty[items[stop.next].at],
+                };
+                if !fits || broken >= FORBID_PENALTY {
+                    continue;
+                }
+                if rest + broken < best[from] {
+                    best[from] = rest + broken;
+                    chosen[from] = Some(stop);
+                }
+            }
+            if chosen[from].is_none() {
+                if let Some((stop, cost)) = fallback {
+                    best[from] = cost;
+                    chosen[from] = Some(stop);
+                }
+            }
+        }
+        let mut plan = Vec::new();
+        let mut at = 0;
+        while let Some(stop) = chosen.get(at).copied().flatten() {
+            plan.push((at, stop.next.min(count), stop.foot));
+            at = stop.next;
+        }
+        plan
+    }
+
+    fn in_pool<T: Send>(threads: usize, run: impl FnOnce() -> T + Send) -> T {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("pool")
+            .install(run)
+    }
+
+    #[test]
+    fn pages_planned_on_many_threads_are_the_plan_one_walk_makes() {
+        let layout = Layout::default();
+        for seed in [1, 7, 0x5eed] {
+            // Several blocks of starts, so the pipelined gather crosses from
+            // one block into the next, and the last block is a partial one.
+            let lines = document(seed, PLAN_BLOCK * 3 + 517);
+            let plan = |threads| {
+                in_pool(threads, || {
+                    let leadings = line_leadings(&lines, &layout);
+                    let items = page_items(&lines, &layout, &leadings);
+                    let plan: Vec<_> = plan_pages(&items, &lines, &layout, &leadings)
+                        .into_iter()
+                        .map(|p| (p.from, p.upto, p.foot))
+                        .collect();
+                    (leadings, break_penalties(&lines, &layout.paging), plan)
+                })
+            };
+            let (leadings, penalties, serial) = plan(1);
+            let items = page_items(&lines, &layout, &leadings);
+            assert_eq!(
+                serial,
+                reference(&items, &lines, &layout, &leadings),
+                "seed {seed}"
+            );
+            assert!(
+                serial.len() > 50,
+                "seed {seed}: too few pages to say anything"
+            );
+            assert!(
+                serial.iter().any(|p| p.2.is_some()),
+                "seed {seed}: no page ran a table past its foot"
+            );
+            let mut sizes = vec![TypeSize {
+                size: layout.size,
+                leading: layout.leading,
+            }];
+            let walked: Vec<f64> = lines.iter().map(|l| leading_on(l, &mut sizes)).collect();
+            assert_eq!(leadings, walked, "seed {seed}");
+            for threads in [2, 8] {
+                assert!(
+                    plan(threads) == (leadings.clone(), penalties.clone(), serial.clone()),
+                    "seed {seed}: {threads} threads"
+                );
+            }
+        }
+    }
 }
 
 /// A table of contents: where one belongs, which headings feed it, and where
