@@ -139,6 +139,98 @@ pub struct Vm<'a> {
     out: Out,
     /// What BibTeX would have printed to the terminal.
     pub warnings: Vec<String>,
+    /// The globals read and written, kept while a chunk of a parallel
+    /// `ITERATE` runs.
+    trace: Option<Trace>,
+}
+
+/// An `ITERATE` shorter than this runs on one thread: below it, starting the
+/// workers costs more than the walk.
+const PARALLEL_ENTRIES: usize = 256;
+/// The fewest entries a chunk of a parallel `ITERATE` is given.
+const MIN_CHUNK: usize = 64;
+
+/// Which globals a run of entries touched: the ones it read before it had
+/// written them, whose values it therefore took from before it started, and
+/// the ones it wrote.
+#[derive(Default)]
+struct Trace {
+    read_first: BTreeSet<String>,
+    written: BTreeSet<String>,
+}
+
+/// What every chunk of a parallel `ITERATE` starts from.
+struct Shared {
+    fields: BTreeSet<String>,
+    entry_ints: BTreeSet<String>,
+    entry_strs: BTreeSet<String>,
+    global_ints: BTreeMap<String, i64>,
+    global_strs: BTreeMap<String, String>,
+    preamble: String,
+}
+
+/// One chunk's run, to be kept or thrown away.
+struct Ran {
+    /// The entries as they were before the run, for when it is thrown away.
+    original: Vec<EntryState>,
+    entries: Vec<EntryState>,
+    global_ints: BTreeMap<String, i64>,
+    global_strs: BTreeMap<String, String>,
+    trace: Trace,
+    text: String,
+    line: String,
+    stack_empty: bool,
+    warnings: Vec<String>,
+}
+
+/// Run `body` over `entries` in order on a machine of its own, started from
+/// `shared` with an empty stack and an empty output line.
+fn run_chunk(style: &Style, shared: &Shared, body: &[Token], entries: Vec<EntryState>) -> Ran {
+    let original = entries.clone();
+    let mut vm = Vm {
+        style,
+        functions: functions_of(style),
+        fields: shared.fields.clone(),
+        entry_ints: shared.entry_ints.clone(),
+        entry_strs: shared.entry_strs.clone(),
+        global_ints: shared.global_ints.clone(),
+        global_strs: shared.global_strs.clone(),
+        entries,
+        order: Vec::new(),
+        current: None,
+        preamble: shared.preamble.clone(),
+        stack: Vec::new(),
+        out: Out::default(),
+        warnings: Vec::new(),
+        trace: Some(Trace::default()),
+    };
+    let body = Rc::new(body.to_vec());
+    for at in 0..vm.entries.len() {
+        vm.current = Some(at);
+        vm.execute(body.clone());
+    }
+    Ran {
+        original,
+        entries: vm.entries,
+        global_ints: vm.global_ints,
+        global_strs: vm.global_strs,
+        trace: vm.trace.unwrap_or_default(),
+        text: vm.out.text,
+        line: vm.out.line,
+        stack_empty: vm.stack.is_empty(),
+        warnings: vm.warnings,
+    }
+}
+
+/// The style's functions by name; a later definition replaces an earlier one.
+fn functions_of(style: &Style) -> BTreeMap<String, Rc<Vec<Token>>> {
+    let mut functions = BTreeMap::new();
+    for command in &style.commands {
+        if let Command::Function { name, body } = command {
+            functions.insert(name.clone(), Rc::new(body.clone()));
+        }
+    }
+    functions
 }
 
 impl<'a> Vm<'a> {
@@ -148,7 +240,7 @@ impl<'a> Vm<'a> {
     pub fn new(style: &'a Style, db: &Bib, aux: &Aux) -> Vm<'a> {
         let mut vm = Vm {
             style,
-            functions: BTreeMap::new(),
+            functions: functions_of(style),
             fields: BTreeSet::new(),
             entry_ints: BTreeSet::new(),
             entry_strs: BTreeSet::new(),
@@ -161,6 +253,7 @@ impl<'a> Vm<'a> {
             stack: Vec::new(),
             out: Out::default(),
             warnings: Vec::new(),
+            trace: None,
         };
 
         for command in &style.commands {
@@ -184,9 +277,6 @@ impl<'a> Vm<'a> {
                     for name in names {
                         vm.global_strs.insert(name.clone(), String::new());
                     }
-                }
-                Command::Function { name, body } => {
-                    vm.functions.insert(name.clone(), Rc::new(body.clone()));
                 }
                 _ => {}
             }
@@ -249,7 +339,9 @@ impl<'a> Vm<'a> {
         // scan per entry.
         let mut by_lower: HashMap<String, &Entry> = HashMap::new();
         for entry in &db.entries {
-            by_lower.entry(entry.key.to_ascii_lowercase()).or_insert(entry);
+            by_lower
+                .entry(entry.key.to_ascii_lowercase())
+                .or_insert(entry);
         }
         let mut listed: HashSet<String> = self
             .entries
@@ -333,20 +425,8 @@ impl<'a> Vm<'a> {
                     self.current = None;
                     self.execute(Rc::new(body.clone()));
                 }
-                Command::Iterate(body) => {
-                    for at in self.order.clone() {
-                        self.current = Some(at);
-                        self.execute(Rc::new(body.clone()));
-                    }
-                    self.current = None;
-                }
-                Command::Reverse(body) => {
-                    for at in self.order.clone().into_iter().rev() {
-                        self.current = Some(at);
-                        self.execute(Rc::new(body.clone()));
-                    }
-                    self.current = None;
-                }
+                Command::Iterate(body) => self.iterate(body, false),
+                Command::Reverse(body) => self.iterate(body, true),
                 Command::Sort => {
                     // BibTeX sorts on the sort.key$ the style built, and the
                     // comparison is on characters, so a key a style forgot to
@@ -363,6 +443,134 @@ impl<'a> Vm<'a> {
             }
         }
         std::mem::take(&mut self.out.text)
+    }
+
+    /// `ITERATE` (or, `reverse`, `REVERSE`): run `body` once per entry, in the
+    /// order `SORT` left.
+    ///
+    /// BibTeX runs the entries one after another, and the only state one
+    /// entry's run can hand the next is the global variables, the stack and the
+    /// half-written output line: entry variables belong to their entry. So a
+    /// long walk is split into chunks run at once, each later chunk starting
+    /// from the globals as they stood before the walk, an empty stack and an
+    /// empty line. A chunk's result is kept only when that start was the true
+    /// one -- the chunk before it ended with an empty stack and line, and it
+    /// read no global, before writing it, that an earlier chunk wrote. The
+    /// first chunk that fails the test, and everything after it, is run again
+    /// in order, so the outcome is the one-entry-at-a-time outcome exactly.
+    fn iterate(&mut self, body: &[Token], reverse: bool) {
+        let mut order = self.order.clone();
+        if reverse {
+            order.reverse();
+        }
+        let body = Rc::new(body.to_vec());
+        let threads = crate::parallel::default_threads().min(order.len() / MIN_CHUNK);
+        let done = match threads > 1 && order.len() >= PARALLEL_ENTRIES {
+            true => self.iterate_parallel(&body, &order, threads),
+            false => 0,
+        };
+        for &at in &order[done..] {
+            self.current = Some(at);
+            self.execute(body.clone());
+        }
+        self.current = None;
+    }
+
+    /// The parallel half of [`Vm::iterate`]: how many entries of `order` it
+    /// finished, the rest being left to run in order.
+    fn iterate_parallel(
+        &mut self,
+        body: &Rc<Vec<Token>>,
+        order: &[usize],
+        threads: usize,
+    ) -> usize {
+        let shared = Shared {
+            fields: self.fields.clone(),
+            entry_ints: self.entry_ints.clone(),
+            entry_strs: self.entry_strs.clone(),
+            global_ints: self.global_ints.clone(),
+            global_strs: self.global_strs.clone(),
+            preamble: self.preamble.clone(),
+        };
+
+        // The first entry runs alone first. One that reads a global before
+        // writing it, and writes it, is handing a value on to the next entry
+        // -- a running maximum, the previous entry's label -- and every chunk
+        // after the first would fail the test, so the walk stays in order.
+        self.trace = Some(Trace::default());
+        self.current = Some(order[0]);
+        self.execute(body.clone());
+        let carried = match &self.trace {
+            Some(trace) => !trace.read_first.is_disjoint(&trace.written),
+            None => false,
+        };
+        if carried {
+            self.trace = None;
+            return 1;
+        }
+
+        let bounds: Vec<usize> = (0..=threads).map(|k| k * order.len() / threads).collect();
+        let chunks: Vec<Vec<EntryState>> = (1..threads)
+            .map(|k| {
+                order[bounds[k]..bounds[k + 1]]
+                    .iter()
+                    .map(|&at| std::mem::take(&mut self.entries[at]))
+                    .collect()
+            })
+            .collect();
+        let style = self.style;
+        let tokens: &[Token] = body;
+        let results: Vec<Ran> = std::thread::scope(|scope| {
+            let workers: Vec<_> = chunks
+                .into_iter()
+                .map(|entries| {
+                    let shared = &shared;
+                    scope.spawn(move || run_chunk(style, shared, tokens, entries))
+                })
+                .collect();
+            for &at in &order[1..bounds[1]] {
+                self.current = Some(at);
+                self.execute(body.clone());
+            }
+            workers
+                .into_iter()
+                .map(|worker| worker.join().expect("a bibliography worker panicked"))
+                .collect()
+        });
+
+        let mut written = self.trace.take().map(|t| t.written).unwrap_or_default();
+        let mut clean = self.stack.is_empty() && self.out.line.is_empty();
+        let mut done = bounds[1];
+        for (k, ran) in results.into_iter().enumerate() {
+            let positions = &order[bounds[k + 1]..bounds[k + 2]];
+            let keep = clean && ran.stack_empty && ran.trace.read_first.is_disjoint(&written);
+            if !keep {
+                // This chunk and every one after it run again, in order, from
+                // the entries as they were.
+                clean = false;
+                for (&at, entry) in positions.iter().zip(ran.original) {
+                    self.entries[at] = entry;
+                }
+                continue;
+            }
+            for (&at, entry) in positions.iter().zip(ran.entries) {
+                self.entries[at] = entry;
+            }
+            for name in &ran.trace.written {
+                if let Some(value) = ran.global_ints.get(name) {
+                    self.global_ints.insert(name.clone(), *value);
+                } else if let Some(value) = ran.global_strs.get(name) {
+                    self.global_strs.insert(name.clone(), value.clone());
+                }
+            }
+            written.extend(ran.trace.written);
+            self.out.text.push_str(&ran.text);
+            self.out.line = ran.line;
+            self.warnings.extend(ran.warnings);
+            clean = self.out.line.is_empty();
+            done = bounds[k + 2];
+        }
+        done
     }
 
     /// Run one body.
@@ -397,10 +605,12 @@ impl<'a> Vm<'a> {
         }
         if let Some(value) = self.global_ints.get(name) {
             self.stack.push(Val::Int(*value));
+            self.note_read(name);
             return;
         }
         if let Some(value) = self.global_strs.get(name) {
             self.stack.push(Val::Str(value.clone()));
+            self.note_read(name);
             return;
         }
         if let Some(at) = self.current {
@@ -424,6 +634,22 @@ impl<'a> Vm<'a> {
         // Outside an entry, an entry variable is still a name the style may
         // mention; BibTeX complains rather than stopping.
         self.warnings.push(format!("I couldn't execute {name}"));
+    }
+
+    /// Record a read of global `name`, for a parallel `ITERATE`'s test.
+    fn note_read(&mut self, name: &str) {
+        if let Some(trace) = &mut self.trace {
+            if !trace.written.contains(name) && !trace.read_first.contains(name) {
+                trace.read_first.insert(name.to_string());
+            }
+        }
+    }
+
+    /// Record a write of global `name`.
+    fn note_write(&mut self, name: String) {
+        if let Some(trace) = &mut self.trace {
+            trace.written.insert(name);
+        }
     }
 
     fn pop(&mut self) -> Val {
@@ -454,10 +680,12 @@ impl<'a> Vm<'a> {
         let name = name.clone();
         if let Some(slot) = self.global_ints.get_mut(&name) {
             *slot = value.as_int().unwrap_or(0);
+            self.note_write(name);
             return;
         }
         if let Some(slot) = self.global_strs.get_mut(&name) {
             *slot = value.as_str();
+            self.note_write(name);
             return;
         }
         if let Some(at) = self.current {

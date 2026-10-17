@@ -24,6 +24,9 @@ fn main() -> ExitCode {
     // as tectonic's V2 interface does, so nothing below has to know about them.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("-X") {
+        // `TEXRS_THREADS` sizes the workers here too: `-X bibtex` walks a
+        // style in parallel.
+        texrs::parallel::configure(None);
         return run_document(&args[1..]);
     }
 

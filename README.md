@@ -961,6 +961,36 @@ font definitions and postamble are written serially. The file is byte-identical
 to the single-writer output at any thread count, and a document of only a few
 pages is encoded on the calling thread.
 
+**Bibliographies.** `-X bibtex` runs an `ITERATE` or `REVERSE` of 256 or more
+entries in chunks at once. An entry's own variables belong to it, so all one
+entry's run can hand the next is the global variables, the stack and the
+half-written output line. Each chunk after the first starts from the globals as
+they stood before the walk, with an empty stack and line, and records which
+globals it read before writing them. A chunk is kept only when the chunk before
+it ended with an empty stack and line and no earlier chunk wrote a global it
+read first; the first chunk that fails, and every one after it, runs again in
+order. A walk whose first entry reads a global and then writes it (a running
+maximum such as `longest.label`, alpha's previous label) stays in order from the
+start. Database and `.aux` reading stay serial: the `.bib` of 50,000 entries
+below reads in about 70 ms, and an `@string` changes the meaning of every
+record after it. Before the parallel walk the database reader, the `.aux`
+reader and the entry loading found repeated keys, citations and
+cross-reference targets by scanning every earlier entry, which was quadratic in
+the entry count; they now use hash sets. Measured 2026-10-17 (release build,
+18-core aarch64 macOS, load averages 18 to 36, medians of 5 to 7 interleaved
+runs) on a generated `.bib` with `plain.bst`, wall / user CPU in ms:
+
+| entries, cited | before | 1 thread | 4 | 8 | 18 |
+|---|---|---|---|---|---|
+| 50,000, 25,000 | 11770 / 10110 | 2020 / 1900 | 870 / 2260 | 920 / 2370 | 660 / 2590 |
+| 5,000, 2,000 | 270 / 250 | 210 / 200 | 140 / 280 | 120 / 310 | 120 / 360 |
+
+`alpha.bst` at 50,000 went from 10730 ms to 2080 ms at one thread and 560 ms at
+18. The `.bbl` and the warnings are byte-identical to the previous build at
+every thread count, and match `bibtex` 0.99e for plain, alpha and unsrt.
+abbrv still differs from `bibtex` where it did before, on a braced First part
+such as `{van der}`, which `bibtex` abbreviates to `v.`.
+
 **Cross-reference pass.** A LaTeX document that both labels and refers (or
 cites and has a bibliography) is lowered twice per run: once by the pass that
 collects its labels into the `.aux`, once to typeset against the `.aux`. The
