@@ -61,6 +61,13 @@ impl Colours {
         Colours { by_name }
     }
 
+    /// [`Colours::new`], built once and shared, for a reader that only looks
+    /// names up in xcolor's defaults: a picture asks for them once per node.
+    pub fn predefined() -> &'static Colours {
+        static PREDEFINED: std::sync::OnceLock<Colours> = std::sync::OnceLock::new();
+        PREDEFINED.get_or_init(Colours::new)
+    }
+
     /// Name a colour that is already known, for `\colorlet`.
     pub fn define_rgb(&mut self, name: &str, rgb: Rgb) {
         self.by_name.insert(name.trim().to_string(), rgb);

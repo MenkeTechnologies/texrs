@@ -431,7 +431,7 @@ impl Metrics for crate::typeset::FontChain {
 /// The palette is xcolor's defaults, and node text is sized by `Estimate`. A
 /// document that defines its own colours or sets nodes wants `parse_with`.
 pub fn parse(options: &str, body: &str) -> Picture {
-    parse_with(options, body, &Colours::new(), &Estimate)
+    parse_with(options, body, Colours::predefined(), &Estimate)
 }
 
 /// PGF's own unit vectors, in points.
@@ -650,10 +650,9 @@ fn emit(
     for pending in &built.nodes {
         // A node's own `[...]` overrides what the path handed it, which is how
         // `\draw[red] ... node[above,black] {x}` sets black text on a red line.
-        let node_style = style.with(&pending.options, &Colours::new());
         let node_style = match pending.options.is_empty() {
             true => style.clone(),
-            false => node_style,
+            false => style.with(&pending.options, Colours::predefined()),
         };
         let node = measure(
             &pending.text,

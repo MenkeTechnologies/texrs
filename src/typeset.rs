@@ -3295,7 +3295,7 @@ pub fn to_pdf_ahead(
                 let picture = crate::tikz::parse_document(
                     &options,
                     &body,
-                    &crate::colour::Colours::new(),
+                    crate::colour::Colours::predefined(),
                     &picture_metrics,
                 );
                 let (min_x, min_y, max_x, _) = picture.bounds();
@@ -6936,7 +6936,7 @@ pub fn picture_mark(options: &str, body: &str) -> String {
     let picture = crate::tikz::parse_document(
         options,
         body,
-        &crate::colour::Colours::new(),
+        crate::colour::Colours::predefined(),
         &crate::tikz::Estimate,
     );
     let (_, height) = picture.extent();
@@ -7004,8 +7004,12 @@ fn picture_remeasured(line: String, metrics: &dyn crate::tikz::Metrics) -> Strin
     let Some((_, options, body)) = picture_parts(&line) else {
         return line;
     };
-    let picture =
-        crate::tikz::parse_document(&options, &body, &crate::colour::Colours::new(), metrics);
+    let picture = crate::tikz::parse_document(
+        &options,
+        &body,
+        crate::colour::Colours::predefined(),
+        metrics,
+    );
     let (_, height) = picture.extent();
     let span = picture_span(height, &options, &body);
     match is_centred(&line) {
