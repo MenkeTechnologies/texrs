@@ -883,8 +883,9 @@ Scaling with `--jobs`, on those same 60 documents:
 | speedup | 1.00x | 1.85x | 2.71x | 4.96x | 6.73x | 5.58x |
 
 Ten cores, so the fall at 16 is oversubscription rather than a limit in the
-work. A single document is still a single thread: this parallelises the batch,
-not the engine.
+work. At v0.3.0 a single document was a single thread: this parallelised the
+batch, not the engine. Page drawing, and page encoding on the `--dvi` path, now
+fan out inside one document; see below and the 2026-10-17 measurement.
 
 **PDF assembly.** `pdf::document` writes each font and picture once and
 finds an already-written one by address before comparing contents, so a font
@@ -923,6 +924,72 @@ stack use is constant and the bound is arithmetic rather than memory:
 |---|---|---|---|
 | `tex` | ok | **capacity exceeded** | capacity exceeded |
 | texrs | ok | ok | ok |
+
+### Measured, 2026-10-17 at `0d7158a91a`
+
+Taken at commit `0d7158a91a`, release build, on an 18-core aarch64 macOS machine
+that was under other load the whole time (1-minute load average between 15 and
+26). Every figure is a median of interleaved runs — 9 per thread count for the
+large document, 7 for the other two — with a warm kpse path cache and
+`SOURCE_DATE_EPOCH=1`, on the default PDF path. The stage split comes from
+timers placed between stages in a scratch build; they are not in the tree.
+
+**Where one document's time goes**: a 1001-page LaTeX document from 4.3 MB of
+source, wall time in ms.
+
+| stage | 1 thread | 8 threads |
+|---|---|---|
+| process start and exit | 8 | 8 |
+| argument parsing, reading the source | 8 | 9 |
+| desugar, `.aux` update | 3 | 3 |
+| preamble text (`latex::preamble_at`) | 100 | 102 |
+| preamble preload | 3 | 3 |
+| lowering (`Lowerer::lower`) | 190 | 194 |
+| compile and VM run | 4 | 4 |
+| font setup, references, contents | 1 | 1 |
+| line breaking (`typeset::break_lines_measured`) | 394 | 408 |
+| pagination (`typeset::paginate`) | 39 | 39 |
+| page-start prescan (`typeset::page_starts`) | 24 | 24 |
+| page drawing (parallel) | 419 | 79 |
+| `pdf::document` | 48 | 51 |
+| page count of the written PDF, twice | 43 | 45 |
+| file write | 7 | 17 |
+| drops and returns | 3 | 4 |
+| **sum of stage medians** | **1294** | **990** |
+| **median wall** | **1351** | **990** |
+| median user CPU | 1250 | 1430 |
+
+The kpse startup prefetch runs on a thread of its own and overlaps the stages
+after it, so it has no row. At one thread the pages are drawn on the pool's one
+worker while the calling thread waits, which is the drawing row.
+
+Page drawing is the only stage that fans out. At 8 threads the other ~910 ms is
+serial, and most of it is in three places:
+
+- **Line breaking**, `typeset::break_lines_measured`: one loop over paragraphs
+  carrying the colour, face and size stacks, the centring flag and the list
+  depth. A paragraph's `fill` depends on nothing else, so it can be split the
+  way drawing was — a serial pass recording that state per paragraph, then the
+  paragraphs in parallel. About 40% of it is `linebreak::Hyphenator::points`.
+- **Lowering**, `lower::Lowerer::lower`: the expander, whose macro and register
+  state carries from token to token. Serial by nature.
+- **Preamble text**, `latex::preamble_at`: package loading (`load::preamble`,
+  ~42 ms), the counter scan in `latex::support` (~22 ms), the class check in
+  `numbering` (~22 ms) and the label seeds (~8 ms) — independent scans of the
+  same source.
+
+Smaller: `pdf::document` spends most of its time in the SHA-256 of the whole
+file for `/ID` (`pdf::file_identifier`); the page count is taken by inflating
+the finished PDF, once in `main.rs` `write_pdf` and again in
+`pdf_output_line`; `paginate` and `page_starts` are sequential by definition.
+
+**Scaling with `TEXRS_THREADS`**, median wall in ms:
+
+| document | 1 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| LaTeX, 1001 pages, 4.3 MB | 1351 | 1188 | 1097 | 990 | 933 |
+| plain TeX, 394 pages, 2.0 MB | 425 | 383 | 343 | 310 | 302 |
+| LaTeX, 200 pages, 0.9 MB | 271 | 240 | 221 | 211 | 209 |
 
 ## [0x0B] Releasing
 
