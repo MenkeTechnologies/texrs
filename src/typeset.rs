@@ -3680,7 +3680,7 @@ const PARALLEL_PARAGRAPHS: usize = 64;
 
 /// What breaking one paragraph needs to know that the paragraphs before it
 /// left behind.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct ParagraphStart {
     colours: Vec<Spec>,
     faces: Vec<Face>,
@@ -3696,16 +3696,62 @@ struct ParagraphStart {
 }
 
 /// The state each paragraph begins with, advanced from `carried` in document
-/// order by the same routing `break_measured` breaks with, but without
-/// measuring or breaking anything.
+/// order exactly as `paragraph_starts_serial` advances it.
 ///
-/// Pictures, listings and tables leave every piece of the state where they
-/// found it (a table READS the stacks; see `table_lines`). In prose the region
-/// markers move the centring flag and the depth, and the stacks move only in
-/// a word `word_width` splits into styled runs -- one holding a colour or face
-/// marker -- so only those words are walked, split exactly as `fill` splits
-/// them.
+/// Reading a paragraph's markers is the cost, and a paragraph's markers do the
+/// same thing to the state whatever state they meet: a stack pops some number
+/// of entries it did not push and then leaves what it pushed, and the centring
+/// flag and the depth are each SET or left alone. So every paragraph's effect
+/// is read in parallel against stacks not yet known (`ParagraphEffect`); a
+/// serial walk applies the effects in order, which for the common paragraph
+/// that touches nothing is three flag tests, and records the state at the head
+/// of each chunk of paragraphs; and the chunks then fill in their own
+/// paragraphs' states in parallel.
 fn paragraph_starts(
+    paras: &[&str],
+    layout: &Layout,
+    carried: ParagraphStart,
+) -> Vec<ParagraphStart> {
+    use rayon::prelude::*;
+    let effects: Vec<ParagraphEffect> = paras
+        .par_iter()
+        .map(|para| ParagraphEffect::of(para, layout))
+        .collect();
+    let size = paras
+        .len()
+        .div_ceil(rayon::current_num_threads() * 4)
+        .max(1);
+    let mut state = carried;
+    let mut heads = Vec::with_capacity(paras.len().div_ceil(size));
+    for (at, (para, effect)) in paras.iter().zip(&effects).enumerate() {
+        if at % size == 0 {
+            heads.push(state.clone());
+        }
+        effect.advance(para, layout, &mut state);
+    }
+    let chunks: Vec<Vec<ParagraphStart>> = paras
+        .par_chunks(size)
+        .zip(effects.par_chunks(size))
+        .zip(heads)
+        .map(|((paras, effects), mut state)| {
+            paras
+                .iter()
+                .zip(effects)
+                .map(|(para, effect)| {
+                    let start = state.clone();
+                    effect.advance(para, layout, &mut state);
+                    start
+                })
+                .collect()
+        })
+        .collect();
+    chunks.concat()
+}
+
+/// The state each paragraph begins with, one paragraph after another: what
+/// `paragraph_starts` must reproduce.
+#[cfg(test)]
+fn paragraph_starts_serial(
     paras: &[&str],
     layout: &Layout,
     mut carried: ParagraphStart,
@@ -3713,37 +3759,112 @@ fn paragraph_starts(
     let mut starts = Vec::with_capacity(paras.len());
     for para in paras {
         starts.push(carried.clone());
-        let (_, para) = paragraph_params(para, &layout.breaking);
-        let para: &str = &para;
-        if is_block_para(para) || listing_lines(para).is_some() || para.contains(TABLE_ROW) {
-            continue;
-        }
-        let ParagraphStart {
+        advance_paragraph(para, layout, &mut carried);
+    }
+    starts
+}
+
+/// Move `state` over one paragraph, without measuring or breaking anything.
+fn advance_paragraph(para: &str, layout: &Layout, state: &mut ParagraphStart) {
+    let ParagraphStart {
+        colours,
+        faces,
+        sizes,
+        centred,
+        depth,
+    } = state;
+    let (now_centred, now_depth) = walk_paragraph(
+        para,
+        layout,
+        &mut Live {
             colours,
             faces,
             sizes,
-            centred,
-            depth,
-        } = &mut carried;
-        for part in para.split([PAGE_BREAK, VERTICAL_SPACE]) {
-            let mut rest = part;
-            loop {
-                let (stretch, marker) = next_stretch(rest);
-                if stretch.contains(STACK_MARKERS) {
-                    for word in words_carrying_refs(stretch) {
-                        if word.contains(STACK_MARKERS) {
-                            styled_runs(&word, colours, faces, sizes);
-                        }
+        },
+    );
+    *centred = now_centred.unwrap_or(*centred);
+    *depth = now_depth.unwrap_or(*depth);
+}
+
+/// Read one paragraph's markers into `styles` by the same routing
+/// `break_measured` breaks with, and say what it last SET the centring flag
+/// and the list depth to, if anything.
+///
+/// Pictures, listings and tables leave every piece of the state where they
+/// found it (a table READS the stacks; see `table_lines`). In prose the region
+/// markers set the centring flag and the depth, and the stacks move only in a
+/// word `word_width` splits into styled runs -- one holding a colour or face
+/// marker -- so only those words are walked, split exactly as `fill` splits
+/// them.
+fn walk_paragraph(
+    para: &str,
+    layout: &Layout,
+    styles: &mut impl StyleStacks,
+) -> (Option<bool>, Option<usize>) {
+    let (mut centred, mut depth) = (None, None);
+    let (_, para) = paragraph_params(para, &layout.breaking);
+    let para: &str = &para;
+    if is_block_para(para) || listing_lines(para).is_some() || para.contains(TABLE_ROW) {
+        return (centred, depth);
+    }
+    for part in para.split([PAGE_BREAK, VERTICAL_SPACE]) {
+        let mut rest = part;
+        loop {
+            let (stretch, marker) = next_stretch(rest);
+            if stretch.contains(STACK_MARKERS) {
+                for word in words_carrying_refs(stretch) {
+                    if word.contains(STACK_MARKERS) {
+                        walk_styles(&word, styles);
                     }
                 }
-                match marker {
-                    Some(marker) => rest = cross_region(rest, stretch, marker, centred, depth),
-                    None => break,
-                }
+            }
+            let Some(marker) = marker else { break };
+            // `cross_region` SETS what it moves, whatever it was before.
+            let (mut now_centred, mut now_depth) = (false, 0);
+            rest = cross_region(rest, stretch, marker, &mut now_centred, &mut now_depth);
+            match marker {
+                LIST_INDENT => depth = Some(now_depth),
+                _ => centred = Some(now_centred),
             }
         }
     }
-    starts
+    (centred, depth)
+}
+
+/// What one paragraph does to the state the paragraph before it left, read
+/// without knowing that state.
+struct ParagraphEffect {
+    styles: StyleEffect,
+    centred: Option<bool>,
+    depth: Option<usize>,
+}
+
+impl ParagraphEffect {
+    fn of(para: &str, layout: &Layout) -> Self {
+        let mut styles = StyleEffect::default();
+        let (centred, depth) = walk_paragraph(para, layout, &mut styles);
+        ParagraphEffect {
+            styles,
+            centred,
+            depth,
+        }
+    }
+
+    /// Move `state` over the paragraph this was read from. A stack the
+    /// paragraph moves that is EMPTY has no floor for its pops to stop at --
+    /// only the breaker's colour stack starts that way, until its first push
+    /// -- so that paragraph is walked again against the state itself.
+    fn advance(&self, para: &str, layout: &Layout, state: &mut ParagraphStart) {
+        if !self
+            .styles
+            .apply(&mut state.colours, &mut state.faces, &mut state.sizes)
+        {
+            advance_paragraph(para, layout, state);
+            return;
+        }
+        state.centred = self.centred.unwrap_or(state.centred);
+        state.depth = self.depth.unwrap_or(state.depth);
+    }
 }
 
 /// One paragraph's lines, from the state the paragraphs before it left, which
@@ -4259,7 +4380,7 @@ const PARALLEL_BLOCKS: usize = 8;
 
 /// What drawing one page needs to know that a serial walk over the pages
 /// before it would have left behind.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct PageStart {
     colours: Vec<Spec>,
     faces: Vec<Face>,
@@ -4272,11 +4393,64 @@ struct PageStart {
 ///
 /// A `\color`, `\ttfamily` or size change holds until its group closes, which
 /// may be pages later, so the stacks cross page boundaries; the folio counts
-/// from one and starts again after a title page. Both are advanced here in
-/// page order by the same line routing `to_pdf` draws with: lines that are
-/// space, images, pictures or table rules never reach the style splitter, and
-/// the rest walk the stacks exactly once.
+/// from one and starts again after a title page.
+///
+/// Reading a page's lines is the cost, and what they do to the stacks does not
+/// depend on the stacks they meet (see `StyleEffect`). So on a pool of more
+/// than one thread each page's effect, and whether it restarts the folio, is
+/// read in parallel, and a serial walk applies them in page order -- one
+/// truncate and one short extend per page that moves a stack. A handful of
+/// pages, or one thread, walks the lines in turn (`page_starts_serial`), which
+/// is what this reproduces.
 fn page_starts(
+    chunks: &[Vec<&str>],
+    mut colours: Vec<Spec>,
+    mut faces: Vec<Face>,
+    mut sizes: Vec<TypeSize>,
+) -> Vec<PageStart> {
+    use rayon::prelude::*;
+    if chunks.len() < PARALLEL_PAGES || rayon::current_num_threads() == 1 {
+        return page_starts_serial(chunks, colours, faces, sizes);
+    }
+    let effects: Vec<(bool, StyleEffect)> = chunks
+        .par_iter()
+        .map(|chunk| {
+            let mut effect = StyleEffect::default();
+            walk_page(chunk, &mut effect);
+            (restarts_here(chunk), effect)
+        })
+        .collect();
+    let mut folio = 1;
+    let mut starts = Vec::with_capacity(chunks.len());
+    for (chunk, (restarts, effect)) in chunks.iter().zip(&effects) {
+        if *restarts {
+            folio = 1;
+        }
+        starts.push(PageStart {
+            colours: colours.clone(),
+            faces: faces.clone(),
+            sizes: sizes.clone(),
+            folio,
+        });
+        folio += 1;
+        // Only an empty stack defeats the effect, and every stack here is
+        // seeded; walking the page again keeps that an assumption checked.
+        if !effect.apply(&mut colours, &mut faces, &mut sizes) {
+            walk_page(
+                chunk,
+                &mut Live {
+                    colours: &mut colours,
+                    faces: &mut faces,
+                    sizes: &mut sizes,
+                },
+            );
+        }
+    }
+    starts
+}
+
+/// The style stacks and folio each page begins with, one page after another.
+fn page_starts_serial(
     chunks: &[Vec<&str>],
     mut colours: Vec<Spec>,
     mut faces: Vec<Face>,
@@ -4295,22 +4469,36 @@ fn page_starts(
             folio,
         });
         folio += 1;
-        for &line in chunk {
-            let line = without_longtable(line);
-            if is_space_line(line)
-                || image_parts(line).is_some()
-                || picture_parts(line).is_some()
-                || line.starts_with(TABLE_MARK)
-            {
-                continue;
-            }
-            let line = line.strip_prefix(CENTRE).unwrap_or(line);
-            let line = line.strip_prefix(JUSTIFY).unwrap_or(line);
-            let (_, line) = strip_indent(line);
-            styled_runs(line, &mut colours, &mut faces, &mut sizes);
-        }
+        walk_page(
+            chunk,
+            &mut Live {
+                colours: &mut colours,
+                faces: &mut faces,
+                sizes: &mut sizes,
+            },
+        );
     }
     starts
+}
+
+/// Read one page's style markers into `styles` by the same line routing
+/// `to_pdf` draws with: lines that are space, images, pictures or table rules
+/// never reach the style splitter, and the rest walk the stacks exactly once.
+fn walk_page(chunk: &[&str], styles: &mut impl StyleStacks) {
+    for &line in chunk {
+        let line = without_longtable(line);
+        if is_space_line(line)
+            || image_parts(line).is_some()
+            || picture_parts(line).is_some()
+            || line.starts_with(TABLE_MARK)
+        {
+            continue;
+        }
+        let line = line.strip_prefix(CENTRE).unwrap_or(line);
+        let line = line.strip_prefix(JUSTIFY).unwrap_or(line);
+        let (_, line) = strip_indent(line);
+        walk_styles(line, styles);
+    }
 }
 
 /// Split broken lines into pages: at a forced break, and otherwise wherever
@@ -6747,58 +6935,58 @@ fn styled_runs(
     faces: &mut Vec<Face>,
     sizes: &mut Vec<TypeSize>,
 ) -> Vec<StyledRun> {
-    let mut runs = Vec::new();
-    let mut text = String::new();
-    let mut chars = line.chars().peekable();
-    let default: Spec = (
-        DEFAULT_COLOUR.0.to_string(),
-        DEFAULT_COLOUR.1.to_string(),
-        DEFAULT_COLOUR.2.to_string(),
-    );
-    let top = |stack: &[Spec]| stack.last().cloned().unwrap_or_else(|| default.clone());
+    let mut drawn = Drawn {
+        stacks: Live {
+            colours: stack,
+            faces,
+            sizes,
+        },
+        runs: Vec::new(),
+        text: String::new(),
+    };
+    walk_styles(line, &mut drawn);
+    drawn.flush();
+    drawn.runs
+}
+
+/// What the style markers of a line DO, one call per marker, to whatever is
+/// keeping the stacks: the live stacks a page is drawn from (`Live`, and
+/// `Drawn` around it, which also cuts the line into runs), or the record of a
+/// stretch's effect on stacks not yet known (`StyleEffect`).
+///
+/// One reader of the markers for all of them, so the parallel prescans cannot
+/// read a marker differently from the page that draws it.
+trait StyleStacks {
+    /// A character that prints.
+    fn text(&mut self, _ch: char) {}
+    /// A formula's setting, which is a run of its own.
+    fn math(&mut self, _spec: &str) {}
+    /// A colour opens; `None` is a spec that is not three components, which
+    /// pushes the colour already in force.
+    fn push_colour(&mut self, spec: Option<Spec>);
+    fn pop_colour(&mut self);
+    /// A face opens, as a code applied to the face in force.
+    fn push_face(&mut self, code: char);
+    fn pop_face(&mut self);
+    /// A size opens; `None` is a spec that cannot be read, which pushes the
+    /// size already in force.
+    fn push_size(&mut self, size: Option<TypeSize>);
+    fn pop_size(&mut self);
+}
+
+/// Read one line's style markers into `stacks`.
+fn walk_styles(line: &str, stacks: &mut impl StyleStacks) {
+    let mut chars = line.chars();
     while let Some(ch) = chars.next() {
         match ch {
             FACE_PUSH => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
                 // The code character belongs to the marker whatever it is: a
                 // marker read as one character would set the other as a glyph.
                 let code = chars.next().unwrap_or_else(|| Face::MAIN.code());
-                // Applied to the face already in force, so `\textbf` inside a
-                // `\sffamily` group reaches the page as the sans BOLD face
-                // rather than replacing the family.
-                faces.push(Face::from_code(code, current_face(faces)));
+                stacks.push_face(code);
             }
-            FACE_POP => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
-                // The bottom entry is the main face and is never popped, so an
-                // unbalanced close leaves the document in its own face.
-                if faces.len() > 1 {
-                    faces.pop();
-                }
-            }
+            FACE_POP => stacks.pop_face(),
             SIZE_PUSH => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
                 // The spec runs to the marker that closes it, which is the
                 // same character: read to it whatever is between, so a
                 // damaged spec costs its own heading and not the rest of the
@@ -6813,37 +7001,11 @@ fn styled_runs(
                 // A spec that cannot be read still pushes, because the
                 // `SIZE_POP` that closes it is coming either way and has to
                 // pop what this pushed rather than the entry underneath.
-                let pushed = match size_spec(&spec) {
-                    Some((size, leading)) => TypeSize { size, leading },
-                    None => current_size(sizes),
-                };
-                sizes.push(pushed);
+                stacks
+                    .push_size(size_spec(&spec).map(|(size, leading)| TypeSize { size, leading }));
             }
-            SIZE_POP => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
-                // The bottom entry is the document's own size and is never
-                // popped: an unbalanced close leaves the body size in force
-                // rather than nothing at all.
-                if sizes.len() > 1 {
-                    sizes.pop();
-                }
-            }
+            SIZE_POP => stacks.pop_size(),
             '\u{1}' => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
                 let mut spec = String::new();
                 for c in chars.by_ref() {
                     if c == '\u{2}' {
@@ -6863,12 +7025,7 @@ fn styled_runs(
                             break;
                         }
                     }
-                    runs.push((
-                        crate::math::run(&spec),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
+                    stacks.math(&spec);
                     continue;
                 }
                 let p: Vec<&str> = spec.split(',').collect();
@@ -6876,32 +7033,305 @@ fn styled_runs(
                 // colour it inherits -- because the `\u{3}` that closes it is
                 // coming either way and has to pop what this pushed, not the
                 // entry underneath.
-                let pushed = match p.len() == 3 {
-                    true => (p[0].to_string(), p[1].to_string(), p[2].to_string()),
-                    false => top(stack),
-                };
-                stack.push(pushed);
+                stacks.push_colour(match p.len() == 3 {
+                    true => Some((p[0].to_string(), p[1].to_string(), p[2].to_string())),
+                    false => None,
+                });
             }
-            '\u{3}' => {
-                if !text.is_empty() {
-                    runs.push((
-                        std::mem::take(&mut text),
-                        top(stack),
-                        current_face(faces),
-                        current_size(sizes),
-                    ));
-                }
-                if stack.len() > 1 {
-                    stack.pop();
-                }
-            }
-            c => text.push(c),
+            '\u{3}' => stacks.pop_colour(),
+            c => stacks.text(c),
         }
     }
-    if !text.is_empty() {
-        runs.push((text, top(stack), current_face(faces), current_size(sizes)));
+}
+
+/// The colour in force, which is the document's default when nothing has
+/// pushed.
+fn current_colour(colours: &[Spec]) -> Spec {
+    colours.last().cloned().unwrap_or_else(|| {
+        (
+            DEFAULT_COLOUR.0.to_string(),
+            DEFAULT_COLOUR.1.to_string(),
+            DEFAULT_COLOUR.2.to_string(),
+        )
+    })
+}
+
+/// The stacks themselves, moved by the markers.
+struct Live<'a> {
+    colours: &'a mut Vec<Spec>,
+    faces: &'a mut Vec<Face>,
+    sizes: &'a mut Vec<TypeSize>,
+}
+
+impl StyleStacks for Live<'_> {
+    fn push_colour(&mut self, spec: Option<Spec>) {
+        let pushed = spec.unwrap_or_else(|| current_colour(self.colours));
+        self.colours.push(pushed);
     }
-    runs
+    fn pop_colour(&mut self) {
+        // The bottom entry is the document's default and is never popped.
+        if self.colours.len() > 1 {
+            self.colours.pop();
+        }
+    }
+    fn push_face(&mut self, code: char) {
+        // Applied to the face already in force, so `\textbf` inside a
+        // `\sffamily` group reaches the page as the sans BOLD face rather
+        // than replacing the family.
+        self.faces
+            .push(Face::from_code(code, current_face(self.faces)));
+    }
+    fn pop_face(&mut self) {
+        // The bottom entry is the main face and is never popped, so an
+        // unbalanced close leaves the document in its own face.
+        if self.faces.len() > 1 {
+            self.faces.pop();
+        }
+    }
+    fn push_size(&mut self, size: Option<TypeSize>) {
+        let pushed = size.unwrap_or_else(|| current_size(self.sizes));
+        self.sizes.push(pushed);
+    }
+    fn pop_size(&mut self) {
+        // The bottom entry is the document's own size and is never popped:
+        // an unbalanced close leaves the body size in force rather than
+        // nothing at all.
+        if self.sizes.len() > 1 {
+            self.sizes.pop();
+        }
+    }
+}
+
+/// The live stacks, and the line cut into runs at every marker: each run is
+/// the text between two markers in the style in force over it.
+struct Drawn<'a> {
+    stacks: Live<'a>,
+    runs: Vec<StyledRun>,
+    text: String,
+}
+
+impl Drawn<'_> {
+    /// End the run in hand, in the style it was set in.
+    fn flush(&mut self) {
+        if !self.text.is_empty() {
+            let text = std::mem::take(&mut self.text);
+            let run = self.styled(text);
+            self.runs.push(run);
+        }
+    }
+    fn styled(&self, text: String) -> StyledRun {
+        (
+            text,
+            current_colour(self.stacks.colours),
+            current_face(self.stacks.faces),
+            current_size(self.stacks.sizes),
+        )
+    }
+}
+
+impl StyleStacks for Drawn<'_> {
+    fn text(&mut self, ch: char) {
+        self.text.push(ch);
+    }
+    fn math(&mut self, spec: &str) {
+        self.flush();
+        let run = self.styled(crate::math::run(spec));
+        self.runs.push(run);
+    }
+    fn push_colour(&mut self, spec: Option<Spec>) {
+        self.flush();
+        self.stacks.push_colour(spec);
+    }
+    fn pop_colour(&mut self) {
+        self.flush();
+        self.stacks.pop_colour();
+    }
+    fn push_face(&mut self, code: char) {
+        self.flush();
+        self.stacks.push_face(code);
+    }
+    fn pop_face(&mut self) {
+        self.flush();
+        self.stacks.pop_face();
+    }
+    fn push_size(&mut self, size: Option<TypeSize>) {
+        self.flush();
+        self.stacks.push_size(size);
+    }
+    fn pop_size(&mut self) {
+        self.flush();
+        self.stacks.pop_size();
+    }
+}
+
+/// What a stretch of markers does to one stack, read without knowing what is
+/// on it.
+///
+/// Every stack here has a floor -- its bottom entry is never popped -- and a
+/// pop of an entry the stretch pushed itself always succeeds, since the floor
+/// is under it. So any sequence of pushes and pops comes to `pops` pops of
+/// entries that were there before (stopping at the floor) followed by
+/// `pushes`. A push that copies or modifies the entry in force can only meet,
+/// when the stretch's own pushes are all gone, the entry that the final
+/// `pops` leave on top: each entry says how it is made from that one.
+struct StackEffect<E> {
+    pops: usize,
+    pushes: Vec<E>,
+    /// Whether any marker moved this stack at all, which is what an EMPTY
+    /// stack -- one without a floor -- cannot be answered without.
+    moved: bool,
+}
+
+impl<E> Default for StackEffect<E> {
+    fn default() -> Self {
+        StackEffect {
+            pops: 0,
+            pushes: Vec::new(),
+            moved: false,
+        }
+    }
+}
+
+impl<E> StackEffect<E> {
+    fn push(&mut self, entry: E) {
+        self.moved = true;
+        self.pushes.push(entry);
+    }
+
+    fn pop(&mut self) {
+        self.moved = true;
+        if self.pushes.pop().is_none() {
+            self.pops += 1;
+        }
+    }
+
+    /// Apply this to a stack with a floor, making each pushed entry from the
+    /// entry the pops leave on top.
+    fn apply<T>(&self, stack: &mut Vec<T>, make: impl Fn(&E, &T) -> T) {
+        if !self.moved {
+            return;
+        }
+        stack.truncate(stack.len().saturating_sub(self.pops).max(1));
+        let Some(below) = stack.last() else { return };
+        let pushed: Vec<T> = self.pushes.iter().map(|entry| make(entry, below)).collect();
+        stack.extend(pushed);
+    }
+
+    /// Whether `apply` can answer for `stack`: it can for any stack with its
+    /// floor in place, and for any stack this does not move.
+    fn applies_to<T>(&self, stack: &[T]) -> bool {
+        !self.moved || !stack.is_empty()
+    }
+}
+
+/// A pushed colour or size: one the marker named, or a copy of the one in
+/// force where it was pushed.
+#[derive(Clone)]
+enum Pushed<T> {
+    Named(T),
+    InForce,
+}
+
+impl<T: Clone> Pushed<T> {
+    fn make(&self, below: &T) -> T {
+        match self {
+            Pushed::Named(value) => value.clone(),
+            Pushed::InForce => below.clone(),
+        }
+    }
+}
+
+/// A pushed face, as what it makes of each face it could be pushed onto. A
+/// face code modifies the face in force (`Face::from_code`), and there are
+/// only twelve faces, so a chain of codes is a table of twelve.
+#[derive(Clone, Copy)]
+struct FaceMap([u8; 12]);
+
+impl FaceMap {
+    const IDENTITY: FaceMap = FaceMap([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+
+    /// This, and then `code` applied to what it made.
+    fn then(self, code: char) -> FaceMap {
+        FaceMap(
+            self.0
+                .map(|at| Face::from_code(code, Face::ALL[at as usize]).index() as u8),
+        )
+    }
+
+    fn of(self, face: Face) -> Face {
+        Face::ALL[self.0[face.index()] as usize]
+    }
+}
+
+/// What a stretch of markers does to the colour, face and size stacks, read
+/// by the same `walk_styles` that moves the stacks themselves.
+#[derive(Default)]
+struct StyleEffect {
+    colours: StackEffect<Pushed<Spec>>,
+    faces: StackEffect<FaceMap>,
+    sizes: StackEffect<Pushed<TypeSize>>,
+}
+
+impl StyleEffect {
+    /// Apply this to the three stacks, or leave them as they are and say so
+    /// when a stack it moves is empty.
+    fn apply(
+        &self,
+        colours: &mut Vec<Spec>,
+        faces: &mut Vec<Face>,
+        sizes: &mut Vec<TypeSize>,
+    ) -> bool {
+        if !(self.colours.applies_to(colours)
+            && self.faces.applies_to(faces)
+            && self.sizes.applies_to(sizes))
+        {
+            return false;
+        }
+        self.colours.apply(colours, Pushed::make);
+        self.faces.apply(faces, |map, below| map.of(*below));
+        self.sizes.apply(sizes, Pushed::make);
+        true
+    }
+}
+
+impl StyleStacks for StyleEffect {
+    fn push_colour(&mut self, spec: Option<Spec>) {
+        let pushed = match spec {
+            Some(spec) => Pushed::Named(spec),
+            None => self
+                .colours
+                .pushes
+                .last()
+                .cloned()
+                .unwrap_or(Pushed::InForce),
+        };
+        self.colours.push(pushed);
+    }
+    fn pop_colour(&mut self) {
+        self.colours.pop();
+    }
+    fn push_face(&mut self, code: char) {
+        let under = self
+            .faces
+            .pushes
+            .last()
+            .copied()
+            .unwrap_or(FaceMap::IDENTITY);
+        self.faces.push(under.then(code));
+    }
+    fn pop_face(&mut self) {
+        self.faces.pop();
+    }
+    fn push_size(&mut self, size: Option<TypeSize>) {
+        let pushed = match size {
+            Some(size) => Pushed::Named(size),
+            None => self.sizes.pushes.last().cloned().unwrap_or(Pushed::InForce),
+        };
+        self.sizes.push(pushed);
+    }
+    fn pop_size(&mut self) {
+        self.sizes.pop();
+    }
 }
 
 /// The face in force, which is the main one when nothing has pushed.
@@ -7240,5 +7670,152 @@ mod font_file_tests {
             FontFile::parse("").resolve(Some(std::path::Path::new("/tmp"))),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod prescan_tests {
+    use super::*;
+
+    /// xorshift64*, so the documents are the same on every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % n
+        }
+    }
+
+    /// A word of text glued to style markers, unbalanced as often as not:
+    /// named and damaged colours, every face code and a damaged one, named
+    /// and damaged sizes, and the region markers.
+    fn piece(rng: &mut Rng) -> String {
+        match rng.below(16) {
+            0 => format!("\u{1}{},0,{}\u{2}", rng.below(3), rng.below(3)),
+            1 => "\u{1}bad\u{2}".to_string(),
+            2 | 3 => "\u{3}".to_string(),
+            4 | 5 => {
+                let codes = [
+                    'r', 's', 'm', 'b', 'i', 'n', 'B', 'j', 'S', 'J', 'k', 'M', 'K', '?',
+                ];
+                format!("{FACE_PUSH}{}", codes[rng.below(codes.len())])
+            }
+            6 | 7 => FACE_POP.to_string(),
+            8 => format!(
+                "{SIZE_PUSH}{};{}{SIZE_PUSH}",
+                8 + rng.below(10),
+                10 + rng.below(10)
+            ),
+            9 => format!("{SIZE_PUSH}junk{SIZE_PUSH}"),
+            10 => SIZE_POP.to_string(),
+            11 => CENTRE.to_string(),
+            12 => CENTRE_END.to_string(),
+            13 => format!("{LIST_INDENT}{}", rng.below(4)),
+            _ => ["word", "x", "abc"][rng.below(3)].to_string(),
+        }
+    }
+
+    fn document(seed: u64, paragraphs: usize) -> Vec<String> {
+        let mut rng = Rng(seed);
+        (0..paragraphs)
+            .map(|_| {
+                let mut para = String::new();
+                for _ in 0..rng.below(24) {
+                    para.push_str(&piece(&mut rng));
+                    match rng.below(5) {
+                        0 => para.push(' '),
+                        1 if rng.below(8) == 0 => para.push(PAGE_BREAK),
+                        _ => {}
+                    }
+                }
+                para
+            })
+            .collect()
+    }
+
+    fn seeded(colours: Vec<Spec>, layout: &Layout) -> ParagraphStart {
+        ParagraphStart {
+            colours,
+            faces: vec![Face::MAIN],
+            sizes: vec![TypeSize {
+                size: layout.size,
+                leading: layout.leading,
+            }],
+            centred: false,
+            depth: 0,
+        }
+    }
+
+    /// The parallel paragraph prescan records what the serial one does, on
+    /// the breaker's empty colour stack and on a seeded one.
+    #[test]
+    fn paragraph_starts_match_the_serial_walk() {
+        let layout = Layout::default();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        for seed in 1..=40u64 {
+            let doc = document(seed, 50 + seed as usize * 7);
+            let paras: Vec<&str> = doc.iter().map(String::as_str).collect();
+            for colours in [Vec::new(), vec![current_colour(&[])]] {
+                let start = seeded(colours, &layout);
+                let serial = paragraph_starts_serial(&paras, &layout, start.clone());
+                let parallel = pool.install(|| paragraph_starts(&paras, &layout, start));
+                assert_eq!(parallel, serial, "seed {seed}");
+            }
+        }
+    }
+
+    /// The parallel page prescan records what the serial one does, the folio
+    /// included.
+    #[test]
+    fn page_starts_match_the_serial_walk() {
+        let layout = Layout::default();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        for seed in 1..=40u64 {
+            let doc = document(seed, 200);
+            let mut rng = Rng(seed ^ 0x9E37_79B9);
+            let mut chunks: Vec<Vec<&str>> = Vec::new();
+            let mut lines = doc.iter().map(String::as_str);
+            while let Some(first) = lines.next() {
+                let mut page = vec![first];
+                page.extend(lines.by_ref().take(rng.below(12)));
+                chunks.push(page);
+            }
+            let start = seeded(vec![current_colour(&[])], &layout);
+            let serial = page_starts_serial(
+                &chunks,
+                start.colours.clone(),
+                start.faces.clone(),
+                start.sizes.clone(),
+            );
+            let parallel =
+                pool.install(|| page_starts(&chunks, start.colours, start.faces, start.sizes));
+            assert!(chunks.len() >= PARALLEL_PAGES);
+            assert_eq!(parallel, serial, "seed {seed}");
+        }
+    }
+
+    /// A face pushed under a chain of codes is the chain applied to the face
+    /// in force, for every face it could meet.
+    #[test]
+    fn face_map_is_the_codes_applied_in_turn() {
+        let codes = ['s', 'b', '?', 'n', 'i', 'M', 'r'];
+        for below in Face::ALL {
+            let mut map = FaceMap::IDENTITY;
+            let mut face = below;
+            for code in codes {
+                map = map.then(code);
+                face = Face::from_code(code, face);
+                assert_eq!(map.of(below), face);
+            }
+        }
     }
 }

@@ -900,8 +900,15 @@ time and stay sequential; output is byte-identical across runs and thread counts
 
 **Page drawing.** Page breaking is sequential, but once the lines are broken
 and cut into pages, drawing a page reads only its own lines, the colour, face
-and size stacks as they stood where the page begins, and its folio. One cheap
-serial pass over the lines records those per page; the pages are then drawn
+and size stacks as they stood where the page begins, and its folio. What a
+run of lines does to a stack does not depend on what the stack holds: it pops
+some number of entries it did not push (stopping at the floor every stack
+keeps) and leaves the entries it did push, each of which is either named by its
+marker or made from the entry in force (a face code modifies the face below, so
+a chain of codes is a table over the twelve faces). So on more than one thread
+each page's effect on the stacks is read in parallel, and a serial walk only
+applies those effects in page order to record each page's start; one thread, or
+a handful of pages, walks the lines in turn. The pages are then drawn
 independently and collected in page order, so a single document's page content
 scales across cores and the file is identical at any thread count. A document
 of only a few pages is drawn on the calling thread. Each page also shares its
@@ -910,9 +917,12 @@ which was the larger share of this stage before the fan-out.
 
 **Line breaking.** What one paragraph hands the next is only the colour, face
 and size stacks, the centring flag and the list depth. On a pool of more than
-one thread, a serial pass that reads the markers without measuring anything
-records that state at each paragraph's start; the paragraphs are then broken
-in parallel and collected in document order, and the paragraph space between
+one thread, each paragraph's effect on that state is read in parallel without
+measuring anything (the stacks as for page drawing; the centring flag and the
+depth are each set or left alone), a serial walk applies the effects in order
+and records the state at the head of each chunk of paragraphs, and the chunks
+fill in their own paragraphs' start states in parallel; the paragraphs are then
+broken in parallel and collected in document order, and the paragraph space between
 two is decided on the collected lines. One thread, or a document of fewer than
 64 paragraphs, walks the paragraphs in turn. Liang's patterns and the
 `\hyphenation` exceptions are held in a letter trie, as `tex.web` holds them,
@@ -921,7 +931,12 @@ hash of every substring; it breaks every word of `/usr/share/dict/words`
 where the hash table did. Measured 2026-10-17 on the 1001-page document below,
 under load averages between 43 and 110, median wall went from 1191 ms to 839 ms
 at 8 threads and from 1664 ms to 1462 ms at one; output is byte-identical to
-the previous build at both.
+the previous build at both. Reading the paragraph and page effects in parallel
+then took the two prescans on that document from 28 and 23 ms to 7 and 2 ms at
+8 threads (median of 11 interleaved runs, load averages 6 to 9; median wall
+379 ms to 333 ms), and the page prescan from 22 ms to 10 ms at one, where it no
+longer cuts every line into runs; PDF and DVI are byte-identical to the
+previous build at 1 and 8 threads.
 
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
@@ -1097,7 +1112,8 @@ since); the page count was taken by inflating
 the finished PDF, once in `main.rs` `write_pdf` and again in
 `pdf_output_line` (since this measurement it is the writer's own count,
 carried beside the bytes in `texrs::Pdf`, and nothing is inflated);
-`paginate` and `page_starts` are sequential by definition.
+`paginate` is sequential by definition (since this measurement `page_starts`
+reads each page in parallel and only applies the per-page effects in series).
 
 **Scaling with `TEXRS_THREADS`**, median wall in ms:
 
