@@ -952,6 +952,20 @@ thread count and from 1331 ms to 1037 ms at 8, for 22% more user CPU (2450 to
 3000 ms); at one thread it is unchanged (2352 against 2356 ms). Output is
 byte-identical to the previous build at 1 and 8 threads.
 
+A formula's inputs are fixed once it is read, so its setting no longer waits
+for lowering to end: formulas are gathered in batches of 32 and each full batch
+goes to the rayon pool as it fills, while the lowerer reads on. At the end the
+lowerer sets the last part-batch itself, collects the batches by the index of
+their first formula, and fills the slots; the settings are freed on a worker.
+A document of fewer than 32 formulas, or a run with `TEXRS_THREADS=1`, sets
+every formula on the lowering thread at the end, as before. Setting reports no
+diagnostics, so there is no message order for the overlap to change. Measured
+2026-10-17 (load averages 16 to 33, medians of 9 interleaved runs, PDF): the
+35,000-formula document went from 1089 ms to 820 ms at 8 threads and 978 ms to
+778 ms at the default count; a mixed text, picture and formula document from
+1510 ms to 1317 ms at 8 and 1304 ms to 1245 ms at the default. PDF and DVI are
+byte-identical to the previous build at 1, 2 and 8 threads.
+
 **DVI pages.** On the `--dvi` path a page is its own lines and its number, so
 each page's box is built and its `bop`..`eop` commands are encoded by a writer
 of its own, in parallel; the pages are then appended in order, which is where

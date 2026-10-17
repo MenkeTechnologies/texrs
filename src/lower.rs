@@ -156,8 +156,8 @@ pub struct Lowerer {
     /// counted, so the recursion's use of the Rust stack can be bounded in
     /// bytes as well as in levels. See [`LOWER_STACK_BUDGET`].
     stack_base: usize,
-    /// The formulas read so far and not yet set; see [`crate::math::Deferred`].
-    formulas: Vec<crate::math::Deferred>,
+    /// The formulas read so far and not yet seen set; see [`crate::math::Formulas`].
+    formulas: crate::math::Formulas,
     /// The list environments open, outermost first, each with the item number
     /// it has reached.
     ///
@@ -299,7 +299,7 @@ impl Lowerer {
             text_output: false,
             depth: 0,
             stack_base: 0,
-            formulas: Vec::new(),
+            formulas: Default::default(),
             lists: Vec::new(),
             table_depth: 0,
             title_formats: std::collections::HashMap::new(),
@@ -420,12 +420,12 @@ impl Lowerer {
         match self.block(&mut lx, None) {
             Ok(mut cmds) => {
                 self.eng.note_mouth(&lx);
-                crate::math::fill(&mut cmds, std::mem::take(&mut self.formulas));
+                std::mem::take(&mut self.formulas).fill(&mut cmds);
                 self.close_reports(&mut cmds);
                 Ok(cmds)
             }
             Err(e) => {
-                self.formulas.clear();
+                self.formulas = Default::default();
                 // What was reported and recovered from before the run stopped
                 // was printed by tex before whatever stopped it, and is the
                 // reason a reader needs to make sense of a stop that follows.

@@ -304,7 +304,7 @@ pub fn lower_math(
     lx: &mut Lexer,
     tok: &Token,
     out: &mut Vec<Cmd>,
-    deferred: &mut Vec<Deferred>,
+    deferred: &mut Formulas,
 ) -> Result<bool, TexError> {
     let (style, stop) = match tok {
         // `$` and `$$`. A document reaches here only where the character has
@@ -449,7 +449,7 @@ fn consume_end(eng: &mut Engine, lx: &mut Lexer) {
 #[allow(clippy::too_many_arguments)]
 fn emit(
     out: &mut Vec<Cmd>,
-    deferred: &mut Vec<Deferred>,
+    deferred: &mut Formulas,
     f: parse::Formula,
     style: Style,
     size: f64,
@@ -463,7 +463,7 @@ fn emit(
         push(out, &set::plain(&f.flat()));
         return;
     };
-    let index = deferred.len();
+    let index = deferred.next_index();
     // The ordinary case, and the only one before `&` and `\eqno` meant
     // anything: one row, one column, no number.
     if f.is_single() && f.number.is_none() {
@@ -504,7 +504,7 @@ fn emit(
 /// (§1194's penalties), the environment (§810's columns) and the measure
 /// (§1204's equation number). Nothing the lowerer does reads a spec back, so
 /// the settings are made after lowering, on the pool when there are enough
-/// of them, and written into their slots by [`fill`].
+/// of them, and written into their slots by [`Formulas::fill`].
 pub struct Deferred {
     formula: parse::Formula,
     fonts: &'static font::MathFonts,
@@ -526,9 +526,123 @@ impl Deferred {
     }
 }
 
-/// Fewer formulas than this are set on the calling thread: fanning out costs
-/// more than a handful of formulas are worth.
-const PARALLEL_FORMULAS: usize = 16;
+/// How many formulas go to a worker at a time. A document with fewer is set
+/// on the calling thread, at the join, as is the part-batch at the end of
+/// any document: handing out a handful costs more than setting them.
+const BATCH: usize = 32;
+
+/// One batch's settings, the index of its first formula, or the panic that
+/// stopped it, to be raised where the formulas are joined.
+type Batch = (usize, std::thread::Result<Vec<Vec<String>>>);
+
+/// The formulas the lowerer has read and not yet seen set.
+///
+/// A formula's setting depends only on what its [`Deferred`] holds, which is
+/// fixed when the formula is read, so it can be set while the lowerer goes
+/// on reading the rest of the document. Formulas are collected into batches
+/// of [`BATCH`] and each full batch is handed to the rayon pool as soon as it
+/// fills; [`Formulas::fill`] sets what is left on the calling thread, waits
+/// for the batches still out and writes every setting into the slot its
+/// index names. With one thread in the pool -- `TEXRS_THREADS=1` -- nothing
+/// is handed out and every formula is set at the join, on the caller.
+///
+/// Setting reports nothing: it is arithmetic on the mlist and the families'
+/// fontdimens, so there are no diagnostics whose order the overlap could
+/// change. A panic in a worker is carried back and raised at the join, as a
+/// parallel iterator would raise it.
+#[derive(Default)]
+pub struct Formulas {
+    /// Read and not yet handed to a worker; the first is formula
+    /// `read - pending.len()`.
+    pending: Vec<Deferred>,
+    /// How many have been read: the index the next one's slot names.
+    read: usize,
+    /// How many batches are out.
+    sent: usize,
+    /// Where the batches report back, opened with the first one sent.
+    results: Option<(
+        std::sync::mpsc::Sender<Batch>,
+        std::sync::mpsc::Receiver<Batch>,
+    )>,
+}
+
+impl Formulas {
+    /// The index the next formula's slot names.
+    fn next_index(&self) -> usize {
+        self.read
+    }
+
+    fn push(&mut self, d: Deferred) {
+        self.pending.push(d);
+        self.read += 1;
+        if self.pending.len() == BATCH && rayon::current_num_threads() > 1 {
+            self.send();
+        }
+    }
+
+    /// Hand the pending batch to the pool.
+    fn send(&mut self) {
+        let batch = std::mem::replace(&mut self.pending, Vec::with_capacity(BATCH));
+        let first = self.read - batch.len();
+        let (tx, _) = self.results.get_or_insert_with(std::sync::mpsc::channel);
+        let tx = tx.clone();
+        self.sent += 1;
+        rayon::spawn(move || {
+            let specs = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                batch.iter().map(Deferred::specs).collect()
+            }));
+            // The receiver is gone only when lowering failed and its formulas
+            // were abandoned.
+            let _ = tx.send((first, specs));
+        });
+    }
+
+    /// Set every formula not yet set and write each setting into its slot.
+    ///
+    /// The settings are independent of one another and of the order they
+    /// are made in, and each lands in the slot its index names, so the
+    /// commands come out the same whatever the thread count.
+    pub fn fill(mut self, cmds: &mut [Cmd]) {
+        if self.read == 0 {
+            return;
+        }
+        let tail = std::mem::take(&mut self.pending);
+        let mut specs: Vec<Vec<String>> = Vec::with_capacity(self.read);
+        specs.resize_with(self.read - tail.len(), Vec::new);
+        specs.extend(tail.iter().map(Deferred::specs));
+        if let Some((tx, rx)) = self.results.take() {
+            drop(tx);
+            for _ in 0..self.sent {
+                let (first, batch) = receive(&rx);
+                let batch = batch.unwrap_or_else(|p| std::panic::resume_unwind(p));
+                for (at, rows) in batch.into_iter().enumerate() {
+                    specs[first + at] = rows;
+                }
+            }
+        }
+        fill_cmds(cmds, &specs);
+        // A formula-heavy document's settings are tens of thousands of small
+        // allocations, and freeing them is work nothing downstream waits on.
+        match self.sent > 0 {
+            true => rayon::spawn(move || drop((specs, tail))),
+            false => drop((specs, tail)),
+        }
+    }
+}
+
+/// The next batch back. On a pool thread -- a caller inside `install`, as the
+/// tests are -- the wait runs other jobs, which may be the batches it is
+/// waiting for; elsewhere it blocks.
+fn receive(rx: &std::sync::mpsc::Receiver<Batch>) -> Batch {
+    loop {
+        if let Ok(b) = rx.try_recv() {
+            return b;
+        }
+        if rayon::yield_now() != Some(rayon::Yield::Executed) {
+            return rx.recv().expect("every batch sent reports back");
+        }
+    }
+}
 
 /// What opens a slot inside a formula's marker spec. An encoded spec starts
 /// with the width, a digit or a minus sign, so `#` there is never a setting.
@@ -537,25 +651,6 @@ const SLOT: &str = "\u{1}M#";
 /// The slot for row `row` of the `index`-th deferred formula.
 fn slot(index: usize, row: usize) -> String {
     format!("#{index}.{row}")
-}
-
-/// Set every deferred formula and write each setting into its slot.
-///
-/// The settings are independent of one another and of the order they are
-/// made in, and each lands in the slot its index names, so the commands come
-/// out the same whatever the thread count.
-pub fn fill(cmds: &mut [Cmd], deferred: Vec<Deferred>) {
-    if deferred.is_empty() {
-        return;
-    }
-    let specs: Vec<Vec<String>> = match deferred.len() >= PARALLEL_FORMULAS {
-        true => {
-            use rayon::prelude::*;
-            deferred.par_iter().map(Deferred::specs).collect()
-        }
-        false => deferred.iter().map(Deferred::specs).collect(),
-    };
-    fill_cmds(cmds, &specs);
 }
 
 fn fill_cmds(cmds: &mut [Cmd], specs: &[Vec<String>]) {
