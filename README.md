@@ -933,11 +933,24 @@ load, that stage went from about 150 ms to 19 ms with 6,000 pictures, 130 ms to
 33 ms with 4,000 images, and 185 ms to 33 ms for a mix of both with formulas.
 A picture's marker is also decoded through a lookup table rather than a search
 of the base64 alphabet, which had been about a quarter of a drawing-heavy
-document's serial time. Formulas stay sequential: one is parsed and set while the
-document is lowered, against the engine's macros and catcodes, and the lowerer
-reads its own output back, so setting them later would need a placeholder in
-the command stream. On a formula-heavy document that setting is about 40% of the
-run, and it is the largest serial stage this leaves.
+document's serial time.
+
+**Formulas.** A formula is READ while the document is lowered, because reading
+it expands macros against the engine and consumes the input, but it is no longer
+SET there. The lowerer writes the formula's marker with a slot where the
+setting's spec goes and keeps the parsed mlist with what setting it depends on:
+the style, the math families at the type size in force, whether it is a
+display, its environment's columns and the measure for an equation number.
+What the lowerer reads back from its own output is the last character of the
+text run, for a ligature's first half or a face marker, and a marker ends the
+same way whatever its spec holds, so nothing it decides waits on a setting.
+After lowering the formulas are set, in parallel once there are 16 or more,
+and each spec is written into the slot its index names. Measured 2026-10-17 on
+a synthetic document of about 35,000 formulas (load averages 18 to 36, medians
+of 9 to 11 interleaved runs), wall went from 1128 ms to 760 ms at the default
+thread count and from 1331 ms to 1037 ms at 8, for 22% more user CPU (2450 to
+3000 ms); at one thread it is unchanged (2352 against 2356 ms). Output is
+byte-identical to the previous build at 1 and 8 threads.
 
 **DVI pages.** On the `--dvi` path a page is its own lines and its number, so
 each page's box is built and its `bop`..`eop` commands are encoded by a writer

@@ -43,8 +43,9 @@
 //! - LaTeX's `equation` counter. `\eqno` and `\leqno` are read and placed by
 //!   §1204-§1206, but `\begin{equation}` cannot put a NUMBER beside its
 //!   display: a counter is a `\count` register (`src/latex/counters.rs`), a
-//!   register is run-time state, and a formula is SET while the document is
-//!   lowered -- so the digits do not exist yet when the glyphs are placed.
+//!   register is run-time state, and a formula is SET from what lowering
+//!   read, before the document runs -- so the digits do not exist yet when
+//!   the glyphs are placed.
 //!   Numbering it needs either a marker that carries a register into a set
 //!   formula or a right-flush line in `src/typeset.rs`; neither is here.
 //! - The penalties of §761 and §767 are inserted -- `\binoppenalty` after a
@@ -151,13 +152,12 @@ pub fn set_mlist(list: &[Noad], style: Style, size: f64) -> Option<Setting> {
 ///
 /// §1194: `mlist_penalties := (mode > 0)`, which is true for a `$…$` in
 /// running text and false for a display (§1199).
-fn set_formula(list: &[Noad], style: Style, size: f64, display: bool) -> Option<Setting> {
-    let fonts = fonts_at(size)?;
+fn set_formula(fonts: &font::MathFonts, list: &[Noad], style: Style, display: bool) -> Setting {
     let b = match display {
         true => mlist::set(fonts, list, style),
         false => mlist::set_with_penalties(fonts, list, style),
     };
-    Some(set::flatten(&b, &|i| set::font_size(fonts, i)))
+    set::flatten(&b, &|i| set::font_size(fonts, i))
 }
 
 /// Set a whole display: its rows lined up at shared column widths, and the
@@ -173,7 +173,23 @@ pub fn set_display(
     environment: &str,
     measure: f64,
 ) -> Option<Vec<Setting>> {
-    let fonts = fonts_at(size)?;
+    Some(display_rows(
+        fonts_at(size)?,
+        f,
+        style,
+        environment,
+        measure,
+    ))
+}
+
+/// [`set_display`] in families already loaded.
+fn display_rows(
+    fonts: &font::MathFonts,
+    f: &parse::Formula,
+    style: Style,
+    environment: &str,
+    measure: f64,
+) -> Vec<Setting> {
     let widest = f.rows.iter().map(|r| r.len()).max().unwrap_or(1);
     let columns = align::columns(environment, widest);
     let mut boxes = align::rows(fonts, &f.rows, style, &columns);
@@ -190,12 +206,10 @@ pub fn set_display(
             boxes.push(align::numbered(fonts, last, a, z, f.number_left));
         }
     }
-    Some(
-        boxes
-            .iter()
-            .map(|b| set::flatten(b, &|i| set::font_size(fonts, i)))
-            .collect(),
-    )
+    boxes
+        .iter()
+        .map(|b| set::flatten(b, &|i| set::font_size(fonts, i)))
+        .collect()
 }
 
 /// Read a formula from a source string, for a test or a caller that has the
@@ -280,6 +294,9 @@ const BODY: &str = "document";
 /// place: `src/latex/prelude.tex` defines `\(`, `\)`, `\[` and `\]` to expand
 /// to nothing, so by the time a name reaches the macro table the formula's
 /// delimiters have gone.
+///
+/// The formula is READ here, because reading it expands macros against the
+/// engine and consumes the input. It is not SET here: see [`Deferred`].
 pub fn lower_math(
     eng: &mut Engine,
     size: f64,
@@ -287,6 +304,7 @@ pub fn lower_math(
     lx: &mut Lexer,
     tok: &Token,
     out: &mut Vec<Cmd>,
+    deferred: &mut Vec<Deferred>,
 ) -> Result<bool, TexError> {
     let (style, stop) = match tok {
         // `$` and `$$`. A document reaches here only where the character has
@@ -321,7 +339,7 @@ pub fn lower_math(
                     consume_environment_name(eng, lx);
                     let f = parse::formula(eng, lx, parse::Stop::Cs("end"))?;
                     consume_end(eng, lx);
-                    emit(out, &f, DISPLAY_STYLE, size, true, name, measure);
+                    emit(out, deferred, f, DISPLAY_STYLE, size, true, name, measure);
                     return Ok(true);
                 }
                 None => return Ok(false),
@@ -336,7 +354,16 @@ pub fn lower_math(
     if style == DISPLAY_STYLE && stop == parse::Stop::MathShift {
         let _ = second_shift(eng, lx);
     }
-    emit(out, &f, style, size, style == DISPLAY_STYLE, "", measure);
+    emit(
+        out,
+        deferred,
+        f,
+        style,
+        size,
+        style == DISPLAY_STYLE,
+        "",
+        measure,
+    );
     Ok(true)
 }
 
@@ -404,7 +431,7 @@ fn consume_end(eng: &mut Engine, lx: &mut Lexer) {
     }
 }
 
-/// Write a set formula into the command stream.
+/// Write a formula into the command stream, its setting left as a slot.
 ///
 /// A display goes on a line of its own and centred, which is what a display IS
 /// -- the paragraph breaks either side are how the text stream says so, and
@@ -412,50 +439,186 @@ fn consume_end(eng: &mut Engine, lx: &mut Lexer) {
 /// COLUMNS in it -- an `align`, an `eqnarray` -- writes one such line per row,
 /// every one of them packed to the same width, which is what lines the columns
 /// up: see [`align`] for why the rows are not one vertical box.
+///
+/// Everything but each row's setting is written NOW, so the text the lowerer
+/// reads back -- `push_text_char` looks at the last character of the run for
+/// a ligature's first half and a face marker -- is what it was when formulas
+/// were set in place: a marker ends in `\u{3}` (or a display's `\n`) whatever
+/// its spec holds, and whether there is a marker at all depends only on the
+/// families loading, which is answered here.
 #[allow(clippy::too_many_arguments)]
 fn emit(
     out: &mut Vec<Cmd>,
-    f: &parse::Formula,
+    deferred: &mut Vec<Deferred>,
+    f: parse::Formula,
     style: Style,
     size: f64,
     display: bool,
-    environment: &str,
+    environment: &'static str,
     measure: f64,
 ) {
-    let flat = f.flat();
+    let Some(fonts) = fonts_at(size) else {
+        // No math fonts on this machine: the formula still says what it says,
+        // so it is written as text rather than dropped.
+        push(out, &set::plain(&f.flat()));
+        return;
+    };
+    let index = deferred.len();
     // The ordinary case, and the only one before `&` and `\eqno` meant
     // anything: one row, one column, no number.
     if f.is_single() && f.number.is_none() {
-        let Some(setting) = set_formula(&flat, style, size, display) else {
-            push(out, &set::plain(&flat));
-            return;
-        };
-        push_setting(out, &setting, &set::plain(&flat), display);
-        return;
-    }
-    let Some(settings) = set_display(f, style, size, environment, measure) else {
-        // No math fonts on this machine: the formula still says what it says,
-        // so it is written as text rather than dropped.
-        push(out, &set::plain(&flat));
-        return;
-    };
-    let last = f.rows.len().saturating_sub(1);
-    for (at, (row, setting)) in f.rows.iter().zip(settings.iter()).enumerate() {
-        let mut spelled: String = row.iter().map(|cell| set::plain(cell)).collect();
-        // The equation number goes beside the row it was placed beside, so a
-        // reader gets it where the page draws it.
-        if at == last {
-            if let Some(number) = &f.number {
-                spelled.push_str(&set::plain(number));
+        push_setting(out, &slot(index, 0), &set::plain(&f.flat()), display);
+    } else {
+        // `display_rows` sets one line per row.
+        let last = f.rows.len().saturating_sub(1);
+        for (at, row) in f.rows.iter().enumerate() {
+            let mut spelled: String = row.iter().map(|cell| set::plain(cell)).collect();
+            // The equation number goes beside the row it was placed beside,
+            // so a reader gets it where the page draws it.
+            if at == last {
+                if let Some(number) = &f.number {
+                    spelled.push_str(&set::plain(number));
+                }
             }
+            push_setting(out, &slot(index, at), &spelled, display);
         }
-        push_setting(out, setting, &spelled, display);
+    }
+    deferred.push(Deferred {
+        formula: f,
+        fonts,
+        style,
+        display,
+        environment,
+        measure,
+    });
+}
+
+/// A formula read while the document was lowered and not yet set.
+///
+/// Setting a formula is `mlist_to_hlist` and a walk of the boxes it makes,
+/// and on a document dense with mathematics it was the larger part of
+/// lowering. It reads nothing the lowerer goes on to change: the mlist is
+/// read once and finished, and the rest of what layout depends on is what
+/// this captures -- the style, the families at the type size in force (its
+/// fontdimens are every number §700-§767 uses), whether it is a display
+/// (§1194's penalties), the environment (§810's columns) and the measure
+/// (§1204's equation number). Nothing the lowerer does reads a spec back, so
+/// the settings are made after lowering, on the pool when there are enough
+/// of them, and written into their slots by [`fill`].
+pub struct Deferred {
+    formula: parse::Formula,
+    fonts: &'static font::MathFonts,
+    style: Style,
+    display: bool,
+    environment: &'static str,
+    measure: f64,
+}
+
+impl Deferred {
+    /// The encoded spec of each row, in the order [`emit`] wrote the slots.
+    fn specs(&self) -> Vec<String> {
+        let f = &self.formula;
+        let settings = match f.is_single() && f.number.is_none() {
+            true => vec![set_formula(self.fonts, &f.flat(), self.style, self.display)],
+            false => display_rows(self.fonts, f, self.style, self.environment, self.measure),
+        };
+        settings.iter().map(set::encode).collect()
     }
 }
 
-/// One set formula, as the marker the typesetter reads.
-fn push_setting(out: &mut Vec<Cmd>, setting: &Setting, spelled: &str, display: bool) {
-    let marked = format!("\u{1}{SETTING}{}\u{2}{spelled}\u{3}", set::encode(setting));
+/// Fewer formulas than this are set on the calling thread: fanning out costs
+/// more than a handful of formulas are worth.
+const PARALLEL_FORMULAS: usize = 16;
+
+/// What opens a slot inside a formula's marker spec. An encoded spec starts
+/// with the width, a digit or a minus sign, so `#` there is never a setting.
+const SLOT: &str = "\u{1}M#";
+
+/// The slot for row `row` of the `index`-th deferred formula.
+fn slot(index: usize, row: usize) -> String {
+    format!("#{index}.{row}")
+}
+
+/// Set every deferred formula and write each setting into its slot.
+///
+/// The settings are independent of one another and of the order they are
+/// made in, and each lands in the slot its index names, so the commands come
+/// out the same whatever the thread count.
+pub fn fill(cmds: &mut [Cmd], deferred: Vec<Deferred>) {
+    if deferred.is_empty() {
+        return;
+    }
+    let specs: Vec<Vec<String>> = match deferred.len() >= PARALLEL_FORMULAS {
+        true => {
+            use rayon::prelude::*;
+            deferred.par_iter().map(Deferred::specs).collect()
+        }
+        false => deferred.iter().map(Deferred::specs).collect(),
+    };
+    fill_cmds(cmds, &specs);
+}
+
+fn fill_cmds(cmds: &mut [Cmd], specs: &[Vec<String>]) {
+    for cmd in cmds {
+        match cmd {
+            Cmd::Text(t) => fill_text(t, specs),
+            Cmd::Color { body, .. } | Cmd::Group { body, .. } | Cmd::Loop { body, .. } => {
+                fill_cmds(body, specs)
+            }
+            Cmd::IfNum {
+                then_branch,
+                else_branch,
+                ..
+            }
+            | Cmd::IfOdd {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                fill_cmds(then_branch, specs);
+                fill_cmds(else_branch, specs);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Replace each slot in `t` with the spec it names. Text that only looks like
+/// a slot -- an index no formula has -- is left as it was.
+fn fill_text(t: &mut String, specs: &[Vec<String>]) {
+    if !t.contains(SLOT) {
+        return;
+    }
+    let mut out = String::with_capacity(t.len() * 2);
+    let mut rest = t.as_str();
+    while let Some(at) = rest.find(SLOT) {
+        // Keep `\u{1}M`, drop the `#`.
+        out.push_str(&rest[..at + SLOT.len() - 1]);
+        let after = &rest[at + SLOT.len()..];
+        let end = after.find('\u{2}').unwrap_or(after.len());
+        let spec = after[..end].split_once('.').and_then(|(i, r)| {
+            let (i, r) = (i.parse::<usize>().ok()?, r.parse::<usize>().ok()?);
+            specs.get(i)?.get(r)
+        });
+        match spec {
+            Some(spec) => {
+                out.push_str(spec);
+                rest = &after[end..];
+            }
+            None => {
+                out.push('#');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    *t = out;
+}
+
+/// One formula, as the marker the typesetter reads.
+fn push_setting(out: &mut Vec<Cmd>, spec: &str, spelled: &str, display: bool) {
+    let marked = format!("\u{1}{SETTING}{spec}\u{2}{spelled}\u{3}");
+
     match display {
         true => push(
             out,
