@@ -107,6 +107,9 @@ pub fn spelled(tokens: &[Token]) -> String {
 /// counter of the same name unless starred.
 const UNITS: [&str; 4] = ["chapter", "section", "subsection", "subsubsection"];
 
+/// The float environments, by the names `\begin` and `\end` expand to.
+const FLOATS: [&str; 4] = ["figure", "table", "figure*", "table*"];
+
 /// LaTeX's counters as the typesetting run follows them while it lowers.
 ///
 /// Only what an equation number can read is kept: the sectioning units, which
@@ -120,40 +123,68 @@ pub struct Numbering {
 
 impl Numbering {
     /// Follow `tok`, a token the lowerer is about to act on, when it moves a
-    /// counter: a sectioning command or a `\setcounter` / `\addtocounter`.
-    /// Whatever is read to decide is put back, so the lowerer acts on the
-    /// token exactly as it would have.
-    pub fn watch(&mut self, eng: &mut Engine, lx: &mut Lexer, tok: &Token) {
-        let Token::Cs(name) = tok else { return };
+    /// counter: a sectioning command, a `\caption`, or a `\setcounter` /
+    /// `\addtocounter`. Whatever is read to decide is put back, so the lowerer
+    /// acts on the token exactly as it would have.
+    ///
+    /// The answer is what goes into the text for `typeset::unit_numbers`: the
+    /// new `\@currentlabel` when the token refsteps a counter -- latex.ltx's
+    /// `\@sect` refsteps the unit's and `\caption` refsteps `\@captype`'s --
+    /// read from the class's own `\the<counter>` (`\arabic{section}` in
+    /// article.cls, `\thechapter.\arabic{section}` in report.cls and book.cls,
+    /// whatever `\appendix` made of either); and the edges of a float, because
+    /// `\begin` opens a group and the caption's `\@currentlabel` dies with it.
+    pub fn watch(&mut self, eng: &mut Engine, lx: &mut Lexer, tok: &Token) -> Option<String> {
+        use crate::typeset::{ref_mark, REF_CLOSE, REF_OPEN, REF_VALUE};
+        let Token::Cs(name) = tok else { return None };
         let name = name.name();
+        if FLOATS.contains(&name) {
+            return Some(ref_mark(REF_OPEN, ""));
+        }
+        if name
+            .strip_prefix("end")
+            .is_some_and(|f| FLOATS.contains(&f))
+        {
+            return Some(ref_mark(REF_CLOSE, ""));
+        }
         if UNITS.contains(&name) {
             // latex.ltx's `\@ssect` is `\@sect` without the `\refstepcounter`.
-            match eng.skip_optional_star(lx) {
-                true => lx.push_back(&[Token::Char('*', Cat::Other)]),
-                false => self.step(eng, name),
+            if eng.skip_optional_star(lx) {
+                lx.push_back(&[Token::Char('*', Cat::Other)]);
+                return None;
             }
-            return;
+            return Some(ref_mark(REF_VALUE, &self.refstep(eng, name)));
+        }
+        if name == "caption" {
+            // ltfloat.dtx: `\def\caption{\refstepcounter\@captype ...}`; the
+            // float environment is what says which counter that is.
+            let captype = spelled(macro_body(eng, "@captype")?);
+            return Some(ref_mark(REF_VALUE, &self.refstep(eng, &captype)));
         }
         if name != "setcounter" && name != "addtocounter" {
-            return;
+            return None;
         }
         let mut taken = Vec::new();
         let counter = raw_group(eng, lx, &mut taken);
         let value = raw_group(eng, lx, &mut taken);
         lx.push_back(&taken);
-        let (Some(counter), Some(value)) = (counter, value) else {
-            return;
-        };
         // A value that is not a literal number -- `\value{x}`, a macro -- is
         // run-time arithmetic and is not followed.
-        let Ok(value) = value.trim().parse::<i64>() else {
-            return;
-        };
-        let held = self.counters.entry(counter).or_insert(0);
+        let value = value?.trim().parse::<i64>().ok()?;
+        let held = self.counters.entry(counter?).or_insert(0);
         *held = match name {
             "setcounter" => value,
             _ => *held + value,
         };
+        None
+    }
+
+    /// latex.ltx's `\refstepcounter`: the step, and the `\@currentlabel` it
+    /// leaves -- `\p@<name>` is empty for every counter a standard class
+    /// numbers a heading, a float or a display with.
+    fn refstep(&mut self, eng: &Engine, name: &str) -> String {
+        self.step(eng, name);
+        self.the(eng, name)
     }
 
     /// latex.ltx's `\stepcounter`: one more, and every counter on its
@@ -221,6 +252,16 @@ impl Numbering {
                         at += 1;
                     }
                     "relax" => {}
+                    // report.cls and book.cls:
+                    // `\ifnum \c@chapter>\z@ \thechapter.\fi \@arabic\c@figure`.
+                    "ifnum" => {
+                        let (holds, after) = self.compare(&toks[at + 1..])?;
+                        let body = &toks[at + 1 + after..];
+                        let (then, otherwise, end) = branches(body)?;
+                        let taken = if holds { then } else { otherwise };
+                        out.push_str(&self.represent(eng, taken, depth + 1)?);
+                        at += 1 + after + end;
+                    }
                     // `\thechapter`, `\p@equation`: a macro of no arguments
                     // reads as its body.
                     other => {
@@ -232,6 +273,92 @@ impl Numbering {
         }
         Some(out)
     }
+
+    /// `\ifnum`'s `<number><relation><number>` at the head of `toks` (§503):
+    /// whether it holds, and how many tokens it took.
+    fn compare(&self, toks: &[Token]) -> Option<(bool, usize)> {
+        let (left, used) = self.operand(toks)?;
+        let mut at = used + spaces(&toks[used..]);
+        let Some(Token::Char(relation @ ('<' | '=' | '>'), _)) = toks.get(at) else {
+            return None;
+        };
+        at += 1;
+        let (right, used) = self.operand(&toks[at..])?;
+        let holds = match relation {
+            '<' => left < right,
+            '=' => left == right,
+            _ => left > right,
+        };
+        Some((holds, at + used))
+    }
+
+    /// One side of an `\ifnum`: a counter's register (`\c@chapter`,
+    /// `\value{chapter}`, the kernel's `\count\cr@chapter`), one of latex.ltx's
+    /// constants, or digits.
+    fn operand(&self, toks: &[Token]) -> Option<(i64, usize)> {
+        let at = spaces(toks);
+        match toks.get(at)? {
+            Token::Cs(cs) => {
+                let value = match cs.name() {
+                    "value" => {
+                        let (counter, used) = braced(&toks[at + 1..])?;
+                        return Some((self.value(&counter), at + 1 + used));
+                    }
+                    "count" => {
+                        let Some(Token::Cs(register)) = toks.get(at + 1) else {
+                            return None;
+                        };
+                        let counter = register.name().strip_prefix("cr@")?;
+                        return Some((self.value(counter), at + 2));
+                    }
+                    "z@" => 0,
+                    "@ne" => 1,
+                    "tw@" => 2,
+                    "m@ne" => -1,
+                    name => self.value(name.strip_prefix("c@")?),
+                };
+                Some((value, at + 1))
+            }
+            Token::Char(..) => {
+                let digits: String = toks[at..]
+                    .iter()
+                    .map_while(|t| match t {
+                        Token::Char(c, _) if c.is_ascii_digit() || *c == '-' => Some(*c),
+                        _ => None,
+                    })
+                    .collect();
+                Some((digits.parse().ok()?, at + digits.len()))
+            }
+        }
+    }
+}
+
+/// How many space tokens open `toks`.
+fn spaces(toks: &[Token]) -> usize {
+    toks.iter().take_while(|t| t.is_space()).count()
+}
+
+/// The two branches of a conditional whose test has been read, and the index
+/// of its `\fi` in `toks`. A conditional nested inside a branch is skipped
+/// whole, as §500 skips one.
+fn branches(toks: &[Token]) -> Option<(&[Token], &[Token], usize)> {
+    let mut depth = 0usize;
+    let mut otherwise = None;
+    for (at, t) in toks.iter().enumerate() {
+        let Token::Cs(cs) = t else { continue };
+        match cs.name() {
+            "fi" if depth == 0 => {
+                let then_end = otherwise.unwrap_or(at);
+                let else_start = otherwise.map_or(at, |e| e + 1);
+                return Some((&toks[..then_end], &toks[else_start..at], at));
+            }
+            "fi" => depth -= 1,
+            "else" if depth == 0 => otherwise = Some(at),
+            name if name.starts_with("if") => depth += 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Whether the class sets equation numbers at the left: leqno.clo's

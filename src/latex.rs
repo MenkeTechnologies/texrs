@@ -161,6 +161,9 @@ fn preamble_of(src: &str, mode: Mode, previous: Option<&std::path::Path>) -> Str
         let mut out = support(&format!("{src}\n{loaded}"));
         out.reserve(packages.len() + 1024);
         out.push_str(&packages);
+        if amsmath_wanted(src, &loaded) {
+            out.push_str(AMSMATH);
+        }
         (out, joined(numbered), joined(unresolved), joined(resolved))
     });
     out.push_str(numbered);
@@ -227,6 +230,33 @@ pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String 
     preamble_of(src, mode, Some(document))
 }
 
+/// The part of amsmath this engine carries itself: `\numberwithin`, `\eqref`
+/// and the `\tagform@` it sets the number with. The displays amsmath numbers
+/// -- `align`, `gather`, `\tag` -- are read by `src/math.rs`.
+///
+/// amsmath.sty does not load here (`texrs: package amsmath needs ...`), and
+/// none of the three is LaTeX's: `\numberwithin` is amsmath.sty's
+/// `\DeclareCommandCopy\numberwithin\counterwithin`, so a document that does
+/// not load amsmath has no `\numberwithin` under pdflatex either. The kernel
+/// defines `\counterwithin` (ltcounts.dtx, 2018) and the other two under names
+/// of its own, and this puts them in place.
+const AMSMATH: &str = "\
+\\catcode`\\@=11\n\
+\\let\\numberwithin\\counterwithin\n\
+\\let\\eqref\\@texrs@eqref\n\
+\\let\\tagform@\\@texrs@tagform\n\
+\\catcode`\\@=12\n";
+
+/// Whether `src` loads amsmath -- itself, or through a class or package that
+/// requires it, as mathtools and amsart do -- and amsmath.sty did not load.
+fn amsmath_wanted(src: &str, loaded: &str) -> bool {
+    let amsmath = |r: &load::Request| r.extension == "sty" && r.name == "amsmath";
+    let wanted = load::requests(src)
+        .iter()
+        .any(|r| amsmath(r) || load::chain(r).iter().any(|(inner, _)| amsmath(inner)));
+    wanted && !loaded.contains("\\ProvidesPackage{amsmath}")
+}
+
 /// The kernel definitions a CLASS overwrites with box machinery, taken back.
 ///
 /// The kernel is read before the class and a standard class defines some of the
@@ -252,20 +282,22 @@ pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String 
 /// environment itself does nothing. `\figure` and `\table` are `\newcommand`
 /// rather than `\let` because both take the optional placement argument --
 /// `\begin{figure}[htbp]` -- and `\let` copies a meaning without the optional
-/// argument that `\newcommand` recorded beside it.
+/// argument that `\newcommand` recorded beside it. Each float still says which
+/// counter its `\caption` refsteps -- `\@captype`, which latex.ltx's `\@float`
+/// defines -- or every table caption was numbered as a figure.
 const RECLAIMED: &str = "\
 \\catcode`\\@=11\n\
 \\let\\thebibliography\\@texrs@thebibliography\n\
 \\def\\endthebibliography{}\n\
 \\let\\fnum@figure\\@texrs@fnum@figure\n\
 \\let\\fnum@table\\@texrs@fnum@table\n\
-\\newcommand{\\figure}[1][]{}\n\
+\\newcommand{\\figure}[1][]{\\def\\@captype{figure}}\n\
 \\newcommand{\\endfigure}{}\n\
-\\newcommand{\\table}[1][]{}\n\
+\\newcommand{\\table}[1][]{\\def\\@captype{table}}\n\
 \\newcommand{\\endtable}{}\n\
-\\expandafter\\let\\csname figure*\\endcsname\\relax\n\
+\\expandafter\\def\\csname figure*\\endcsname{\\def\\@captype{figure}}\n\
 \\expandafter\\let\\csname endfigure*\\endcsname\\relax\n\
-\\expandafter\\let\\csname table*\\endcsname\\relax\n\
+\\expandafter\\def\\csname table*\\endcsname{\\def\\@captype{table}}\n\
 \\expandafter\\let\\csname endtable*\\endcsname\\relax\n\
 \\let\\description\\relax \\let\\enddescription\\relax\n\
 \\let\\abstract\\relax \\let\\endabstract\\relax\n\
@@ -289,11 +321,15 @@ const RECLAIMED: &str = "\
 /// `kpsewhich` is read as report's, which is what this layer carried before
 /// there was a choice to make.
 fn numbering(src: &str) -> &'static str {
+    // article.cls:263, 451-465, and its \appendix (439-442), which letters the
+    // SECTIONS where report's letters the chapters.
     const ARTICLE: &str = "\
 \\def\\thesection{\\arabic{section}}\n\
 \\def\\thefigure{\\arabic{figure}}\n\
 \\def\\thetable{\\arabic{table}}\n\
-\\def\\theequation{\\arabic{equation}}\n";
+\\def\\theequation{\\arabic{equation}}\n\
+\\def\\appendix{\\par\\setcounter{section}{0}\\setcounter{subsection}{0}\
+\\gdef\\thesection{\\Alph{section}}}\n";
     match class_declares_chapters(src) {
         Some(true) | None => "",
         Some(false) => ARTICLE,
@@ -309,13 +345,6 @@ fn numbering(src: &str) -> &'static str {
 /// be read falls back to `base_class_declares_chapters`; `None` is a class
 /// outside that list which `kpsewhich` cannot find either, or a source with no
 /// `\documentclass` at all.
-///
-/// Public because it answers a question outside this module as well.
-/// `typeset::unit_numbers` counts chapter, section and subsection and joins
-/// EVERY level down to the one being asked for, so an article's first section
-/// comes back as `0.1` where LaTeX writes `1` -- BUGS.md records it. The join
-/// has to start at the shallowest level the CLASS declares, and this is the
-/// fact that says which that is.
 pub fn class_declares_chapters(src: &str) -> Option<bool> {
     let class = load::requests(src)
         .into_iter()

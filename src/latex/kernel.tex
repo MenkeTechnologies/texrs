@@ -137,8 +137,13 @@
 % it is executed.
 %
 % \ctr@NAME takes the operation and the operand: `\ctr@section\@ctrset{4}'.
-\def\@ctrset#1#2{\count#1=#2 }
-\def\@ctradd#1#2{\advance\count#1 by #2 }
+%
+% Both are \global, as latex.ltx's are. \stepcounter resets the counters on a
+% \cl@ list INSIDE a group, and a local assignment there was undone at its
+% \endgroup: `\stepcounter{chapter}' left section and figure where they were,
+% and a report's second chapter numbered its first figure 1.2 in the `.aux'.
+\def\@ctrset#1#2{\global\count#1=#2 }
+\def\@ctradd#1#2{\global\advance\count#1 by #2 }
 % latex.ltx: \def\setcounter#1#2{...\global\csname c@#1\endcsname#2\relax}
 \def\setcounter#1#2{\@nameuse{ctr@#1}\@ctrset{#2}}
 % latex.ltx: \def\addtocounter#1#2{...\global\advance\csname c@#1\endcsname#2\relax}
@@ -324,7 +329,10 @@
 \setcounter{page}{1}
 \setcounter{secnumdepth}{2}
 \setcounter{tocdepth}{2}
-% report.cls's own \the<counter> definitions.
+% report.cls's own \the<counter> definitions (report.cls:270-276, 528-544).
+% Its `\ifnum \c@chapter>\z@' is `\ifnum\count\cr@chapter>0' here: there is no
+% \c@ name (see above), and `\ifnum\value{chapter}>0' -- the macro reaching
+% \count through \csname -- measured FALSE with the chapter at 1.
 \def\thepart{\Roman{part}}
 \def\thechapter{\arabic{chapter}}
 \def\thesection{\thechapter.\arabic{section}}
@@ -332,15 +340,22 @@
 \def\thesubsubsection{\thesubsection.\arabic{subsubsection}}
 \def\theparagraph{\thesubsubsection.\arabic{paragraph}}
 \def\thesubparagraph{\theparagraph.\arabic{subparagraph}}
-\def\thefigure{\thechapter.\arabic{figure}}
-\def\thetable{\thechapter.\arabic{table}}
-\def\theequation{\thechapter.\arabic{equation}}
+\def\thefigure{\ifnum\count\cr@chapter>0 \thechapter.\fi\arabic{figure}}
+\def\thetable{\ifnum\count\cr@chapter>0 \thechapter.\fi\arabic{table}}
+\def\theequation{\ifnum\count\cr@chapter>0 \thechapter.\fi\arabic{equation}}
 \def\thefootnote{\arabic{footnote}}
 \def\thepage{\arabic{page}}
 \def\theenumi{\arabic{enumi}}
 \def\theenumii{\alph{enumii}}
 \def\theenumiii{\roman{enumiii}}
 \def\theenumiv{\Alph{enumiv}}
+% report.cls:514-518, \appendix, and the names it switches between (report.cls
+% 720-721, 277). article's \appendix is in `src/latex.rs', ARTICLE.
+\def\chaptername{Chapter}
+\def\appendixname{Appendix}
+\def\@chapapp{\chaptername}
+\def\appendix{\par\setcounter{chapter}{0}\setcounter{section}{0}%
+  \gdef\@chapapp{\appendixname}\gdef\thechapter{\Alph{chapter}}}
 %
 % ---- cross references: ltxref.dtx ----------------------------------------
 % latex.ltx:
@@ -373,20 +388,55 @@
 
 
 \def\@setref#1#2#3{\expandafter#2#1}
-% amsmath: \eqref{...} is \ref in parentheses, through \tagform@.
-\def\eqref#1{\textup{\tagform@{\ref{#1}}}}
-\def\tagform@#1{(#1)}
-% amsmath.sty:
-%   \providecommand{\numberwithin}[3][\arabic]{...\@addtoreset{#2}{#3}%
-%     \@xp\xdef\csname the#2\endcsname{\@xp\@nx\csname the#3\endcsname .\@nx#1{#2}}}
-% The same, without the two \@ifundefined checks on the counters' names: the
-% counter is reset by the unit and numbered under it. `src/math/number.rs'
-% reads both macros to number a display in the typesetting run.
-\def\numberwithin{\@ifnextchar[\@numberwithin{\@numberwithin[\arabic]}}
-\def\@numberwithin[#1]#2#3{\@addtoreset{#2}{#3}%
-  \expandafter\xdef\csname the#2\endcsname{%
-    \expandafter\noexpand\csname the#3\endcsname.\noexpand#1{#2}}}
 \def\textup#1{#1}
+%
+% ---- \counterwithin, \counterwithout: ltcounts.dtx (2018-04-01) ----------
+% latex.ltx:
+%   \NewDocumentCommand \counterwithin {sO{\arabic}mm}{%
+%     \@ifbothcounters{#3}{#4}{\@addtoreset{#3}{#4}%
+%       \IfBooleanF #1{\expandafter\xdef\csname the#3\expandafter\endcsname
+%          {\expandafter\noexpand\csname the#4\endcsname.\unexpanded{#2}{#3}}}}}
+%   \NewDocumentCommand \counterwithout {sO{\arabic}mm}{%
+%     \@ifbothcounters{#3}{#4}{\@removefromreset{#3}{#4}%
+%       \IfBooleanF #1{\expandafter\xdef\csname the#3\endcsname{\unexpanded{#2}{#3}}}}}
+% The star keeps \the#3 as it was; the unstarred form rewrites it. The
+% \NewDocumentCommand argument spec is \@ifstar and \@ifnextchar[ here, the
+% boolean is the macro that is or is not applied to the \xdef, and
+% \@ifbothcounters -- the `No counter' error -- is not carried. amsmath.sty's
+% \numberwithin is `\DeclareCommandCopy\numberwithin\counterwithin', so it is
+% made from this behind \usepackage{amsmath}: see `src/latex.rs', AMSMATH.
+% `src/math/number.rs' reads the \cl@ lists and \the<counter> these write.
+\long\def\@gobble#1{}
+\def\counterwithin{\@ifstar{\@ctrwithin\@gobble}{\@ctrwithin\@firstofone}}
+\def\@ctrwithin#1{\@ifnextchar[{\@ctrwithin@#1}{\@ctrwithin@#1[\arabic]}}
+\def\@ctrwithin@#1[#2]#3#4{\@addtoreset{#3}{#4}%
+  #1{\expandafter\xdef\csname the#3\endcsname{%
+    \expandafter\noexpand\csname the#4\endcsname.\noexpand#2{#3}}}}
+\def\counterwithout{\@ifstar{\@ctrwithout\@gobble}{\@ctrwithout\@firstofone}}
+\def\@ctrwithout#1{\@ifnextchar[{\@ctrwithout@#1}{\@ctrwithout@#1[\arabic]}}
+\def\@ctrwithout@#1[#2]#3#4{\@removefromreset{#3}{#4}%
+  #1{\expandafter\xdef\csname the#3\endcsname{\noexpand#2{#3}}}}
+% latex.ltx's \@removefromreset rebuilds \cl@#2 in one \xdef, with \@elt
+% defined to drop the entry whose `\csname c@##1\endcsname' is \ifx-equal to a
+% marker. Neither half of that test works here -- a counter has no \c@ name,
+% and \csname is not expanded inside an \edef (see the refusals above) -- so
+% the list is WALKED instead, the way \stepcounter walks it: each \@elt
+% compares its name with the one being removed and \@cons-es every other back
+% onto a fresh list, which then becomes \cl@#2.
+\def\@removefromreset#1#2{\def\@rfr@name{#1}\gdef\@rfr@list{}%
+  \begingroup\let\@elt\@rfr@elt\csname cl@#2\endcsname\endgroup
+  \expandafter\let\csname cl@#2\endcsname\@rfr@list}
+\def\@rfr@elt#1{\def\@rfr@this{#1}%
+  \ifx\@rfr@this\@rfr@name\else\@cons\@rfr@list{{#1}}\fi}
+% amsmath.sty:
+%   \DeclareCommandCopy\numberwithin\counterwithin
+%   \DeclareRobustCommand{\eqref}[1]{\textup{\tagform@{\ref{#1}}}}
+%   \def\tagform@#1{\maketag@@@{(\ignorespaces#1\unskip\@@italiccorr)}}
+% Under names of their own, so that they exist only where amsmath does:
+% `src/latex.rs' \let-s them into place for a document that loads amsmath and
+% whose amsmath.sty this engine cannot read.
+\def\@texrs@eqref#1{\textup{\tagform@{\ref{#1}}}}
+\def\@texrs@tagform#1{(#1)}
 % latex.ltx:
 %   \def\label#1{...\protected@write\@auxout{}%
 %      {\string\newlabel{#1}{{\@currentlabel}{\thepage}}}...}

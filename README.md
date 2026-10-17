@@ -334,9 +334,13 @@ than none.
   `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
   to a page, and no maths (a formula's scripts are dropped; `--pdf` sets them).
 - `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
-  pages — `\ref` gives the sectioning number or, for a label in a numbered
-  display, the equation number the display sets beside it (`equation`, the
-  `align` family per row, `\tag`, `\eqref`, `\numberwithin`, `leqno`);
+  pages — `\ref` gives `\@currentlabel` as the class's `\the<counter>` writes
+  it: a heading's number (`1` in an article, `1.1` in a report or book, lettered
+  after `\appendix`), a float caption's, or the equation number a numbered
+  display sets beside it (`equation`, the `align` family per row, `\tag`,
+  `leqno`); a float or display is a group, so its number does not outlive it.
+  `\counterwithin` / `\counterwithout` are the kernel's; `\numberwithin` and
+  `\eqref` exist only behind `\usepackage{amsmath}`, as under pdflatex.
   `\pageref` gives the page it fell on.
   Worth knowing what this is NOT evidence of: the corpus has 88,341 `\label{`
   and zero `\ref{` or `\pageref{`, because Pandoc writes labels and never

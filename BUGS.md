@@ -223,22 +223,32 @@ same cause: tex.web §1279 expands a message body while reading it from the file
 and texrs slurps it first. It is not in `tests/cases` because the oracle there
 is `tex`, which has no `\directlua` to compare against.
 
-## A section's number carries a chapter a class has not got
+## A section's number carried a chapter a class has not got -- fixed
 
-`\ref` is answered from `typeset::unit_numbers`, which counts chapter, section
-and subsection and joins every level down to the one being asked for. A class
-with no chapters still carries the chapter's nought, so `article` numbers its
-first section `0.1` where LaTeX numbers it `1`:
-
-```
-\documentclass{article}\begin{document}\section{First}\label{a}See \ref{a}.
-```
-sets `See 0.1.` here and `See 1.` under `pdflatex`. `tests/latex.rs`'s
-`a_label_written_to_the_aux_is_what_the_next_run_resolves` pins the current
-answer so the divergence cannot change unnoticed. The fix is for the join to
-start at the shallowest level the CLASS declares -- `report` and `book` declare
-`chapter` and `article` does not -- which is a fact `src/latex.rs` already reads
-for `\thesection`.
+`typeset::unit_numbers` counted the contents marks and joined chapter, section
+and subsection, so every class was numbered as report: an article's first
+section was `0.1` (pdflatex: `1`), its appendix `0.2` (`A`), and a figure or
+table took the number of the subsection it stood in. A `\ref` now names
+latex.ltx's `\@currentlabel`: `math::number::Numbering::watch` follows each
+`\refstepcounter` the typesetting run meets -- a numbered heading, a `\caption`
+(of `\@captype`, which `figure` and `table` now set), a display place -- and
+writes the number the class's own `\the<counter>` gives (including report.cls's
+`\ifnum \c@chapter>\z@` for floats and equations, and whatever `\appendix`
+redefined); a float or display is a group, so its number is undone at its end,
+and a starred unit steps nothing. The label pass had a fault of its own:
+`\setcounter` and `\addtocounter` were local, so the resets `\stepcounter`
+makes inside a group were undone and a report's first chapter numbered its
+figure `1.2` in the `.aux`; both are `\global` now, as in latex.ltx.
+`\numberwithin` was in the kernel; it is amsmath's, so it and `\eqref` are put
+in place only for a document that loads amsmath (`src/latex.rs`, `AMSMATH`),
+and the kernel has LaTeX's own `\counterwithin` / `\counterwithout` (starred
+forms keep `\the<counter>`). `tests/latex.rs` pins article, report and book,
+with and without amsmath, `\appendix`, `\section*` and `\chapter*`, against
+pdflatex (two runs). Not followed: `secnumdepth` -- a unit past it is still
+stepped and numbered, in both runs (a report's `\subsubsection` gets `1.1.1.1`
+where pdflatex leaves `\@currentlabel` at the subsection's `1.1.1`); and a
+heading and a contents entry still print no number at all, which is the
+lowerer's heading code.
 
 ## A reference to an equation was `??` in the typeset run -- fixed
 

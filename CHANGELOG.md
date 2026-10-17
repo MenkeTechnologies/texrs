@@ -13,6 +13,14 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\ref` names the number the class writes: `1` for an article's first section
+  (was `0.1`), `A` after `\appendix` (was `0.2`), a caption's own figure or
+  table number, report's `\ifnum \c@chapter>\z@` float and equation numbers;
+  a float or display no longer leaves its number standing after it.
+- `\setcounter` and `\addtocounter` are global, so `\stepcounter`'s resets
+  survive the group it makes them in.
+- `\numberwithin` and `\eqref` exist only behind `\usepackage{amsmath}`;
+  the kernel has LaTeX's `\counterwithin` and `\counterwithout`.
 - `\char` and a `\chardef`ed name set the character of their code in a
   document body (§1110, §1141), where `\char` stopped the run.
 - A definition whose name is missing is `Missing control sequence inserted`

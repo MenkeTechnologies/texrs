@@ -6284,11 +6284,17 @@ pub const REF_NUMBER: char = 'n';
 /// A `\pageref`: the page this key fell on.
 pub const REF_PAGE: char = 'p';
 
-/// latex.ltx's `\@currentlabel`, set by something other than a sectioning
-/// unit: the span holds the number itself -- an equation's `2.1`, a `\tag`'s
-/// `A` -- and every `\label` after it names that number until the next unit
-/// starts. `src/math.rs` writes one for each place a display numbers.
+/// latex.ltx's `\@currentlabel`, as a `\refstepcounter` leaves it: the span holds
+/// the number itself -- a section's `2`, an equation's `2.1`, a `\tag`'s `A` --
+/// and every `\label` after it names that number until the next one.
+/// `src/math.rs` writes one for each numbered heading, caption and display place.
 pub const REF_VALUE: char = 'v';
+
+/// The start and end of a group that a `REF_VALUE` inside it does not outlive:
+/// a float or a display environment, which `\begin` opens with `\begingroup`.
+/// The spans carry no key.
+pub const REF_OPEN: char = '(';
+pub const REF_CLOSE: char = ')';
 
 /// What LaTeX sets for a reference whose label it has not got: `??`, from
 /// latex.ltx's `\@setref`, which sets that and warns.
@@ -6420,87 +6426,46 @@ fn has_ref(text: &str, code: char) -> bool {
     false
 }
 
-/// The number the class prints for each label: `1` for a chapter, `2.1` for
-/// the first section of the second chapter, and so on down.
+/// The number each label names: latex.ltx's `\@currentlabel` where the
+/// `\label` stands.
 ///
-/// Counted off the contents marks, because those are the only record in the
-/// text of where a sectioning unit begins and how deep it is -- and the
-/// lowerer writes one for every heading whether or not a contents was asked
-/// for. `tocdepth` is not consulted: what the contents LISTS is a different
-/// question from what a unit is numbered.
+/// `\@currentlabel` is set by `\refstepcounter` and by nothing else, and every
+/// one the typesetting run follows -- a numbered heading's, a caption's, a
+/// display's -- reaches the text as a `REF_VALUE` span carrying the number the
+/// class's `\the<counter>` writes (`math::number::Numbering`). So a label names
+/// the last span before it, as it does under LaTeX: a `\section*` steps
+/// nothing and leaves the previous number standing, and a label before any
+/// step names `\@currentlabel`'s initial empty value. A `REF_OPEN` ..
+/// `REF_CLOSE` pair is a group: the value inside it is the outer one again
+/// once it closes, so a label after a figure names the section around it.
 ///
-/// Two limits, both of which the corpus reaches with nothing:
-///
-///   * a `\chapter*` is counted, because `toc_entry_mark` does not record the
-///     star. No document in the corpus writes a starred heading;
-///   * a `\subsubsection` carries no mark at all -- `toc_entry_mark` is empty
-///     past a subsection -- so a label under one takes its subsection's
-///     number. The corpus holds one `\subsubsection` in 169 files.
-///
-/// A label standing before any heading has no unit to be numbered by and is
-/// left out, so a `\ref` to it sets `??`, which is what LaTeX sets for a
-/// reference it cannot resolve.
-///
-/// A label after a `REF_VALUE` span names that span's number instead -- an
-/// equation's, which `src/math.rs` numbered as the display was read -- until
-/// the next unit begins, as `\@currentlabel` does under LaTeX.
+/// Counting the contents marks instead -- which this did -- numbered every
+/// class as report: an article's first section came back as `0.1`, its
+/// appendix as `0.2`, and a figure as the subsection it stood in.
 fn unit_numbers(text: &str) -> std::collections::HashMap<String, String> {
-    // Chapter, section, subsection: the three levels `toc_level` names.
-    let mut counters = [0usize; 3];
     let mut current = String::new();
-    // A number standing as `\@currentlabel` since the last unit: see
-    // `REF_VALUE`.
-    let mut value: Option<String> = None;
+    let mut saved = Vec::new();
     let mut numbers = std::collections::HashMap::new();
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            TOC => {
-                let Some(code) = chars.next() else { break };
-                let Some(level) = toc_level(code).filter(|l| *l < counters.len()) else {
-                    continue;
-                };
-                counters[level] += 1;
-                // A new chapter puts its sections back to zero: the second
-                // chapter's first section is 2.1 and not 2.4.
-                for deeper in counters[level + 1..].iter_mut() {
-                    *deeper = 0;
-                }
-                current = counters[..=level]
-                    .iter()
-                    .map(usize::to_string)
-                    .collect::<Vec<String>>()
-                    .join(".");
-                // The unit's `\refstepcounter` takes `\@currentlabel` back.
-                value = None;
-            }
-            REF => {
-                let Some(code) = chars.next() else { break };
-                let key: String = chars.by_ref().take_while(|c| *c != REF).collect();
-                match code {
-                    REF_VALUE => value = Some(key),
-                    // The last definition of a key wins, which is what a rerun
-                    // over LaTeX's own `.aux` does with a duplicated label.
-                    REF_LABEL => match &value {
-                        Some(v) => {
-                            numbers.insert(key, v.clone());
-                        }
-                        None if !current.is_empty() => {
-                            numbers.insert(key, current.clone());
-                        }
-                        None => {}
-                    },
-                    _ => {}
-                }
+    let mut at = 0;
+    while let Some(span) = next_ref(text, at) {
+        match span.code {
+            REF_VALUE => current = span.key.to_string(),
+            REF_OPEN => saved.push(current.clone()),
+            REF_CLOSE => current = saved.pop().unwrap_or(current),
+            // The last definition of a key wins, which is what a rerun over
+            // LaTeX's own `.aux` does with a duplicated label.
+            REF_LABEL => {
+                numbers.insert(span.key.to_string(), current.clone());
             }
             _ => {}
         }
+        at = span.end;
     }
     numbers
 }
 
-/// The text with every `\ref` replaced by the number of the unit its label
-/// stands in, and `??` where there is no such label.
+/// The text with every `\ref` replaced by the number its label names,
+/// and `??` where there is no such label.
 ///
 /// Public because `--text` resolves them too: a document read as text has no
 /// pages, but it has its own structure, and "see chapter 2" is what the

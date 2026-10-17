@@ -346,7 +346,10 @@ fn lower_math_at(
 ) -> Result<bool, TexError> {
     // A sectioning command or a `\setcounter` moves the counters an equation
     // number reads; it is followed here and left for the lowerer to act on.
-    deferred.numbering.watch(eng, lx, tok);
+    // What it means for `\@currentlabel` goes into the text: see `watch`.
+    if let Some(marks) = deferred.numbering.watch(eng, lx, tok) {
+        push(out, &marks);
+    }
     let Some((f, style, display, environment)) = read(eng, lx, tok)? else {
         return Ok(false);
     };
@@ -411,8 +414,18 @@ fn numbered(
             numbers.push((place.row, shown));
         }
     }
+    // A display environment is a group, so what its places set as
+    // `\@currentlabel` is undone at its end.
     if !marks.is_empty() {
-        push(out, &marks);
+        use crate::typeset::{REF_CLOSE, REF_OPEN};
+        push(
+            out,
+            &format!(
+                "{}{marks}{}",
+                ref_mark(REF_OPEN, ""),
+                ref_mark(REF_CLOSE, "")
+            ),
+        );
     }
     numbers
 }

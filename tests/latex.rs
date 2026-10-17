@@ -447,13 +447,10 @@ fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
     // register writes now.
     assert!(aux.contains("\\newlabel{sec:a}{{1}{1}}"), "{aux}");
     assert!(aux.contains("\\bibcite{k}{1}"), "{aux}");
-    // `0.1` rather than `1`: the number comes from `typeset::unit_numbers`,
-    // which counts chapter, section and subsection and joins every level down
-    // to the one asked for -- so a class with no chapters still carries the
-    // chapter's nought. LaTeX writes `1` here, and BUGS.md records the
-    // difference; what this test is about is that the reference RESOLVED,
-    // against a `??` that means the run could not settle it.
-    assert!(got.contains("Section 0.1 and [1]."), "{got}");
+    // `1`, as pdflatex sets it: article.cls's `\thesection` has no chapter in
+    // front of it. The typesetting run set `0.1` while it counted headings as
+    // report's.
+    assert!(got.contains("Section 1 and [1]."), "{got}");
     assert!(!got.contains("??"), "every reference resolved: {got}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -831,7 +828,7 @@ fn display_settings(marked: &str) -> Vec<texrs::math::set::Setting> {
 /// from the sectioning units only.
 #[test]
 fn a_display_is_numbered_and_a_reference_to_it_resolves() {
-    let src = "\\documentclass{article}\n\\begin{document}\n\
+    let src = "\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n\
                \\section{First}\n\
                \\begin{equation} E = mc^2 \\label{eq:one} \\end{equation}\n\
                See \\ref{eq:one} and \\eqref{eq:one}.\n\
@@ -877,7 +874,7 @@ fn a_display_is_numbered_and_a_reference_to_it_resolves() {
 /// document, each number at the left margin.
 #[test]
 fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
-    let src = "\\documentclass[leqno]{article}\n\
+    let src = "\\documentclass[leqno]{article}\n\\usepackage{amsmath}\n\
                \\numberwithin{equation}{section}\n\\begin{document}\n\
                \\section{A}\n\
                \\begin{equation} a = b \\label{e1}\\end{equation}\n\
@@ -916,7 +913,9 @@ fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
 /// to workers.
 #[test]
 fn equation_numbers_are_the_same_on_one_thread_and_many() {
-    let mut src = String::from("\\documentclass{article}\n\\begin{document}\n\\section{S}\n");
+    let mut src = String::from(
+        "\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n\\section{S}\n",
+    );
     for k in 1..=80 {
         src.push_str(&format!(
             "Before $x_{k}$.\n\\begin{{equation}} y = \\frac{{{k}}}{{2}} \\label{{e{k}}}\\end{{equation}}\n"
@@ -940,4 +939,181 @@ fn equation_numbers_are_the_same_on_one_thread_and_many() {
     let text = texrs::text_without_marks(&texrs::typeset::refs_numbered(&serial));
     assert!(text.contains("Last (80), first 1."), "{text}");
     assert!(text.contains("(79)"), "{text}");
+}
+
+/// The body every class-numbering test below shares: a chapter's worth of
+/// units, a float of each kind, a display, a starred unit, `\appendix`, and a
+/// line of references to all of it.
+const CLASS_UNITS: &str = "\\begin{document}\n\
+    \\chapter{One}\\label{c1}\n\
+    \\section{Sec}\\label{s1}\n\
+    \\subsection{Sub}\\label{ss1}\n\
+    \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+    \\begin{table}x\\caption{T}\\label{t1}\\end{table}\n\
+    \\begin{equation}a\\label{e1}\\end{equation}\n\
+    \\chapter*{Star}\\label{star}\n\
+    \\section{SecS}\\label{s2}\n\
+    \\chapter{Two}\\label{c2}\n\
+    \\section{Sec2}\\label{s3}\n\
+    \\appendix\n\
+    \\chapter{App}\\label{a1}\n\
+    \\section{AppSec}\\label{as1}\n\
+    \\begin{equation}b\\label{e2}\\end{equation}\n\
+    R: \\ref{c1} \\ref{s1} \\ref{ss1} \\ref{f1} \\ref{t1} \\ref{e1} \\ref{star} \\ref{s2} \
+    \\ref{c2} \\ref{s3} \\ref{a1} \\ref{as1} \\ref{e2} END\n\
+    \\end{document}\n";
+
+/// A `\ref` names `\@currentlabel` as the CLASS's `\the<counter>` wrote it,
+/// against pdflatex (pdfTeX 1.40.29, TeX Live 2026, two runs, measured on each
+/// document). In an article a section is `1`, not report's `0.1`; a float's
+/// caption is its own counter's number, a table's not a figure's; a figure or
+/// a display is a group, so a label after it -- here the one after the starred
+/// unit, which steps nothing -- names the unit around it again; and
+/// `\appendix` letters the sections in an article and the chapters in a report
+/// or book.
+#[test]
+fn a_reference_names_the_number_the_class_writes() {
+    let article = "\\documentclass{article}\n\\begin{document}\n\
+                   \\label{pre}\n\
+                   \\section{One}\\label{s1}\n\
+                   \\subsection{Sub}\\label{ss1}\n\
+                   \\subsubsection{SubSub}\\label{sss1}\n\
+                   \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+                   \\begin{table}x\\caption{T}\\label{t1}\\end{table}\n\
+                   \\section*{Star}\\label{star}\n\
+                   \\begin{equation}a\\label{e1}\\end{equation}\n\
+                   \\section{Two}\\label{s2}\n\
+                   \\subsection{Sub2}\\label{ss2}\n\
+                   \\begin{figure}x\\caption{F2}\\label{f2}\\end{figure}\n\
+                   \\appendix\n\
+                   \\section{App}\\label{a1}\n\
+                   \\subsection{AppSub}\\label{as1}\n\
+                   \\begin{equation}b\\label{e2}\\end{equation}\n\
+                   R: [\\ref{pre}] \\ref{s1} \\ref{ss1} \\ref{sss1} \\ref{f1} \\ref{t1} \
+                   \\ref{star} \\ref{e1} \\ref{s2} \\ref{ss2} \\ref{f2} \\ref{a1} \\ref{as1} \
+                   \\ref{e2} END\n\
+                   \\end{document}\n";
+    let got = texrs::run_text(article).expect("article");
+    assert!(
+        got.contains("R: [] 1 1.1 1.1.1 1 1 1.1.1 1 2 2.1 2 A A.1 2 END"),
+        "{got}"
+    );
+    for class in ["report", "book"] {
+        let src = format!("\\documentclass{{{class}}}\n{CLASS_UNITS}");
+        let got = texrs::run_text(&src).expect(class);
+        assert!(
+            got.contains("R: 1 1.1 1.1.1 1.1 1.1 1.1 1.1.1 1.2 2 2.1 A A.1 A.1 END"),
+            "{class}: {got}"
+        );
+    }
+}
+
+/// The label pass writes the article's numbers into the `.aux` as well:
+/// pdflatex writes `\newlabel{a1}{{A}{1}...}` for the appendix and
+/// `\newlabel{t1}{{1}{1}...}` for the first table (measured, two runs).
+#[test]
+fn the_aux_carries_the_article_s_own_numbers() {
+    let dir = std::env::temp_dir().join(format!("texrs-aux-class-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let doc = dir.join("classnum.tex");
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\section{One}\\label{s1}\n\
+               \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+               \\begin{table}x\\caption{T}\\label{t1}\\end{table}\n\
+               \\appendix\n\\section{App}\\label{a1}\n\
+               See \\ref{a1}.\n\
+               \\end{document}\n";
+    std::fs::write(&doc, src).expect("write");
+    let _ = std::fs::remove_file(dir.join("classnum.aux"));
+    texrs::run_text_at(&doc, src).expect("run");
+    let aux = std::fs::read_to_string(dir.join("classnum.aux")).expect("aux written");
+    for entry in [
+        "\\newlabel{s1}{{1}{1}}",
+        "\\newlabel{f1}{{1}{1}}",
+        "\\newlabel{t1}{{1}{1}}",
+        "\\newlabel{a1}{{A}{1}}",
+    ] {
+        assert!(aux.contains(entry), "{entry} in {aux}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// report.cls numbers a float `\ifnum \c@chapter>\z@ \thechapter.\fi` its own
+/// number, and a chapter resets it: pdflatex (two runs, measured) sets
+/// `1 1 1.1 1.1 A.1 A.1` here, and writes the same into the `.aux`. The label
+/// pass wrote `1.2` for the figure in the first chapter while `\stepcounter`'s
+/// resets were local to the group it makes them in.
+#[test]
+fn a_report_s_floats_are_numbered_within_the_chapter_once_there_is_one() {
+    let src = "\\documentclass{report}\n\\begin{document}\n\
+               \\begin{figure}x\\caption{F}\\label{f0}\\end{figure}\n\
+               \\chapter{A}\\label{c}\n\
+               \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+               \\begin{equation}a\\label{e}\\end{equation}\n\
+               \\appendix\n\\chapter{B}\\section{S}\\label{s}\n\
+               \\begin{table}x\\caption{T}\\label{t}\\end{table}\n\
+               R: \\ref{f0} \\ref{c} \\ref{f1} \\ref{e} \\ref{s} \\ref{t} END\n\
+               \\end{document}\n";
+    let got = texrs::run_text(src).expect("run");
+    assert!(got.contains("R: 1 1 1.1 1.1 A.1 A.1 END"), "{got}");
+    let labels = texrs::latex::aux::pass(src).expect("label pass").labels;
+    for (key, number) in [
+        ("f0", "1"),
+        ("c", "1"),
+        ("f1", "1.1"),
+        ("e", "1.1"),
+        ("s", "A.1"),
+        ("t", "A.1"),
+    ] {
+        assert_eq!(
+            labels.get(key).map(|(n, _)| n.as_str()),
+            Some(number),
+            "{key}: {labels:?}"
+        );
+    }
+}
+
+/// `\numberwithin` is amsmath's and `\counterwithin` / `\counterwithout` are
+/// the kernel's (ltcounts.dtx, 2018-04-01). pdflatex (pdfTeX 1.40.29, TeX Live
+/// 2026, two runs) sets `(1.1) (2.1) 1.1 2.1 1 1` for the first document --
+/// the starred `\counterwithin*` resets `table` per section and leaves
+/// `\thetable` alone -- and `1 2 1.1 2.2` for the second, where
+/// `\counterwithout*{equation}{chapter}` stops the reset and keeps report's
+/// `\theequation`. Without amsmath pdflatex stops at
+/// `! Undefined control sequence.` on `\numberwithin`.
+#[test]
+fn numberwithin_is_amsmath_s_and_counterwithin_is_the_kernel_s() {
+    let within = "\\documentclass{article}\n\\usepackage{amsmath}\n\
+                  \\numberwithin{equation}{section}\n\
+                  \\counterwithin{figure}{section}\n\
+                  \\counterwithin*{table}{section}\n\\begin{document}\n\
+                  \\section{One}\n\
+                  \\begin{equation}a\\label{e1}\\end{equation}\n\
+                  \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+                  \\begin{table}x\\caption{T}\\label{t1}\\end{table}\n\
+                  \\section{Two}\n\
+                  \\begin{equation}a\\label{e2}\\end{equation}\n\
+                  \\begin{figure}x\\caption{F}\\label{f2}\\end{figure}\n\
+                  \\begin{table}x\\caption{T}\\label{t2}\\end{table}\n\
+                  R: \\eqref{e1} \\eqref{e2} \\ref{f1} \\ref{f2} \\ref{t1} \\ref{t2} END\n\
+                  \\end{document}\n";
+    let got = texrs::run_text(within).expect("within");
+    assert!(got.contains("R: (1.1) (2.1) 1.1 2.1 1 1 END"), "{got}");
+    let without = "\\documentclass{report}\n\
+                   \\counterwithout{figure}{chapter}\n\
+                   \\counterwithout*{equation}{chapter}\n\\begin{document}\n\
+                   \\chapter{One}\n\
+                   \\begin{figure}x\\caption{F}\\label{f1}\\end{figure}\n\
+                   \\begin{equation}a\\label{e1}\\end{equation}\n\
+                   \\chapter{Two}\n\
+                   \\begin{figure}x\\caption{F}\\label{f2}\\end{figure}\n\
+                   \\begin{equation}a\\label{e2}\\end{equation}\n\
+                   R: \\ref{f1} \\ref{f2} \\ref{e1} \\ref{e2} END\n\
+                   \\end{document}\n";
+    let got = texrs::run_text(without).expect("without");
+    assert!(got.contains("R: 1 2 1.1 2.2 END"), "{got}");
+    let no_amsmath = "\\documentclass{article}\n\\numberwithin{equation}{section}\n\
+                      \\begin{document}\nx\n\\end{document}\n";
+    let err = texrs::run_text(no_amsmath).expect_err("no amsmath, no \\numberwithin");
+    assert!(err.0.contains("\\numberwithin"), "{}", err.0);
 }
