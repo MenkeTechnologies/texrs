@@ -886,8 +886,8 @@ Scaling with `--jobs`, on those same 60 documents:
 
 Ten cores, so the fall at 16 is oversubscription rather than a limit in the
 work. At v0.3.0 a single document was a single thread: this parallelised the
-batch, not the engine. Page drawing, and page encoding on the `--dvi` path, now
-fan out inside one document; see below and the 2026-10-17 measurement.
+batch, not the engine. Line breaking, page drawing, and page encoding on the
+`--dvi` path now fan out inside one document; see below and the 2026-10-17 measurement.
 
 **PDF assembly.** `pdf::document` writes each font and picture once and
 finds an already-written one by address before comparing contents, so a font
@@ -907,6 +907,21 @@ scales across cores and the file is identical at any thread count. A document
 of only a few pages is drawn on the calling thread. Each page also shares its
 fonts by reference (`Arc`) instead of copying a font program per drawn run,
 which was the larger share of this stage before the fan-out.
+
+**Line breaking.** What one paragraph hands the next is only the colour, face
+and size stacks, the centring flag and the list depth. On a pool of more than
+one thread, a serial pass that reads the markers without measuring anything
+records that state at each paragraph's start; the paragraphs are then broken
+in parallel and collected in document order, and the paragraph space between
+two is decided on the collected lines. One thread, or a document of fewer than
+64 paragraphs, walks the paragraphs in turn. Liang's patterns and the
+`\hyphenation` exceptions are held in a letter trie, as `tex.web` holds them,
+so a word costs one table step per letter from each position rather than a
+hash of every substring; it breaks every word of `/usr/share/dict/words`
+where the hash table did. Measured 2026-10-17 on the 1001-page document below,
+under load averages between 43 and 110, median wall went from 1191 ms to 839 ms
+at 8 threads and from 1664 ms to 1462 ms at one; output is byte-identical to
+the previous build at both.
 
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
@@ -989,6 +1004,8 @@ serial, and most of it is in three places:
   depth. A paragraph's `fill` depends on nothing else, so it can be split the
   way drawing was — a serial pass recording that state per paragraph, then the
   paragraphs in parallel. About 40% of it is `linebreak::Hyphenator::points`.
+  Since this measurement it is split that way and the patterns are a trie;
+  see **Line breaking** above.
 - **Lowering**, `lower::Lowerer::lower`: the expander, whose macro and register
   state carries from token to token. Serial by nature.
 - **Preamble text**, `latex::preamble_at`: package loading (`load::preamble`,

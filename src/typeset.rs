@@ -3611,48 +3611,53 @@ fn face_coverage(font: &crate::pdf::Font) -> Option<std::collections::BTreeSet<u
 /// live across words, lines and paragraphs here exactly as it does where the
 /// page is drawn. Measuring a monospace word in the prose font is how a line
 /// of code came out narrower than it sets.
+///
+/// That carried state -- the style stacks, the centring flag and the list
+/// depth -- is ALL one paragraph hands the next. So on a pool of more than one
+/// thread a cheap serial pass (`paragraph_starts`) records it at each
+/// paragraph's start, the paragraphs are broken independently and collected in
+/// document order, and the `\parskip` between two is decided on the collected
+/// lines as the serial walk decided it. One thread, or a document of few
+/// paragraphs, walks the paragraphs in turn with no prescan.
 fn break_lines_measured(
     text: &str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face, f64) -> f64,
+    width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
 ) -> Vec<String> {
-    // The breaker cares about the face and not about the colour, but the two
-    // markers are interleaved in one stream, so the same splitter reads both
-    // and the colour half goes on a stack nothing here looks at.
-    let mut colours: Vec<Spec> = Vec::new();
-    let mut faces: Vec<Face> = vec![Face::MAIN];
-    // Seeded with the document's own size, which is the entry never popped:
-    // an unbalanced size marker leaves the body size in force.
-    let mut sizes: Vec<TypeSize> = vec![TypeSize {
-        size: layout.size,
-        leading: layout.leading,
-    }];
-    let mut lines = Vec::new();
-    // Centring is a REGION and outlives the paragraph its marker landed in: a
-    // title page is one `\begin{center}` holding half a dozen `\par`-separated
-    // pieces, so the flag is carried across the loops rather than reset in
-    // them.
-    let mut centred = false;
-    // And so is the list depth: a `\begin{itemize}` opens a region that runs
-    // to its `\end`, and an item's own body is regularly several paragraphs.
-    // 0 is "not in a list".
-    let mut depth = 0usize;
-    for para in text.split("\n\n") {
-        // The parameters this paragraph ended under (see `BREAK_PARAMS`), which
-        // `fill` reads off the layout it is handed.
-        let (params, para) = paragraph_params(para, &layout.breaking);
-        let para: &str = &para;
-        let with_params;
-        let layout = match params == layout.breaking {
-            true => layout,
-            false => {
-                with_params = Layout {
-                    breaking: params,
-                    ..layout.clone()
-                };
-                &with_params
+    let mut carried = ParagraphStart {
+        // The breaker cares about the face and not about the colour, but the
+        // two markers are interleaved in one stream, so the same splitter reads
+        // both and the colour half goes on a stack nothing here looks at.
+        colours: Vec::new(),
+        faces: vec![Face::MAIN],
+        // Seeded with the document's own size, which is the entry never
+        // popped: an unbalanced size marker leaves the body size in force.
+        sizes: vec![TypeSize {
+            size: layout.size,
+            leading: layout.leading,
+        }],
+        centred: false,
+        depth: 0,
+    };
+    let paras: Vec<&str> = text.split("\n\n").collect();
+    let broken: Vec<(bool, Vec<String>)> =
+        match paras.len() >= PARALLEL_PARAGRAPHS && rayon::current_num_threads() > 1 {
+            true => {
+                use rayon::prelude::*;
+                let starts = paragraph_starts(&paras, layout, carried);
+                paras
+                    .par_iter()
+                    .zip(starts)
+                    .map(|(para, mut start)| break_measured(para, layout, &mut start, width_of))
+                    .collect()
             }
+            false => paras
+                .iter()
+                .map(|para| break_measured(para, layout, &mut carried, width_of))
+                .collect(),
         };
+    let mut lines = Vec::new();
+    for (sets_text, own) in broken {
         // `\parskip`: the space LaTeX leaves BETWEEN two paragraphs, which
         // texrs left out entirely -- and which is the largest reason it set a
         // book short. See `PARAGRAPH_SPACE`. It goes in only between two
@@ -3661,68 +3666,208 @@ fn break_lines_measured(
         let after_text = lines
             .last()
             .is_some_and(|line: &String| !is_space_line(line) && !is_break_line(line));
-        if after_text && sets_text(para) {
+        if after_text && sets_text {
             lines.push(VERTICAL_SPACE.to_string());
         }
-        // A picture is one line of its own, whatever it measures: it is drawn
-        // rather than set, so there is nothing in it to fill to a measure and
-        // nothing a break may fall inside. `line_height` reads the room it
-        // takes off the marker, and the drawing loop below draws it there.
-        if is_block_para(para) {
-            // `\begin{center}\begin{tikzpicture}` is how most documents put a
-            // drawing on a page, and the centring is a REGION that outlives the
-            // paragraph its marker landed in -- so the flag `fill` is carrying
-            // is what says whether this picture is centred, and it goes on the
-            // line the way it goes on a line of text.
-            lines.push(match centred {
-                true => format!("{CENTRE}{}", para.trim()),
-                false => para.trim().to_string(),
-            });
+        lines.extend(own);
+    }
+    lines
+}
+
+/// Fewer paragraphs than this are broken on the calling thread: fanning out
+/// costs more than a short document's breaking is worth.
+const PARALLEL_PARAGRAPHS: usize = 64;
+
+/// What breaking one paragraph needs to know that the paragraphs before it
+/// left behind.
+#[derive(Clone)]
+struct ParagraphStart {
+    colours: Vec<Spec>,
+    faces: Vec<Face>,
+    sizes: Vec<TypeSize>,
+    /// Centring is a REGION and outlives the paragraph its marker landed in:
+    /// a title page is one `\begin{center}` holding half a dozen
+    /// `\par`-separated pieces.
+    centred: bool,
+    /// And so is the list depth: a `\begin{itemize}` opens a region that runs
+    /// to its `\end`, and an item's own body is regularly several paragraphs.
+    /// 0 is "not in a list".
+    depth: usize,
+}
+
+/// The state each paragraph begins with, advanced from `carried` in document
+/// order by the same routing `break_measured` breaks with, but without
+/// measuring or breaking anything.
+///
+/// Pictures, listings and tables leave every piece of the state where they
+/// found it (a table READS the stacks; see `table_lines`). In prose the region
+/// markers move the centring flag and the depth, and the stacks move only in
+/// a word `word_width` splits into styled runs -- one holding a colour or face
+/// marker -- so only those words are walked, split exactly as `fill` splits
+/// them.
+fn paragraph_starts(
+    paras: &[&str],
+    layout: &Layout,
+    mut carried: ParagraphStart,
+) -> Vec<ParagraphStart> {
+    let mut starts = Vec::with_capacity(paras.len());
+    for para in paras {
+        starts.push(carried.clone());
+        let (_, para) = paragraph_params(para, &layout.breaking);
+        let para: &str = &para;
+        if is_block_para(para) || listing_lines(para).is_some() || para.contains(TABLE_ROW) {
             continue;
         }
-        // A code listing is already broken, by the author -- see
-        // `listing_lines`, which the DVI breaker reads the same way.
-        if let Some(code) = listing_lines(para) {
-            lines.extend(code.map(str::to_string));
-            continue;
-        }
-        // A table is set as a table -- rows on their own lines, columns as
-        // wide as their content -- rather than filled into prose. A row end is
-        // what says a paragraph is one, the way a listing break says a
-        // paragraph is a listing.
-        if para.contains(TABLE_ROW) {
-            table_lines(para, layout, &colours, &faces, &sizes, width_of, &mut lines);
-            continue;
-        }
-        // A forced break is its own line, so the paginator can see one. It has
-        // to come out here because `split_whitespace` below counts a form feed
-        // as whitespace and would silently drop it.
-        for (part_number, part) in para.split(PAGE_BREAK).enumerate() {
-            if part_number > 0 {
-                lines.push(PAGE_BREAK.to_string());
-            }
-            // Vertical space is its own line for the same reason: a vertical
-            // tab is whitespace to Rust, so the space a heading asked for
-            // would vanish into the gap between two words.
-            for (space_number, part) in part.split(VERTICAL_SPACE).enumerate() {
-                if space_number > 0 {
-                    lines.push(VERTICAL_SPACE.to_string());
+        let ParagraphStart {
+            colours,
+            faces,
+            sizes,
+            centred,
+            depth,
+        } = &mut carried;
+        for part in para.split([PAGE_BREAK, VERTICAL_SPACE]) {
+            let mut rest = part;
+            loop {
+                let (stretch, marker) = next_stretch(rest);
+                if stretch.contains(STACK_MARKERS) {
+                    for word in words_carrying_refs(stretch) {
+                        if word.contains(STACK_MARKERS) {
+                            styled_runs(&word, colours, faces, sizes);
+                        }
+                    }
                 }
-                fill(
-                    part,
-                    &mut centred,
-                    &mut depth,
-                    layout,
-                    &mut colours,
-                    &mut faces,
-                    &mut sizes,
-                    width_of,
-                    &mut lines,
-                );
+                match marker {
+                    Some(marker) => rest = cross_region(rest, stretch, marker, centred, depth),
+                    None => break,
+                }
             }
         }
     }
-    lines
+    starts
+}
+
+/// One paragraph's lines, from the state the paragraphs before it left, which
+/// it advances; and whether it sets text, which is what decides the
+/// `\parskip` before it.
+fn break_measured(
+    para: &str,
+    layout: &Layout,
+    state: &mut ParagraphStart,
+    width_of: &dyn Fn(&str, Face, f64) -> f64,
+) -> (bool, Vec<String>) {
+    let ParagraphStart {
+        colours,
+        faces,
+        sizes,
+        centred,
+        depth,
+    } = state;
+    let mut lines = Vec::new();
+    // The parameters this paragraph ended under (see `BREAK_PARAMS`), which
+    // `fill` reads off the layout it is handed.
+    let (params, para) = paragraph_params(para, &layout.breaking);
+    let para: &str = &para;
+    let sets = sets_text(para);
+    let with_params;
+    let layout = match params == layout.breaking {
+        true => layout,
+        false => {
+            with_params = Layout {
+                breaking: params,
+                ..layout.clone()
+            };
+            &with_params
+        }
+    };
+    // A picture is one line of its own, whatever it measures: it is drawn
+    // rather than set, so there is nothing in it to fill to a measure and
+    // nothing a break may fall inside. `line_height` reads the room it takes
+    // off the marker, and the drawing loop below draws it there.
+    if is_block_para(para) {
+        // `\begin{center}\begin{tikzpicture}` is how most documents put a
+        // drawing on a page, and the centring is a REGION that outlives the
+        // paragraph its marker landed in -- so the flag `fill` is carrying is
+        // what says whether this picture is centred, and it goes on the line
+        // the way it goes on a line of text.
+        lines.push(match *centred {
+            true => format!("{CENTRE}{}", para.trim()),
+            false => para.trim().to_string(),
+        });
+        return (sets, lines);
+    }
+    // A code listing is already broken, by the author -- see
+    // `listing_lines`, which the DVI breaker reads the same way.
+    if let Some(code) = listing_lines(para) {
+        lines.extend(code.map(str::to_string));
+        return (sets, lines);
+    }
+    // A table is set as a table -- rows on their own lines, columns as wide
+    // as their content -- rather than filled into prose. A row end is what
+    // says a paragraph is one, the way a listing break says a paragraph is a
+    // listing.
+    if para.contains(TABLE_ROW) {
+        table_lines(para, layout, colours, faces, sizes, width_of, &mut lines);
+        return (sets, lines);
+    }
+    // A forced break is its own line, so the paginator can see one. It has to
+    // come out here because `split_whitespace` below counts a form feed as
+    // whitespace and would silently drop it.
+    for (part_number, part) in para.split(PAGE_BREAK).enumerate() {
+        if part_number > 0 {
+            lines.push(PAGE_BREAK.to_string());
+        }
+        // Vertical space is its own line for the same reason: a vertical tab
+        // is whitespace to Rust, so the space a heading asked for would vanish
+        // into the gap between two words.
+        for (space_number, part) in part.split(VERTICAL_SPACE).enumerate() {
+            if space_number > 0 {
+                lines.push(VERTICAL_SPACE.to_string());
+            }
+            fill(
+                part, centred, depth, layout, colours, faces, sizes, width_of, &mut lines,
+            );
+        }
+    }
+    (sets, lines)
+}
+
+/// The markers `word_width` splits a word into styled runs at, which are the
+/// only places the breaker moves the colour, face and size stacks.
+const STACK_MARKERS: [char; 4] = ['\u{1}', '\u{3}', FACE_PUSH, FACE_POP];
+
+/// The text `fill` sets in one alignment: up to the next region marker, and
+/// that marker.
+fn next_stretch(rest: &str) -> (&str, Option<char>) {
+    match rest.find([CENTRE, CENTRE_END, LIST_INDENT]) {
+        Some(at) => (&rest[..at], rest[at..].chars().next()),
+        None => (rest, None),
+    }
+}
+
+/// Step over the region marker that ends `stretch`, applying it, and return
+/// the text after it.
+///
+/// The depth marker carries the new depth as one digit, so a nested list
+/// opening and the outer list resuming after it are the same instruction with
+/// different arguments -- and nothing has to track a stack on this side.
+fn cross_region<'a>(
+    rest: &'a str,
+    stretch: &str,
+    marker: char,
+    centred: &mut bool,
+    depth: &mut usize,
+) -> &'a str {
+    match marker {
+        LIST_INDENT => {
+            let (deeper, after) = strip_indent(&rest[stretch.len()..]);
+            *depth = deeper;
+            after
+        }
+        m => {
+            *centred = m == CENTRE;
+            &rest[stretch.len() + m.len_utf8()..]
+        }
+    }
 }
 
 /// Fill one stretch of text into lines at the measure, total-fit, marking each
@@ -3748,10 +3893,7 @@ fn fill(
     use crate::linebreak::After;
     let mut rest = text;
     loop {
-        let (stretch, marker) = match rest.find([CENTRE, CENTRE_END, LIST_INDENT]) {
-            Some(at) => (&rest[..at], rest[at..].chars().next()),
-            None => (rest, None),
-        };
+        let (stretch, marker) = next_stretch(rest);
         // A list narrows the measure by exactly what it moves the text in, so
         // a long item wraps INSIDE the list rather than running back out to
         // the right margin. A centred line is not moved in -- see `start` --
@@ -3831,19 +3973,7 @@ fn fill(
             });
         }
         match marker {
-            // The depth marker carries the new depth as one digit, so a nested
-            // list opening and the outer list resuming after it are the same
-            // instruction with different arguments -- and nothing has to track
-            // a stack on this side.
-            Some(LIST_INDENT) => {
-                let (deeper, after) = strip_indent(&rest[stretch.len()..]);
-                *depth = deeper;
-                rest = after;
-            }
-            Some(m) => {
-                *centred = m == CENTRE;
-                rest = &rest[stretch.len() + m.len_utf8()..];
-            }
+            Some(marker) => rest = cross_region(rest, stretch, marker, centred, depth),
             None => return,
         }
     }
@@ -5099,7 +5229,7 @@ fn with_contents(
 fn contents_set<'a>(
     text: &'a str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face, f64) -> f64,
+    width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
 ) -> std::borrow::Cow<'a, str> {
     let Some(depth) = contents_depth(text) else {
         return std::borrow::Cow::Borrowed(text);
@@ -5428,7 +5558,7 @@ fn with_pagerefs(text: &str, pages: &std::collections::HashMap<String, usize>) -
 fn refs_paged<'a>(
     text: &'a str,
     layout: &Layout,
-    width_of: &dyn Fn(&str, Face, f64) -> f64,
+    width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
 ) -> std::borrow::Cow<'a, str> {
     if !has_ref(text, REF_PAGE) {
         return std::borrow::Cow::Borrowed(text);
@@ -6792,7 +6922,7 @@ fn word_width(
     sizes: &mut Vec<TypeSize>,
     width_of: &dyn Fn(&str, Face, f64) -> f64,
 ) -> f64 {
-    if !word.contains(['\u{1}', '\u{3}', FACE_PUSH, FACE_POP]) {
+    if !word.contains(STACK_MARKERS) {
         return width_of(word, current_face(faces), current_size(sizes).size);
     }
     styled_runs(word, colours, faces, sizes)

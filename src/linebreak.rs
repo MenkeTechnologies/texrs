@@ -36,7 +36,6 @@
 //! to it, which is why tex reports `Underfull \hbox` far more often than
 //! `Overfull`.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// What may happen after one piece of a paragraph.
@@ -411,16 +410,132 @@ fn total_fit(
 /// with, and a copy here would be a second thing to keep in step. A machine
 /// with no TeX installation gets an EMPTY set and no hyphenation, which is
 /// what texrs did before this and is still a correct paragraph.
+///
+/// Both the patterns and the exceptions are held in a letter trie, the
+/// structure `tex.web` keeps them in (§920-§923): looking a word up walks the
+/// trie once from each of its positions, following one letter at a time, so a
+/// lookup costs one array index per letter rather than one hash of every
+/// substring it might match.
 #[derive(Default)]
 pub struct Hyphenator {
+    /// Every byte a pattern or exception spells with, numbered from one; 0 is
+    /// a byte none of them uses, which no lookup can follow.
+    letters: Letters,
     /// A pattern's letters to the level between each of them: `.ach4` is
     /// `".ach"` and `[0, 0, 0, 0, 4]`.
-    patterns: HashMap<Vec<u8>, Vec<u8>>,
+    patterns: Trie<Vec<u8>>,
     /// `\hyphenation{as-so-ciate}`: where a named word breaks, whatever the
     /// patterns say.
-    exceptions: HashMap<Vec<u8>, Vec<usize>>,
-    /// The longest pattern, so a lookup only walks as far as one can reach.
-    longest: usize,
+    exceptions: Trie<Vec<usize>>,
+}
+
+/// The bytes a trie's keys are spelled in, each to its column.
+#[derive(Default)]
+struct Letters {
+    column: Vec<u8>,
+    count: usize,
+}
+
+impl Letters {
+    fn new(keys: &[&[u8]]) -> Self {
+        let mut column = vec![0u8; 256];
+        let mut count = 0;
+        for &byte in keys.iter().flat_map(|key| key.iter()) {
+            if column[usize::from(byte)] == 0 {
+                count += 1;
+                // Hyphenation keys are letters and the full stop: far fewer
+                // than 255, which a column number has room for.
+                column[usize::from(byte)] = u8::try_from(count).unwrap_or(u8::MAX);
+            }
+        }
+        Self { column, count }
+    }
+
+    /// The column `byte` is followed in, or `None` when no key spells with it.
+    fn of(&self, byte: u8) -> Option<usize> {
+        match self.column.get(usize::from(byte)).copied().unwrap_or(0) {
+            0 => None,
+            c => Some(usize::from(c) - 1),
+        }
+    }
+}
+
+/// Keys spelled in [`Letters`], each to the value stored where it ends.
+///
+/// Node 0 is the root. `next[node * width + column]` is the node one letter
+/// on, and 0 there means no key continues that way (the root is no node's
+/// child, so 0 is free to mean "none").
+struct Trie<V> {
+    width: usize,
+    next: Vec<u32>,
+    value: Vec<Option<V>>,
+}
+
+impl<V> Default for Trie<V> {
+    fn default() -> Self {
+        Self {
+            width: 0,
+            next: Vec::new(),
+            value: Vec::new(),
+        }
+    }
+}
+
+impl<V> Trie<V> {
+    fn new(width: usize) -> Self {
+        Self {
+            width,
+            next: vec![0; width],
+            value: vec![None],
+        }
+    }
+
+    /// Store `value` at `key`, replacing what a key spelled the same stored.
+    fn insert(&mut self, letters: &Letters, key: &[u8], value: V) {
+        let mut node = 0usize;
+        for &byte in key {
+            let Some(column) = letters.of(byte) else {
+                return;
+            };
+            let slot = node * self.width + column;
+            node = match self.next[slot] {
+                0 => {
+                    let fresh = self.value.len();
+                    self.next[slot] = u32::try_from(fresh).unwrap_or(u32::MAX);
+                    self.next.extend(std::iter::repeat_n(0, self.width));
+                    self.value.push(None);
+                    fresh
+                }
+                to => to as usize,
+            };
+        }
+        self.value[node] = Some(value);
+    }
+
+    /// The node one letter on from `node`, if any key continues that way.
+    fn step(&self, letters: &Letters, node: usize, byte: u8) -> Option<usize> {
+        let column = letters.of(byte)?;
+        match self.next.get(node * self.width + column).copied() {
+            None | Some(0) => None,
+            Some(to) => Some(to as usize),
+        }
+    }
+
+    /// What is stored at `key` exactly.
+    fn get(&self, letters: &Letters, key: &[u8]) -> Option<&V> {
+        if self.value.is_empty() {
+            return None;
+        }
+        let mut node = 0usize;
+        for &byte in key {
+            node = self.step(letters, node, byte)?;
+        }
+        self.value[node].as_ref()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.value.iter().all(Option::is_none)
+    }
 }
 
 /// `\lefthyphenmin` and `\righthyphenmin`, at the values LaTeX sets for
@@ -431,30 +546,48 @@ const RIGHT_MIN: usize = 3;
 impl Hyphenator {
     /// The patterns from a `hyphen.tex`, and nothing if it cannot be read.
     pub fn from_source(src: &str) -> Self {
-        let mut me = Self::default();
-        for pattern in block(src, "\\patterns{") {
-            let (key, levels) = split_pattern(&pattern);
-            if key.is_empty() {
-                continue;
-            }
-            me.longest = me.longest.max(key.len());
-            me.patterns.insert(key, levels);
-        }
-        for word in block(src, "\\hyphenation{") {
-            let letters: Vec<u8> = word
-                .bytes()
-                .filter(|b| *b != b'-')
-                .map(|b| b.to_ascii_lowercase())
-                .collect();
-            let mut at = Vec::new();
-            let mut seen = 0usize;
-            for byte in word.bytes() {
-                match byte {
-                    b'-' => at.push(seen),
-                    _ => seen += 1,
+        let patterns: Vec<(Vec<u8>, Vec<u8>)> = block(src, "\\patterns{")
+            .iter()
+            .map(|pattern| split_pattern(pattern))
+            .filter(|(key, _)| !key.is_empty())
+            .collect();
+        let exceptions: Vec<(Vec<u8>, Vec<usize>)> = block(src, "\\hyphenation{")
+            .iter()
+            .map(|word| {
+                let letters: Vec<u8> = word
+                    .bytes()
+                    .filter(|b| *b != b'-')
+                    .map(|b| b.to_ascii_lowercase())
+                    .collect();
+                let mut at = Vec::new();
+                let mut seen = 0usize;
+                for byte in word.bytes() {
+                    match byte {
+                        b'-' => at.push(seen),
+                        _ => seen += 1,
+                    }
                 }
-            }
-            me.exceptions.insert(letters, at);
+                (letters, at)
+            })
+            .collect();
+        let keys: Vec<&[u8]> = patterns
+            .iter()
+            .map(|(key, _)| key.as_slice())
+            .chain(exceptions.iter().map(|(key, _)| key.as_slice()))
+            .collect();
+        let letters = Letters::new(&keys);
+        let mut me = Self {
+            patterns: Trie::new(letters.count),
+            exceptions: Trie::new(letters.count),
+            letters,
+        };
+        // In source order, so a pattern or exception stated twice keeps the
+        // later statement, as inserting into a map did.
+        for (key, levels) in patterns {
+            me.patterns.insert(&me.letters, &key, levels);
+        }
+        for (key, at) in exceptions {
+            me.exceptions.insert(&me.letters, &key, at);
         }
         me
     }
@@ -474,26 +607,34 @@ impl Hyphenator {
         if len < LEFT_MIN + RIGHT_MIN || !word.bytes().all(|b| b.is_ascii_alphabetic()) {
             return Vec::new();
         }
-        let lower: Vec<u8> = word.bytes().map(|b| b.to_ascii_lowercase()).collect();
-        let inside = |at: &usize| *at >= LEFT_MIN && len - *at >= RIGHT_MIN;
-        if let Some(known) = self.exceptions.get(&lower) {
-            return known.iter().copied().filter(inside).collect();
-        }
-        // Liang: the word between two full stops, every substring looked up,
-        // and the highest level wins at each position. An odd level is a break.
+        // The word between two full stops, lower-cased: the exceptions are
+        // keyed on the letters alone, the patterns on the whole of it.
         let mut edged = Vec::with_capacity(len + 2);
         edged.push(b'.');
-        edged.extend_from_slice(&lower);
+        edged.extend(word.bytes().map(|b| b.to_ascii_lowercase()));
         edged.push(b'.');
+        let inside = |at: &usize| *at >= LEFT_MIN && len - *at >= RIGHT_MIN;
+        if let Some(known) = self.exceptions.get(&self.letters, &edged[1..=len]) {
+            return known.iter().copied().filter(inside).collect();
+        }
+        // Liang: every substring that is a pattern applies its levels, and
+        // the highest level wins at each position. An odd level is a break.
+        // The substrings starting at `i` are exactly the trie nodes walking
+        // `edged[i..]` passes through, so one walk per start finds them all.
         let mut level = vec![0u8; edged.len() + 1];
-        for i in 0..edged.len() {
-            let far = (i + self.longest).min(edged.len());
-            for j in i + 1..=far {
-                let Some(values) = self.patterns.get(&edged[i..j]) else {
-                    continue;
-                };
-                for (k, value) in values.iter().enumerate() {
-                    level[i + k] = level[i + k].max(*value);
+        if !self.patterns.value.is_empty() {
+            for i in 0..edged.len() {
+                let mut node = 0usize;
+                for &byte in &edged[i..] {
+                    let Some(to) = self.patterns.step(&self.letters, node, byte) else {
+                        break;
+                    };
+                    node = to;
+                    if let Some(values) = &self.patterns.value[node] {
+                        for (k, value) in values.iter().enumerate() {
+                            level[i + k] = level[i + k].max(*value);
+                        }
+                    }
                 }
             }
         }
