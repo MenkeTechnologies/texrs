@@ -345,6 +345,30 @@ fn base_class_declares_chapters(name: &str) -> Option<bool> {
     }
 }
 
+thread_local! {
+    /// Lines [`report`] holds back instead of printing, while [`held_reports`]
+    /// runs on this thread. Held lines have not been through the once-per-process
+    /// filter yet, so [`release_reports`] decides that at the moment it prints.
+    static HELD: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f`, holding back every line [`report`] would have printed meanwhile.
+///
+/// Two runs that overlap (`aux::update_then`) print in an order of their own
+/// choosing; holding both and releasing them in the order the runs would have
+/// taken one after the other keeps stderr what it was.
+pub(crate) fn held_reports<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+    let outer = HELD.with(|h| h.borrow_mut().replace(Vec::new()));
+    let value = f();
+    let lines = HELD.with(|h| std::mem::replace(&mut *h.borrow_mut(), outer));
+    (value, lines.unwrap_or_default())
+}
+
+/// Print lines [`held_reports`] held back, as [`report`] would have.
+pub(crate) fn release_reports(lines: &[String]) {
+    report(lines);
+}
+
 /// Say, once each, what would not load.
 ///
 /// On stderr and by name, because the failure this replaces is the silent one:
@@ -354,6 +378,16 @@ fn base_class_declares_chapters(name: &str) -> Option<bool> {
 fn report(said: &[String]) {
     use std::collections::BTreeSet;
     use std::sync::{Mutex, OnceLock};
+    let held = HELD.with(|h| match h.borrow_mut().as_mut() {
+        Some(lines) => {
+            lines.extend_from_slice(said);
+            true
+        }
+        None => false,
+    });
+    if held {
+        return;
+    }
     static SEEN: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
     let seen = SEEN.get_or_init(|| Mutex::new(BTreeSet::new()));
     let Ok(mut seen) = seen.lock() else { return };

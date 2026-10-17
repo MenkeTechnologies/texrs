@@ -433,24 +433,55 @@ pub fn run_pdf_with_messages(
 ) -> Result<(Pdf, Vec<String>), TexError> {
     crate::kpse::prefetch_startup();
     let src_d = crate::rust_ffi::desugar(src);
-    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
-    if crate::latex::looks_like_latex(&src_d) {
-        // With the file known, `\ref` is resolved from the `.aux` beside it and
-        // the labels this run finds are written back there; without one, every
-        // reference is `??`. Both are no-ops for a document with no references.
-        match path {
-            Some(p) => {
-                crate::latex::aux::update(p, &src_d);
-                lowerer.preload(&crate::latex::preamble_at(
-                    p,
-                    &src_d,
-                    crate::latex::Mode::Text,
-                ))?;
-            }
-            None => lowerer.preload(&crate::latex::preamble_text(&src_d))?,
+    let latex = crate::latex::looks_like_latex(&src_d);
+    // With the file known, `\ref` is resolved from the `.aux` beside it and the
+    // labels this run finds are written back there -- by a label pass that
+    // `update_then` overlaps with this run's lowering when that cannot change a
+    // byte; without a file, every reference is `??`. Both are no-ops for a
+    // document with no references. The page building after it reads only what
+    // the lowering produced, so it stays outside: a lowering the `.aux` made
+    // stale is all that is ever thrown away.
+    let ran = match (latex, path) {
+        (true, Some(p)) => {
+            crate::latex::aux::update_then(p, &src_d, || lower_for_pdf(path, &src_d, true))
         }
+        _ => lower_for_pdf(path, &src_d, latex),
+    };
+    let ran = ran?;
+    let pdf = crate::typeset::to_pdf(
+        &ran.text,
+        &ran.families,
+        &ran.layout,
+        ran.page_colour,
+        path.and_then(|p| p.parent()),
+    );
+    Ok((pdf, ran.messages))
+}
+
+/// What [`lower_for_pdf`] hands the page builder.
+struct Lowered {
+    messages: Vec<String>,
+    text: String,
+    families: crate::typeset::Families,
+    layout: crate::typeset::Layout,
+    page_colour: Option<crate::colour::Rgb>,
+}
+
+/// [`run_pdf_with_messages`] up to the page builder, once the `.aux` is read.
+fn lower_for_pdf(
+    path: Option<&std::path::Path>,
+    src_d: &str,
+    latex: bool,
+) -> Result<Lowered, TexError> {
+    let mut lowerer = crate::lower::Lowerer::new().with_text_output();
+    if latex {
+        let preamble = match path {
+            Some(p) => crate::latex::preamble_at(p, src_d, crate::latex::Mode::Text),
+            None => crate::latex::preamble_text(src_d),
+        };
+        lowerer.preload(&preamble)?;
     }
-    let cmds = lowerer.lower(&src_d)?;
+    let cmds = lowerer.lower(src_d)?;
     // The families are read while lowering, because that is where the preamble
     // is; they have to be taken from the lowerer before it is dropped.
     let families = lowerer.fonts.clone();
@@ -463,14 +494,13 @@ pub fn run_pdf_with_messages(
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     let messages = crate::runtime::run(chunk).map_err(TexError)?;
     let text = crate::runtime::take_text();
-    let pdf = crate::typeset::to_pdf(
-        &text,
-        &families,
-        &layout,
+    Ok(Lowered {
+        messages,
+        text,
+        families,
+        layout,
         page_colour,
-        path.and_then(|p| p.parent()),
-    );
-    Ok((pdf, messages))
+    })
 }
 
 /// How many pages a PDF declares.

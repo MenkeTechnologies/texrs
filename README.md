@@ -961,6 +961,24 @@ font definitions and postamble are written serially. The file is byte-identical
 to the single-writer output at any thread count, and a document of only a few
 pages is encoded on the calling thread.
 
+**Cross-reference pass.** A LaTeX document that both labels and refers (or
+cites and has a bibliography) is lowered twice per run: once by the pass that
+collects its labels into the `.aux`, once to typeset against the `.aux`. The
+pass reads only the source, so when an `.aux` from an earlier run is on disk
+the two run concurrently, the typesetting against the `.aux` as it stands; when
+the pass is done its `.aux` is written as before, and if that file would parse
+differently from the old one the lowering is redone against the new one
+(`latex::aux::update_then`). Package reports on stderr are held on both sides
+and released in sequential order. It stays sequential at one thread, on a
+first run, and for documents using Lua, `\rust` blocks or URL inputs.
+Measured 2026-10-17 on a 1001-page article with 2000 labels and 2000
+references (load averages 18 to 30, medians of 15 interleaved runs, default
+thread count): an unchanged rerun went from 1146 ms to 686 ms wall, user CPU
+2022 to 2087 ms, peak RSS about 205 to 335 MB; a run after an edit that
+renumbers every label went from 1000 ms to 1123 ms wall (2005 to 2637 ms user),
+the cost of a lowering thrown away. stdout, stderr, the PDF and the `.aux` are
+byte-identical to the previous build and across thread counts.
+
 **Iteration depth.** `\def\r{... \ifnum ... \r \fi}` is TeX's loop, and
 `tex` recurses through it — one input-stack level per turn, giving up at
 `[input stack size=10000]`. texrs lowers that shape to a backward jump, so its

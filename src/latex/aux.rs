@@ -255,6 +255,11 @@ fn is_settled(value: &str) -> bool {
 
 /// Write an `.aux` in the format LaTeX writes and [`parse`] reads.
 pub fn write(path: &Path, aux: &Aux) -> std::io::Result<()> {
+    std::fs::write(path, render(aux))
+}
+
+/// The text [`write`] puts in the file.
+fn render(aux: &Aux) -> String {
     let mut text = String::from("\\relax \n");
     for (key, (value, page)) in &aux.labels {
         text.push_str(&format!("\\newlabel{{{key}}}{{{{{value}}}{{{page}}}}}\n"));
@@ -262,7 +267,7 @@ pub fn write(path: &Path, aux: &Aux) -> std::io::Result<()> {
     for (key, value) in &aux.citations {
         text.push_str(&format!("\\bibcite{{{key}}}{{{value}}}\n"));
     }
-    std::fs::write(path, text)
+    text
 }
 
 /// Whether the run has to happen again, and LaTeX's own sentence for it.
@@ -300,20 +305,114 @@ pub fn update(document: &Path, src: &str) -> bool {
     // Over the chapters as well as the book: a `\label` and the `\ref` that
     // wants it are usually in two different files.
     let src = &super::include::gathered(src);
-    let refs = !defined(src).is_empty() && !referenced(src).is_empty();
-    let bib = src.contains("\\bibitem") && !cited(src).is_empty();
-    if !refs && !bib {
+    if !wants_pass(src) {
         return false;
     }
     let path = path_for(document);
     let previous = read(&path);
     let Ok(now) = pass(src) else { return false };
-    let again = rerun_needed(&previous, &now);
-    let _ = write(&path, &now);
+    settle(&path, &previous, &now)
+}
+
+/// Whether `src` (gathered) has anything for [`pass`] to resolve.
+fn wants_pass(src: &str) -> bool {
+    let refs = !defined(src).is_empty() && !referenced(src).is_empty();
+    let bib = src.contains("\\bibitem") && !cited(src).is_empty();
+    refs || bib
+}
+
+/// Write what the pass found and say whether the run has to happen again.
+fn settle(path: &Path, previous: &Aux, now: &Aux) -> bool {
+    let again = rerun_needed(previous, now);
+    let _ = write(path, now);
     if again {
         eprintln!("texrs: {RERUN}");
     }
     again
+}
+
+/// [`update`] followed by `run`, which reads the `.aux` `update` wrote --
+/// with the two overlapped when that cannot change what `run` returns.
+///
+/// One after the other, a run pays for the document twice: [`pass`] lowers
+/// and runs it to collect the labels, then `run` lowers it again with them. The pass reads only `src`, never the `.aux`; `run` reads the `.aux`
+/// and nothing the pass leaves behind. So on a document whose labels did not
+/// move since the last run -- every run after the first of an unedited file,
+/// and most edits -- the `.aux` the pass writes parses to exactly what is
+/// already on disk, and `run` against the file as it stands is `run` against
+/// the file as it will be. Here the pass runs on a thread of its own while
+/// `run` runs on the calling thread against the current `.aux`; when the pass
+/// comes back, its `.aux` is written as before, and if it would have read
+/// differently `run` is simply done again, now against the new one.
+///
+/// Byte-identical to [`update`] then `run` in every case. What `run` returns is
+/// a function of `src` and the `.aux` it parsed, and it is only kept when that
+/// parse is the one the sequential order would have handed it. stderr keeps its
+/// order because both sides' package reports are held and released in the
+/// order the two would have printed them -- the pass's, the rerun warning,
+/// then `run`'s -- and those are the only lines either prints while lowering.
+///
+/// Not overlapped, so exactly the sequential order: with one thread
+/// configured; on a first run (no `.aux` yet, so the speculation would be
+/// wrong by construction and only add `run` to the wall time); and for a
+/// document with work whose effects the two copies could see in each other --
+/// Lua (its chunks may touch files), `\rust` blocks (compiled into a shared
+/// cache), and URL inputs (fetched into one).
+pub fn update_then<T>(document: &Path, src: &str, run: impl Fn() -> T) -> T {
+    let gathered = super::include::gathered(src);
+    if !wants_pass(&gathered) {
+        return run();
+    }
+    let path = path_for(document);
+    let previous = read(&path);
+    let overlap = crate::parallel::default_threads() > 1
+        && !previous.is_empty()
+        && !has_shared_effects(&gathered);
+    if !overlap {
+        if let Ok(now) = pass(&gathered) {
+            settle(&path, &previous, &now);
+        }
+        return run();
+    }
+    let ((found, pass_said), (speculative, run_said)) = std::thread::scope(|s| {
+        // The pass lowers the whole document, and a spawned thread's default
+        // stack is a quarter of the main thread's it would have run on.
+        let labels = std::thread::Builder::new()
+            .name("texrs-aux-pass".into())
+            .stack_size(PASS_STACK)
+            .spawn_scoped(s, || super::held_reports(|| pass(&gathered)))
+            .expect("spawn the label pass");
+        let speculative = super::held_reports(&run);
+        match labels.join() {
+            Ok(found) => (found, speculative),
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    });
+    super::release_reports(&pass_said);
+    let Ok(now) = found else {
+        // A failed pass writes nothing, so `run` read what it would have.
+        super::release_reports(&run_said);
+        return speculative;
+    };
+    settle(&path, &previous, &now);
+    match parse(&render(&now)) == previous {
+        true => {
+            super::release_reports(&run_said);
+            speculative
+        }
+        false => run(),
+    }
+}
+
+/// Stack for the overlapped label pass; see [`update_then`].
+const PASS_STACK: usize = 64 << 20;
+
+/// Whether `src` does anything outside the engine that two concurrent copies
+/// of it could observe in each other. See [`update_then`].
+fn has_shared_effects(src: &str) -> bool {
+    ["\\directlua", "\\lua", "\\latelua", "\\rustcompile", "://"]
+        .iter()
+        .any(|needle| src.contains(needle))
 }
 
 /// A key for what the `.aux` currently says.
