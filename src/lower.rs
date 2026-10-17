@@ -1682,7 +1682,9 @@ impl Lowerer {
                 "char" => {
                     let Num::Literal(code) = self.number(lx)? else {
                         // A register's value is the run's, and a character is chosen here.
-                        return Err(TexError("\\char needs a number known while lowering".into()));
+                        return Err(TexError(
+                            "\\char needs a number known while lowering".into(),
+                        ));
                     };
                     self.push_char_code(&mut out, code)?;
                 }
