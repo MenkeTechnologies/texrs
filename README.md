@@ -1013,6 +1013,27 @@ lowerer does not decide; at one thread, 1043 to 1011 ms and 2518 to 2316 ms on
 the LaTeX and mixed ones. PDF, DVI, stdout and stderr are byte-identical to the
 previous build at 1 and 8 threads.
 
+The formula reader was the larger part of what was left. A noad held a built
+box inline, which made every field of every noad the size of a box; it is now
+boxed, so a formula is a fraction of the bytes to read, copy and drop. A single
+formula's spelling and setting read its one list in place instead of a
+flattened copy, the spelling is built in one string, a symbol's math code is
+looked up by the token's id in plain.tex's table hashed once rather than
+searched per control sequence, the mouth reads a control word into a buffer it
+keeps, and a group argument is read without its brace instead of having it
+taken out after. Measured 2026-10-17 on a loaded machine, as the lowering
+thread's CPU time (medians of interleaved runs, load averages 39 to 48 at 8
+threads, 19 to 20 at one), `Lowerer::lower` went from 132 to 107 ms on the
+1001-page LaTeX document, 235 to 129 ms on the 800-page formula-heavy one, 371
+to 283 ms on the 3328-page mixed one and 45 to 42 ms on the 394-page plain TeX
+one at 8 threads (186 to 151, 751 to 539, 696 to 527 and 37 to 34 ms at one
+thread). Median wall (5 interleaved runs, load averages 21 to 23) went from
+410 to 377 ms, 666 to 568 ms, 959 to 864 ms, 178 to 168 ms and 266 to 238 ms
+at 8 threads on those four and the 200-page LaTeX one, and from 1110 to 1082,
+2037 to 1832, 2689 to 2533, 473 to 426 and 349 to 347 ms at one thread. PDF,
+DVI, `--text` output, stdout and stderr are byte-identical to the previous
+build at 1 and 8 threads.
+
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
 every `\includegraphics` file is opened to resolve its lengths. Each such line
