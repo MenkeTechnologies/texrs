@@ -60,6 +60,6 @@ pub extern "C" fn texrs_aot_main() -> i64 {
     // so the empty document is what it produced, and `pdf_output_line` says of
     // it exactly what the interpreter says of a document that ships nothing.
     let out = std::path::Path::new(&name).with_extension("pdf");
-    println!("{}", crate::pdf_output_line(&out, &[]));
+    println!("{}", crate::pdf_output_line(&out, 0, &[]));
     code
 }

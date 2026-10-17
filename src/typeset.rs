@@ -2770,13 +2770,18 @@ pub fn base14_face(base: &str, face: Face) -> String {
 /// `page` is what `\pagecolor` asked for, painted under everything else.
 /// `near` is the directory the document was read from, which is where a font
 /// it ships with itself is looked for.
+///
+/// The page count goes back beside the bytes because the writer is the one
+/// place that knows it without reading the finished file back: the pages are
+/// inside a compressed object stream, and counting them afterwards meant
+/// inflating the whole PDF.
 pub fn to_pdf(
     text: &str,
     families: &Families,
     layout: &Layout,
     page_colour: Option<crate::colour::Rgb>,
     near: Option<&std::path::Path>,
-) -> Vec<u8> {
+) -> crate::Pdf {
     use crate::pdf::{document, Font, Page, Set};
 
     // The font the document asked for, EMBEDDED if it can be found: that is
@@ -3448,7 +3453,10 @@ pub fn to_pdf(
         }
         false => work.into_iter().map(draw_page).collect(),
     };
-    document(&pages)
+    crate::Pdf {
+        bytes: document(&pages),
+        pages: pages.len(),
+    }
 }
 
 /// The document's own face, as the metrics a picture's nodes are sized by.

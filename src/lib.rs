@@ -409,7 +409,17 @@ pub fn run_pdf(src: &str) -> Result<Vec<u8>, TexError> {
 /// nothing at all -- silently, since a font that cannot be found is a font
 /// that gets substituted.
 pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, TexError> {
-    run_pdf_with_messages(path, src).map(|(pdf, _)| pdf)
+    run_pdf_with_messages(path, src).map(|(pdf, _)| pdf.bytes)
+}
+
+/// A finished PDF and the number of pages the writer put in it.
+///
+/// Carried together so whoever reports on the file -- `Output written on ...`,
+/// or "no pages, no file" -- has the count without inflating the PDF to find
+/// it, which on a thousand-page document is a pass over every stream in it.
+pub struct Pdf {
+    pub bytes: Vec<u8>,
+    pub pages: usize,
 }
 
 /// The same, keeping the `\message` stream the run produced.
@@ -420,7 +430,7 @@ pub fn run_pdf_at(path: Option<&std::path::Path>, src: &str) -> Result<Vec<u8>, 
 pub fn run_pdf_with_messages(
     path: Option<&std::path::Path>,
     src: &str,
-) -> Result<(Vec<u8>, Vec<String>), TexError> {
+) -> Result<(Pdf, Vec<String>), TexError> {
     crate::kpse::prefetch_startup();
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
@@ -488,8 +498,11 @@ pub fn pdf_page_count(pdf: &[u8]) -> usize {
 /// command line after it has written the file, and a `--aot` binary, which
 /// carries a chunk of register writes, branches and `\message` and no stomach
 /// at all, so the page count it reports is zero by construction.
-pub fn pdf_output_line(out: &std::path::Path, pdf: &[u8]) -> String {
-    match pdf_page_count(pdf) {
+///
+/// `pages` is the count the writer gave back in [`Pdf`] rather than one read
+/// off `pdf`: see [`Pdf`].
+pub fn pdf_output_line(out: &std::path::Path, pages: usize, pdf: &[u8]) -> String {
+    match pages {
         0 => "No pages of output.".to_string(),
         1 => format!(
             "Output written on {} (1 page, {} bytes).",

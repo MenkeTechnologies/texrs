@@ -234,8 +234,8 @@ fn main() -> ExitCode {
     // The cache keys on the file, so it is only used when there is one and the
     // run has not asked to go without it.
     if cli.pdf_out {
-        return match texrs::run_pdf_at(Some(std::path::Path::new(&path)), &src) {
-            Ok(bytes) => {
+        return match texrs::run_pdf_with_messages(Some(std::path::Path::new(&path)), &src) {
+            Ok((texrs::Pdf { bytes, pages }, _)) => {
                 let out = output_path(&cli, &path, "pdf");
                 // A document with nothing on it gets no file. Measured, that is
                 // what luatex does -- `luatex empty_document.tex` says
@@ -246,7 +246,7 @@ fn main() -> ExitCode {
                 // Invalid page count 0`: a file no reader will open is worse
                 // than the absence of one, and the absence is also the answer
                 // the reference engine gives.
-                if texrs::pdf_page_count(&bytes) == 0 {
+                if pages == 0 {
                     println!("({path} -> no pages of output)");
                     return ExitCode::SUCCESS;
                 }
@@ -436,14 +436,14 @@ fn output_path(cli: &texrs::cli::Cli, input: &str, extension: &str) -> PathBuf {
 /// on it is the divergence `pdf-parity` reports for `empty_document.tex` — it
 /// would have become the everyday behaviour the moment the ordinary invocation
 /// started writing.
-fn write_pdf(path: &str, pdf: &[u8]) -> Result<String, String> {
+fn write_pdf(path: &str, pdf: &texrs::Pdf) -> Result<String, String> {
     let out = Path::new(path).with_extension("pdf");
-    if texrs::pdf_page_count(pdf) > 0 {
-        std::fs::write(&out, pdf).map_err(|e| format!("{}: {e}", out.display()))?;
+    if pdf.pages > 0 {
+        std::fs::write(&out, &pdf.bytes).map_err(|e| format!("{}: {e}", out.display()))?;
     }
     // The wording lives in the library so the `--aot` binary, which has no main
     // of its own to keep in step, reports the same line.
-    Ok(texrs::pdf_output_line(&out, pdf))
+    Ok(texrs::pdf_output_line(&out, pdf.pages, &pdf.bytes))
 }
 
 /// One document, as the single-file path runs it, returning the line to print.

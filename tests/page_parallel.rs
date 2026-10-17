@@ -37,7 +37,7 @@ fn render(text: &str, threads: usize) -> Vec<u8> {
         .num_threads(threads)
         .build()
         .expect("pool");
-    pool.install(|| to_pdf(text, &Families::default(), &Layout::default(), None, None))
+    pool.install(|| to_pdf(text, &Families::default(), &Layout::default(), None, None).bytes)
 }
 
 /// The sizes the page's `Tf` operators select.

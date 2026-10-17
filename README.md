@@ -983,9 +983,11 @@ serial, and most of it is in three places:
   scans run side by side, so only the load and `support` are left in series.
 
 Smaller: `pdf::document` spends most of its time in the SHA-256 of the whole
-file for `/ID` (`pdf::file_identifier`); the page count is taken by inflating
+file for `/ID` (`pdf::file_identifier`); the page count was taken by inflating
 the finished PDF, once in `main.rs` `write_pdf` and again in
-`pdf_output_line`; `paginate` and `page_starts` are sequential by definition.
+`pdf_output_line` (since this measurement it is the writer's own count,
+carried beside the bytes in `texrs::Pdf`, and nothing is inflated);
+`paginate` and `page_starts` are sequential by definition.
 
 **Scaling with `TEXRS_THREADS`**, median wall in ms:
 
