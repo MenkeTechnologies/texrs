@@ -16,7 +16,7 @@ use super::noad::*;
 use crate::catcode::Cat;
 use crate::expand::{Engine, NumericCs, TexError};
 use crate::lexer::Lexer;
-use crate::token::Token;
+use crate::token::{CsId, Token};
 
 type R<T> = Result<T, TexError>;
 
@@ -73,6 +73,15 @@ impl Formula {
     /// Whether this is the ordinary case: one row, one column.
     pub fn is_single(&self) -> bool {
         self.rows.len() == 1 && self.rows[0].len() == 1
+    }
+
+    /// The ordinary case's one list, borrowed: what [`Formula::flat`] would
+    /// copy for it. `None` when there are rows or columns.
+    pub fn single(&self) -> Option<&[Noad]> {
+        match self.is_single() {
+            true => Some(&self.rows[0][0]),
+            false => None,
+        }
     }
 }
 
@@ -355,7 +364,7 @@ impl Scanner<'_> {
                     // A one-token subformula that is a symbol is that symbol;
                     // anything else is read as a list of one item, which is
                     // what `\sqrt{\frac ab}` and `x^\frac12` need.
-                    if let Some(code) = self.math_code_of(name.name()) {
+                    if let Some(code) = self.math_code_of(name) {
                         return Ok(char_field(code).unwrap_or(Field::Empty));
                     }
                     let mut one = Vec::new();
@@ -369,7 +378,7 @@ impl Scanner<'_> {
 
     /// The 15-bit math code a control sequence stands for, from the engine's
     /// own `\mathchardef` table first and plain.tex's names second.
-    fn math_code_of(&mut self, name: &str) -> Option<i64> {
+    fn math_code_of(&mut self, name: CsId) -> Option<i64> {
         // `\mathchardef\half="2201` in the DOCUMENT wins over the table below:
         // `src/expand.rs` already carries `\mathchardef`, and duplicating its
         // values here rather than asking it is how the two drift apart.
@@ -380,8 +389,7 @@ impl Scanner<'_> {
         // "100; a `\chardef` is a character code and so is under 256. Values
         // below that are left to the character path, which is what §1154's
         // `char_given` case does with them.
-        let id = crate::token::CsId::intern(name);
-        if let Some(NumericCs::Value(v)) = self.eng.numeric_cs(id) {
+        if let Some(NumericCs::Value(v)) = self.eng.numeric_cs(name) {
             if v >= 256 {
                 return Some(v);
             }
@@ -389,10 +397,7 @@ impl Scanner<'_> {
                 return Some(mathcode(v as u8 as char));
             }
         }
-        MATH_SYMBOLS
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, c)| *c)
+        plain_math_symbol(name.name())
     }
 
     /// One delimiter argument, as `scan_delimiter` reads it (§1160): a
@@ -574,15 +579,10 @@ impl Scanner<'_> {
     }
 
     /// Everything a control sequence can mean inside a formula.
-    fn control_sequence(
-        &mut self,
-        lx: &mut Lexer,
-        name: crate::token::CsId,
-        out: &mut Vec<Noad>,
-    ) -> R<()> {
+    fn control_sequence(&mut self, lx: &mut Lexer, name: CsId, out: &mut Vec<Noad>) -> R<()> {
         let n = name.name();
         // A symbol named by `\mathchardef`, in the document or in plain.tex.
-        if let Some(code) = self.math_code_of(n) {
+        if let Some(code) = self.math_code_of(name) {
             if let Some(atom) = atom_for_code(code) {
                 out.push(Noad::Atom(atom));
             }
@@ -1067,6 +1067,16 @@ const OPERATOR_NAMES: &[&str] = &[
 const OPERATOR_LIMITS: &[&str] = &[
     "lim", "limsup", "liminf", "max", "min", "sup", "inf", "det", "Pr", "gcd",
 ];
+
+/// The math code [`MATH_SYMBOLS`] gives `name`, if it names one of them.
+///
+/// Asked of nearly every control sequence a formula holds, the symbols and the
+/// macros alike, so the table is hashed once rather than searched per call.
+fn plain_math_symbol(name: &str) -> Option<i64> {
+    static BY_NAME: once_cell::sync::Lazy<rustc_hash::FxHashMap<&str, i64>> =
+        once_cell::sync::Lazy::new(|| MATH_SYMBOLS.iter().copied().collect());
+    BY_NAME.get(name).copied()
+}
 
 /// Every `\mathchardef` in plain.tex, verbatim (plain.tex:744-920).
 ///

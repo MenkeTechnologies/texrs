@@ -666,12 +666,15 @@ fn emit(
     };
     // The ordinary case, and the only one before `&` and `\eqno` meant
     // anything: one row, one column, no number.
-    if f.is_single() && numbers.is_empty() {
-        push_setting(out, &slot(index, 0), &set::plain(&f.flat()), display);
+    if let (Some(list), true) = (f.single(), numbers.is_empty()) {
+        push_setting(out, &slot(index, 0), &set::plain(list), display);
     } else {
         // `display_rows` sets one line per row.
         for (at, row) in f.rows.iter().enumerate() {
-            let mut spelled: String = row.iter().map(|cell| set::plain(cell)).collect();
+            let mut spelled = String::new();
+            for cell in row {
+                set::plain_into(&mut spelled, cell);
+            }
             // The equation number goes beside the row it was placed beside,
             // so a reader gets it where the page draws it.
             for (_, _, number) in numbers.iter().filter(|(r, _, _)| *r == at) {
@@ -722,9 +725,9 @@ impl Deferred {
     /// The encoded spec of each row, in the order [`emit`] wrote the slots.
     fn specs(&self) -> Vec<String> {
         let f = &self.formula;
-        let settings = match f.is_single() && self.numbers.is_empty() {
-            true => vec![set_formula(self.fonts, &f.flat(), self.style, self.display)],
-            false => display_rows(
+        let settings = match (f.single(), self.numbers.is_empty()) {
+            (Some(list), true) => vec![set_formula(self.fonts, list, self.style, self.display)],
+            _ => display_rows(
                 self.fonts,
                 f,
                 &self.numbers,

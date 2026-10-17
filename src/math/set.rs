@@ -14,7 +14,7 @@
 //! asked for `--text` rather than for a page.
 
 use super::mlist::font_parts;
-use super::noad::{Field, Noad, Scaled};
+use super::noad::{Atom, Field, Noad, Scaled};
 use crate::node::{BoxNode, Node, RuleNode};
 use crate::pack::Setter;
 
@@ -210,60 +210,54 @@ pub fn font_size(fonts: &super::font::MathFonts, index: usize) -> Scaled {
 /// paragraph on spaces and a formula is one word.
 pub fn plain(list: &[Noad]) -> String {
     let mut out = String::new();
+    plain_into(&mut out, list);
+    out
+}
+
+/// [`plain`], appended to `out`. The whole spelling is built in the one
+/// string, rather than in a string per field and per script joined into it.
+pub fn plain_into(out: &mut String, list: &[Noad]) {
     for item in list {
         match item {
             Noad::Atom(a) => {
-                out.push_str(&plain_field(&a.nucleus));
-                if !a.supscr.is_empty() {
-                    out.push_str(&script(&plain_field(&a.supscr), true));
-                }
-                if !a.subscr.is_empty() {
-                    out.push_str(&script(&plain_field(&a.subscr), false));
-                }
+                field_into(out, &a.nucleus);
+                scripts_into(out, a);
             }
             Noad::Fraction(f) => {
-                out.push_str(&plain(&f.numerator));
+                plain_into(out, &f.numerator);
                 out.push('/');
-                out.push_str(&plain(&f.denominator));
+                plain_into(out, &f.denominator);
             }
             Noad::Radical(r) => {
                 // `\sqrt[3]{x}` reads as a cube root, which is where its index
                 // goes when it is written rather than set: in front of the
                 // sign and raised, the way `∛` is one character.
                 if let Some(index) = &r.index {
-                    out.push_str(&script(&plain(index), true));
+                    script_into(out, true, |out| plain_into(out, index));
                 }
                 out.push('√');
-                out.push_str(&plain_field(&r.nucleus.nucleus));
+                field_into(out, &r.nucleus.nucleus);
             }
-            Noad::Over(a) | Noad::Under(a) | Noad::VCenter(a) => {
-                out.push_str(&plain_field(&a.nucleus))
-            }
+            Noad::Over(a) | Noad::Under(a) | Noad::VCenter(a) => field_into(out, &a.nucleus),
             // An accent reads as the letter with the mark on it, which is what
             // a reader would say: `\hat x` is `x̂`, one letter and one
             // combining character.
             Noad::Accent(a) => {
-                out.push_str(&plain_field(&a.atom.nucleus));
+                field_into(out, &a.atom.nucleus);
                 if let Some(mark) = combining(a.accent) {
                     out.push(mark);
                 }
-                if !a.atom.supscr.is_empty() {
-                    out.push_str(&script(&plain_field(&a.atom.supscr), true));
-                }
-                if !a.atom.subscr.is_empty() {
-                    out.push_str(&script(&plain_field(&a.atom.subscr), false));
-                }
+                scripts_into(out, &a.atom);
             }
             // `\mathchoice`'s text list: a formula printed for a reader is not
             // in any style, and the text one is what `$...$` in a paragraph
             // would have chosen (§731).
-            Noad::Choice(c) => out.push_str(&plain(&c.text)),
+            Noad::Choice(c) => plain_into(out, &c.text),
             Noad::Left(_) | Noad::Right(_) | Noad::Style(_) => {}
             Noad::Glue(_) | Noad::Kern(_) | Noad::MuGlue(_) | Noad::MuKern(_) => {}
             Noad::Node(_) => {}
         }
     }
-    out
 }
 
 /// The combining character that spells one of plain.tex's math accents
@@ -290,40 +284,55 @@ fn combining(accent: super::noad::MathChar) -> Option<char> {
     }
 }
 
-fn plain_field(f: &Field) -> String {
+fn field_into(out: &mut String, f: &Field) {
     match f {
-        Field::Empty | Field::Box(_) => String::new(),
-        Field::Char(c) => super::font::unicode(c.fam, c.character)
-            .map(String::from)
-            .unwrap_or_default(),
-        Field::Literal(c) => c.to_string(),
-        Field::List(l) => plain(l),
+        Field::Empty | Field::Box(_) => {}
+        Field::Char(c) => out.extend(super::font::unicode(c.fam, c.character)),
+        Field::Literal(c) => out.push(*c),
+        Field::List(l) => plain_into(out, l),
     }
 }
 
-/// A script in Unicode's own superscript or subscript letters where they
-/// exist, and after a `^` or a `_` where they do not.
-fn script(text: &str, superscript: bool) -> String {
-    const SUPER: &str = "⁰¹²³⁴⁵⁶⁷⁸⁹";
-    const SUB: &str = "₀₁₂₃₄₅₆₇₈₉";
-    let table: Vec<char> = match superscript {
-        true => SUPER.chars().collect(),
-        false => SUB.chars().collect(),
-    };
-    let digits: Option<String> = text
-        .chars()
-        .map(|c| c.to_digit(10).map(|d| table[d as usize]))
-        .collect();
-    match digits {
-        Some(s) if !s.is_empty() => s,
-        _ => {
-            let mark = match superscript {
-                true => '^',
-                false => '_',
-            };
-            format!("{mark}{text}")
-        }
+/// An atom's superscript and then its subscript, each where it has one.
+fn scripts_into(out: &mut String, a: &Atom) {
+    if !a.supscr.is_empty() {
+        script_into(out, true, |out| field_into(out, &a.supscr));
     }
+    if !a.subscr.is_empty() {
+        script_into(out, false, |out| field_into(out, &a.subscr));
+    }
+}
+
+/// A script, which `spell` appends to `out`, in Unicode's own superscript or
+/// subscript digits where they exist, and after a `^` or a `_` where they do
+/// not.
+///
+/// The script is spelled in place and rewritten there: a run of digits by
+/// their raised or lowered forms, anything else by the mark put in front.
+fn script_into(out: &mut String, superscript: bool, spell: impl FnOnce(&mut String)) {
+    const SUPER: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+    const SUB: [char; 10] = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+    let start = out.len();
+    spell(out);
+    let end = out.len();
+    let digits = end > start && out.as_bytes()[start..].iter().all(u8::is_ascii_digit);
+    if !digits {
+        let mark = match superscript {
+            true => '^',
+            false => '_',
+        };
+        out.insert(start, mark);
+        return;
+    }
+    let table = match superscript {
+        true => &SUPER,
+        false => &SUB,
+    };
+    for at in start..end {
+        let digit = out.as_bytes()[at] - b'0';
+        out.push(table[usize::from(digit)]);
+    }
+    out.replace_range(start..end, "");
 }
 
 /// The setting, as the characters a marker's spec carries.
@@ -332,12 +341,15 @@ fn script(text: &str, superscript: bool) -> String {
 /// spelling and back: `g` is a glyph and `r` a rule, and the three numbers in
 /// front are the formula's own width, height and depth.
 pub fn encode(s: &Setting) -> String {
+    use std::fmt::Write;
+    // Each piece is written straight into the spec. Writing to a `String`
+    // cannot fail, so the `fmt::Result` is dropped.
     let mut out = format!("{};{};{}", s.width, s.height, s.depth);
     for g in &s.glyphs {
-        out.push_str(&format!(";g{},{},{},{}", g.x, g.y, g.size, g.ch as u32));
+        let _ = write!(out, ";g{},{},{},{}", g.x, g.y, g.size, g.ch as u32);
     }
     for r in &s.rules {
-        out.push_str(&format!(";r{},{},{},{}", r.x, r.y, r.width, r.height));
+        let _ = write!(out, ";r{},{},{},{}", r.x, r.y, r.width, r.height);
     }
     out
 }
