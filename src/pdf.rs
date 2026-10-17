@@ -935,7 +935,7 @@ pub struct Page {
     pub images: Vec<(String, crate::image::Image)>,
     /// The fonts the content names, as `(name in the content, font)` --
     /// `("F1", Helvetica)`.
-    pub fonts: Vec<(String, Font)>,
+    pub fonts: Vec<(String, std::sync::Arc<Font>)>,
     /// Which codes each of those fonts was actually asked to draw, as
     /// `("F1", {'H', 'e', 'l', 'o'})`.
     ///
@@ -1023,7 +1023,7 @@ impl Page {
     /// The text is bytes rather than characters: a code in a TeX font means
     /// whatever the font's own encoding says, and 11 is an `ff` ligature and
     /// not a vertical tab.
-    pub fn text_in(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str) {
+    pub fn text_in(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str) {
         self.draw(font, size, x, y, text, 0.0);
     }
 
@@ -1039,7 +1039,8 @@ impl Page {
     /// to the advance of every code 32 in a simple font, which all three of the
     /// fonts here are. Text with no space in it cannot be set to a width at
     /// all, and is drawn where it stands rather than drawn wrong.
-    pub fn text_set(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str, set: Set) {
+    pub fn text_set(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str, set: Set) {
+        let font = font.into();
         // A composite font's codes are two bytes and none of them is the
         // single-byte 32 that `Tw` widens, so there is no space here to share
         // the room between: 0x20 inside a glyph id is half a glyph id.
@@ -1055,9 +1056,10 @@ impl Page {
     }
 
     /// One `BT ... ET`, with `word_space` added to every space in it.
-    fn draw(&mut self, font: Font, size: f64, x: f64, y: f64, text: &str, word_space: f64) {
+    fn draw(&mut self, font: impl Into<std::sync::Arc<Font>>, size: f64, x: f64, y: f64, text: &str, word_space: f64) {
+        let font = font.into();
         let name = format!("F{}", self.fonts.len() + 1);
-        let name = match self.fonts.iter().find(|(_, used)| used == &font) {
+        let name = match self.fonts.iter().find(|(_, used)| std::sync::Arc::ptr_eq(used, &font) || **used == *font) {
             Some((existing, _)) => existing.clone(),
             None => {
                 self.fonts.push((name.clone(), font));
@@ -1139,6 +1141,15 @@ impl Page {
     }
 }
 
+/// Whether two references name the same value, the address first.
+///
+/// A font or picture used on every page is one allocation shared by all of
+/// them, and comparing it with itself by value reads the whole font program or
+/// the whole pixel buffer once per page per resource.
+fn same<T: PartialEq>(a: &T, b: &T) -> bool {
+    a == b
+}
+
 /// Write a document of `pages`.
 ///
 /// This is `pdfdoc.c`'s shape: a catalogue naming a page tree, a page tree
@@ -1163,8 +1174,9 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     let mut drawn: Vec<(&Font, std::collections::BTreeSet<u8>)> = Vec::new();
     for page in pages {
         for (name, font) in &page.fonts {
+            let font: &Font = font;
             let codes = page.used.get(name).cloned().unwrap_or_default();
-            match drawn.iter_mut().find(|(seen, _)| *seen == font) {
+            match drawn.iter_mut().find(|(seen, _)| same(*seen, font)) {
                 Some((_, all)) => all.extend(codes),
                 None => drawn.push((font, codes)),
             }
@@ -1173,7 +1185,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     let codes_of = |font: &Font| {
         drawn
             .iter()
-            .find(|(seen, _)| *seen == font)
+            .find(|(seen, _)| same(*seen, font))
             .map(|(_, codes)| codes.clone())
             .unwrap_or_default()
     };
@@ -1186,7 +1198,8 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         });
         let mut fonts = Dict::new();
         for (name, font) in &page.fonts {
-            let object = match font_objects.iter().find(|(seen, _)| *seen == font) {
+            let font: &Font = font;
+            let object = match font_objects.iter().find(|(seen, _)| same(*seen, font)) {
                 Some((_, object)) => object.clone(),
                 None => {
                     let object = add_font(&mut pdf, font, &codes_of(font));
@@ -1198,7 +1211,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         }
         let mut images = Dict::new();
         for (name, image) in &page.images {
-            let object = match image_objects.iter().find(|(seen, _)| *seen == image) {
+            let object = match image_objects.iter().find(|(seen, _)| same(*seen, image)) {
                 Some((_, object)) => object.clone(),
                 None => {
                     let object = add_image(&mut pdf, image);
@@ -2083,7 +2096,7 @@ mod tests {
         assert_eq!(page.fonts.len(), 2);
         assert_eq!(
             page.fonts[0],
-            ("F1".to_string(), Font::Base14("Helvetica".to_string()))
+            ("F1".to_string(), Font::Base14("Helvetica".to_string()).into())
         );
         assert_eq!(page.content.matches("/F1").count(), 2);
         // The parentheses in the text are escaped, or the stream ends early.

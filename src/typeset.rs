@@ -693,13 +693,8 @@ pub fn find_font(name: &str) -> Option<std::path::PathBuf> {
 /// The lookup itself, which is what costs.
 fn find_font_uncached(name: &str) -> Option<std::path::PathBuf> {
     let file = format!("{name}.tfm");
-    if let Ok(out) = std::process::Command::new("kpsewhich").arg(&file).output() {
-        if out.status.success() {
-            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !p.is_empty() && std::path::Path::new(&p).exists() {
-                return Some(std::path::PathBuf::from(p));
-            }
-        }
+    if let Some(p) = crate::kpse::locate(&file) {
+        return Some(p);
     }
     for root in [
         "/usr/local/texlive",
@@ -1699,7 +1694,7 @@ pub struct Fallbacks {
     /// Each face as the file will carry it, built once `reserve` has been told
     /// every character the document draws. Building it per piece instead would
     /// subset a 23 MB face thirty thousand times over.
-    carried: Vec<Option<crate::pdf::Font>>,
+    carried: Vec<Option<std::sync::Arc<crate::pdf::Font>>>,
 }
 
 /// One face of the chain: enough of its file to answer for a character, and the
@@ -1770,11 +1765,15 @@ impl Fallbacks {
     /// Build each face into the font the file will carry, now that every
     /// character the document draws has been reserved.
     pub fn settle(&mut self) {
-        self.carried = self.faces.iter().map(Outside::font).collect();
+        self.carried = self
+            .faces
+            .iter()
+            .map(|face| face.font().map(std::sync::Arc::new))
+            .collect();
     }
 
     /// One face of the chain as a font the file can carry.
-    pub fn font(&self, face: usize) -> Option<&crate::pdf::Font> {
+    pub fn font(&self, face: usize) -> Option<&std::sync::Arc<crate::pdf::Font>> {
         self.carried.get(face)?.as_ref()
     }
 
@@ -2792,6 +2791,7 @@ pub fn to_pdf(
     // it named, then the member of the fourteen that carries that face -- and
     // the main font when the document asked for none of those, so a `\texttt`
     // in a document with no monospace family still sets rather than vanishing.
+    let main_shared = std::sync::Arc::new(main.clone());
     let base = match &main {
         Font::Base14(name) => name.clone(),
         _ => requested.map(base14_for).unwrap_or("Helvetica").to_string(),
@@ -2856,7 +2856,7 @@ pub fn to_pdf(
     // named for that family and that cut, then the member of the fourteen
     // carrying it, then the family's own upright face -- so a `\textbf` in a
     // document that shipped no bold still sets rather than vanishing.
-    let fonts: Vec<Font> = Face::ALL
+    let fonts: Vec<std::sync::Arc<Font>> = Face::ALL
         .iter()
         .map(|face| {
             // The upright, medium face of a family is the one resolved above,
@@ -2873,6 +2873,7 @@ pub fn to_pdf(
             // own meaning has lost the only thing the markup was for.
             face_file(*face).unwrap_or_else(|| Font::Base14(base14_face(&base, *face)))
         })
+        .map(std::sync::Arc::new)
         .collect();
     // What each family is scaled by. A document writes `Scale=MatchLowercase`
     // so a display family sits beside its text family rather than looming over
@@ -2901,7 +2902,7 @@ pub fn to_pdf(
     // line may then run a little long or short of the measure.
     let embedded_widths: Vec<Option<Vec<i64>>> = fonts
         .iter()
-        .map(|f| match f {
+        .map(|f| match &**f {
             Font::TrueType { widths, .. } => Some(widths.clone()),
             _ => None,
         })
@@ -2912,7 +2913,7 @@ pub fn to_pdf(
     // character the face has no glyph for has to come from somewhere else, and
     // it cannot be fetched without first knowing that it is missing.
     let coverage: Vec<Option<std::collections::BTreeSet<u32>>> =
-        fonts.iter().map(face_coverage).collect();
+        fonts.iter().map(|f| face_coverage(f)).collect();
     // A face with no file to read is one of the fourteen, and carrying all of
     // WinAnsi is what being one of them means.
     let covers = |ch: char, face: Face| match &coverage[face.index()] {
@@ -3162,7 +3163,7 @@ pub fn to_pdf(
                     &mut page,
                     left - min_x,
                     bottom - min_y,
-                    main.clone(),
+                    std::sync::Arc::clone(&main_shared),
                 );
                 // Exactly what `line_height` reserved for it, or the line after
                 // the picture is set somewhere the fitter did not put it.
@@ -3304,12 +3305,12 @@ pub fn to_pdf(
                     for (glyph, gx, gy, size) in crate::math::glyphs(&set) {
                         for piece in drawn(&glyph, &|c| covers(c, face), &outside) {
                             let font = match piece.from {
-                                Source::Symbol => Font::Base14(SYMBOL_FONT_NAME.to_string()),
+                                Source::Symbol => std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string())),
                                 Source::Outside(at) => match fallbacks.font(at) {
-                                    Some(font) => font.clone(),
+                                    Some(font) => std::sync::Arc::clone(font),
                                     None => continue,
                                 },
-                                Source::Face => fonts[face.index()].clone(),
+                                Source::Face => std::sync::Arc::clone(&fonts[face.index()]),
                             };
                             let at = Set {
                                 natural: 0.0,
@@ -3341,14 +3342,14 @@ pub fn to_pdf(
                 // by what it just drew.
                 for piece in drawn(&plain, &|c| covers(c, face), &outside) {
                     let font = match piece.from {
-                        Source::Symbol => Font::Base14(SYMBOL_FONT_NAME.to_string()),
+                        Source::Symbol => std::sync::Arc::new(Font::Base14(SYMBOL_FONT_NAME.to_string())),
                         // The face the chain answered with, carried in the file
                         // as the glyphs this document borrowed from it.
                         Source::Outside(at) => match fallbacks.font(at) {
-                            Some(font) => font.clone(),
+                            Some(font) => std::sync::Arc::clone(font),
                             None => continue,
                         },
-                        Source::Face => fonts[face.index()].clone(),
+                        Source::Face => std::sync::Arc::clone(&fonts[face.index()]),
                     };
                     // The piece takes its share of the room: what it measures,
                     // plus the widening for each space that falls inside it.
@@ -3402,7 +3403,7 @@ pub fn to_pdf(
         let shown = folio.to_string();
         let width = width_of(&shown, Face::MAIN, layout.size);
         page.text_in(
-            main.clone(),
+            std::sync::Arc::clone(&main_shared),
             layout.size,
             (page.width - width) / 2.0,
             page.height - layout.margin - layout.height - FOOTSKIP,

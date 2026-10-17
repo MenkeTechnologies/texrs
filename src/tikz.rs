@@ -757,8 +757,9 @@ pub fn draw_on(
     page: &mut crate::pdf::Page,
     ox: f64,
     oy: f64,
-    font: crate::pdf::Font,
+    font: impl Into<std::sync::Arc<crate::pdf::Font>>,
 ) {
+    let font = font.into();
     // A shading is painted by `sh`, which names a dictionary out of the
     // page's `/Shading` (§8.7.4.5) exactly as `gs` names one out of its
     // `/ExtGState`. Both are registered here, because a name that resolves to
