@@ -2,7 +2,7 @@
 
 use crate::catcode::Cat;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::RwLock;
 
 /// A control sequence name, interned to a 32-bit id.
@@ -52,13 +52,13 @@ impl std::fmt::Debug for CsId {
 /// the document's DISTINCT control sequences (hundreds), not by how often they
 /// are expanded (millions), which is exactly the trade interning exists to make.
 struct Names {
-    to_id: HashMap<&'static str, &'static str>,
+    to_id: FxHashMap<&'static str, &'static str>,
     count: usize,
 }
 
 static NAMES: Lazy<RwLock<Names>> = Lazy::new(|| {
     RwLock::new(Names {
-        to_id: HashMap::new(),
+        to_id: FxHashMap::default(),
         count: 0,
     })
 });
@@ -85,8 +85,8 @@ impl CsId {
         // touching the shared lock is what keeps interning from costing more
         // than the `String` it replaced.
         thread_local! {
-            static SEEN: std::cell::RefCell<HashMap<Box<str>, &'static str>> =
-                std::cell::RefCell::new(HashMap::new());
+            static SEEN: std::cell::RefCell<FxHashMap<Box<str>, &'static str>> =
+                std::cell::RefCell::new(FxHashMap::default());
         }
         if let Some(hit) = SEEN.with(|c| c.borrow().get(name).copied()) {
             return CsId(hit);

@@ -120,6 +120,11 @@ bincode = "1.3"
 nix = { version = "0.29", features = ["fs"] }
 dirs = "5"
 once_cell = "1"
+# The hasher of the expander's own tables (the meanings, the interned names):
+# keys there are pointers and short names the document chose, nothing an
+# adversary feeds a hash table to flood it, and SipHash was a measurable part of
+# looking one up per control sequence. Already in the tree beneath fusevm.
+rustc-hash = "2"
 # Bundles (src/bundle.rs): a document's support files as one archive, the
 # local half of tectonic's `bundles`. Deflate only — a bundle is read, never
 # written, and every other codec zip can carry is one more thing to keep

@@ -13,6 +13,7 @@
 use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -259,12 +260,12 @@ pub struct Engine {
     /// What each control sequence means, keyed by interned id.
     ///
     /// Keyed on `CsId` rather than the name: a lookup here happens on every
-    /// control sequence the expander touches, and hashing a `u32` is what makes
-    /// that cheap. `tex.web` reaches `eqtb` the same way, by the pointer the
-    /// hash table already produced.
-    pub meanings: HashMap<CsId, Meaning>,
+    /// control sequence the expander touches, and hashing a pointer with
+    /// FxHash is what makes that cheap. `tex.web` reaches `eqtb` the same way,
+    /// by the pointer the hash table already produced.
+    pub meanings: FxHashMap<CsId, Meaning>,
     /// Default values recorded by `\newcommand{\x}[n][default]`.
-    optional_defaults: HashMap<CsId, Vec<Token>>,
+    optional_defaults: FxHashMap<CsId, Vec<Token>>,
     pub count: HashMap<i64, i64>,
     pub messages: Vec<String>,
     /// The line `\inputlineno` was last read on (§1382's `line`). A read
@@ -496,8 +497,8 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             cats: CatTable::new(),
-            meanings: HashMap::new(),
-            optional_defaults: HashMap::new(),
+            meanings: FxHashMap::default(),
+            optional_defaults: FxHashMap::default(),
             count: HashMap::new(),
             messages: Vec::new(),
             input_line: 0,

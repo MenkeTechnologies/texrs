@@ -5352,7 +5352,7 @@ impl Lowerer {
 /// makes whatever depends on it a refusal rather than a guess.
 #[derive(Default)]
 struct Known {
-    map: std::collections::HashMap<i64, Option<i64>>,
+    map: rustc_hash::FxHashMap<i64, Option<i64>>,
     /// Every change, with what it replaced, so a group or a conditional arm
     /// can put the state back without cloning the table.
     trail: Vec<(i64, Option<Option<i64>>)>,
