@@ -90,6 +90,57 @@ fn one_thread_and_many_produce_identical_output() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A LaTeX document, whose preamble is assembled from scans that run on
+/// threads of their own: the package load (with a refusal reported on stderr),
+/// the class's numbering, the counter and switch allocations, and the label
+/// seedings -- the second run's from the `.aux` the first one left. Every
+/// piece has to land in the same place at any thread count, and the page count
+/// the run reports is the writer's, so it is checked against the file.
+#[test]
+fn a_latex_preamble_is_the_same_at_any_thread_count() {
+    let dir = std::env::temp_dir().join(format!("texrs_threads_latex_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let mut src = String::from(
+        "\\documentclass{article}\n\\usepackage{no-such-package-texrs}\n\
+         \\newcounter{thing}\\newif\\ifdraft\n\\begin{document}\n",
+    );
+    for i in 0..40 {
+        src.push_str(&format!(
+            "\\section{{S{i}}}\\label{{s{i}}} See \\ref{{s{}}} and \\ref{{gone}}.\n\n",
+            (i + 1) % 40
+        ));
+        for _ in 0..8 {
+            src.push_str("Words enough to fill out a page or two of text here. ");
+        }
+        src.push_str("\n\n");
+    }
+    src.push_str("\\end{document}\n");
+    std::fs::write(dir.join("doc.tex"), src).expect("write source");
+
+    let mut seen: Vec<Vec<Run>> = Vec::new();
+    for threads in ["1", "8"] {
+        let _ = std::fs::remove_file(dir.join("doc.aux"));
+        // Twice: the first run writes the `.aux`, the second seeds from it.
+        seen.push(vec![run(&dir, threads, false), run(&dir, threads, false)]);
+    }
+    for pass in 0..2 {
+        let (one, many) = (&seen[0][pass], &seen[1][pass]);
+        assert_eq!(one.stdout, many.stdout, "stdout, run {pass}");
+        assert_eq!(one.stderr, many.stderr, "stderr, run {pass}");
+        assert!(one.pdf == many.pdf, "PDF differs, run {pass}");
+    }
+    let last = &seen[0][1];
+    let pages = texrs::pdf_page_count(&last.pdf);
+    assert!(pages > 1, "{pages}");
+    let said = format!(
+        "Output written on doc.pdf ({pages} pages, {} bytes).",
+        last.pdf.len()
+    );
+    assert!(last.stdout.contains(&said), "{}", last.stdout);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_bad_thread_count_is_ignored_not_fatal() {
     let dir = std::env::temp_dir().join(format!("texrs_threads_bad_{}", std::process::id()));

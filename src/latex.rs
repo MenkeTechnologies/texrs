@@ -97,34 +97,73 @@ pub fn support(about: &str) -> String {
     // over both, and in that order: two passes would each start at the first
     // free register and hand the same one to two different names, which is the
     // fault `counters.rs` records for the counters.
-    out.push_str(&allocate::definitions(&format!("{PRELUDE}\n{about}")));
+    //
+    // The four scans each read `about` and nothing the others write, so they
+    // run side by side and are joined in the order below whatever the thread
+    // count. `about` is the whole document on the ordinary path, which is what
+    // makes a scan of it worth a thread.
+    let ((registers, counters), (switches, existing)) = rayon::join(
+        || {
+            rayon::join(
+                || allocate::definitions(&format!("{PRELUDE}\n{about}")),
+                || counters::allocations(about),
+            )
+        },
+        || {
+            rayon::join(
+                // The switches the KERNEL declares as well as `about`'s own: a
+                // class reads \if@compatibility without declaring it, and
+                // latex.ltx is where it comes from.
+                || switches::definitions(PRELUDE) + &switches::definitions(about),
+                // Which of the files `about` asks \IfFileExists about are
+                // really there.
+                || load::existence(about),
+            )
+        },
+    );
+    out.push_str(&registers);
     out.push_str(PRELUDE);
     out.push_str("\\catcode`\\@=11\n");
-    out.push_str(&counters::allocations(about));
-    // The switches the KERNEL declares as well as `about`'s own: a class reads
-    // \if@compatibility without declaring it, and latex.ltx is where it comes
-    // from.
-    out.push_str(&switches::definitions(PRELUDE));
-    out.push_str(&switches::definitions(about));
-    // Which of the files `about` asks \IfFileExists about are really there.
-    out.push_str(&load::existence(about));
+    out.push_str(&counters);
+    out.push_str(&switches);
+    out.push_str(&existing);
     out
 }
 
 fn preamble_in(src: &str, mode: Mode) -> String {
+    preamble_of(src, mode, None)
+}
+
+/// The preamble, with the labels of `previous` -- the `.aux` a run left last
+/// time -- seeded after the unresolved ones when there is one.
+///
+/// The scans of the document are independent of each other: the package load
+/// and the `support` built over what it loaded, the class's numbering, and the
+/// two label seedings each read `src` (and the `.aux`) and write nothing
+/// another reads. So the three small ones run on threads of their own while
+/// the package load runs on the CALLING thread -- where its probes lower the
+/// packages and where it reports on stderr, exactly as before -- and the
+/// pieces are joined in the fixed order below.
+fn preamble_of(src: &str, mode: Mode, previous: Option<&std::path::Path>) -> String {
     // Everything scanned below is scanned over the document AND the chapters it
     // reads: a book declares its counters, writes its labels and refers to them
     // in files `book.tex` only names. See `include`.
     let src = &include::gathered(src);
-    let (packages, said, loaded) = load::preamble(src);
-    report(&said);
-    // The counter registers are allocated over the document AND the files that
-    // really loaded, together: two separate allocations would both start at 120
-    // and hand the same register to two counters.
-    let mut out = support(&format!("{src}\n{loaded}"));
-    out.reserve(packages.len() + 1024);
-    out.push_str(&packages);
-    out.push_str(numbering(src));
+    let (mut out, numbered, unresolved, resolved) = std::thread::scope(|s| {
+        let numbered = s.spawn(|| numbering(src));
+        let unresolved = s.spawn(|| aux::seeds(&aux::Aux::default(), src));
+        let resolved = s.spawn(|| previous.map(|p| aux::seeds(&aux::read(&aux::path_for(p)), src)));
+        let (packages, said, loaded) = load::preamble(src);
+        report(&said);
+        // The counter registers are allocated over the document AND the files
+        // that really loaded, together: two separate allocations would both
+        // start at 120 and hand the same register to two counters.
+        let mut out = support(&format!("{src}\n{loaded}"));
+        out.reserve(packages.len() + 1024);
+        out.push_str(&packages);
+        (out, joined(numbered), joined(unresolved), joined(resolved))
+    });
+    out.push_str(numbered);
     out.push_str(RECLAIMED);
     if mode == Mode::Text {
         // `\number` and `\the` are refused in the text stream -- measured:
@@ -163,9 +202,21 @@ fn preamble_in(src: &str, mode: Mode) -> String {
     // page' came out as `n page', the reference gone and the word after it eaten.
     // A run that knows which FILE the document is overwrites these from the .aux
     // it left last time; see `preamble_at`.
-    out.push_str(&aux::seeds(&aux::Aux::default(), src));
+    out.push_str(&unresolved);
     out.push_str("\\catcode`\\@=12\n");
+    if let Some(resolved) = resolved {
+        out.push_str("\\catcode`\\@=11\n");
+        out.push_str(&resolved);
+        out.push_str("\\catcode`\\@=12\n");
+    }
     out
+}
+
+/// A scoped thread's answer, its panic carried on to the caller as its own.
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 /// The preamble with the labels a previous run left in `document.aux` seeded in.
@@ -173,12 +224,7 @@ fn preamble_in(src: &str, mode: Mode) -> String {
 /// Separate because it needs to know which FILE the document is, and the entry
 /// points in `lib.rs` that take a string and nothing else cannot say.
 pub fn preamble_at(document: &std::path::Path, src: &str, mode: Mode) -> String {
-    let previous = aux::read(&aux::path_for(document));
-    let mut out = preamble_in(src, mode);
-    out.push_str("\\catcode`\\@=11\n");
-    out.push_str(&aux::seeds(&previous, &include::gathered(src)));
-    out.push_str("\\catcode`\\@=12\n");
-    out
+    preamble_of(src, mode, Some(document))
 }
 
 /// The kernel definitions a CLASS overwrites with box machinery, taken back.

@@ -978,7 +978,9 @@ serial, and most of it is in three places:
 - **Preamble text**, `latex::preamble_at`: package loading (`load::preamble`,
   ~42 ms), the counter scan in `latex::support` (~22 ms), the class check in
   `numbering` (~22 ms) and the label seeds (~8 ms) — independent scans of the
-  same source.
+  same source. Since this measurement the class check and both label seedings
+  run on threads of their own beside the package load, and `support`'s four
+  scans run side by side, so only the load and `support` are left in series.
 
 Smaller: `pdf::document` spends most of its time in the SHA-256 of the whole
 file for `/ID` (`pdf::file_identifier`); the page count is taken by inflating
