@@ -304,7 +304,10 @@ impl Lexer {
         let want: Vec<char> = marker.chars().collect();
         let mut i = self.pos;
         while i + want.len() <= self.chars.len() {
-            if self.chars[i..i + want.len()] == want[..] {
+            // The first character alone rules out nearly every position, and is
+            // one compare where the slice is a call.
+            let opens = want.first().map_or(true, |w| self.chars[i] == *w);
+            if opens && self.chars[i..i + want.len()] == want[..] {
                 let text: String = self.chars[self.pos..i].iter().collect();
                 self.pos = i + want.len();
                 self.state = State::MidLine;
@@ -368,6 +371,12 @@ impl Lexer {
         self.invalid.take()
     }
 
+    /// Whether any invalid character is waiting to be reported.
+    #[inline]
+    pub fn has_invalid(&self) -> bool {
+        !self.invalid.borrow().is_empty()
+    }
+
     /// Put a token stream back in front of the input, to be read next.
     ///
     /// Stored reversed so `next` can pop from the end — expansion pushes whole
@@ -380,6 +389,7 @@ impl Lexer {
 
     /// Drop the levels whose tokens are all read and nothing sits above:
     /// §325 and §390 end a finished token list before they begin another.
+    #[inline]
     fn drop_finished(&mut self) {
         let depth = self.pending.len();
         while self
@@ -708,7 +718,12 @@ impl Lexer {
         // compiles to bytecode, so the mouth is walked once and the VM does the
         // repeated work. Left in, off, and honest -- `TEXRS_PARALLEL=1` turns
         // it on for anyone measuring a document shaped differently.
-        if std::env::var_os("TEXRS_PARALLEL").is_none() {
+        //
+        // The variable is read once per process: every token list the
+        // lowerer runs through a mouth of its own asks this on its first read,
+        // and a `getenv` per list was measurable.
+        static PARALLEL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*PARALLEL.get_or_init(|| std::env::var_os("TEXRS_PARALLEL").is_some()) {
             self.ahead_disabled = true;
             return None;
         }

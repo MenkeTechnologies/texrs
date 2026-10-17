@@ -274,6 +274,18 @@ const MAX_LOWER_DEPTH: usize = 64;
 /// the runaway ends in TeX's capacity error rather than an abort.
 const LOWER_STACK_BUDGET: usize = 1536 * 1024;
 
+/// How many tokens the document level reads before offering its commands to
+/// the paragraph feed again when they have not grown in number.
+///
+/// The feed takes only what can no longer change, so an offer that is skipped
+/// hands nothing on wrongly: the same text goes at the next one, which is all
+/// the breaking job can tell apart. The commands are offered whenever one is
+/// added -- every source line adds a line directive -- and otherwise every
+/// this many tokens, for a run of text that goes on without a line end.
+/// Offering after every token, as it was, put a walk back over the trailing
+/// line directives in front of every character of prose.
+const OFFER_EVERY: usize = 1024;
+
 /// The address of a local in the caller's frame. The stack grows down on
 /// every target texrs builds for, so the difference between two of these is
 /// the stack used between the two calls.
@@ -625,15 +637,17 @@ impl Lowerer {
         while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
             at -= 1;
         }
-        let tail = at.checked_sub(1).and_then(|i| match &out[i] {
-            Cmd::Text(t) => Some(t.as_str()),
+        // The last character of the run in progress, which is all that is asked
+        // of it below: read once rather than by a suffix compare per question.
+        let last = at.checked_sub(1).and_then(|i| match &out[i] {
+            Cmd::Text(t) => t.chars().next_back(),
             _ => None,
         });
         // A text command's face arrives as characters, so it is seen here: the
         // marker, the one character naming the face, and the closing marker.
         if c == crate::typeset::FACE_POP {
             self.faces.pop();
-        } else if tail.is_some_and(|t| t.ends_with(crate::typeset::FACE_PUSH)) {
+        } else if last == Some(crate::typeset::FACE_PUSH) {
             self.faces.push(mono_after(c, self.faces.last().copied()));
         }
         // The pair a ligature joins is ONE character, so the first of it comes
@@ -645,7 +659,7 @@ impl Lowerer {
         let joined = match code {
             true => None,
             false => prev
-                .filter(|p| tail.is_some_and(|t| t.ends_with(*p)))
+                .filter(|p| last == Some(*p))
                 .and_then(|p| ligature(p, c)),
         };
         let mut c = c;
@@ -738,6 +752,9 @@ impl Lowerer {
         // here, AFTER every command it lowered to, so the mark sees its value.
         // How much of `out` the register tracker has followed.
         let mut followed = 0usize;
+        // The length of `out` when the feed was last offered it, and how many
+        // tokens have been read since: see `OFFER_EVERY`.
+        let mut offered = (usize::MAX, 0usize);
         // §82: the hundredth error ends the run.
         while let Some(tok) = {
             self.flush_keeps(&mut out);
@@ -749,7 +766,11 @@ impl Lowerer {
             // in order; a group's are not yet placed in it.
             if self.depth == 1 {
                 if let Some(feed) = self.feed.as_mut() {
-                    feed.offer(&out, &self.fonts, &self.layout);
+                    offered.1 += 1;
+                    if out.len() != offered.0 || offered.1 >= OFFER_EVERY {
+                        feed.offer(&out, &self.fonts, &self.layout);
+                        offered = (out.len(), 0);
+                    }
                 }
             }
             let tok = match self.eng.halted {
@@ -4935,7 +4956,12 @@ impl Lowerer {
 
     /// Write the `Cmd::KeepGlobal` marks the last command's `\global`
     /// assignment is owed, now that everything it lowered to is in `out`.
+    #[inline]
     fn flush_keeps(&mut self, out: &mut Vec<Cmd>) {
+        // Called before every token, and owed nothing before nearly all of them.
+        if self.pending_keeps.is_empty() {
+            return;
+        }
         for reg in std::mem::take(&mut self.pending_keeps) {
             out.push(Cmd::KeepGlobal {
                 reg,

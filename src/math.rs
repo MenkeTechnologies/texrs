@@ -314,7 +314,28 @@ const BODY: &str = "document";
 ///
 /// The formula is READ here, because reading it expands macros against the
 /// engine and consumes the input. It is not SET here: see [`Deferred`].
+///
+/// A character other than a math shift opens nothing and moves no counter,
+/// and characters are most of what a document is, so they are answered here,
+/// inlined into the lowerer's loop, without a call.
+#[inline]
 pub fn lower_math(
+    eng: &mut Engine,
+    size: f64,
+    measure: f64,
+    lx: &mut Lexer,
+    tok: &Token,
+    out: &mut Vec<Cmd>,
+    deferred: &mut Formulas,
+) -> Result<bool, TexError> {
+    if matches!(tok, Token::Char(_, cat) if *cat != crate::catcode::Cat::MathShift) {
+        return Ok(false);
+    }
+    lower_math_at(eng, size, measure, lx, tok, out, deferred)
+}
+
+/// [`lower_math`] for a token that may open a formula.
+fn lower_math_at(
     eng: &mut Engine,
     size: f64,
     measure: f64,

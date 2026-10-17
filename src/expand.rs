@@ -1026,7 +1026,19 @@ impl Engine {
     /// §346's report of each invalid character the mouth skipped, in front of
     /// anything reported after it. The mouth keeps them until asked, so every
     /// caller that is about to report or print asks first.
+    ///
+    /// Asked after every token the mouth hands over, and almost always with
+    /// nothing to report, so that case is a look at the mouth inlined into the
+    /// caller and the reporting is out of line.
+    #[inline]
     pub fn note_mouth(&mut self, lx: &Lexer) {
+        if lx.has_invalid() {
+            self.report_invalid(lx);
+        }
+    }
+
+    #[cold]
+    fn report_invalid(&mut self, lx: &Lexer) {
         for context in lx.take_invalid() {
             self.errors.push(format!(
                 "! Text line contains an invalid character.{}",
