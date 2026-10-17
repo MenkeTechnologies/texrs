@@ -129,6 +129,8 @@ pub struct Lowerer {
     /// turns it on for a caller who wants what the document SAYS rather than
     /// what it announced.
     text_output: bool,
+    /// Read formulas and set none: the label pass. See [`Self::passing_over_formulas`].
+    formulas_passed_over: bool,
     /// How many `\input` files are open above this one, so a file that inputs
     /// itself stops with a diagnostic instead of exhausting the host stack.
     input_depth: usize,
@@ -297,6 +299,7 @@ impl Lowerer {
             page_colour: None,
             layout: crate::typeset::Layout::default(),
             text_output: false,
+            formulas_passed_over: false,
             depth: 0,
             stack_base: 0,
             formulas: Default::default(),
@@ -353,6 +356,14 @@ impl Lowerer {
 
     pub fn with_text_output(mut self) -> Self {
         self.text_output = true;
+        self
+    }
+
+    /// Read every formula with the math parser and set none of it, keeping only
+    /// the labels and equation numbers it carries: what the `.aux` pass needs
+    /// (`src/latex/aux.rs`), which has no text stream to set them in.
+    pub fn passing_over_formulas(mut self) -> Self {
+        self.formulas_passed_over = true;
         self
     }
 
@@ -768,6 +779,11 @@ impl Lowerer {
                 )? {
                     continue;
                 }
+            }
+            // The label pass reads a formula as the run above does and sets
+            // nothing; see `crate::math::pass_over_math`.
+            if self.formulas_passed_over && crate::math::pass_over_math(&mut self.eng, lx, &tok)? {
+                continue;
             }
             let Token::Cs(name) = &tok else {
                 // Braces group the macro table while lowering, so a `\def`

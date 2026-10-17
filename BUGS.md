@@ -240,6 +240,24 @@ start at the shallowest level the CLASS declares -- `report` and `book` declare
 `chapter` and `article` does not -- which is a fact `src/latex.rs` already reads
 for `\thesection`.
 
+## A reference to an equation is `??` in the typeset run
+
+The `.aux` is right: the label pass reads every formula with the math parser
+(`math::pass_over_math`), steps `equation` once per numbered display -- per row
+for `align`, `gather` and `eqnarray`, skipping a `\nonumber` row -- and writes
+`\newlabel{eq:one}{{1}{1}}` where pdflatex writes `{{1}{1}{}{equation.1}{}}`.
+The page does not use it. `\ref` is answered in the run itself by
+`lower_cross_ref` from `typeset::unit_numbers`, which knows sectioning units
+only, and a `\label` inside a display never reaches it (the math parser reads
+it by name and sets nothing), so
+
+```
+\begin{equation} E = mc^2 \label{eq:one} \end{equation} See \ref{eq:one}.
+```
+sets `See ??.` here and `See 1.` under `pdflatex`, and the display carries no
+`(1)` either. The fix is for the typesetting run to number displays and to
+answer a reference it has no unit for from the `.aux`.
+
 ## Divergences from tex
 
 **Line ends and the printer** were here and are not. A line end in the file is

@@ -306,6 +306,83 @@ pub fn lower_math(
     out: &mut Vec<Cmd>,
     deferred: &mut Formulas,
 ) -> Result<bool, TexError> {
+    let Some((f, style, display, environment)) = read(eng, lx, tok)? else {
+        return Ok(false);
+    };
+    emit(out, deferred, f, style, size, display, environment, measure);
+    Ok(true)
+}
+
+/// Whether `tok` opens a formula, and if so read it and set nothing -- the
+/// label pass's [`lower_math`].
+///
+/// The pass (`src/latex/aux.rs`) collects the `.aux` and has no page, but it
+/// must still read a formula exactly as the run that sets it does: `\frac`,
+/// `\sqrt`, `\left` and the rest are the math parser's, not macros, and a pass
+/// that met them as text stopped at `! Undefined control sequence \frac.` and
+/// wrote no `.aux` at all. Latex's `.aux` is unaffected by what a formula
+/// draws; what it does take from one is the `\label`s inside it, and the
+/// equation number a numbered display steps (ltmath.dtx's `equation`,
+/// amsmath's `align`, `gather`, `multline`, and `eqnarray`). Those are put
+/// back in front of the input as `\refstepcounter{equation}` and `\label{..}`,
+/// in the order latex.ltx meets them, for the pass to run as it runs any other.
+pub fn pass_over_math(eng: &mut Engine, lx: &mut Lexer, tok: &Token) -> Result<bool, TexError> {
+    let Some((f, _, _, environment)) = read(eng, lx, tok)? else {
+        return Ok(false);
+    };
+    let equation: Vec<Token> = "equation"
+        .chars()
+        .map(|c| Token::Char(c, crate::catcode::Cat::Letter))
+        .collect();
+    let mut back = Vec::new();
+    let step = |back: &mut Vec<Token>| call(back, "refstepcounter", &equation);
+    let labels_in = |back: &mut Vec<Token>, row: Option<usize>| {
+        for (_, key) in f
+            .labels
+            .iter()
+            .filter(|(r, _)| row.is_none_or(|row| *r == row))
+        {
+            call(back, "label", key);
+        }
+    };
+    match environment {
+        // One number for the whole display, whichever row says `\nonumber`.
+        "equation" | "multline" => {
+            if f.unnumbered.is_empty() {
+                step(&mut back);
+            }
+            labels_in(&mut back, None);
+        }
+        // A number per row: amsmath's `\label` names its own row's.
+        "align" | "alignat" | "gather" | "eqnarray" => {
+            for row in 0..f.rows.len() {
+                if !f.unnumbered.contains(&row) {
+                    step(&mut back);
+                }
+                labels_in(&mut back, Some(row));
+            }
+        }
+        _ => labels_in(&mut back, None),
+    }
+    lx.push_back(&back);
+    Ok(true)
+}
+
+/// `\name{arg}`, as tokens, onto `back`.
+fn call(back: &mut Vec<Token>, name: &str, arg: &[Token]) {
+    back.push(Token::cs(name));
+    back.push(Token::Char('{', crate::catcode::Cat::BeginGroup));
+    back.extend_from_slice(arg);
+    back.push(Token::Char('}', crate::catcode::Cat::EndGroup));
+}
+
+/// The formula `tok` opens, read: what [`lower_math`] sets and
+/// [`pass_over_math`] does not. `None` when `tok` opens none.
+fn read(
+    eng: &mut Engine,
+    lx: &mut Lexer,
+    tok: &Token,
+) -> Result<Option<(parse::Formula, Style, bool, &'static str)>, TexError> {
     let (style, stop) = match tok {
         // `$` and `$$`. A document reaches here only where the character has
         // category 3: `\$` is an ordinary dollar sign and stays one.
@@ -333,20 +410,19 @@ pub fn lower_math(
                     // the ordinary dollar sign it was defined with and only
                     // the document's own `$` opens maths.
                     eng.cats.set('$', crate::catcode::Cat::MathShift);
-                    return Ok(false);
+                    return Ok(None);
                 }
                 Some(name) => {
                     consume_environment_name(eng, lx);
                     let f = parse::formula(eng, lx, parse::Stop::Cs("end"))?;
                     consume_end(eng, lx);
-                    emit(out, deferred, f, DISPLAY_STYLE, size, true, name, measure);
-                    return Ok(true);
+                    return Ok(Some((f, DISPLAY_STYLE, true, name)));
                 }
-                None => return Ok(false),
+                None => return Ok(None),
             },
-            _ => return Ok(false),
+            _ => return Ok(None),
         },
-        _ => return Ok(false),
+        _ => return Ok(None),
     };
     let f = parse::formula(eng, lx, stop)?;
     // `$$…$$` closes with two math-shift characters, and the scan stopped at
@@ -354,17 +430,7 @@ pub fn lower_math(
     if style == DISPLAY_STYLE && stop == parse::Stop::MathShift {
         let _ = second_shift(eng, lx);
     }
-    emit(
-        out,
-        deferred,
-        f,
-        style,
-        size,
-        style == DISPLAY_STYLE,
-        "",
-        measure,
-    );
-    Ok(true)
+    Ok(Some((f, style, style == DISPLAY_STYLE, "")))
 }
 
 /// Whether the NEXT token is another math shift, which is what makes `$$` a

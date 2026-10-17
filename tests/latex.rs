@@ -458,6 +458,47 @@ fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The label pass reads mathematics the way the typesetting run does. It once
+/// met `\frac` as an undefined macro, failed, and wrote no `.aux` for any
+/// document with a formula in it. The values are pdflatex's for this document
+/// (pdfTeX 1.40.29, TeX Live 2026, two runs, measured): the numbered displays
+/// step `equation` once each -- per row for `align`, skipping the `\nonumber`
+/// row -- and a `\label` inside a display names its number.
+#[test]
+fn a_document_with_mathematics_still_writes_its_aux() {
+    let dir = std::env::temp_dir().join(format!("texrs-aux-math-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let doc = dir.join("maths.tex");
+    let src = "\\documentclass{article}\n\\begin{document}\n\
+               \\section{Intro}\\label{s:intro}\n\
+               $\\frac{a}{b} + \\sqrt[3]{x} + \\binom{n}{k}$ and\n\
+               $\\left(\\frac{1}{2}\\right) + \\text{word} + \\mathrm{d}x$,\n\
+               \\(x^2\\), \\[ y_1 \\] See \\ref{eq:one}, \\ref{eq:three} and \\cite{k}.\n\
+               Note\\footnote{A footnote with $\\frac{1}{2}$.}.\n\
+               \\begin{equation} E = \\frac{m}{c^2} \\label{eq:one} \\end{equation}\n\
+               \\begin{align}\n a &= b \\label{eq:two} \\\\\n c &= d \\nonumber \\\\\n\
+               e &= f \\label{eq:three}\n\\end{align}\n\
+               \\begin{equation*} z \\end{equation*}\n\
+               \\section{Two}\\label{s:two}\n\
+               \\begin{thebibliography}{9}\\bibitem{k} A book.\\end{thebibliography}\n\
+               \\end{document}\n";
+    std::fs::write(&doc, src).expect("write");
+    let _ = std::fs::remove_file(dir.join("maths.aux"));
+    texrs::run_text_at(&doc, src).expect("run");
+    let aux = std::fs::read_to_string(dir.join("maths.aux")).expect("aux written");
+    for entry in [
+        "\\newlabel{s:intro}{{1}{1}}",
+        "\\newlabel{eq:one}{{1}{1}}",
+        "\\newlabel{eq:two}{{2}{1}}",
+        "\\newlabel{eq:three}{{3}{1}}",
+        "\\newlabel{s:two}{{2}{1}}",
+        "\\bibcite{k}{1}",
+    ] {
+        assert!(aux.contains(entry), "{entry} in {aux}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `\newif` gives a switch its two setters, and the ones the FORMAT declares
 /// have to be there before a class reads them: article.cls says
 /// `\@mparswitchfalse` on its first page, and the class would not load at all

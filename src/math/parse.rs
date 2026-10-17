@@ -49,6 +49,12 @@ pub struct Formula {
     pub number: Option<Vec<Noad>>,
     /// `\leqno` rather than `\eqno`: §1206's `l`, the number at the left.
     pub number_left: bool,
+    /// Each `\label` the formula carried: the row it was in and its key,
+    /// as the tokens of its argument. A label sets nothing, so this is all
+    /// that is kept of it -- for the label pass, which writes them out.
+    pub labels: Vec<(usize, Vec<Token>)>,
+    /// The rows `\nonumber` or `\notag` took the equation number from.
+    pub unnumbered: Vec<usize>,
 }
 
 impl Formula {
@@ -80,6 +86,8 @@ pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Formula> {
         cells: Vec::new(),
         number: None,
         number_left: false,
+        labels: Vec::new(),
+        unnumbered: Vec::new(),
     };
     let last = scanner.mlist(lx, stop)?;
     scanner.cells.push(last);
@@ -88,6 +96,8 @@ pub fn formula(eng: &mut Engine, lx: &mut Lexer, stop: Stop) -> R<Formula> {
         rows: scanner.rows,
         number: scanner.number,
         number_left: scanner.number_left,
+        labels: scanner.labels,
+        unnumbered: scanner.unnumbered,
     })
 }
 
@@ -104,6 +114,8 @@ struct Scanner<'a> {
     cells: Vec<Vec<Noad>>,
     number: Option<Vec<Noad>>,
     number_left: bool,
+    labels: Vec<(usize, Vec<Token>)>,
+    unnumbered: Vec<usize>,
 }
 
 const MAX_DEPTH: usize = 48;
@@ -411,6 +423,37 @@ impl Scanner<'_> {
         }
     }
 
+    /// An undelimited macro argument (§392), unexpanded: one token, or a
+    /// balanced group without its outer braces. Spaces before it are skipped.
+    fn raw_argument(&mut self, lx: &mut Lexer) -> Vec<Token> {
+        let first = loop {
+            match lx.next_token(&self.eng.cats) {
+                Some(Token::Char(_, Cat::Space)) => continue,
+                Some(t) => break t,
+                None => return Vec::new(),
+            }
+        };
+        if !matches!(first, Token::Char(_, Cat::BeginGroup)) {
+            return vec![first];
+        }
+        let mut body = Vec::new();
+        let mut depth = 1usize;
+        while let Some(t) = lx.next_token(&self.eng.cats) {
+            match t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            body.push(t);
+        }
+        body
+    }
+
     /// `math_ac` (§1165): the `accent_noad` a `\mathaccent` code makes.
     ///
     /// The code is fifteen bits like a `\mathchardef`'s: the class is read and
@@ -582,6 +625,18 @@ impl Scanner<'_> {
                     };
                 }
             }
+            // A label is a target, not mathematics: latex.ltx's `\label` writes
+            // to the `.aux` and sets nothing, which is what the prelude's
+            // `\newcommand{\label}[1]{}` does here. It is read by name rather
+            // than expanded so that the label pass -- where `\label` is
+            // `\@auxlabel`, a `\message` the formula has nowhere to put -- can
+            // still write the entry: see `crate::math::pass_over_math`.
+            "label" => {
+                let key = self.raw_argument(lx);
+                self.labels.push((self.rows.len(), key));
+            }
+            // amsmath's: the row's equation number is not taken.
+            "nonumber" | "notag" => self.unnumbered.push(self.rows.len()),
             // §688's style nodes.
             "displaystyle" => out.push(Noad::Style(DISPLAY_STYLE)),
             "textstyle" => out.push(Noad::Style(TEXT_STYLE)),

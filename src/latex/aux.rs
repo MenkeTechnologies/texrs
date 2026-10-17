@@ -212,7 +212,7 @@ fn keys_after(src: &str, commands: &[&str]) -> Vec<String> {
 /// line LaTeX's `\protected@write\@auxout` writes.
 pub fn pass(src: &str) -> Result<Aux, crate::TexError> {
     let src_d = crate::rust_ffi::desugar(src);
-    let mut lowerer = crate::lower::Lowerer::new();
+    let mut lowerer = crate::lower::Lowerer::new().passing_over_formulas();
     lowerer.preload(&super::preamble(&src_d))?;
     lowerer.preload(
         "\\makeatletter\\let\\label\\@auxlabel\\let\\bibitem\\@auxbibitem\\makeatother\n",

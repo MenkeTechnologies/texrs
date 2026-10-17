@@ -15,7 +15,10 @@ use std::process::Command;
 
 /// Sections that label themselves and refer to their neighbours, with a
 /// package that will not load so the run has a report on stderr whose place
-/// relative to the rerun warning matters.
+/// relative to the rerun warning matters. Each carries mathematics, and a
+/// numbered display with a label of its own: the pass once stopped at the first
+/// `\frac` and wrote no `.aux`, so on any document with a formula the overlap
+/// never ran and neither did the round trip.
 fn document(inserted: bool) -> String {
     let mut s = String::from(
         "\\documentclass{article}\n\\usepackage{texrs-no-such-package}\n\\begin{document}\n",
@@ -27,6 +30,7 @@ fn document(inserted: bool) -> String {
         let back = if n > 1 { n - 1 } else { 120 };
         s.push_str(&format!(
             "\\section{{Part {n}}}\\label{{sec:{n}}}\n\
+             \\begin{{equation}}\\frac{{1}}{{\\sqrt{{n}}}}\\label{{eq:{n}}}\\end{{equation}}\n\
              See section~\\ref{{sec:{back}}} and \\cite{{k{n}}} for what came \
              before, and section~\\ref{{sec:{}}} for what follows. {}\n\n",
             n % 120 + 1,
@@ -108,6 +112,10 @@ fn overlapping_the_label_pass_changes_no_byte_of_any_run() {
     assert!(one[2].aux.contains("\\newlabel{sec:7}{{8}"), "{}", one[2].aux);
     assert!(one[1].aux.contains("\\bibcite{k7}{7}"), "{}", one[1].aux);
     assert!(one[2].aux.contains("\\bibcite{k7}{8}"), "{}", one[2].aux);
+    // The equations are numbered by the displays alone, and the inserted
+    // section has none, so eq:7 is 7 before the edit and after it.
+    assert!(one[1].aux.contains("\\newlabel{eq:7}{{7}"), "{}", one[1].aux);
+    assert!(one[2].aux.contains("\\newlabel{eq:7}{{7}"), "{}", one[2].aux);
     assert!(one.iter().all(|s| !s.pdf.is_empty()));
 
     for threads in ["2", "8"] {
