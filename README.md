@@ -908,6 +908,22 @@ of only a few pages is drawn on the calling thread. Each page also shares its
 fonts by reference (`Arc`) instead of copying a font program per drawn run,
 which was the larger share of this stage before the fan-out.
 
+**Pictures, images and formulas.** Before the pages are fitted, every TikZ
+picture is parsed again against the document's own face to size its nodes, and
+every `\includegraphics` file is opened to resolve its lengths. Each such line
+depends only on itself, the fonts and the file it names, so once a document has
+eight or more of them the lines are remeasured in parallel and collected in
+document order. Measured 2026-10-17 on synthetic documents under heavy machine
+load, that stage went from about 150 ms to 19 ms with 6,000 pictures, 130 ms to
+33 ms with 4,000 images, and 185 ms to 33 ms for a mix of both with formulas.
+A picture's marker is also decoded through a lookup table rather than a search
+of the base64 alphabet, which had been about a quarter of a drawing-heavy
+document's serial time. Formulas stay sequential: one is parsed and set while the
+document is lowered, against the engine's macros and catcodes, and the lowerer
+reads its own output back, so setting them later would need a placeholder in
+the command stream. On a formula-heavy document that setting is about 40% of the
+run, and it is the largest serial stage this leaves.
+
 **DVI pages.** On the `--dvi` path a page is its own lines and its number, so
 each page's box is built and its `bop`..`eop` commands are encoded by a writer
 of its own, in parallel; the pages are then appended in order, which is where

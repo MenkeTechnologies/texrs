@@ -3055,23 +3055,48 @@ pub fn to_pdf(
     // the same widths every word on it is measured by -- `tikz::Estimate`,
     // which is all the lowerer had, charges half an em a character and sizes
     // every node box wrong.
-    let picture_metrics = FaceMetrics {
-        measure: &width_of,
-        size: layout.size,
-    };
+    //
     // Each picture's reserved height is restated against those metrics before
     // anything is fitted, so the room the page keeps for a drawing and the room
     // the drawing is given below are the same number. See `PICTURE`.
-    let lines: Vec<String> = break_lines_measured(&text, layout, &width_of)
-        .into_iter()
-        .map(|line| picture_remeasured(line, &picture_metrics))
-        // An image's lengths are resolved here for the same reason a picture's
-        // height is: `width=0.8\textwidth` is a fraction of a measure, and the
-        // natural size is a fact about a file, and the lowerer had neither.
-        // Resolved BEFORE the page is fitted, so the room the fitter keeps for
-        // a figure and the room the figure is given below are one number.
-        .map(|line| image_remeasured(line, layout, near))
-        .collect();
+    //
+    // An image's lengths are resolved here for the same reason a picture's
+    // height is: `width=0.8\textwidth` is a fraction of a measure, and the
+    // natural size is a fact about a file, and the lowerer had neither.
+    // Resolved BEFORE the page is fitted, so the room the fitter keeps for a
+    // figure and the room the figure is given below are one number.
+    let remeasure = |line: String| -> String {
+        let picture_metrics = FaceMetrics {
+            measure: &width_of,
+            size: layout.size,
+        };
+        image_remeasured(picture_remeasured(line, &picture_metrics), layout, near)
+    };
+    let broken = break_lines_measured(&text, layout, &width_of);
+    // A line's remeasure reads that line, the fonts and the files it names,
+    // and nothing another line wrote: no TeX state, no style stack, no shared
+    // mutable table. So the lines are remeasured independently and collected
+    // in document order -- the same lines whatever the thread count -- once
+    // there are enough drawings to pay for the fan-out.
+    //
+    // Counted by the span's opening character, which is where `picture_parts`
+    // and `image_parts` look for it: a formula's line is long, and searching
+    // the whole of every line for a marker cost more than remeasuring them.
+    let blocks = broken
+        .iter()
+        .filter(|line| {
+            let inner = line.trim_start();
+            let inner = inner.strip_prefix(CENTRE).unwrap_or(inner);
+            inner.starts_with([PICTURE, IMAGE])
+        })
+        .count();
+    let lines: Vec<String> = match blocks >= PARALLEL_BLOCKS {
+        true => {
+            use rayon::prelude::*;
+            broken.into_par_iter().map(remeasure).collect()
+        }
+        false => broken.into_iter().map(remeasure).collect(),
+    };
 
     // The colour stack, seeded with what the document is set in where it has
     // not said otherwise. Seeding it means a run with nothing pushed still
@@ -4097,6 +4122,10 @@ fn sets_text(para: &str) -> bool {
 /// Fewer pages than this are drawn on the calling thread: fanning out costs
 /// more than a handful of pages are worth.
 const PARALLEL_PAGES: usize = 8;
+
+/// Fewer pictures and images than this are remeasured on the calling thread,
+/// for the same reason.
+const PARALLEL_BLOCKS: usize = 8;
 
 /// What drawing one page needs to know that a serial walk over the pages
 /// before it would have left behind.
@@ -5835,6 +5864,22 @@ fn picture_remeasured(line: String, metrics: &dyn crate::tikz::Metrics) -> Strin
 /// The base64 alphabet, RFC 4648 §4.
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// The alphabet inverted: a character's six bits, or 64 for one outside it.
+///
+/// A picture line is read back several times per page the fitter considers --
+/// `line_height`, `paginate`, the breaker's block test -- and searching the
+/// alphabet once per character made that decoding a quarter of a drawing-heavy
+/// document's serial time.
+const UNBASE64: [u8; 128] = {
+    let mut table = [64u8; 128];
+    let mut at = 0;
+    while at < 64 {
+        table[BASE64[at] as usize] = at as u8;
+        at += 1;
+    }
+    table
+};
+
 /// `bytes` as base64: one word, with nothing in it a text pipeline splits on.
 fn base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -5862,7 +5907,10 @@ fn unbase64(text: &str) -> Option<Vec<u8>> {
         if ch == '=' {
             break;
         }
-        let six = BASE64.iter().position(|b| *b as char == ch)? as u32;
+        let six = match UNBASE64.get(ch as usize) {
+            Some(&six) if six < 64 => u32::from(six),
+            _ => return None,
+        };
         packed = packed << 6 | six;
         held += 6;
         if held >= 8 {
