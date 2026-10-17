@@ -111,8 +111,8 @@ pub fn requests(src: &str) -> Vec<Request> {
 /// the document deliberately did not ask for.
 fn calls(src: &str, command: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    for line_start in comment_free(src) {
-        let mut rest = line_start.as_str();
+    for line in lines_naming(src, command) {
+        let mut rest = line;
         while let Some(at) = rest.find(command) {
             let after = &rest[at + command.len()..];
             rest = after;
@@ -137,33 +137,59 @@ fn calls(src: &str, command: &str) -> Vec<(String, String)> {
     out
 }
 
-/// `src` with everything after an unescaped `%` on each line removed.
+/// The lines of `src` that contain `command`, each with everything after its
+/// first unescaped `%` removed.
 ///
 /// Returned a line at a time so a `\usepackage` cannot be assembled out of two
-/// lines that a comment separated.
-fn comment_free(src: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in src.lines() {
-        let mut kept = String::with_capacity(line.len());
-        let mut escaped = false;
-        for ch in line.chars() {
-            if escaped {
-                kept.push(ch);
-                escaped = false;
-                continue;
+/// lines that a comment separated. The lines are those of `str::lines`, in
+/// order, each yielded once however often `command` occurs on it.
+///
+/// Only a line the command occurs on can hold a call once its comment is cut
+/// off, so the search for the command decides which lines are looked at, and
+/// the rest of the document is never walked a character at a time. The lines
+/// come back as slices of `src`: cutting a comment off is a shorter slice, not
+/// a copy. The scans that ask -- four in `requests`, two in `existence` -- each
+/// run over the whole document and the files it loaded, so a copy per line per
+/// scan was most of what they cost.
+fn lines_naming<'a>(src: &'a str, command: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    let mut from = 0;
+    std::iter::from_fn(move || {
+        let at = from + src[from..].find(command)?;
+        // `from` is 0 or just past a newline, so the line starts there unless a
+        // newline comes between.
+        let start = src[from..at].rfind('\n').map_or(from, |n| from + n + 1);
+        let line = match src[at..].find('\n') {
+            Some(n) => {
+                from = at + n + 1;
+                let line = &src[start..at + n];
+                line.strip_suffix('\r').unwrap_or(line)
             }
-            match ch {
-                '\\' => {
-                    kept.push(ch);
-                    escaped = true;
-                }
-                '%' => break,
-                _ => kept.push(ch),
+            None => {
+                from = src.len();
+                &src[start..]
             }
+        };
+        Some(uncommented(line))
+    })
+}
+
+/// `line` up to its first `%` that a backslash does not escape.
+///
+/// Byte by byte, which is the same as char by char here: `\` and `%` are ASCII,
+/// and every byte of a multi-byte character is above 0x7f, so neither can be
+/// mistaken for one -- and a backslash before a multi-byte character escapes
+/// its first byte, which is no more than the other bytes are already.
+fn uncommented(line: &str) -> &str {
+    let mut escaped = false;
+    for (at, byte) in line.bytes().enumerate() {
+        match (escaped, byte) {
+            (true, _) => escaped = false,
+            (false, b'\\') => escaped = true,
+            (false, b'%') => return &line[..at],
+            (false, _) => {}
         }
-        out.push(kept);
     }
-    out
+    line
 }
 
 /// Where `kpsewhich` says `NAME.EXT` is.
@@ -271,8 +297,8 @@ fn exists(name: &str) -> bool {
 /// is the not-found one, which is what it took before.
 fn braced_names(text: &str, command: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for line in comment_free(text) {
-        let mut rest = line.as_str();
+    for line in lines_naming(text, command) {
+        let mut rest = line;
         while let Some(at) = rest.find(command) {
             let after = &rest[at + command.len()..];
             rest = after;
@@ -670,6 +696,60 @@ mod tests {
     fn a_commented_out_usepackage_is_not_a_request() {
         assert!(requests("% \\usepackage{tikz}\n").is_empty());
         assert_eq!(requests("\\usepackage{a} % \\usepackage{b}\n").len(), 1);
+    }
+
+    #[test]
+    fn the_comment_rules_are_the_ones_the_line_copying_scan_applied() {
+        // The scan this replaced copied every line with its comment cut off.
+        // Kept here as the oracle: the slices `lines_naming` returns have to be
+        // exactly the copies it made, for every line that still names the
+        // command once the comment is gone.
+        fn copied(src: &str) -> Vec<String> {
+            let mut out = Vec::new();
+            for line in src.lines() {
+                let mut kept = String::new();
+                let mut escaped = false;
+                for ch in line.chars() {
+                    if escaped {
+                        kept.push(ch);
+                        escaped = false;
+                        continue;
+                    }
+                    match ch {
+                        '\\' => {
+                            kept.push(ch);
+                            escaped = true;
+                        }
+                        '%' => break,
+                        _ => kept.push(ch),
+                    }
+                }
+                out.push(kept);
+            }
+            out
+        }
+        let src = "\\usepackage{a}\\usepackage{b}\n\
+                   \\% \\usepackage{escaped}\n\
+                   \\\\% \\usepackage{after-an-escaped-backslash}\n\
+                   \\verb|%| \\usepackage{after-verb}\n\
+                   \\usepackage{é}\\é% \\usepackage{x}\r\n\
+                   \r\n\
+                   %\\usepackage{c}\n\
+                   \\usepackage[opt]{d}\r";
+        let command = "\\usepackage";
+        let sliced: Vec<&str> = lines_naming(src, command)
+            .filter(|l| l.contains(command))
+            .collect();
+        let expected: Vec<String> = copied(src)
+            .into_iter()
+            .filter(|l| l.contains(command))
+            .collect();
+        assert_eq!(sliced, expected);
+        // What that means for the document: an escaped `\%` is a percent sign
+        // and the package after it is asked for; `\verb` is not looked inside,
+        // so its `%` still ends the line, as it always has here.
+        let names: Vec<String> = requests(src).into_iter().map(|r| r.name).collect();
+        assert_eq!(names, ["a", "b", "escaped", "é", "d"]);
     }
 
     #[test]
