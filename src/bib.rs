@@ -176,6 +176,9 @@ impl Aux {
     /// Parse the text of one `.aux`.
     pub fn parse(text: &str) -> Aux {
         let mut aux = Aux::default();
+        // The keys met so far, so a repeated `\cite` is dropped without a scan
+        // of every citation before it.
+        let mut seen: HashSet<String> = HashSet::new();
         for (command, argument) in commands(text) {
             match command.as_str() {
                 "citation" => {
@@ -183,7 +186,7 @@ impl Aux {
                         let key = key.trim();
                         if key == "*" {
                             aux.all = true;
-                        } else if !key.is_empty() && !aux.citations.contains(&key.to_string()) {
+                        } else if !key.is_empty() && seen.insert(key.to_string()) {
                             aux.citations.push(key.to_string());
                         }
                     }
@@ -205,8 +208,9 @@ impl Aux {
     }
 
     fn absorb(&mut self, other: Aux) {
+        let mut seen: HashSet<String> = self.citations.iter().cloned().collect();
         for key in other.citations {
-            if !self.citations.contains(&key) {
+            if seen.insert(key.clone()) {
                 self.citations.push(key);
             }
         }
