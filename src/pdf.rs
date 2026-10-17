@@ -1147,7 +1147,7 @@ impl Page {
 /// them, and comparing it with itself by value reads the whole font program or
 /// the whole pixel buffer once per page per resource.
 fn same<T: PartialEq>(a: &T, b: &T) -> bool {
-    a == b
+    std::ptr::eq(a, b) || a == b
 }
 
 /// Write a document of `pages`.

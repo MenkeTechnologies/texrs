@@ -879,6 +879,15 @@ Ten cores, so the fall at 16 is oversubscription rather than a limit in the
 work. A single document is still a single thread: this parallelises the batch,
 not the engine.
 
+**PDF assembly.** `pdf::document` writes each font and picture once and
+finds an already-written one by address before comparing contents, so a font
+shared by every page costs one pointer comparison per use rather than a read of
+the whole font program. Measured on a synthetic 600-page document with 40
+embedded faces, that lookup went from about 1.9 s to about 0.13 s. Subsetting,
+object packing and serialisation measured as a small fraction of a document's
+time and stay sequential; output is byte-identical across runs and thread counts
+(set `SOURCE_DATE_EPOCH` to pin the creation date).
+
 **Iteration depth.** `\def\r{... \ifnum ... \r \fi}` is TeX's loop, and
 `tex` recurses through it — one input-stack level per turn, giving up at
 `[input stack size=10000]`. texrs lowers that shape to a backward jump, so its
