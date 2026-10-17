@@ -290,13 +290,13 @@ fn table<'scope, 'env: 'scope>(
             let toks = super::scan(&body, LineMode::Partial, &c.eng.cats);
             c.eng.meanings.insert(
                 CsId::intern(&name),
-                Meaning::Macro(Macro {
+                Meaning::Macro(std::rc::Rc::new(Macro {
                     params: Vec::new(),
                     body: toks,
                     long: false,
                     protected: false,
                     outer: false,
-                }),
+                })),
             );
             Ok(())
         })?,

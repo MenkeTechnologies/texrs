@@ -269,13 +269,13 @@ fn meaning_of(repr: &MeaningRepr) -> Meaning {
             long,
             outer,
             protected,
-        } => Meaning::Macro(Macro {
+        } => Meaning::Macro(std::rc::Rc::new(Macro {
             params: params.iter().map(token_of).collect(),
             body: body.iter().map(token_of).collect(),
             long: *long,
             outer: *outer,
             protected: *protected,
-        }),
+        })),
         MeaningRepr::Primitive(name) => Meaning::Primitive(CsId::intern(name)),
         MeaningRepr::Char(c, cat) => Meaning::Char(*c, u8_to_cat(*cat)),
         MeaningRepr::CharDef(v) => Meaning::CharDef(*v),

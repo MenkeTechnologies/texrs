@@ -14,6 +14,7 @@ use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// The token a list keeps for one read from the stream: §358's `dont_expand`
 /// marker lives only in the stream, so a `\noexpand`ed control sequence is
@@ -48,7 +49,10 @@ pub struct Macro {
 /// macro table: `\let\a=\relax` makes `\a` a primitive, not a macro.
 #[derive(Clone, PartialEq)]
 pub enum Meaning {
-    Macro(Macro),
+    /// Shared, because a call reads the definition while it expands and the
+    /// table can change under it: holding the definition by count is what a
+    /// call costs instead of a copy of its parameter text and body.
+    Macro(Rc<Macro>),
     /// A primitive, by its canonical name (`relax`, `par`, …).
     Primitive(CsId),
     /// `\let\a=b` — a character token.
@@ -3763,7 +3767,7 @@ impl Engine {
             body.push(brace);
         }
         let was = std::mem::replace(&mut self.global, global);
-        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
+        self.set_meaning(name, Meaning::Macro(Rc::new(self.new_macro(params, body))));
         self.global = was;
         // A prefix applies to the definition it precedes and to nothing after
         // it, so it is spent here rather than left to colour the next `\def`.
@@ -3829,7 +3833,7 @@ impl Engine {
                 Cat::Other,
             ));
         }
-        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
+        self.set_meaning(name, Meaning::Macro(Rc::new(self.new_macro(params, body))));
         // The default is recorded but not yet honoured: a call that omits the
         // bracket would need the same peek `\@ifnextchar` does, at every use
         // site rather than at the definition. Recorded here so the definition
@@ -4203,7 +4207,10 @@ impl Engine {
                 self.diagnostic(&shown);
             }
         }
-        let mut out = Vec::with_capacity(m.body.len());
+        // Room for the body and every argument once, which bounds what a body
+        // that names each parameter once becomes, so it is built without growing.
+        let substituted: usize = args.iter().map(Vec::len).sum();
+        let mut out = Vec::with_capacity(m.body.len() + substituted);
         let mut i = 0;
         while i < m.body.len() {
             match &m.body[i] {
@@ -5954,7 +5961,10 @@ impl Engine {
     }
     /// Define a macro with no parameters, for `\edef`'s rewritten body.
     pub fn define_macro(&mut self, name: CsId, body: Vec<Token>) {
-        self.set_meaning(name, Meaning::Macro(self.new_macro(Vec::new(), body)));
+        self.set_meaning(
+            name,
+            Meaning::Macro(Rc::new(self.new_macro(Vec::new(), body))),
+        );
     }
 
     /// The same, with a parameter text — validated as `\def`'s is.
@@ -6076,7 +6086,7 @@ impl Engine {
     ) -> R<()> {
         validate_params(&params)?;
         let was = std::mem::replace(&mut self.global, global);
-        self.set_meaning(name, Meaning::Macro(self.new_macro(params, body)));
+        self.set_meaning(name, Meaning::Macro(Rc::new(self.new_macro(params, body))));
         self.global = was;
         self.long = false;
         self.outer = false;
