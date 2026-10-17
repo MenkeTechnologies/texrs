@@ -162,3 +162,107 @@ fn the_compiler_does_not_leave_its_intermediates_behind() {
         );
     }
 }
+
+/// stdout, stderr and the PDF (empty when none was written) of one run.
+struct Run {
+    stdout: String,
+    stderr: String,
+    pdf: Vec<u8>,
+}
+
+/// Run `cmd` with the PDF's dates pinned, take the PDF it wrote beside `doc`
+/// and remove it, so the next run of the same document starts from nothing.
+fn pinned(mut cmd: Command, doc: &Path) -> Run {
+    let out = cmd
+        .env("SOURCE_DATE_EPOCH", "1")
+        .output()
+        .expect("run the document");
+    assert!(
+        out.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pdf_path = doc.with_extension("pdf");
+    let pdf = std::fs::read(&pdf_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&pdf_path);
+    Run {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        pdf,
+    }
+}
+
+/// AOT-compile `src`, run the binary, then run the same file through the
+/// bytecode path; both runs, in that order.
+fn compiled_and_interpreted(dir: &Path, name: &str, src: &str) -> (Run, Run) {
+    let doc = dir.join(format!("{name}.tex"));
+    std::fs::write(&doc, src).expect("write document");
+    let built = Command::new(env!("CARGO_BIN_EXE_texrs"))
+        .arg("--aot")
+        .arg(&doc)
+        .output()
+        .expect("run texrs --aot");
+    assert!(
+        built.status.success(),
+        "--aot failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let compiled = pinned(Command::new(dir.join(name)), &doc);
+    let mut bytecode = Command::new(env!("CARGO_BIN_EXE_texrs"));
+    bytecode.arg(&doc);
+    (compiled, pinned(bytecode, &doc))
+}
+
+fn assert_same_run(compiled: &Run, interpreted: &Run) {
+    assert_eq!(compiled.stdout, interpreted.stdout, "stdout differs");
+    assert_eq!(compiled.stderr, interpreted.stderr, "stderr differs");
+    assert!(
+        compiled.pdf == interpreted.pdf,
+        "the PDFs differ: {} bytes compiled, {} interpreted",
+        compiled.pdf.len(),
+        interpreted.pdf.len()
+    );
+}
+
+/// The binary used to run the chunk and stop: the text it produced was never
+/// typeset, so every document came out as `No pages of output.` while the
+/// bytecode run of the same file wrote its pages.
+#[test]
+fn a_compiled_document_typesets_the_pages_the_interpreted_one_does() {
+    if !can_link() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n\
+               \\def\\pair#1#2{(#1,#2)}\n\
+               Lorem ipsum dolor sit amet, \\pair{1}{x} consectetur adipiscing elit.\n\n\
+               \\message{SAID}Second paragraph.\n\
+               \\end\n";
+    let (compiled, interpreted) = compiled_and_interpreted(dir.path(), "plain", src);
+    assert!(
+        interpreted.stdout.contains("(1 page,") && !interpreted.pdf.is_empty(),
+        "the interpreted run set no page: {:?}",
+        interpreted.stdout
+    );
+    assert_same_run(&compiled, &interpreted);
+}
+
+/// The page inputs the lowering reads from a LaTeX preamble -- the class's
+/// size, the main font -- are not in the chunk; the binary has to carry them.
+#[test]
+fn a_compiled_latex_document_keeps_its_preamble_page_inputs() {
+    if !can_link() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = "\\documentclass[11pt]{article}\n\\usepackage{fontspec}\n\
+               \\setmainfont{NoSuchFontExistsAnywhere}\n\
+               \\begin{document}\nHello \\textbf{bold} and \\texttt{mono}.\n\\end{document}\n";
+    let (compiled, interpreted) = compiled_and_interpreted(dir.path(), "latex", src);
+    assert!(
+        !interpreted.pdf.is_empty(),
+        "the interpreted run set no page: {:?}",
+        interpreted.stdout
+    );
+    assert_same_run(&compiled, &interpreted);
+}

@@ -467,12 +467,60 @@ struct Lowered {
     page_colour: Option<crate::colour::Rgb>,
 }
 
+/// The bytecode of a PDF run and what the page builder reads beside it: the
+/// part of [`run_pdf_with_messages`] that is fixed once the document is lowered.
+///
+/// A `--aot` binary is this, compiled: the chunk becomes native code and the
+/// rest is embedded beside it (`src/aot_runtime.rs`), so the binary sets the
+/// same pages an ordinary run of the same file sets.
+pub struct PdfProgram {
+    pub chunk: fusevm::Chunk,
+    pub families: crate::typeset::Families,
+    pub layout: crate::typeset::Layout,
+    pub page_colour: Option<crate::colour::Rgb>,
+}
+
+/// [`PdfProgram`] for `src`, read the way [`run_pdf_with_messages`] reads it:
+/// desugared, the LaTeX preamble preloaded, and `\ref` answered from the
+/// `.aux` beside `path` after the label pass has brought it up to date.
+pub fn compile_pdf_program(
+    path: Option<&std::path::Path>,
+    src: &str,
+) -> Result<PdfProgram, TexError> {
+    let src_d = crate::rust_ffi::desugar(src);
+    let latex = crate::latex::looks_like_latex(&src_d);
+    match (latex, path) {
+        (true, Some(p)) => {
+            crate::latex::aux::update_then(p, &src_d, || pdf_program(path, &src_d, true))
+        }
+        _ => pdf_program(path, &src_d, latex),
+    }
+}
+
 /// [`run_pdf_with_messages`] up to the page builder, once the `.aux` is read.
 fn lower_for_pdf(
     path: Option<&std::path::Path>,
     src_d: &str,
     latex: bool,
 ) -> Result<Lowered, TexError> {
+    let program = pdf_program(path, src_d, latex)?;
+    let messages = crate::runtime::run(program.chunk).map_err(TexError)?;
+    let text = crate::runtime::take_text();
+    Ok(Lowered {
+        messages,
+        text,
+        families: program.families,
+        layout: program.layout,
+        page_colour: program.page_colour,
+    })
+}
+
+/// [`PdfProgram`] once the `.aux` is read.
+fn pdf_program(
+    path: Option<&std::path::Path>,
+    src_d: &str,
+    latex: bool,
+) -> Result<PdfProgram, TexError> {
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if latex {
         let preamble = match path {
@@ -492,11 +540,8 @@ fn lower_for_pdf(
     // 10pt-on-12pt, 1in-margin page whatever it asked for.
     let layout = lowerer.layout.clone();
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
-    let messages = crate::runtime::run(chunk).map_err(TexError)?;
-    let text = crate::runtime::take_text();
-    Ok(Lowered {
-        messages,
-        text,
+    Ok(PdfProgram {
+        chunk,
         families,
         layout,
         page_colour,
@@ -521,13 +566,31 @@ pub fn pdf_page_count(pdf: &[u8]) -> usize {
     text.matches("/Type /Page").count() - text.matches("/Type /Pages").count()
 }
 
+/// The `(./doc.tex …)` line tex prints for a file.
+///
+/// The trailing space belongs to `\end`: tex prints `(./doc.tex MSGS )` when
+/// `\end` stopped the run inside the file, and `(./doc.tex MSGS)` when the file
+/// simply ran out. The difference is visible in any build log that greps for
+/// one, so it is reproduced rather than normalised away. The command line and
+/// a `--aot` binary both print it through here.
+pub fn file_line(path: &str, msgs: &str, ended: bool) -> String {
+    let body = match msgs.is_empty() {
+        true => String::new(),
+        false => format!(" {msgs}"),
+    };
+    let close = match ended {
+        true => " )",
+        false => ")",
+    };
+    format!("(./{path}{body}{close}")
+}
+
 /// What a run says about the PDF it produced, the way lualatex says it.
 ///
 /// A document that ships no page gets no file and says so; tex and lualatex
 /// both behave that way. Both entry points report through here — the ordinary
-/// command line after it has written the file, and a `--aot` binary, which
-/// carries a chunk of register writes, branches and `\message` and no stomach
-/// at all, so the page count it reports is zero by construction.
+/// command line after it has written the file, and a `--aot` binary after it
+/// has typeset the text its compiled chunk produced.
 ///
 /// `pages` is the count the writer gave back in [`Pdf`] rather than one read
 /// off `pdf`: see [`Pdf`].

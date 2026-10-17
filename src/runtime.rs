@@ -464,6 +464,19 @@ fn run_with(
         None => {}
     }
     let result = vm.run();
+    finish_run()?;
+    match result {
+        VMResult::Ok(_) | VMResult::Halted => Ok(MESSAGES.with(|m| m.borrow().clone())),
+        VMResult::Error(e) => Err(e),
+    }
+}
+
+/// What a run owes once its VM has returned: the report still being built, and
+/// the fault a builtin halted on, as the error it stands for.
+///
+/// Shared with the `--aot` entry (`src/aot_runtime.rs`), whose VM fusevm runs
+/// and returns from without passing through [`run_with`].
+pub(crate) fn finish_run() -> Result<(), String> {
     // A report with nothing printed after it still has to be printed. In an
     // ordinary run the buffer is empty here -- every `\message` flushes its
     // own -- so this only ever carries an error §82 reported after the last
@@ -474,11 +487,8 @@ fn run_with(
     }
     // A builtin that faulted halted the VM, so the halt has to be read as the
     // error it stands for rather than as a clean finish.
-    if let Some(f) = FAULT.with(|f| f.borrow_mut().take()) {
-        return Err(f);
-    }
-    match result {
-        VMResult::Ok(_) | VMResult::Halted => Ok(MESSAGES.with(|m| m.borrow().clone())),
-        VMResult::Error(e) => Err(e),
+    match FAULT.with(|f| f.borrow_mut().take()) {
+        Some(f) => Err(f),
+        None => Ok(()),
     }
 }

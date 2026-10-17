@@ -335,7 +335,7 @@ fn main() -> ExitCode {
             if cli.interaction.prints() {
                 println!(
                     "{}",
-                    file_line(&path, &msgs.join(" "), texrs::source_ends_run(&src))
+                    texrs::file_line(&path, &msgs.join(" "), texrs::source_ends_run(&src))
                 );
                 println!("{tail}");
             }
@@ -1133,24 +1133,6 @@ fn cache_clear() -> ExitCode {
     }
 }
 
-/// The `(./doc.tex …)` line tex prints for a file.
-///
-/// The trailing space belongs to `\end`: tex prints `(./doc.tex MSGS )` when
-/// `\end` stopped the run inside the file, and `(./doc.tex MSGS)` when the file
-/// simply ran out. The difference is visible in any build log that greps for
-/// one, so it is reproduced rather than normalised away.
-fn file_line(path: &str, msgs: &str, ended: bool) -> String {
-    let body = match msgs.is_empty() {
-        true => String::new(),
-        false => format!(" {msgs}"),
-    };
-    let close = match ended {
-        true => " )",
-        false => ")",
-    };
-    format!("(./{path}{body}{close}")
-}
-
 /// A file, then the command line as more input after it.
 ///
 /// The file is run twice: once alone, to learn where its own output ends, and
@@ -1174,7 +1156,7 @@ fn run_with_trailing(
     };
     if interaction.prints() {
         let after = all[from_file.len().min(all.len())..].join(" ");
-        let line = file_line(path, &from_file.join(" "), false);
+        let line = texrs::file_line(path, &from_file.join(" "), false);
         match after.is_empty() {
             true => println!("{line}"),
             false => println!("{line} {after}"),
