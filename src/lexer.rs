@@ -427,6 +427,14 @@ impl Lexer {
         });
     }
 
+    /// How many input levels this lexer holds: the nearest thing it has to
+    /// §321's `input_ptr`, which tex bounds at `stack_size`. A level read to
+    /// its end is dropped when the next one begins (§325, §390), so a tail call
+    /// keeps this flat and a call that leaves tokens behind grows it by one.
+    pub fn input_levels(&self) -> usize {
+        self.levels.len()
+    }
+
     fn begin_level(&mut self, toks: &[Token], kind: LevelKind) {
         // A level something has read below is gone, whatever came after it.
         self.drop_finished();

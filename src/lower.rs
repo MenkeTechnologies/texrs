@@ -152,6 +152,10 @@ pub struct Lowerer {
     /// inline copy, this bounds the nesting so the failure is TeX's own
     /// "capacity exceeded" rather than a segfault.
     depth: usize,
+    /// The stack address at the outermost level [`Lowerer::enter_level`]
+    /// counted, so the recursion's use of the Rust stack can be bounded in
+    /// bytes as well as in levels. See [`LOWER_STACK_BUDGET`].
+    stack_base: usize,
     /// The list environments open, outermost first, each with the item number
     /// it has reached.
     ///
@@ -244,7 +248,32 @@ enum ListKind {
 ///
 /// If this abbreviates a document that legitimately nests deeper, the fix is a
 /// bigger stack for the lowering thread, not a bigger number here.
+///
+/// The count alone kept drifting off the cliff: `block_inner` is one function
+/// with a match arm per command, and an unoptimised build gives every local of
+/// every arm its own stack slot, so its frame is ~32 KiB and grows with each
+/// command added. 63 levels of it overflowed the 2 MiB of a spawned thread
+/// before the count reached 64. [`LOWER_STACK_BUDGET`] bounds the bytes too,
+/// which is the quantity that actually runs out.
 const MAX_LOWER_DEPTH: usize = 64;
+
+/// The Rust stack the lowering recursion may use below its outermost level.
+///
+/// Three quarters of the 2 MiB a spawned thread gets by default (the test
+/// harness, rayon's workers), leaving the rest for whatever the deepest level
+/// calls into. An optimised build reaches [`MAX_LOWER_DEPTH`] first; an
+/// unoptimised one, with its fatter frames, reaches this first -- either way
+/// the runaway ends in TeX's capacity error rather than an abort.
+const LOWER_STACK_BUDGET: usize = 1536 * 1024;
+
+/// The address of a local in the caller's frame. The stack grows down on
+/// every target texrs builds for, so the difference between two of these is
+/// the stack used between the two calls.
+#[inline(always)]
+fn stack_address() -> usize {
+    let marker = 0u8;
+    std::hint::black_box(&marker) as *const u8 as usize
+}
 
 impl Lowerer {
     pub fn new() -> Self {
@@ -267,6 +296,7 @@ impl Lowerer {
             layout: crate::typeset::Layout::default(),
             text_output: false,
             depth: 0,
+            stack_base: 0,
             lists: Vec::new(),
             table_depth: 0,
             title_formats: std::collections::HashMap::new(),
@@ -612,14 +642,29 @@ impl Lowerer {
         self.listing_depth > 0 || self.faces.contains(&true)
     }
 
-    fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
-        self.depth += 1;
-        if self.depth > MAX_LOWER_DEPTH {
-            self.depth -= 1;
+    /// Count one more level of the lowering recursion -- a group, or the arms
+    /// of a run-time conditional, in a block or in a message -- refusing past
+    /// [`MAX_LOWER_DEPTH`] levels or [`LOWER_STACK_BUDGET`] bytes of stack,
+    /// whichever comes first. Both arms of an undecided conditional are
+    /// lowered, so a macro that calls itself inside one never reaches a base
+    /// case at lowering time. The caller decrements `depth` on the way out.
+    fn enter_level(&mut self) -> R<()> {
+        let here = stack_address();
+        if self.depth == 0 {
+            self.stack_base = here;
+        }
+        let used = self.stack_base.saturating_sub(here);
+        if self.depth >= MAX_LOWER_DEPTH || used > LOWER_STACK_BUDGET {
             return Err(TexError(
                 "TeX capacity exceeded, sorry [input stack size=100]".into(),
             ));
         }
+        self.depth += 1;
+        Ok(())
+    }
+
+    fn block(&mut self, lx: &mut Lexer, stop: Option<&[&str]>) -> R<Vec<Cmd>> {
+        self.enter_level()?;
         // A group is a ligature boundary. `-{}-` is how a LaTeX document has
         // always asked for two hyphens where two hyphens are meant, and that
         // only works if the hyphen before the group cannot pair with the one
@@ -3837,9 +3882,26 @@ impl Lowerer {
                 }
             };
         }
+        // A macro that calls itself never empties `work`: bound the walk the
+        // way the expander bounds an `\edef`, so it ends in TeX's capacity
+        // error rather than a hang or unbounded memory.
+        let mut steps = 0usize;
         while let Some(t) = work.pending.pop() {
             if self.eng.halted {
                 break;
+            }
+            steps += 1;
+            if steps > 200_000 {
+                return Err(TexError("TeX capacity exceeded".into()));
+            }
+            // A call that leaves its `\fi` behind each time (`\ifnum..\r\fi`)
+            // is a level of tex's input stack per iteration, and tex stops at
+            // its `stack_size` of 10000. The bookkeeping for the error context
+            // is also linear in the levels, so unbounded it is quadratic.
+            if work.input_levels() > 10_000 {
+                return Err(TexError(
+                    "TeX capacity exceeded, sorry [input stack size=10000]".into(),
+                ));
             }
             // Active characters are commands here too: `\message{~}` runs `~`.
             let t = match &t {
@@ -4272,6 +4334,14 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.msg_number(work)?;
+                    // Two literals are a frontend fact: decide here, as §498
+                    // does, so only the arm taken is lowered. Lowering both
+                    // made `\def\r#1{\ifnum#1>0 \r{0}\fi}` unbounded
+                    // for a call whose test is false.
+                    if let Some(truth) = literal_truth(&left, rel, &right) {
+                        self.open_decided(work, truth, &mut decided)?;
+                        continue;
+                    }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
                     flush!();
                     out.push(MsgOp::If {
@@ -4292,6 +4362,10 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.dimen_number(work, true)?;
+                    if let Some(truth) = literal_truth(&left, rel, &right) {
+                        self.open_decided(work, truth, &mut decided)?;
+                        continue;
+                    }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
                     flush!();
                     out.push(MsgOp::If {
@@ -4304,6 +4378,10 @@ impl Lowerer {
                 }
                 "ifodd" => {
                     let value = self.msg_number(work)?;
+                    if let Num::Literal(v) = value {
+                        self.open_decided(work, v % 2 != 0, &mut decided)?;
+                        continue;
+                    }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
                     flush!();
                     out.push(MsgOp::IfOdd {
@@ -4388,6 +4466,13 @@ impl Lowerer {
 
     /// The `\or`-separated arms of an `\ifcase`, the last being `\else`'s.
     fn msg_case_arms(&mut self, work: &mut Lexer) -> R<Vec<Vec<MsgOp>>> {
+        self.enter_level()?;
+        let arms = self.msg_case_arms_inner(work);
+        self.depth -= 1;
+        arms
+    }
+
+    fn msg_case_arms_inner(&mut self, work: &mut Lexer) -> R<Vec<Vec<MsgOp>>> {
         let mut arms = Vec::new();
         loop {
             let arm = self.msg_ops(work, &["or", "else", "fi"])?;
@@ -4413,6 +4498,13 @@ impl Lowerer {
 
     /// The two arms of a conditional inside a message.
     fn msg_arms(&mut self, work: &mut Lexer) -> R<(Vec<MsgOp>, Vec<MsgOp>)> {
+        self.enter_level()?;
+        let arms = self.msg_arms_inner(work);
+        self.depth -= 1;
+        arms
+    }
+
+    fn msg_arms_inner(&mut self, work: &mut Lexer) -> R<(Vec<MsgOp>, Vec<MsgOp>)> {
         let negated = self.eng.take_unless();
         let then_ops = self.msg_ops(work, &["else", "fi"])?;
         let mut else_ops = Vec::new();
@@ -4475,6 +4567,18 @@ impl Lowerer {
             }
         }
     }
+}
+
+/// A comparison whose two operands are both literals, decided now.
+fn literal_truth(left: &Num, rel: Rel, right: &Num) -> Option<bool> {
+    let (Num::Literal(l), Num::Literal(r)) = (left, right) else {
+        return None;
+    };
+    Some(match rel {
+        Rel::Less => l < r,
+        Rel::Equal => l == r,
+        Rel::Greater => l > r,
+    })
 }
 
 /// A register read, negated when §440's signs before it said so.

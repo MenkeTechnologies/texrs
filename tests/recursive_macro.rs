@@ -135,3 +135,59 @@ fn deeply_nested_conditionals_stay_under_the_bound() {
     src.push_str("\n\\end\n");
     texrs::compile(&src).expect("30 levels of nesting must lower");
 }
+
+/// Run `src` through `run_messages` on a spawned thread, whose stack is a
+/// fraction of main's: the abort these tests guard against is a stack overflow,
+/// which kills the whole test binary rather than failing one test.
+fn run_on_small_stack(src: &'static str) -> Result<String, String> {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || texrs::run_messages(src).map_err(|e| e.0))
+        .expect("spawn")
+        .join()
+        .expect("run_messages must return, not abort")
+}
+
+#[test]
+fn a_message_conditional_over_literals_takes_one_arm() {
+    // `\ifnum0>0` is false, so `\r{0}` in the arm is never scanned. Both arms
+    // were lowered whatever the test said, and this recursed until the stack
+    // was exhausted.
+    let src = concat!(
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n",
+        "\\def\\r#1{\\ifnum#1>0 \\r{0}\\fi}\n",
+        "\\message{[\\r{0}]}\n",
+        "\\end\n"
+    );
+    assert_eq!(run_on_small_stack(src).as_deref(), Ok("[]"));
+}
+
+#[test]
+fn an_undecidable_self_call_in_a_message_is_a_capacity_error() {
+    // The test reads a register, so it is a run-time branch and both arms are
+    // lowered, and the call to itself in the arm never bottoms out at lowering
+    // time. tex takes the false arm (`\count1` is 0) and prints nothing; this
+    // is a divergence, but it must end in the capacity error, not an abort.
+    let src = concat!(
+        "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n",
+        "\\def\\r{\\ifnum\\count1>0 \\r\\fi}\n",
+        "\\message{\\r}\n",
+        "\\end\n"
+    );
+    let err = run_on_small_stack(src).expect_err("must not run");
+    assert!(err.contains("capacity exceeded"), "got {err:?}");
+}
+
+#[test]
+fn a_message_macro_that_never_stops_expanding_is_a_capacity_error() {
+    // Neither of these empties the token list: the first is a tail call that
+    // tex would spin on, the second leaves a `\fi` per call. They hung (and
+    // the second went quadratic in the error-context bookkeeping).
+    for body in ["\\def\\r{\\r a}", "\\def\\r#1{\\ifnum#1>0 \\r{#1}\\fi}"] {
+        let src = format!(
+            "\\catcode`\\{{=1 \\catcode`\\}}=2 \\catcode`\\#=6\n{body}\n\\message{{\\r1}}\n\\end\n"
+        );
+        let err = run_on_small_stack(Box::leak(src.into_boxed_str())).expect_err("must not run");
+        assert!(err.contains("capacity exceeded"), "{body}: got {err:?}");
+    }
+}

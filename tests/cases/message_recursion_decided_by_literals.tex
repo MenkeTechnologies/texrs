@@ -1,0 +1,10 @@
+% A macro whose conditional compares literals is DECIDED while a \message body
+% is walked, so only the arm tex would scan is walked. Lowering both arms of an
+% undecided test made every one of these unbounded: the call in the arm not
+% taken names the macro again, and the walk recursed until the stack was gone.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\stop#1{\ifnum#1>0 \stop{0}\fi}
+\def\odd#1{\ifodd#1 \odd{0}\fi}
+\def\dim#1{\ifdim#1>0pt \dim{0pt}\fi}
+\message{[\stop{0}][\odd{0}][\dim{0pt}][\stop{1}][\odd{1}][\dim{1pt}]}
+\end

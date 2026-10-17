@@ -234,6 +234,8 @@ HELLO-WORLD
 ! Missing number, treated as zero.<to be read again>                    Gl.7 \message{[\number"G                       ][\the\dimen300]}! Bad register code (300).<to be read again>                    ]l.7 \message{[\number"G][\the\dimen300]                                       }[0G][0.0pt]! Missing \endcsname inserted.<to be read again>                    \relax l.8 \message{[\csname a\relax                             \endcsname]}[\a \relax \endcsname ]! Missing number, treated as zero.<to be read again>                    G\m ->\message {[\number "G                          x]}l.10 \m       [0Gx]! Bad register code (300).<to be read again>                    ]\n #1->\message {[#1\the \dimen 300]                                    }l.12 \n{ab}           [ab0.0pt] )(see the transcript file for additional information
 #==# message_doubles_parameter_character.tex
 [##][a##b]
+#==# message_recursion_decided_by_literals.tex
+[][][][][][]
 #==# message_tail_call_through_decided_if.tex
 [a][b][c] (x)(y) AD
 #==# missing_control_sequence_inserted.tex
