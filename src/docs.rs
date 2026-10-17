@@ -561,6 +561,10 @@ const ENVIRONMENT: &[(&str, &str)] = &[
         "The <code>libtexrs.a</code> that <code>--aot</code> links against, when the installed copy is not the one you want.",
     ),
     (
+        "TEXRS_THREADS",
+        "The thread count for a run, a positive integer; <code>--jobs</code> wins when both are given. It sizes the paragraph-parallel line-breaking pool, the speculative pre-lexer and the document batch. Output does not depend on it. Unset, every pool keeps one thread per core.",
+    ),
+    (
         "SOURCE_DATE_EPOCH",
         "A Unix time to stamp a PDF with instead of the wall clock (reproducible-builds.org's specification, which LuaTeX honours too). Two runs of one document otherwise differ in their dates and nothing else, so this is what makes byte equality with LuaTeX a question that can be asked at all.",
     ),
