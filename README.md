@@ -987,6 +987,28 @@ formula-heavy 2801-page one, 120 to 107 ms on a 394-page plain TeX one and 101
 to 88 ms on a 200-page LaTeX one; at one thread nothing changes. PDF, DVI and
 messages are byte-identical to the previous build at 1, 2 and 8 threads.
 
+With the paragraphs broken alongside it, a large document's wall time follows
+the lowerer's own speed, so the work it does per token was cut. The lowerer
+looks at the last character of the text run rather than comparing suffixes,
+offers its commands to the paragraph feed when they have grown (or every 1024
+tokens) instead of after every token, asks the mouth for invalid characters
+and the register tracker for owed marks only when there are some, and answers
+a character that is not a math shift without calling into the formula reader.
+A macro's definition is held by `Rc`, so a call no longer copies its parameter
+text and body; the meaning table and the interned names hash with FxHash; the
+mouth reads `TEXRS_PARALLEL` once per process; and a picture's nodes use one
+shared copy of xcolor's palette instead of building it per node. Measured
+2026-10-17 (medians of interleaved runs, load averages 8 to 13), `Lowerer::lower`
+alone at 8 threads went from 148 to 101 ms on the 1001-page LaTeX document,
+58 to 37 ms on the 394-page plain TeX one, 417 to 292 ms on a 3328-page mixed
+one and 258 to 217 ms on an 800-page formula-heavy one (203 to 166, 48 to 32,
+709 to 626 and 702 to 671 ms at one thread). Median wall at 8 threads went
+from 372 to 323 ms, 826 to 729 ms and 569 to 564 ms on the LaTeX, mixed and
+formula documents, and stayed at 130-134 ms on the plain one, whose wall the
+lowerer does not decide; at one thread, 1043 to 1011 ms and 2518 to 2316 ms on
+the LaTeX and mixed ones. PDF, DVI, stdout and stderr are byte-identical to the
+previous build at 1 and 8 threads.
+
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
 every `\includegraphics` file is opened to resolve its lengths. Each such line
