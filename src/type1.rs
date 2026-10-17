@@ -213,15 +213,7 @@ fn afm_beside(path: &Path) -> Option<AfmMetrics> {
         return Some(found);
     }
     let name = format!("{}.afm", path.file_stem()?.to_string_lossy());
-    let out = std::process::Command::new("kpsewhich")
-        .arg(&name)
-        .output()
-        .ok()?;
-    let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    match found.is_empty() {
-        true => None,
-        false => read(Path::new(&found)),
-    }
+    read(&crate::kpse::locate(&name)?)
 }
 
 /// Where `needle` is in `haystack`, if anywhere.
@@ -288,15 +280,7 @@ pub fn installed(file: &str) -> Option<std::path::PathBuf> {
     if let Some(hit) = seen.lock().ok().and_then(|m| m.get(file).cloned()) {
         return hit;
     }
-    let found = std::process::Command::new("kpsewhich")
-        .arg(file)
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|p| !p.is_empty())
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.exists());
+    let found = crate::kpse::locate(file);
     if let Ok(mut m) = seen.lock() {
         m.insert(file.to_string(), found.clone());
     }

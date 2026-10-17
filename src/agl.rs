@@ -129,11 +129,7 @@ fn table() -> &'static BTreeMap<String, String> {
 
 /// `glyphlist.txt`, wherever the installation keeps it.
 fn installed_list() -> Option<String> {
-    let found = std::process::Command::new("kpsewhich")
-        .arg("glyphlist.txt")
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&found.stdout).trim().to_string();
+    let path = crate::kpse::locate("glyphlist.txt")?;
     std::fs::read_to_string(path).ok()
 }
 

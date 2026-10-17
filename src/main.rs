@@ -85,6 +85,7 @@ fn main() -> ExitCode {
         cli.jobs,
     );
     let mut paths = cli.files.clone();
+    texrs::parallel::configure(jobs);
 
     // `texrs '\message{hi}\end'` -- tex's second invocation form, where the
     // arguments ARE the input. There is no file, so there is no `(./name.tex …)`
@@ -354,11 +355,7 @@ fn main() -> ExitCode {
 /// The exit code is the worst of the runs: one bad document fails the batch.
 fn run_many(paths: &[String], jobs: Option<usize>) -> ExitCode {
     let workers = jobs
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1)
-        })
+        .unwrap_or_else(texrs::parallel::default_threads)
         .max(1)
         .min(paths.len());
 

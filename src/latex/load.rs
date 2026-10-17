@@ -188,21 +188,7 @@ pub fn resolve(name: &str, extension: &str) -> Option<PathBuf> {
 /// `textcomp.cfg` in every document, and a process per ask is what made
 /// `kpsewhich` expensive in the first place.
 pub fn locate(file: &str) -> Option<PathBuf> {
-    if let Some(hit) = resolutions().lock().ok().and_then(|c| c.get(file).cloned()) {
-        return hit;
-    }
-    let found = kpsewhich(file);
-    if let Ok(mut c) = resolutions().lock() {
-        c.insert(file.to_string(), found.clone());
-    }
-    found
-}
-
-fn kpsewhich(file: &str) -> Option<PathBuf> {
-    resolve_many(std::slice::from_ref(&file.to_string()))
-        .into_iter()
-        .next()
-        .flatten()
+    crate::kpse::locate(file)
 }
 
 /// Ask `kpsewhich` for several files at once, and fill the cache with all of
@@ -216,54 +202,7 @@ fn kpsewhich(file: &str) -> Option<PathBuf> {
 /// cannot be matched to the questions by position. They are matched by the file
 /// name at the end of each path, which is what kpsewhich was asked for.
 pub fn warm(names: &[String]) {
-    let missing: Vec<String> = {
-        let cache = resolutions();
-        let Ok(cache) = cache.lock() else { return };
-        names
-            .iter()
-            .filter(|n| !cache.contains_key(*n))
-            .cloned()
-            .collect()
-    };
-    if missing.is_empty() {
-        return;
-    }
-    let found = resolve_many(&missing);
-    let Ok(mut cache) = resolutions().lock() else {
-        return;
-    };
-    for (name, path) in missing.iter().zip(found) {
-        cache.insert(name.clone(), path);
-    }
-}
-
-fn resolutions() -> &'static Mutex<BTreeMap<String, Option<PathBuf>>> {
-    static CACHE: OnceLock<Mutex<BTreeMap<String, Option<PathBuf>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn resolve_many(names: &[String]) -> Vec<Option<PathBuf>> {
-    let empty = vec![None; names.len()];
-    let Ok(out) = std::process::Command::new("kpsewhich").args(names).output() else {
-        return empty;
-    };
-    // kpsewhich exits non-zero when ANY of the names was not found, so the
-    // status says nothing useful about the ones that were; the lines do.
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut by_name: BTreeMap<&str, PathBuf> = BTreeMap::new();
-    for line in text.lines() {
-        let path = PathBuf::from(line.trim());
-        let Some(file) = line.trim().rsplit('/').next() else {
-            continue;
-        };
-        if path.is_file() {
-            by_name.insert(file, path);
-        }
-    }
-    names
-        .iter()
-        .map(|n| by_name.get(n.as_str()).cloned())
-        .collect()
+    crate::kpse::warm(names);
 }
 
 /// The files `text` asks `\IfFileExists` about, and which of them are there.

@@ -46,6 +46,7 @@ pub mod intpar;
 pub mod io;
 pub mod ir;
 pub mod itar;
+pub mod kpse;
 pub mod latex;
 pub mod lexer;
 pub mod linebreak;
@@ -420,6 +421,7 @@ pub fn run_pdf_with_messages(
     path: Option<&std::path::Path>,
     src: &str,
 ) -> Result<(Vec<u8>, Vec<String>), TexError> {
+    crate::kpse::prefetch_startup();
     let src_d = crate::rust_ffi::desugar(src);
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if crate::latex::looks_like_latex(&src_d) {

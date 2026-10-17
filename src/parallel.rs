@@ -37,12 +37,41 @@ pub struct Chunk {
     pub tokens: Vec<Token>,
 }
 
-/// How many workers to use by default: one per core, and never more chunks
-/// than there is work to justify them.
+
+static CONFIGURED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+/// The thread count asked for with `--jobs` or `TEXRS_THREADS` (the flag wins),
+/// if either was given and is a positive integer.
+fn requested(jobs: Option<usize>) -> Option<usize> {
+    jobs.or_else(|| {
+        std::env::var("TEXRS_THREADS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+    })
+    .filter(|n| *n >= 1)
+}
+
+/// Fix the engine's thread count for the whole process, once, at startup.
+///
+/// It sizes the global rayon pool (paragraph-parallel line breaking), is what
+/// [`default_threads`] reports (speculative prelex), and bounds the document
+/// batch. Output does not depend on it. With neither `--jobs` nor
+/// `TEXRS_THREADS` set every pool keeps its default of one thread per core.
+pub fn configure(jobs: Option<usize>) {
+    let Some(n) = requested(jobs) else { return };
+    if CONFIGURED.set(n).is_ok() {
+        let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+    }
+}
+
+/// How many workers to use by default: the configured count, else one per
+/// core, and never more chunks than there is work to justify them.
 pub fn default_threads() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+    CONFIGURED.get().copied().unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    })
 }
 
 /// Split at line boundaries into at most `n` roughly equal pieces.

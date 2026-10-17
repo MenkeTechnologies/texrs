@@ -555,17 +555,7 @@ pub fn hyphenator() -> &'static Hyphenator {
 
 /// `hyphen.tex`, asked for the way every TeX program asks for a file.
 fn patterns_source() -> Option<String> {
-    let out = std::process::Command::new("kpsewhich")
-        .arg("hyphen.tex")
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if path.is_empty() {
-        return None;
-    }
+    let path = crate::kpse::locate("hyphen.tex")?;
     std::fs::read_to_string(path).ok()
 }
 

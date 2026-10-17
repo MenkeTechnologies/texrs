@@ -157,7 +157,7 @@ texrs file                 # the same: .tex is appended when there is no extensi
 texrs '\message{hi}\end'   # the arguments are the input, as in tex
 texrs file '\message{x}'   # more input, read after the file
 texrs a.tex b.tex c.tex    # compile a batch, one document per core
-texrs --jobs=N file...     # bound that to N workers
+texrs --jobs=N file...     # bound that to N workers; TEXRS_THREADS=N sets every pool, output is identical at any N
 texrs --repl               # interactive prompt; state carries across lines
 texrs --lsp                # Language Server Protocol over stdio, for an editor
 texrs --dap                # Debug Adapter Protocol over stdio: breakpoints, stepping
@@ -176,6 +176,13 @@ texrs --cache-clear        # delete it; it holds only what can be recompiled
 texrs --help
 texrs --version
 ```
+Files found through `kpsewhich` (fonts, hyphenation patterns, the glyph list,
+packages) are resolved once per run, in one batched process where the names are
+known ahead of use, and the paths are remembered in
+`<cache dir>/texrs/kpse-*.tsv` (disabled by `TEXRS_CACHE=0`). A remembered path
+is used only while the file still exists and no file of that name sits in the
+working directory.
+
 
 `-X` is the second half of the command line: the document commands, and a reader
 for each binary format a TeX installation is made of. Every one of them prints
