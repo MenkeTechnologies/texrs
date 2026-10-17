@@ -963,6 +963,27 @@ then took the two prescans on that document from 28 and 23 ms to 7 and 2 ms at
 longer cuts every line into runs; PDF and DVI are byte-identical to the
 previous build at 1 and 8 threads.
 
+Lowering is serial, but a paragraph it has finished is finished, so on a pool
+of more than one thread a PDF run of a source of 64 KiB or more breaks
+paragraphs while the rest of the document is still being lowered
+(`typeset::Pipeline`). The lowerer hands on the text of its document-level
+commands as far as they can no longer change (an open text run up to its last
+paragraph break); a job on the pool fills each formula slot as its batch of
+settings comes back, and breaks every 64 or more finished paragraphs from the
+state the ones before them left. The page builder then breaks only the rest.
+Nothing is assumed to match: the paragraphs are used only when the text they
+were read from opens the text the run produced (after `\ref`, `\pageref` and the
+contents are resolved), and the families and the layout are the ones they were
+measured with, the page penalties aside. A conditional or loop the run decides,
+or a colour switch, stops the feed; a `\setmainfont`, a fallback family or a
+geometry or class option read after paragraphs were broken sends the whole
+text to the page builder, as before. Measured 2026-10-17 (median of 15
+interleaved runs, load averages 9 to 15), median wall at 8 threads went from
+345 to 313 ms on the 1001-page LaTeX document below, 887 to 837 ms on a
+formula-heavy 2801-page one, 120 to 107 ms on a 394-page plain TeX one and 101
+to 88 ms on a 200-page LaTeX one; at one thread nothing changes. PDF, DVI and
+messages are byte-identical to the previous build at 1, 2 and 8 threads.
+
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
 every `\includegraphics` file is opened to resolve its lengths. Each such line
@@ -1122,7 +1143,9 @@ serial, and most of it is in three places:
   Since this measurement it is split that way and the patterns are a trie;
   see **Line breaking** above.
 - **Lowering**, `lower::Lowerer::lower`: the expander, whose macro and register
-  state carries from token to token. Serial by nature.
+  state carries from token to token. Serial by nature. Since this measurement
+  the paragraphs it has finished are broken on the pool while it lowers the
+  rest; see **Line breaking** above.
 - **Preamble text**, `latex::preamble_at`: package loading (`load::preamble`,
   ~42 ms), the counter scan in `latex::support` (~22 ms), the class check in
   `numbering` (~22 ms) and the label seeds (~8 ms) — independent scans of the

@@ -160,6 +160,10 @@ pub struct Lowerer {
     stack_base: usize,
     /// The formulas read so far and not yet seen set; see [`crate::math::Formulas`].
     formulas: crate::math::Formulas,
+    /// Where the document's finished paragraphs go while the rest of it is
+    /// still being lowered, when a page builder is breaking them as they come:
+    /// see [`crate::typeset::Feed`].
+    feed: Option<crate::typeset::Feed>,
     /// The list environments open, outermost first, each with the item number
     /// it has reached.
     ///
@@ -303,6 +307,7 @@ impl Lowerer {
             depth: 0,
             stack_base: 0,
             formulas: Default::default(),
+            feed: None,
             lists: Vec::new(),
             table_depth: 0,
             title_formats: std::collections::HashMap::new(),
@@ -367,9 +372,21 @@ impl Lowerer {
         self
     }
 
+    /// Hand the document's text, a stretch of finished paragraphs at a time, to
+    /// `feed` while it is lowered, and the formula settings those stretches
+    /// name as each batch of them comes back. Lowering is unchanged by it; the
+    /// feed closes when [`Self::lower`] returns.
+    pub fn feed_paragraphs(&mut self, feed: crate::typeset::Feed) {
+        self.formulas.tap(feed.tap());
+        self.feed = Some(feed);
+    }
+
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
-        let mut cmds = self.lower_located(src).map_err(|(e, _line)| e)?;
+        let lowered = self.lower_located(src);
+        // Whatever the feed has not handed on by now, the page builder breaks.
+        self.feed = None;
+        let mut cmds = lowered.map_err(|(e, _line)| e)?;
         // The last paragraph ends with the document rather than with a blank
         // line, and is broken with the parameters in force there.
         if let Some(mark) = self.paragraph_end_mark() {
@@ -728,6 +745,13 @@ impl Lowerer {
                 self.known.apply(cmd);
             }
             followed = out.len();
+            // The document's own level is the one whose commands are its text
+            // in order; a group's are not yet placed in it.
+            if self.depth == 1 {
+                if let Some(feed) = self.feed.as_mut() {
+                    feed.offer(&out, &self.fonts, &self.layout);
+                }
+            }
             let tok = match self.eng.halted {
                 true => None,
                 false => lx.next_token(&self.eng.cats),

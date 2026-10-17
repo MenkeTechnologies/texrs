@@ -448,15 +448,22 @@ pub fn run_pdf_with_messages(
         _ => lower_for_pdf(path, &src_d, latex),
     };
     let ran = ran?;
-    let pdf = crate::typeset::to_pdf(
+    let ahead = ran.pipeline.and_then(crate::typeset::Pipeline::finish);
+    let pdf = crate::typeset::to_pdf_ahead(
         &ran.text,
         &ran.families,
         &ran.layout,
         ran.page_colour,
         path.and_then(|p| p.parent()),
+        ahead,
     );
     Ok((pdf, ran.messages))
 }
+
+/// A source shorter than this is lowered and then broken, as it always was:
+/// starting a breaking job beside the lowerer costs more than the few
+/// paragraphs it could break ahead are worth.
+const PIPELINE_BYTES: usize = 64 * 1024;
 
 /// What [`lower_for_pdf`] hands the page builder.
 struct Lowered {
@@ -465,6 +472,8 @@ struct Lowered {
     families: crate::typeset::Families,
     layout: crate::typeset::Layout,
     page_colour: Option<crate::colour::Rgb>,
+    /// The paragraphs broken while the document was lowered, when they were.
+    pipeline: Option<crate::typeset::Pipeline>,
 }
 
 /// The bytecode of a PDF run and what the page builder reads beside it: the
@@ -491,9 +500,9 @@ pub fn compile_pdf_program(
     let latex = crate::latex::looks_like_latex(&src_d);
     match (latex, path) {
         (true, Some(p)) => {
-            crate::latex::aux::update_then(p, &src_d, || pdf_program(path, &src_d, true))
+            crate::latex::aux::update_then(p, &src_d, || pdf_program(path, &src_d, true, None))
         }
-        _ => pdf_program(path, &src_d, latex),
+        _ => pdf_program(path, &src_d, latex, None),
     }
 }
 
@@ -503,7 +512,16 @@ fn lower_for_pdf(
     src_d: &str,
     latex: bool,
 ) -> Result<Lowered, TexError> {
-    let program = pdf_program(path, src_d, latex)?;
+    // A document long enough to pay for it has its finished paragraphs broken
+    // on the pool while the rest of it is lowered: see `typeset::Pipeline`.
+    let (feed, pipeline) = match rayon::current_num_threads() > 1 && src_d.len() >= PIPELINE_BYTES {
+        true => {
+            let (feed, pipeline) = crate::typeset::Pipeline::start(path.and_then(|p| p.parent()));
+            (Some(feed), Some(pipeline))
+        }
+        false => (None, None),
+    };
+    let program = pdf_program(path, src_d, latex, feed)?;
     let messages = crate::runtime::run(program.chunk).map_err(TexError)?;
     let text = crate::runtime::take_text();
     Ok(Lowered {
@@ -512,14 +530,19 @@ fn lower_for_pdf(
         families: program.families,
         layout: program.layout,
         page_colour: program.page_colour,
+        pipeline,
     })
 }
 
 /// [`PdfProgram`] once the `.aux` is read.
+///
+/// With a `feed`, the paragraphs the lowerer finishes are handed to it as it
+/// goes.
 fn pdf_program(
     path: Option<&std::path::Path>,
     src_d: &str,
     latex: bool,
+    feed: Option<crate::typeset::Feed>,
 ) -> Result<PdfProgram, TexError> {
     let mut lowerer = crate::lower::Lowerer::new().with_text_output();
     if latex {
@@ -528,6 +551,9 @@ fn pdf_program(
             None => crate::latex::preamble_text(src_d),
         };
         lowerer.preload(&preamble)?;
+    }
+    if let Some(feed) = feed {
+        lowerer.feed_paragraphs(feed);
     }
     let cmds = lowerer.lower(src_d)?;
     // The families are read while lowering, because that is where the preamble

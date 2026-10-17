@@ -26,6 +26,7 @@
 //! produces nothing and one that produces something imperfect.
 
 use crate::dvi::Writer;
+use crate::ir::Cmd;
 use crate::node::{BoxNode, CharNode, GlueNode, Node, Scaled};
 use crate::tfm::Tfm;
 
@@ -2760,6 +2761,310 @@ pub fn base14_face(base: &str, face: Face) -> String {
     }
 }
 
+/// The twelve faces a PDF is set in, and what a word measures in them.
+///
+/// Read off the families the document named and the directory it was read
+/// from, and -- for the glyphs a fallback face lends -- off the text: the
+/// distinct characters no face draws are reserved before anything is
+/// measured. With no fallback family named, nothing is reserved and the text
+/// does not matter.
+pub(crate) struct Faces {
+    fonts: Vec<std::sync::Arc<crate::pdf::Font>>,
+    main_shared: std::sync::Arc<crate::pdf::Font>,
+    scales: Vec<f64>,
+    embedded_widths: Vec<Option<Vec<i64>>>,
+    coverage: Vec<Option<std::collections::BTreeSet<u32>>>,
+    fallbacks: Fallbacks,
+    metrics: Option<Tfm>,
+}
+
+/// Whether `face` draws `ch` itself. A face with no file to read is one of the
+/// fourteen, and carrying all of WinAnsi is what being one of them means.
+fn covered(coverage: &[Option<std::collections::BTreeSet<u32>>], ch: char, face: Face) -> bool {
+    match &coverage[face.index()] {
+        Some(has) => has.contains(&(ch as u32)),
+        None => true,
+    }
+}
+
+impl Faces {
+    pub(crate) fn new(families: &Families, near: Option<&std::path::Path>, text: &str) -> Faces {
+        use crate::pdf::Font;
+
+        // The font the document asked for, EMBEDDED if it can be found: that is
+        // the difference between a page set in Arimo's metrics and one set in
+        // Arimo. Failing that, one of the fourteen, which gets the widths right
+        // and the shapes wrong -- better than refusing to typeset.
+        let requested = families.main.as_deref();
+        // A font the document SHIPS is tried first: it is the one the document
+        // actually meant, and its family name is regularly not installed at all.
+        let embedded = families
+            .main_file
+            .resolve(near)
+            .and_then(|file| embed_file(&file))
+            .or_else(|| requested.and_then(embed_family));
+        let main = embedded.clone().unwrap_or_else(|| match requested {
+            // A document that asked for a family and did not get it falls to the
+            // member of the fourteen with that family's metrics.
+            Some(family) => Font::Base14(base14_for(family).to_string()),
+            // A document that asked for NO family is a TeX document, and TeX's text
+            // font is cmr10 -- which is the face luatex embeds. Naming Helvetica
+            // here set every plain document in a typeface no TeX engine uses.
+            None => crate::pdf::Font::computer_modern()
+                .unwrap_or_else(|| Font::Base14("Helvetica".to_string())),
+        });
+
+        // The other three faces, in the order `Face::index` puts them: main, mono,
+        // bold, italic. Each is the file the document named for it, then the family
+        // it named, then the member of the fourteen that carries that face -- and
+        // the main font when the document asked for none of those, so a `\texttt`
+        // in a document with no monospace family still sets rather than vanishing.
+        let main_shared = std::sync::Arc::new(main.clone());
+        let base = match &main {
+            Font::Base14(name) => name.clone(),
+            _ => requested.map(base14_for).unwrap_or("Helvetica").to_string(),
+        };
+        let mono = families
+            .mono_file
+            .resolve(near)
+            .and_then(|file| embed_file(&file))
+            .or_else(|| families.mono.as_deref().and_then(embed_family))
+            .or_else(|| {
+                families
+                    .mono
+                    .as_deref()
+                    .map(|f| Font::Base14(base14_for(f).to_string()))
+            })
+            .unwrap_or_else(|| main.clone());
+        // A bold or italic FILE is what the corpus books ship: `BoldFont=Arimo-VF`
+        // beside `UprightFont=Arimo-VF`. Where the two name the same file the font
+        // is the same font, `Page::text_in` recognises it as one and the page is
+        // set in the main face -- which is the honest outcome, since a variable
+        // font's weight axis is not something this can instantiate.
+        // Which `FontFile` a family's files come from. `\setsansfont{X}[BoldFont=Y]`
+        // populated `sans_file.bold` and NOTHING read it: every face resolved
+        // against `main_file`, so a bold cut of the sans family had no file to
+        // come from and no slot to sit in.
+        let file_for = |family: Family| match family {
+            Family::Roman => &families.main_file,
+            Family::Sans => &families.sans_file,
+            Family::Mono => &families.mono_file,
+        };
+        let face_file = |face: Face| {
+            file_for(face.family)
+                .resolve_face(face, near)
+                .and_then(|file| embed_file(&file))
+        };
+        // The sans family, resolved exactly as the mono one is. A book sets its
+        // headings in this -- `\titleformat{\chapter}{\sffamily\bfseries\Huge}` --
+        // and with `\sffamily` answering the main face, every heading in every
+        // book came out in the body typeface. lualatex embeds Orbitron twice for
+        // `arb`; texrs embedded no Orbitron at all.
+        let sans = families
+            .sans_file
+            .resolve(near)
+            .and_then(|file| embed_file(&file))
+            .or_else(|| families.sans.as_deref().and_then(embed_family))
+            .or_else(|| {
+                families
+                    .sans
+                    .as_deref()
+                    .map(|f| Font::Base14(base14_for(f).to_string()))
+            })
+            .unwrap_or_else(|| main.clone());
+        // The upright, medium face of each family -- what the rest of that family
+        // falls back to when the document shipped no file for a bold or italic cut
+        // of it.
+        let upright = |family: Family| match family {
+            Family::Roman => main.clone(),
+            Family::Sans => sans.clone(),
+            Family::Mono => mono.clone(),
+        };
+        // Twelve faces, in `Face::index` order. Each is the file the document
+        // named for that family and that cut, then the member of the fourteen
+        // carrying it, then the family's own upright face -- so a `\textbf` in a
+        // document that shipped no bold still sets rather than vanishing.
+        let fonts: Vec<std::sync::Arc<Font>> = Face::ALL
+            .iter()
+            .map(|face| {
+                // The upright, medium face of a family is the one resolved above,
+                // and it must be USED rather than rebuilt: a document naming no
+                // family at all is set in Computer Modern, which no amount of
+                // base-14 reasoning reconstructs.
+                if !face.bold && !face.italic {
+                    return upright(face.family);
+                }
+                // A cut the document shipped a file for; failing that, the member
+                // of the fourteen carrying that cut of that family -- all twelve
+                // exist. A DIFFERENT typeface that is really bold beats the same
+                // typeface that is not: a description term set in the face of its
+                // own meaning has lost the only thing the markup was for.
+                face_file(*face).unwrap_or_else(|| Font::Base14(base14_face(&base, *face)))
+            })
+            .map(std::sync::Arc::new)
+            .collect();
+        // What each family is scaled by. A document writes `Scale=MatchLowercase`
+        // so a display family sits beside its text family rather than looming over
+        // it, usually once through `\defaultfontfeatures` for everything it loads
+        // -- and unapplied, every heading in that family is set larger than the
+        // document asked for. The bold and italic faces are cuts of the MAIN
+        // family, so they take its scale rather than one of their own.
+        let main_path = families.main_file.resolve(near);
+        let scale_for = |file: &FontFile| {
+            face_scale(
+                file.scale.as_deref(),
+                file.resolve(near).as_deref(),
+                main_path.as_deref(),
+            )
+        };
+        // Per FAMILY, and every cut of a family takes its family's scale. The old
+        // five-slot array gave bold and italic the MAIN family's scale, so a bold
+        // cut of the sans family had no scale slot at all.
+        let scales: Vec<f64> = Face::ALL
+            .iter()
+            .map(|face| scale_for(file_for(face.family)))
+            .collect();
+
+        // Measure in the face that will be printed. An embedded font carries its
+        // own widths; without one, cmr10's are the closest thing installed, and a
+        // line may then run a little long or short of the measure.
+        let embedded_widths: Vec<Option<Vec<i64>>> = fonts
+            .iter()
+            .map(|f| match &**f {
+                Font::TrueType { widths, .. } => Some(widths.clone()),
+                _ => None,
+            })
+            .collect();
+        // Which characters each face can actually draw, from the font file's own
+        // cmap. This is the question `luaotfload.add_fallback` asks per glyph, and
+        // it is the reason the publication scripts required LuaTeX at all: a
+        // character the face has no glyph for has to come from somewhere else, and
+        // it cannot be fetched without first knowing that it is missing.
+        let coverage: Vec<Option<std::collections::BTreeSet<u32>>> =
+            fonts.iter().map(|f| face_coverage(f)).collect();
+        // A face with no file to read is one of the fourteen, and carrying all of
+        // WinAnsi is what being one of them means.
+        let covers = |ch: char, face: Face| covered(&coverage, ch, face);
+        // The faces the DOCUMENT named to fetch a missing glyph from, and the
+        // glyphs it is about to ask them for. Reserving them first is what keeps
+        // the file's `/W` array to the nine glyphs a book borrowed rather than to
+        // all fifty thousand a broad face carries; the scan is over the DISTINCT
+        // characters, so it costs one pass whatever the book's length.
+        let mut fallbacks = Fallbacks::load(&families.fallbacks);
+        if !fallbacks.is_empty() {
+            let distinct: std::collections::BTreeSet<char> =
+                printing_chars(text).filter(|c| !c.is_ascii()).collect();
+            for ch in distinct {
+                // Only what a face cannot draw and the Symbol font has not got:
+                // asking for the rest would carry glyphs nothing ever draws.
+                let drawn_already = SYMBOL_FONT.iter().any(|(c, _, _)| *c == ch)
+                    || Face::ALL
+                        .iter()
+                        .all(|face| winansi_code(ch).is_some() && covers(ch, *face));
+                if !drawn_already {
+                    fallbacks.reserve(ch);
+                }
+            }
+            fallbacks.settle();
+        }
+        Faces {
+            fonts,
+            main_shared,
+            scales,
+            embedded_widths,
+            coverage,
+            fallbacks,
+            metrics: find_font("cmr10").and_then(|p| Tfm::open(&p).ok()),
+        }
+    }
+
+    fn covers(&self, ch: char, face: Face) -> bool {
+        covered(&self.coverage, ch, face)
+    }
+
+    fn outside(&self, ch: char) -> Option<(usize, u16)> {
+        self.fallbacks.glyph(ch)
+    }
+
+    /// What a stretch the face draws ITSELF costs. The codes are what the file
+    /// will hold and the characters are what the document wrote; the two
+    /// differ wherever WinAnsi puts a character somewhere other than its
+    /// codepoint, and each table is indexed by the one it is stated in.
+    fn own_width(&self, codes: &str, source: &str, face: Face, size: f64) -> f64 {
+        // The family's own scale, so a face set at MatchLowercase is MEASURED
+        // at what it will be DRAWN at. The two must come from one number.
+        let size = size * self.scales[face.index()];
+        if let Some(Some(w)) = self.embedded_widths.get(face.index()) {
+            // PDF widths are 1/1000 em, and codes below 32 are not in the table.
+            return codes
+                .chars()
+                .map(|c| {
+                    let at = (c as usize).saturating_sub(32);
+                    let mille = w.get(at).copied().unwrap_or(500);
+                    mille as f64 / 1000.0 * size
+                })
+                .sum();
+        }
+        match &self.metrics {
+            // The .tfm reader kerns and ligatures across neighbouring
+            // characters, so it needs the string whole rather than an iterator.
+            Some(f) => f.width_of(source) * size,
+            None => source.chars().count() as f64 * size * 0.5,
+        }
+    }
+
+    fn piece_width(&self, piece: &Piece, face: Face, size: f64) -> f64 {
+        match piece.from {
+            // The fallback font's metrics are its own, and they are nothing
+            // like the face's: `arrowright` is 987/1000 em where a letter is
+            // about 500. Charging the face's widths for it would push every
+            // line holding an arrow off the measure.
+            Source::Symbol => piece
+                .codes
+                .chars()
+                .map(|c| symbol_width(c as u8) as f64 / 1000.0 * size)
+                .sum(),
+            // A borrowed face's metrics are its own for the same reason, and
+            // they are read from its `hmtx` by the glyph the piece names --
+            // two bytes to the glyph, so the codes are taken in pairs.
+            Source::Outside(at) => glyph_ids(&piece.codes)
+                .map(|glyph| self.fallbacks.width(at, glyph, size))
+                .sum(),
+            Source::Face => self.own_width(&piece.codes, &piece.source, face, size),
+        }
+    }
+
+    /// What `word` measures in `face` at `size`.
+    ///
+    /// Every branch measures through `printing_chars`. A marker's spec is
+    /// digits and commas, which every one of these tables has a real width
+    /// for, so a word inside one \textcolor was charged for its five letters
+    /// plus fourteen spec characters plus three markers -- and a line of them
+    /// broke after four words where the same line uncoloured holds seventeen.
+    /// It cost whole pages: rubyrs/docs/book.tex set in 340 and sets in 186
+    /// with them skipped.
+    pub(crate) fn width_of(&self, word: &str, face: Face, size: f64) -> f64 {
+        // A formula measures what `mlist_to_hlist` made it, not what its
+        // characters come to in the text face: the width of `$\frac{1}{2}$` is
+        // the fraction's, and nothing about it can be read off the glyphs.
+        if let Some(w) = crate::math::run_width(word) {
+            return w;
+        }
+        // Plain ASCII is the case that runs a million times a book: every face
+        // draws it, and the code and the character are the same number, so
+        // there is nothing to decide per character. Answering it here keeps an
+        // ordinary word measured exactly as it was before any of this.
+        if word.is_ascii() {
+            let plain: String = printing_chars(word).collect();
+            return self.own_width(&plain, &plain, face, size);
+        }
+        drawn(word, &|c| self.covers(c, face), &|c| self.outside(c))
+            .iter()
+            .map(|piece| self.piece_width(piece, face, size))
+            .sum()
+    }
+}
+
 /// Set a document straight to PDF, honouring the font it asked for.
 ///
 /// The DVI path names `.tfm` fonts and so can only ever set in Computer Modern;
@@ -2782,261 +3087,48 @@ pub fn to_pdf(
     page_colour: Option<crate::colour::Rgb>,
     near: Option<&std::path::Path>,
 ) -> crate::Pdf {
+    to_pdf_ahead(text, families, layout, page_colour, near, None)
+}
+
+/// [`to_pdf`], taking the paragraphs a [`Pipeline`] broke while the document
+/// was still being lowered.
+///
+/// They are used only where they are provably what breaking `text` here would
+/// make: the faces they were measured in were read off the same families,
+/// with no fallback family whose borrowed glyphs depend on the whole text; the
+/// layout is this one (the page penalties aside, which the lowerer settles at
+/// the end and the breaker never reads); and the text they were read from is
+/// a prefix of `text` as it stands after the references and the contents
+/// have been resolved. Anything else -- a font, a page geometry or a colour
+/// switched after they were read, a conditional the run decided, a forward
+/// reference -- shows up as a difference in one of the three, and the whole
+/// of `text` is broken here instead.
+pub fn to_pdf_ahead(
+    text: &str,
+    families: &Families,
+    layout: &Layout,
+    page_colour: Option<crate::colour::Rgb>,
+    near: Option<&std::path::Path>,
+    ahead: Option<Ahead>,
+) -> crate::Pdf {
     use crate::pdf::{document, Font, Page, Set};
 
-    // The font the document asked for, EMBEDDED if it can be found: that is
-    // the difference between a page set in Arimo's metrics and one set in
-    // Arimo. Failing that, one of the fourteen, which gets the widths right
-    // and the shapes wrong -- better than refusing to typeset.
-    let requested = families.main.as_deref();
-    // A font the document SHIPS is tried first: it is the one the document
-    // actually meant, and its family name is regularly not installed at all.
-    let embedded = families
-        .main_file
-        .resolve(near)
-        .and_then(|file| embed_file(&file))
-        .or_else(|| requested.and_then(embed_family));
-    let main = embedded.clone().unwrap_or_else(|| match requested {
-        // A document that asked for a family and did not get it falls to the
-        // member of the fourteen with that family's metrics.
-        Some(family) => Font::Base14(base14_for(family).to_string()),
-        // A document that asked for NO family is a TeX document, and TeX's text
-        // font is cmr10 -- which is the face luatex embeds. Naming Helvetica
-        // here set every plain document in a typeface no TeX engine uses.
-        None => crate::pdf::Font::computer_modern()
-            .unwrap_or_else(|| Font::Base14("Helvetica".to_string())),
-    });
-
-    // The other three faces, in the order `Face::index` puts them: main, mono,
-    // bold, italic. Each is the file the document named for it, then the family
-    // it named, then the member of the fourteen that carries that face -- and
-    // the main font when the document asked for none of those, so a `\texttt`
-    // in a document with no monospace family still sets rather than vanishing.
-    let main_shared = std::sync::Arc::new(main.clone());
-    let base = match &main {
-        Font::Base14(name) => name.clone(),
-        _ => requested.map(base14_for).unwrap_or("Helvetica").to_string(),
+    // The faces, and what a word measures in them. See `Faces`.
+    let (faces, ahead) = match ahead.filter(|a| a.measured_as(families, layout)) {
+        Some(Ahead { faces, broken, .. }) => (faces, Some(broken)),
+        None => (Faces::new(families, near, text), None),
     };
-    let mono = families
-        .mono_file
-        .resolve(near)
-        .and_then(|file| embed_file(&file))
-        .or_else(|| families.mono.as_deref().and_then(embed_family))
-        .or_else(|| {
-            families
-                .mono
-                .as_deref()
-                .map(|f| Font::Base14(base14_for(f).to_string()))
-        })
-        .unwrap_or_else(|| main.clone());
-    // A bold or italic FILE is what the corpus books ship: `BoldFont=Arimo-VF`
-    // beside `UprightFont=Arimo-VF`. Where the two name the same file the font
-    // is the same font, `Page::text_in` recognises it as one and the page is
-    // set in the main face -- which is the honest outcome, since a variable
-    // font's weight axis is not something this can instantiate.
-    // Which `FontFile` a family's files come from. `\setsansfont{X}[BoldFont=Y]`
-    // populated `sans_file.bold` and NOTHING read it: every face resolved
-    // against `main_file`, so a bold cut of the sans family had no file to
-    // come from and no slot to sit in.
-    let file_for = |family: Family| match family {
-        Family::Roman => &families.main_file,
-        Family::Sans => &families.sans_file,
-        Family::Mono => &families.mono_file,
-    };
-    let face_file = |face: Face| {
-        file_for(face.family)
-            .resolve_face(face, near)
-            .and_then(|file| embed_file(&file))
-    };
-    // The sans family, resolved exactly as the mono one is. A book sets its
-    // headings in this -- `\titleformat{\chapter}{\sffamily\bfseries\Huge}` --
-    // and with `\sffamily` answering the main face, every heading in every
-    // book came out in the body typeface. lualatex embeds Orbitron twice for
-    // `arb`; texrs embedded no Orbitron at all.
-    let sans = families
-        .sans_file
-        .resolve(near)
-        .and_then(|file| embed_file(&file))
-        .or_else(|| families.sans.as_deref().and_then(embed_family))
-        .or_else(|| {
-            families
-                .sans
-                .as_deref()
-                .map(|f| Font::Base14(base14_for(f).to_string()))
-        })
-        .unwrap_or_else(|| main.clone());
-    // The upright, medium face of each family -- what the rest of that family
-    // falls back to when the document shipped no file for a bold or italic cut
-    // of it.
-    let upright = |family: Family| match family {
-        Family::Roman => main.clone(),
-        Family::Sans => sans.clone(),
-        Family::Mono => mono.clone(),
-    };
-    // Twelve faces, in `Face::index` order. Each is the file the document
-    // named for that family and that cut, then the member of the fourteen
-    // carrying it, then the family's own upright face -- so a `\textbf` in a
-    // document that shipped no bold still sets rather than vanishing.
-    let fonts: Vec<std::sync::Arc<Font>> = Face::ALL
-        .iter()
-        .map(|face| {
-            // The upright, medium face of a family is the one resolved above,
-            // and it must be USED rather than rebuilt: a document naming no
-            // family at all is set in Computer Modern, which no amount of
-            // base-14 reasoning reconstructs.
-            if !face.bold && !face.italic {
-                return upright(face.family);
-            }
-            // A cut the document shipped a file for; failing that, the member
-            // of the fourteen carrying that cut of that family -- all twelve
-            // exist. A DIFFERENT typeface that is really bold beats the same
-            // typeface that is not: a description term set in the face of its
-            // own meaning has lost the only thing the markup was for.
-            face_file(*face).unwrap_or_else(|| Font::Base14(base14_face(&base, *face)))
-        })
-        .map(std::sync::Arc::new)
-        .collect();
-    // What each family is scaled by. A document writes `Scale=MatchLowercase`
-    // so a display family sits beside its text family rather than looming over
-    // it, usually once through `\defaultfontfeatures` for everything it loads
-    // -- and unapplied, every heading in that family is set larger than the
-    // document asked for. The bold and italic faces are cuts of the MAIN
-    // family, so they take its scale rather than one of their own.
-    let main_path = families.main_file.resolve(near);
-    let scale_for = |file: &FontFile| {
-        face_scale(
-            file.scale.as_deref(),
-            file.resolve(near).as_deref(),
-            main_path.as_deref(),
-        )
-    };
-    // Per FAMILY, and every cut of a family takes its family's scale. The old
-    // five-slot array gave bold and italic the MAIN family's scale, so a bold
-    // cut of the sans family had no scale slot at all.
-    let scales: Vec<f64> = Face::ALL
-        .iter()
-        .map(|face| scale_for(file_for(face.family)))
-        .collect();
-
-    // Measure in the face that will be printed. An embedded font carries its
-    // own widths; without one, cmr10's are the closest thing installed, and a
-    // line may then run a little long or short of the measure.
-    let embedded_widths: Vec<Option<Vec<i64>>> = fonts
-        .iter()
-        .map(|f| match &**f {
-            Font::TrueType { widths, .. } => Some(widths.clone()),
-            _ => None,
-        })
-        .collect();
-    // Which characters each face can actually draw, from the font file's own
-    // cmap. This is the question `luaotfload.add_fallback` asks per glyph, and
-    // it is the reason the publication scripts required LuaTeX at all: a
-    // character the face has no glyph for has to come from somewhere else, and
-    // it cannot be fetched without first knowing that it is missing.
-    let coverage: Vec<Option<std::collections::BTreeSet<u32>>> =
-        fonts.iter().map(|f| face_coverage(f)).collect();
-    // A face with no file to read is one of the fourteen, and carrying all of
-    // WinAnsi is what being one of them means.
-    let covers = |ch: char, face: Face| match &coverage[face.index()] {
-        Some(has) => has.contains(&(ch as u32)),
-        None => true,
-    };
-    // The faces the DOCUMENT named to fetch a missing glyph from, and the
-    // glyphs it is about to ask them for. Reserving them first is what keeps
-    // the file's `/W` array to the nine glyphs a book borrowed rather than to
-    // all fifty thousand a broad face carries; the scan is over the DISTINCT
-    // characters, so it costs one pass whatever the book's length.
-    let mut fallbacks = Fallbacks::load(&families.fallbacks);
-    if !fallbacks.is_empty() {
-        let distinct: std::collections::BTreeSet<char> =
-            printing_chars(text).filter(|c| !c.is_ascii()).collect();
-        for ch in distinct {
-            // Only what a face cannot draw and the Symbol font has not got:
-            // asking for the rest would carry glyphs nothing ever draws.
-            let drawn_already = SYMBOL_FONT.iter().any(|(c, _, _)| *c == ch)
-                || Face::ALL
-                    .iter()
-                    .all(|face| winansi_code(ch).is_some() && covers(ch, *face));
-            if !drawn_already {
-                fallbacks.reserve(ch);
-            }
-        }
-        fallbacks.settle();
-    }
-    let outside = |ch: char| fallbacks.glyph(ch);
-    let metrics = find_font("cmr10").and_then(|p| Tfm::open(&p).ok());
-    // What a stretch the face draws ITSELF costs. The codes are what the file
-    // will hold and the characters are what the document wrote; the two differ
-    // wherever WinAnsi puts a character somewhere other than its codepoint, and
-    // each table is indexed by the one it is stated in.
-    let own_width = |codes: &str, source: &str, face: Face, size: f64| -> f64 {
-        // The family's own scale, so a face set at MatchLowercase is MEASURED
-        // at what it will be DRAWN at. The two must come from one number.
-        let size = size * scales[face.index()];
-        if let Some(Some(w)) = embedded_widths.get(face.index()) {
-            // PDF widths are 1/1000 em, and codes below 32 are not in the table.
-            return codes
-                .chars()
-                .map(|c| {
-                    let at = (c as usize).saturating_sub(32);
-                    let mille = w.get(at).copied().unwrap_or(500);
-                    mille as f64 / 1000.0 * size
-                })
-                .sum();
-        }
-        match &metrics {
-            // The .tfm reader kerns and ligatures across neighbouring
-            // characters, so it needs the string whole rather than an iterator.
-            Some(f) => f.width_of(source) * size,
-            None => source.chars().count() as f64 * size * 0.5,
-        }
-    };
-    let piece_width = |piece: &Piece, face: Face, size: f64| -> f64 {
-        match piece.from {
-            // The fallback font's metrics are its own, and they are nothing
-            // like the face's: `arrowright` is 987/1000 em where a letter is
-            // about 500. Charging the face's widths for it would push every
-            // line holding an arrow off the measure.
-            Source::Symbol => piece
-                .codes
-                .chars()
-                .map(|c| symbol_width(c as u8) as f64 / 1000.0 * size)
-                .sum(),
-            // A borrowed face's metrics are its own for the same reason, and
-            // they are read from its `hmtx` by the glyph the piece names --
-            // two bytes to the glyph, so the codes are taken in pairs.
-            Source::Outside(at) => glyph_ids(&piece.codes)
-                .map(|glyph| fallbacks.width(at, glyph, size))
-                .sum(),
-            Source::Face => own_width(&piece.codes, &piece.source, face, size),
-        }
-    };
-    // Every branch measures through `printing_chars`. A marker's spec is digits
-    // and commas, which every one of these tables has a real width for, so a
-    // word inside one \textcolor was charged for its five letters plus fourteen
-    // spec characters plus three markers -- and a line of them broke after four
-    // words where the same line uncoloured holds seventeen. It cost whole
-    // pages: rubyrs/docs/book.tex set in 340 and sets in 186 with them skipped.
-    let width_of = |word: &str, face: Face, size: f64| -> f64 {
-        // A formula measures what `mlist_to_hlist` made it, not what its
-        // characters come to in the text face: the width of `$\frac{1}{2}$` is
-        // the fraction's, and nothing about it can be read off the glyphs.
-        if let Some(w) = crate::math::run_width(word) {
-            return w;
-        }
-        // Plain ASCII is the case that runs a million times a book: every face
-        // draws it, and the code and the character are the same number, so
-        // there is nothing to decide per character. Answering it here keeps an
-        // ordinary word measured exactly as it was before any of this.
-        if word.is_ascii() {
-            let plain: String = printing_chars(word).collect();
-            return own_width(&plain, &plain, face, size);
-        }
-        drawn(word, &|c| covers(c, face), &outside)
-            .iter()
-            .map(|piece| piece_width(piece, face, size))
-            .sum()
-    };
+    let Faces {
+        fonts,
+        main_shared,
+        scales,
+        fallbacks,
+        ..
+    } = &faces;
+    let covers = |ch: char, face: Face| faces.covers(ch, face);
+    let outside = |ch: char| faces.outside(ch);
+    let piece_width = |piece: &Piece, face: Face, size: f64| faces.piece_width(piece, face, size);
+    let width_of = |word: &str, face: Face, size: f64| faces.width_of(word, face, size);
 
     // The contents, if the document asked for one: set here rather than where
     // `\tableofcontents` stood, because an entry names the page its chapter
@@ -3072,7 +3164,7 @@ pub fn to_pdf(
         };
         image_remeasured(picture_remeasured(line, &picture_metrics), layout, near)
     };
-    let broken = break_lines_measured(&text, layout, &width_of);
+    let broken = break_lines_from(&text, layout, &width_of, ahead);
     // A line's remeasure reads that line, the fonts and the files it names,
     // and nothing another line wrote: no TeX state, no style stack, no shared
     // mutable table. So the lines are remeasured independently and collected
@@ -3624,38 +3716,24 @@ fn break_lines_measured(
     layout: &Layout,
     width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
 ) -> Vec<String> {
-    let mut carried = ParagraphStart {
-        // The breaker cares about the face and not about the colour, but the
-        // two markers are interleaved in one stream, so the same splitter reads
-        // both and the colour half goes on a stack nothing here looks at.
-        colours: Vec::new(),
-        faces: vec![Face::MAIN],
-        // Seeded with the document's own size, which is the entry never
-        // popped: an unbalanced size marker leaves the body size in force.
-        sizes: vec![TypeSize {
-            size: layout.size,
-            leading: layout.leading,
-        }],
-        centred: false,
-        depth: 0,
+    break_lines_from(text, layout, width_of, None)
+}
+
+/// [`break_lines_measured`], carrying on from the paragraphs a [`Pipeline`]
+/// broke -- when the text they were read from opens `text`, and so its
+/// paragraphs are the first of `text`'s, split at the same separators.
+fn break_lines_from(
+    text: &str,
+    layout: &Layout,
+    width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
+    ahead: Option<BrokenAhead>,
+) -> Vec<String> {
+    let (mut broken, mut carried, rest) = match ahead {
+        Some(a) if text.starts_with(&a.read) => (a.paragraphs, a.carried, &text[a.read.len()..]),
+        _ => (Vec::new(), ParagraphStart::first(layout), text),
     };
-    let paras: Vec<&str> = text.split("\n\n").collect();
-    let broken: Vec<(bool, Vec<String>)> =
-        match paras.len() >= PARALLEL_PARAGRAPHS && rayon::current_num_threads() > 1 {
-            true => {
-                use rayon::prelude::*;
-                let starts = paragraph_starts(&paras, layout, carried);
-                paras
-                    .par_iter()
-                    .zip(starts)
-                    .map(|(para, mut start)| break_measured(para, layout, &mut start, width_of))
-                    .collect()
-            }
-            false => paras
-                .iter()
-                .map(|para| break_measured(para, layout, &mut carried, width_of))
-                .collect(),
-        };
+    let paras: Vec<&str> = rest.split("\n\n").collect();
+    broken.extend(break_paragraphs(&paras, layout, &mut carried, width_of));
     let mut lines = Vec::new();
     for (sets_text, own) in broken {
         // `\parskip`: the space LaTeX leaves BETWEEN two paragraphs, which
@@ -3674,9 +3752,360 @@ fn break_lines_measured(
     lines
 }
 
+/// Each of `paras` broken, in order, from the state `carried` holds, which is
+/// left as the last of them leaves it.
+fn break_paragraphs(
+    paras: &[&str],
+    layout: &Layout,
+    carried: &mut ParagraphStart,
+    width_of: &(dyn Fn(&str, Face, f64) -> f64 + Sync),
+) -> Vec<(bool, Vec<String>)> {
+    match paras.len() >= PARALLEL_PARAGRAPHS && rayon::current_num_threads() > 1 {
+        true => {
+            use rayon::prelude::*;
+            let starts = paragraph_starts(paras, layout, carried.clone());
+            if let (Some(last), Some(start)) = (paras.last(), starts.last()) {
+                *carried = start.clone();
+                advance_paragraph(last, layout, carried);
+            }
+            paras
+                .par_iter()
+                .zip(starts)
+                .map(|(para, mut start)| break_measured(para, layout, &mut start, width_of))
+                .collect()
+        }
+        false => paras
+            .iter()
+            .map(|para| break_measured(para, layout, carried, width_of))
+            .collect(),
+    }
+}
+
 /// Fewer paragraphs than this are broken on the calling thread: fanning out
 /// costs more than a short document's breaking is worth.
 const PARALLEL_PARAGRAPHS: usize = 64;
+
+/// Breaking paragraphs while the rest of the document is still being lowered.
+///
+/// The lowerer is serial, token to token, but a paragraph it has finished is
+/// finished: what breaking it needs is its own text, the state the paragraphs
+/// before it left (`ParagraphStart`, read off their text), the layout and the
+/// faces. So the lowerer hands its text on as it goes (a [`Feed`]), a job on
+/// the pool breaks each run of finished paragraphs as it arrives, and the page
+/// builder takes what was broken ([`Ahead`]) and breaks only the rest.
+///
+/// Nothing here is ASSUMED to be what the page builder would have made. The
+/// text is what the lowerer's commands say when nothing but fixed text is in
+/// them -- the run writes the document's text, and a conditional it decides
+/// stops the feed -- and [`to_pdf_ahead`] uses the broken paragraphs only
+/// when that text opens the text the run produced, after the references are
+/// resolved, and the families and the layout are the ones they were measured
+/// with. A document that switches its font or its page geometry halfway is
+/// broken whole, after lowering, exactly as before.
+pub struct Pipeline {
+    done: std::sync::mpsc::Receiver<std::thread::Result<Option<Ahead>>>,
+}
+
+/// What the lowerer hands the breaking job.
+enum Fed {
+    /// The families and layout in force when the first text was handed on,
+    /// which the paragraphs are measured with.
+    Start { families: Families, layout: Layout },
+    /// More of the text, in order, slots and all.
+    Text(String),
+    /// A batch of formula settings, by the index of its first formula.
+    Settings(usize, crate::math::Settings),
+}
+
+/// The lowerer's end of a [`Pipeline`].
+pub struct Feed {
+    tx: std::sync::mpsc::Sender<Fed>,
+    /// How many of the document level's commands have been read for text.
+    scanned: usize,
+    /// How much of the command after those, a run of text still open, has.
+    taken: usize,
+    /// Text read and not yet handed on.
+    pending: String,
+    started: bool,
+    /// Set once something was met whose text only the run knows, or the
+    /// breaking job has stopped listening: nothing more is handed on.
+    stopped: bool,
+}
+
+/// How much text the lowerer gathers before handing it on.
+const FEED_BYTES: usize = 32 * 1024;
+
+/// How much an open run of text grows by before it is searched for a
+/// paragraph break to hand on up to.
+const TAIL_STEP: usize = 4 * 1024;
+
+impl Pipeline {
+    /// Start the breaking job on the pool. `near` is the directory the
+    /// document was read from, which is where the faces are looked for.
+    pub fn start(near: Option<&std::path::Path>) -> (Feed, Pipeline) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let near = near.map(std::path::Path::to_path_buf);
+        rayon::spawn(move || {
+            let broken = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                break_fed(&rx, near.as_deref())
+            }));
+            let _ = done_tx.send(broken);
+        });
+        let feed = Feed {
+            tx,
+            scanned: 0,
+            taken: 0,
+            pending: String::new(),
+            started: false,
+            stopped: false,
+        };
+        (feed, Pipeline { done })
+    }
+
+    /// What the job broke, once the feed is closed and the job has finished
+    /// the run of paragraphs it was on.
+    pub fn finish(self) -> Option<Ahead> {
+        crate::math::receive(&self.done).unwrap_or_else(|p| std::panic::resume_unwind(p))
+    }
+}
+
+impl Feed {
+    /// Where the lowerer's formula settings are told to, so the job can fill
+    /// the slots in the text it is handed as the join will.
+    pub fn tap(&self) -> crate::math::Tap {
+        let tx = self.tx.clone();
+        std::sync::Arc::new(move |first, settings| {
+            let _ = tx.send(Fed::Settings(first, settings));
+        })
+    }
+
+    /// Read the document level's commands as far as they can no longer change
+    /// the text they write, and hand it on once there is enough of it.
+    ///
+    /// The last command that is not a line directive is still open. When it is
+    /// a run of text, the next characters are appended to it and a ligature
+    /// takes its last character back out -- a character that begins a
+    /// ligature, never a paragraph break -- so it is final up to its last
+    /// paragraph break. Everything before it is final.
+    pub fn offer(&mut self, out: &[Cmd], families: &Families, layout: &Layout) {
+        if self.stopped {
+            return;
+        }
+        let mut end = out.len();
+        while end > 0 && matches!(out[end - 1], Cmd::Line(_)) {
+            end -= 1;
+        }
+        let Some(open) = end.checked_sub(1) else {
+            return;
+        };
+        while self.scanned < open {
+            let cmd = &out[self.scanned];
+            let fixed = match (self.taken, cmd) {
+                (0, _) => fixed_text(cmd, &mut self.pending),
+                (taken, Cmd::Text(t)) => {
+                    self.pending.push_str(&t[taken..]);
+                    true
+                }
+                _ => false,
+            };
+            if !fixed {
+                self.stopped = true;
+                return;
+            }
+            self.taken = 0;
+            self.scanned += 1;
+        }
+        // Looked into only once it has grown by a step, so a run of text is
+        // searched about once and not once per character added to it.
+        if let Cmd::Text(t) = &out[open] {
+            if t.len() - self.taken >= TAIL_STEP {
+                if let Some(at) = t[self.taken..].rfind("\n\n") {
+                    let upto = self.taken + at + 2;
+                    self.pending.push_str(&t[self.taken..upto]);
+                    self.taken = upto;
+                }
+            }
+        }
+        if self.pending.len() < FEED_BYTES {
+            return;
+        }
+        if !self.started {
+            self.started = true;
+            let start = Fed::Start {
+                families: families.clone(),
+                layout: layout.clone(),
+            };
+            self.stopped = self.tx.send(start).is_err();
+        }
+        let text = std::mem::take(&mut self.pending);
+        self.stopped |= self.tx.send(Fed::Text(text)).is_err();
+    }
+}
+
+/// Append the text `cmd` writes when the run comes to it, if that is fixed
+/// already: `false` when the run decides it (a conditional or a loop), or it
+/// is text this does not write the way the run does (a colour's markers).
+fn fixed_text(cmd: &Cmd, into: &mut String) -> bool {
+    match cmd {
+        Cmd::Text(t) => {
+            into.push_str(t);
+            true
+        }
+        Cmd::Group { body, .. } => body.iter().all(|cmd| fixed_text(cmd, into)),
+        Cmd::Color { .. }
+        | Cmd::IfNum { .. }
+        | Cmd::IfOdd { .. }
+        | Cmd::Loop { .. }
+        | Cmd::RustCompile(_) => false,
+        _ => true,
+    }
+}
+
+/// The breaking job: take the text as it comes, fill its formula slots as
+/// their settings come back, and break each run of finished paragraphs.
+///
+/// Once the feed closes, whatever it handed on that can be settled is broken
+/// too. The page builder would break it next in any case, and this way how
+/// much was broken here depends on the text alone and not on how the job and
+/// the lowerer happened to race.
+fn break_fed(rx: &std::sync::mpsc::Receiver<Fed>, near: Option<&std::path::Path>) -> Option<Ahead> {
+    use std::sync::mpsc::TryRecvError;
+    let mut start: Option<(Families, Layout)> = None;
+    let mut breaker: Option<Ahead> = None;
+    let mut settings = crate::math::SettingsTable::default();
+    // Text handed on whose slots are not all settled yet, and settled text
+    // not yet broken.
+    let mut unsettled = String::new();
+    let mut settled = String::new();
+    let (mut fresh, mut closed) = (false, false);
+    loop {
+        let fed = match rx.try_recv() {
+            Ok(fed) => Some(fed),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                closed = true;
+                None
+            }
+        };
+        let fed = match fed {
+            Some(fed) => fed,
+            // Everything queued is in: settle it, and break the paragraphs it
+            // finished once there are enough of them to fan out, or once
+            // nothing more is coming.
+            None if fresh => {
+                fresh = false;
+                let spec = |index: usize, row: usize| settings.get(index, row);
+                let upto =
+                    crate::math::first_unsettled(&unsettled, &spec).unwrap_or(unsettled.len());
+                settled.push_str(&crate::math::filled(&unsettled[..upto], &spec));
+                unsettled.drain(..upto);
+                let (paras, used) = finished_paragraphs(&settled);
+                if paras.len() >= PARALLEL_PARAGRAPHS || (closed && !paras.is_empty()) {
+                    let (families, layout) = start.as_ref()?;
+                    breaker
+                        .get_or_insert_with(|| Ahead::new(families, layout, near))
+                        .break_next(&paras);
+                    settled.drain(..used);
+                }
+                continue;
+            }
+            None if closed => break,
+            // Idle: run another job rather than hold the thread, and block
+            // only when there is none.
+            None => match rayon::yield_now() {
+                Some(rayon::Yield::Executed) => continue,
+                _ => match rx.recv() {
+                    Ok(fed) => fed,
+                    Err(_) => {
+                        closed = true;
+                        continue;
+                    }
+                },
+            },
+        };
+        match fed {
+            // Borrowed glyphs are reserved off the whole text, which no
+            // stretch of it can stand in for.
+            Fed::Start { families, .. } if !families.fallbacks.is_empty() => return None,
+            Fed::Start { families, layout } => start = Some((families, layout)),
+            Fed::Text(text) => unsettled.push_str(&text),
+            Fed::Settings(first, batch) => settings.insert(first, batch),
+        }
+        fresh = true;
+    }
+    breaker
+}
+
+/// The paragraphs `text` has finished -- each followed by its separator --
+/// split exactly as `str::split` splits the whole text, and how much of it
+/// they take up with their separators.
+fn finished_paragraphs(text: &str) -> (Vec<&str>, usize) {
+    let mut paras = Vec::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find("\n\n") {
+        paras.push(&text[from..from + at]);
+        from += at + 2;
+    }
+    (paras, from)
+}
+
+/// Paragraphs broken ahead, the text they were read from, and the state the
+/// last of them left.
+struct BrokenAhead {
+    /// Each paragraph followed by its separator.
+    read: String,
+    paragraphs: Vec<(bool, Vec<String>)>,
+    carried: ParagraphStart,
+}
+
+/// What a [`Pipeline`] broke, for [`to_pdf_ahead`]: the breaking job's own
+/// state, handed over whole when it finishes.
+pub struct Ahead {
+    faces: Faces,
+    families: Families,
+    layout: Layout,
+    broken: BrokenAhead,
+}
+
+impl Ahead {
+    fn new(families: &Families, layout: &Layout, near: Option<&std::path::Path>) -> Self {
+        Ahead {
+            // With no fallback family the faces do not depend on the text.
+            faces: Faces::new(families, near, ""),
+            families: families.clone(),
+            layout: layout.clone(),
+            broken: BrokenAhead {
+                read: String::new(),
+                paragraphs: Vec::new(),
+                carried: ParagraphStart::first(layout),
+            },
+        }
+    }
+
+    /// Break the next paragraphs of the document.
+    fn break_next(&mut self, paras: &[&str]) {
+        let faces = &self.faces;
+        let width_of = |word: &str, face: Face, size: f64| faces.width_of(word, face, size);
+        let broken = &mut self.broken;
+        let lines = break_paragraphs(paras, &self.layout, &mut broken.carried, &width_of);
+        broken.paragraphs.extend(lines);
+        for para in paras {
+            broken.read.push_str(para);
+            broken.read.push_str("\n\n");
+        }
+    }
+
+    /// Whether the paragraphs were measured in what `families` and `layout`
+    /// set the document in.
+    fn measured_as(&self, families: &Families, layout: &Layout) -> bool {
+        let layout_then = Layout {
+            paging: layout.paging,
+            ..self.layout.clone()
+        };
+        families.fallbacks.is_empty() && self.families == *families && layout_then == *layout
+    }
+}
 
 /// What breaking one paragraph needs to know that the paragraphs before it
 /// left behind.
@@ -3693,6 +4122,28 @@ struct ParagraphStart {
     /// to its `\end`, and an item's own body is regularly several paragraphs.
     /// 0 is "not in a list".
     depth: usize,
+}
+
+impl ParagraphStart {
+    /// What the first paragraph of a document begins with.
+    fn first(layout: &Layout) -> Self {
+        ParagraphStart {
+            // The breaker cares about the face and not about the colour, but
+            // the two markers are interleaved in one stream, so the same
+            // splitter reads both and the colour half goes on a stack nothing
+            // here looks at.
+            colours: Vec::new(),
+            faces: vec![Face::MAIN],
+            // Seeded with the document's own size, which is the entry never
+            // popped: an unbalanced size marker leaves the body size in force.
+            sizes: vec![TypeSize {
+                size: layout.size,
+                leading: layout.leading,
+            }],
+            centred: false,
+            depth: 0,
+        }
+    }
 }
 
 /// The state each paragraph begins with, advanced from `carried` in document

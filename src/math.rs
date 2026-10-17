@@ -597,9 +597,44 @@ impl Deferred {
 /// any document: handing out a handful costs more than setting them.
 const BATCH: usize = 32;
 
+/// One batch's settings: the encoded spec of each row of each formula in it.
+/// Shared, because a [`Formulas::tap`] reads them as they come back while
+/// the join still has to write them into the commands.
+pub type Settings = std::sync::Arc<Vec<Vec<String>>>;
+
 /// One batch's settings, the index of its first formula, or the panic that
 /// stopped it, to be raised where the formulas are joined.
-type Batch = (usize, std::thread::Result<Vec<Vec<String>>>);
+type Batch = (usize, std::thread::Result<Settings>);
+
+/// Told of each batch as it comes back: the index of its first formula and its
+/// settings. See [`Formulas::tap`].
+pub type Tap = std::sync::Arc<dyn Fn(usize, Settings) + Send + Sync>;
+
+/// The settings of the batches back so far, by formula index.
+///
+/// A batch handed out holds [`BATCH`] formulas and starts at a multiple of
+/// it: `Formulas::push` sends exactly when that many are pending, and nothing
+/// else empties the pending list before the join.
+#[derive(Default)]
+pub struct SettingsTable {
+    batches: Vec<Option<Settings>>,
+}
+
+impl SettingsTable {
+    pub fn insert(&mut self, first: usize, settings: Settings) {
+        let at = first / BATCH;
+        if self.batches.len() <= at {
+            self.batches.resize(at + 1, None);
+        }
+        self.batches[at] = Some(settings);
+    }
+
+    /// The spec of row `row` of formula `index`, if its batch is back.
+    pub fn get(&self, index: usize, row: usize) -> Option<&str> {
+        let batch = self.batches.get(index / BATCH)?.as_ref()?;
+        batch.get(index % BATCH)?.get(row).map(String::as_str)
+    }
+}
 
 /// The formulas the lowerer has read and not yet seen set.
 ///
@@ -630,6 +665,9 @@ pub struct Formulas {
         std::sync::mpsc::Sender<Batch>,
         std::sync::mpsc::Receiver<Batch>,
     )>,
+    /// Where each batch is ALSO reported as it comes back, for a reader that
+    /// fills slots before the join does: see [`Formulas::tap`].
+    tap: Option<Tap>,
 }
 
 impl Formulas {
@@ -646,17 +684,29 @@ impl Formulas {
         }
     }
 
+    /// Tell `tap` of every batch handed out from now on, with the index of
+    /// its first formula, as soon as it is set. The join is not
+    /// affected: it still receives every batch and fills every slot.
+    pub fn tap(&mut self, tap: Tap) {
+        self.tap = Some(tap);
+    }
+
     /// Hand the pending batch to the pool.
     fn send(&mut self) {
         let batch = std::mem::replace(&mut self.pending, Vec::with_capacity(BATCH));
         let first = self.read - batch.len();
         let (tx, _) = self.results.get_or_insert_with(std::sync::mpsc::channel);
         let tx = tx.clone();
+        let tap = self.tap.clone();
         self.sent += 1;
         rayon::spawn(move || {
             let specs = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                batch.iter().map(Deferred::specs).collect()
+                Settings::new(batch.iter().map(Deferred::specs).collect())
             }));
+            // The join fills every slot whatever the tap made of it.
+            if let (Some(tap), Ok(specs)) = (&tap, &specs) {
+                tap(first, Settings::clone(specs));
+            }
             // The receiver is gone only when lowering failed and its formulas
             // were abandoned.
             let _ = tx.send((first, specs));
@@ -673,39 +723,41 @@ impl Formulas {
             return;
         }
         let tail = std::mem::take(&mut self.pending);
-        let mut specs: Vec<Vec<String>> = Vec::with_capacity(self.read);
-        specs.resize_with(self.read - tail.len(), Vec::new);
-        specs.extend(tail.iter().map(Deferred::specs));
+        let tail_first = self.read - tail.len();
+        let tail_specs: Vec<Vec<String>> = tail.iter().map(Deferred::specs).collect();
+        let mut batches = SettingsTable::default();
         if let Some((tx, rx)) = self.results.take() {
             drop(tx);
             for _ in 0..self.sent {
                 let (first, batch) = receive(&rx);
                 let batch = batch.unwrap_or_else(|p| std::panic::resume_unwind(p));
-                for (at, rows) in batch.into_iter().enumerate() {
-                    specs[first + at] = rows;
-                }
+                batches.insert(first, batch);
             }
         }
-        fill_cmds(cmds, &specs);
+        let spec = |index: usize, row: usize| match index.checked_sub(tail_first) {
+            Some(at) => tail_specs.get(at)?.get(row).map(String::as_str),
+            None => batches.get(index, row),
+        };
+        fill_cmds(cmds, &spec);
         // A formula-heavy document's settings are tens of thousands of small
         // allocations, and freeing them is work nothing downstream waits on.
         match self.sent > 0 {
-            true => rayon::spawn(move || drop((specs, tail))),
-            false => drop((specs, tail)),
+            true => rayon::spawn(move || drop((batches, tail_specs, tail))),
+            false => drop((batches, tail_specs, tail)),
         }
     }
 }
 
-/// The next batch back. On a pool thread -- a caller inside `install`, as the
-/// tests are -- the wait runs other jobs, which may be the batches it is
-/// waiting for; elsewhere it blocks.
-fn receive(rx: &std::sync::mpsc::Receiver<Batch>) -> Batch {
+/// The next report back from a job handed to the pool. On a pool thread -- a
+/// caller inside `install`, as the tests are -- the wait runs other jobs, which
+/// may be the one it is waiting for; elsewhere it blocks.
+pub(crate) fn receive<T>(rx: &std::sync::mpsc::Receiver<T>) -> T {
     loop {
         if let Ok(b) = rx.try_recv() {
             return b;
         }
         if rayon::yield_now() != Some(rayon::Yield::Executed) {
-            return rx.recv().expect("every batch sent reports back");
+            return rx.recv().expect("every job handed out reports back");
         }
     }
 }
@@ -719,7 +771,10 @@ fn slot(index: usize, row: usize) -> String {
     format!("#{index}.{row}")
 }
 
-fn fill_cmds(cmds: &mut [Cmd], specs: &[Vec<String>]) {
+/// Where a formula's spec is looked up: by its index and the row.
+type SpecOf<'s> = dyn Fn(usize, usize) -> Option<&'s str> + 's;
+
+fn fill_cmds<'s>(cmds: &mut [Cmd], specs: &SpecOf<'s>) {
     for cmd in cmds {
         match cmd {
             Cmd::Text(t) => fill_text(t, specs),
@@ -746,22 +801,23 @@ fn fill_cmds(cmds: &mut [Cmd], specs: &[Vec<String>]) {
 
 /// Replace each slot in `t` with the spec it names. Text that only looks like
 /// a slot -- an index no formula has -- is left as it was.
-fn fill_text(t: &mut String, specs: &[Vec<String>]) {
-    if !t.contains(SLOT) {
-        return;
+fn fill_text<'s>(t: &mut String, specs: &SpecOf<'s>) {
+    if t.contains(SLOT) {
+        *t = filled(t, specs);
     }
+}
+
+/// `t` with each slot replaced by the spec it names, as [`Formulas::fill`]
+/// writes it into a command.
+pub fn filled<'s>(t: &str, specs: &SpecOf<'s>) -> String {
     let mut out = String::with_capacity(t.len() * 2);
-    let mut rest = t.as_str();
+    let mut rest = t;
     while let Some(at) = rest.find(SLOT) {
         // Keep `\u{1}M`, drop the `#`.
         out.push_str(&rest[..at + SLOT.len() - 1]);
         let after = &rest[at + SLOT.len()..];
-        let end = after.find('\u{2}').unwrap_or(after.len());
-        let spec = after[..end].split_once('.').and_then(|(i, r)| {
-            let (i, r) = (i.parse::<usize>().ok()?, r.parse::<usize>().ok()?);
-            specs.get(i)?.get(r)
-        });
-        match spec {
+        let (named, end) = slot_named(after);
+        match named.and_then(|(i, r)| specs(i, r)) {
             Some(spec) => {
                 out.push_str(spec);
                 rest = &after[end..];
@@ -773,7 +829,32 @@ fn fill_text(t: &mut String, specs: &[Vec<String>]) {
         }
     }
     out.push_str(rest);
-    *t = out;
+    out
+}
+
+/// Where in `t` the first slot opens whose spec `specs` does not have: how
+/// far [`filled`] writes what the join will. `None` when it has every one.
+pub fn first_unsettled<'s>(t: &str, specs: &SpecOf<'s>) -> Option<usize> {
+    let mut from = 0;
+    while let Some(at) = t[from..].find(SLOT) {
+        let opens = from + at;
+        let (named, end) = slot_named(&t[opens + SLOT.len()..]);
+        if named.and_then(|(i, r)| specs(i, r)).is_none() {
+            return Some(opens);
+        }
+        from = opens + SLOT.len() + end;
+    }
+    None
+}
+
+/// The formula and row a slot names, read from just after its opening, and
+/// where the name ends.
+fn slot_named(after: &str) -> (Option<(usize, usize)>, usize) {
+    let end = after.find('\u{2}').unwrap_or(after.len());
+    let named = after[..end]
+        .split_once('.')
+        .and_then(|(i, r)| Some((i.parse::<usize>().ok()?, r.parse::<usize>().ok()?)));
+    (named, end)
 }
 
 /// One formula, as the marker the typesetter reads.
