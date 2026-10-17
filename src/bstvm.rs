@@ -25,7 +25,7 @@
 //! Everything here is held against the real `bibtex` binary, whole `.bbl`
 //! against whole `.bbl`, in `tests/bibtex.rs`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::bib::{Aux, Bib, Entry};
@@ -198,18 +198,24 @@ impl<'a> Vm<'a> {
         vm.fields.insert("crossref".into());
 
         let selection = db.select(aux);
+        let mut cited: HashMap<&str, &Entry> = HashMap::new();
+        for entry in &selection.cited {
+            cited.entry(entry.key.as_str()).or_insert(entry);
+        }
+        // The keys already loaded, so a repeat is skipped without a scan.
+        let mut loaded: HashSet<String> = HashSet::new();
         for key in &aux.citations {
-            let Some(entry) = selection.cited.iter().find(|e| &e.key == key) else {
+            let Some(entry) = cited.get(key.as_str()) else {
                 continue;
             };
-            if !vm.entries.iter().any(|e| e.key == entry.key) {
+            if loaded.insert(entry.key.clone()) {
                 vm.entries.push(vm.state_of(entry));
             }
         }
         // `\citation{*}` asks for the whole database, in the order it was read.
         if aux.all {
             for entry in &db.entries {
-                if !vm.entries.iter().any(|e| e.key == entry.key) {
+                if loaded.insert(entry.key.clone()) {
                     vm.entries.push(vm.state_of(entry));
                 }
             }
@@ -238,44 +244,47 @@ impl<'a> Vm<'a> {
                 *counts.entry(target.trim().to_string()).or_default() += 1;
             }
         }
+        // Cross-references match keys case-insensitively, the first database
+        // entry winning: both lookups go through lowercased keys rather than a
+        // scan per entry.
+        let mut by_lower: HashMap<String, &Entry> = HashMap::new();
+        for entry in &db.entries {
+            by_lower.entry(entry.key.to_ascii_lowercase()).or_insert(entry);
+        }
+        let mut listed: HashSet<String> = self
+            .entries
+            .iter()
+            .map(|e| e.key.to_ascii_lowercase())
+            .collect();
+
         // A target that is pointed at often enough joins the bibliography, at
         // the end, in the order it was first pointed at.
-        for entry in self.entries.clone() {
-            let Some(target) = entry.fields.get("crossref") else {
+        for at in 0..self.entries.len() {
+            let Some(target) = self.entries[at].fields.get("crossref") else {
                 continue;
             };
             let target = target.trim().to_string();
             if counts.get(&target).copied().unwrap_or(0) < MIN_CROSSREFS {
                 continue;
             }
-            if self
-                .entries
-                .iter()
-                .any(|e| e.key.eq_ignore_ascii_case(&target))
-            {
+            let lower = target.to_ascii_lowercase();
+            if listed.contains(&lower) {
                 continue;
             }
-            if let Some(found) = db
-                .entries
-                .iter()
-                .find(|e| e.key.eq_ignore_ascii_case(&target))
-            {
+            if let Some(found) = by_lower.get(&lower) {
                 let state = self.state_of(found);
                 self.entries.push(state);
+                listed.insert(lower);
             }
         }
 
-        let listed: BTreeSet<String> = self.entries.iter().map(|e| e.key.clone()).collect();
         for at in 0..self.entries.len() {
             let Some(target) = self.entries[at].fields.get("crossref").cloned() else {
                 continue;
             };
             let target = target.trim().to_string();
-            let parent = db
-                .entries
-                .iter()
-                .find(|e| e.key.eq_ignore_ascii_case(&target))
-                .map(|e| self.state_of(e));
+            let lower = target.to_ascii_lowercase();
+            let parent = by_lower.get(&lower).map(|e| self.state_of(e));
             match parent {
                 Some(parent) => {
                     for (name, value) in parent.fields {
@@ -289,7 +298,7 @@ impl<'a> Vm<'a> {
                     self.entries[at].key
                 )),
             }
-            if !listed.iter().any(|k| k.eq_ignore_ascii_case(&target)) {
+            if !listed.contains(&lower) {
                 self.entries[at].fields.remove("crossref");
             }
         }

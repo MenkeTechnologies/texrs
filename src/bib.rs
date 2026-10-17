@@ -21,7 +21,7 @@
 //!  * `@comment` is ignored, and so is anything outside an entry — a `.bib` is
 //!    allowed to have prose between its records.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 /// One record: `@article{key, field = value, …}`.
@@ -84,6 +84,7 @@ impl Bib {
             chars: text.chars().collect(),
             at: 0,
             bib,
+            keys: HashSet::new(),
         };
         parser.run();
         parser.bib
@@ -99,6 +100,7 @@ impl Bib {
             chars: text.chars().collect(),
             at: 0,
             bib: Bib::default(),
+            keys: HashSet::new(),
         };
         parser.run();
         parser.bib
@@ -293,18 +295,25 @@ impl Bib {
                 uncited: Vec::new(),
             };
         }
+        // The first entry with each key, as `entry` finds it, without a scan of
+        // the database per citation.
+        let mut by_key: HashMap<&str, &Entry> = HashMap::new();
+        for entry in &self.entries {
+            by_key.entry(entry.key.as_str()).or_insert(entry);
+        }
         let mut cited = Vec::new();
         let mut missing = Vec::new();
         for key in &aux.citations {
-            match self.entry(key) {
+            match by_key.get(key.as_str()).copied() {
                 Some(entry) => cited.push(entry),
                 None => missing.push(key.clone()),
             }
         }
+        let citations: HashSet<&str> = aux.citations.iter().map(String::as_str).collect();
         let uncited = self
             .entries
             .iter()
-            .filter(|entry| !aux.citations.contains(&entry.key))
+            .filter(|entry| !citations.contains(entry.key.as_str()))
             .collect();
         Selection {
             cited,
@@ -318,6 +327,9 @@ struct Parser {
     chars: Vec<char>,
     at: usize,
     bib: Bib,
+    /// The keys already in `bib.entries`, so a repeat is found without a
+    /// scan of every entry read so far.
+    keys: HashSet<String>,
 }
 
 impl Parser {
@@ -369,7 +381,8 @@ impl Parser {
             self.bib.warnings.push(format!("@{kind}: no citation key"));
             return;
         }
-        if self.bib.entries.iter().any(|e| e.key == key) {
+        let repeat = self.keys.contains(&key);
+        if repeat {
             // BibTeX takes the first and says so; a silent overwrite would make
             // a bibliography depend on file order.
             self.bib
@@ -413,7 +426,8 @@ impl Parser {
             let value = self.read_value();
             fields.push((name, value));
         }
-        if !self.bib.entries.iter().any(|e| e.key == key) {
+        if !repeat {
+            self.keys.insert(key.clone());
             self.bib.entries.push(Entry {
                 kind: kind.to_string(),
                 key,
