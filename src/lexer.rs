@@ -219,6 +219,10 @@ pub struct Lexer {
     ahead_disabled: bool,
     /// How many times a stale read-ahead has been thrown away.
     ahead_misses: u32,
+    /// The name of the control word being read, kept between words so that
+    /// reading one does not allocate: the name is interned and the buffer
+    /// given back. See [`Lexer::control_sequence`].
+    word: String,
     /// Tokens to scan normally before speculating again.
     ///
     /// A document opens by setting catcodes -- `\catcode`\{=1` and friends --
@@ -279,6 +283,7 @@ impl Lexer {
             ahead: None,
             ahead_disabled: true,
             ahead_misses: 0,
+            word: String::new(),
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
@@ -356,6 +361,7 @@ impl Lexer {
             ahead: None,
             ahead_disabled: false,
             ahead_misses: 0,
+            word: String::new(),
             ahead_cooldown: Self::AHEAD_COOLDOWN,
             line_end: None,
             decoded_at: None,
@@ -987,8 +993,12 @@ impl Lexer {
             };
             return Token::cs(first.encode_utf8(&mut [0u8; 4]));
         }
-        let mut name = String::from(first);
-        loop {
+        // The name is built in the mouth's own buffer, taken for the length of
+        // the word and given back once the name is interned.
+        let mut name = std::mem::take(&mut self.word);
+        name.clear();
+        name.push(first);
+        self.state = loop {
             // A control word cannot run past its line (§356), but the line's
             // `\endlinechar` is its last character, and may be a letter.
             if let Some(len) = self.terminator_at(self.pos) {
@@ -997,24 +1007,24 @@ impl Lexer {
                     name.push(e);
                     self.pos += len;
                     self.line_end = None;
-                    self.state = State::NewLine;
-                    return Token::cs(&name);
+                    break State::NewLine;
                 }
-                break;
+                break State::SkipBlanks;
             }
             // The decode has to happen before the letter test, and be undone
             // when what it produced is not a letter: `\ab^^K` names `ab`.
             let save = self.pos;
             let Some(c) = self.decoded_char(cats) else {
-                break;
+                break State::SkipBlanks;
             };
             if cats.get(c) != Cat::Letter {
                 self.pos = save;
-                break;
+                break State::SkipBlanks;
             }
             name.push(c);
-        }
-        self.state = State::SkipBlanks;
-        Token::cs(&name)
+        };
+        let token = Token::cs(&name);
+        self.word = name;
+        token
     }
 }
