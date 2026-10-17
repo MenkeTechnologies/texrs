@@ -177,11 +177,13 @@ texrs --help
 texrs --version
 ```
 Files found through `kpsewhich` (fonts, hyphenation patterns, the glyph list,
-packages) are resolved once per run, in one batched process where the names are
-known ahead of use, and the paths are remembered in
-`<cache dir>/texrs/kpse-*.tsv` (disabled by `TEXRS_CACHE=0`). A remembered path
-is used only while the file still exists and no file of that name sits in the
-working directory.
+packages) are resolved once per run, by one `kpsewhich -interactive` process that
+reads the TeX databases once and answers every name after, and the paths are
+remembered in `<cache dir>/texrs/kpse-*.tsv` (disabled by `TEXRS_CACHE=0`). That
+file is stamped with the size and modification time of every `ls-R` database and
+`texmf.cnf` kpathsea reads, and is started over when the stamp no longer matches,
+as after a TeX Live update. A remembered path is used only while the file still
+exists and no file of that name sits in the working directory.
 
 
 `-X` is the second half of the command line: the document commands, and a reader

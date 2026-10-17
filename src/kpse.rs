@@ -1,23 +1,37 @@
 //! File location through `kpsewhich`, shared by every caller.
 //!
-//! A `kpsewhich` process costs 0.3 to 1 s of wall time and a document asks for
-//! tens of files (fonts, hyphenation patterns, the glyph list, packages), each
-//! of which used to be its own blocking spawn. Three mechanisms remove that:
+//! A `kpsewhich` process costs 0.1 to 1 s of wall time, nearly all of it
+//! reading the `ls-R` databases, and a document asks for tens of files (fonts,
+//! hyphenation patterns, the glyph list, packages). A LaTeX package's own
+//! `\RequirePackage` list is known only once the package has been found and
+//! read, so those asks come one after another. Four mechanisms remove the cost:
 //!
+//! * **One process.** `kpsewhich -interactive` is started once and asked every
+//!   name in turn on its standard input, so the databases are read once per run
+//!   instead of once per ask. Its standard output is a pseudo-terminal, which is
+//!   what makes it line-buffered; through a pipe it would hold every answer until
+//!   it exited. Where that cannot be set up, each ask spawns its own process.
 //! * **Memo.** A name is resolved once per process; concurrent askers for the
-//!   same name wait for the one resolution instead of spawning their own.
-//! * **Batch.** [`warm`] resolves many names with a single process.
+//!   same name wait for the one resolution instead of asking again.
+//! * **Batch.** [`warm`] resolves many names in one go.
 //! * **Disk cache.** Resolved paths are appended to
-//!   `<cache dir>/texrs/kpse-<env hash>.tsv`. A later run takes a recorded path
-//!   only if the file still exists; misses are never recorded, and the file name
-//!   carries a hash of the variables that steer the search, so changing
-//!   `TEXINPUTS` and friends selects a different file.
+//!   `<cache dir>/texrs/kpse-<env hash>.tsv`. The file name carries a hash of
+//!   the variables that steer the search, so changing `TEXINPUTS` and friends
+//!   selects a different file. The file opens with a stamp of the TeX tree --
+//!   size and modification time of every `ls-R` database and every `texmf.cnf`
+//!   kpathsea reads -- and is discarded when the stamp no longer matches, which
+//!   is what installing or updating a package does (`mktexlsr` rewrites
+//!   `ls-R`). A recorded path is taken only if the file still exists; misses are
+//!   never recorded.
 //!
 //! The answer for a name is the same whichever mechanism produced it, so output
 //! does not depend on timing or thread count.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Condvar, Mutex, OnceLock};
 
 /// Files every typeset run reads: the Computer Modern metrics and outlines the
@@ -40,7 +54,7 @@ pub const STARTUP_FILES: &[&str] = &[
 ];
 
 enum Slot {
-    /// Some thread is running `kpsewhich` for this name.
+    /// Some thread is resolving this name.
     Pending,
     Done(Option<PathBuf>),
 }
@@ -48,20 +62,25 @@ enum Slot {
 struct State {
     slots: Mutex<HashMap<String, Slot>>,
     resolved: Condvar,
-    /// Paths recorded by earlier runs, consulted before spawning anything.
+    /// Paths recorded by earlier runs, consulted before asking `kpsewhich`.
     disk: BTreeMap<String, PathBuf>,
     disk_file: Option<PathBuf>,
+    /// Whether the disk file has to be started over, under a fresh stamp,
+    /// before anything is appended: it is missing, unstamped, or was stamped
+    /// against a TeX tree that has since changed. Also serialises writers.
+    restart: Mutex<bool>,
 }
 
 fn state() -> &'static State {
     static STATE: OnceLock<State> = OnceLock::new();
     STATE.get_or_init(|| {
         let disk_file = disk_cache_path();
-        let disk = disk_file.as_deref().map(read_disk).unwrap_or_default();
+        let disk = disk_file.as_deref().and_then(read_disk);
         State {
             slots: Mutex::new(HashMap::new()),
             resolved: Condvar::new(),
-            disk,
+            restart: Mutex::new(disk.is_none()),
+            disk: disk.unwrap_or_default(),
             disk_file,
         }
     })
@@ -79,7 +98,6 @@ pub fn locate(name: &str) -> Option<PathBuf> {
         }
     }
     if let Some(hit) = disk_hit(st, name) {
-        let hit = hit.clone();
         slots.insert(name.to_string(), Slot::Done(Some(hit.clone())));
         return Some(hit);
     }
@@ -94,7 +112,7 @@ pub fn locate(name: &str) -> Option<PathBuf> {
     found
 }
 
-/// Resolve every name not yet known with one `kpsewhich` process.
+/// Resolve every name not yet known, in one go.
 pub fn warm(names: &[String]) {
     let st = state();
     let mut todo: Vec<String> = Vec::new();
@@ -108,7 +126,7 @@ pub fn warm(names: &[String]) {
             }
             match disk_hit(st, n) {
                 Some(p) => {
-                    slots.insert(n.clone(), Slot::Done(Some(p.clone())));
+                    slots.insert(n.clone(), Slot::Done(Some(p)));
                 }
                 None => {
                     slots.insert(n.clone(), Slot::Pending);
@@ -124,12 +142,19 @@ pub fn warm(names: &[String]) {
     finish(st, &todo, &found);
 }
 
-/// Start resolving [`STARTUP_FILES`] on a background thread.
+/// Start resolving [`STARTUP_FILES`] on a background thread, which also starts
+/// the one `kpsewhich` process; and, when the disk cache has to be started
+/// over, stamp the TeX tree on another.
 ///
 /// Returns at once. A caller that needs one of the files before the thread has
-/// resolved it waits on that name (see [`locate`]); it never spawns a second
-/// process for it.
+/// resolved it waits on that name (see [`locate`]); it never asks twice.
 pub fn prefetch_startup() {
+    let st = state();
+    if st.disk_file.is_some() && st.restart.lock().is_ok_and(|r| *r) {
+        std::thread::spawn(|| {
+            tree_stamp();
+        });
+    }
     std::thread::spawn(|| {
         let names: Vec<String> = STARTUP_FILES.iter().map(|s| s.to_string()).collect();
         warm(&names);
@@ -152,35 +177,199 @@ fn finish(st: &State, names: &[String], found: &[Option<PathBuf>]) {
     }
     st.resolved.notify_all();
     if let Some(file) = &st.disk_file {
-        append_disk(file, names, found);
+        append_disk(st, file, names, found);
     }
 }
 
-/// One `kpsewhich` process for all `names`.
+/// Ask `kpsewhich` for all `names`; one answer per name, in order.
 ///
-/// `kpsewhich a b` prints one line per file it found and nothing for one it did
-/// not, so answers are matched to questions by the file name at the end of each
-/// path rather than by position.
+/// An answer is the first path printed whose last component is the name asked
+/// and which is a file. That is the rule a single `kpsewhich a b` process needs
+/// -- it prints one line per file it found and nothing for one it did not, so
+/// lines cannot be matched to questions by position -- and keeping it for the
+/// interactive process too keeps the answers the same either way.
 pub fn resolve_many(names: &[String]) -> Vec<Option<PathBuf>> {
-    let Ok(out) = std::process::Command::new("kpsewhich").args(names).output() else {
+    if let Ok(mut server) = server().lock() {
+        if let Some(s) = server.as_mut() {
+            let mut out = Vec::with_capacity(names.len());
+            for n in names {
+                let answer = s.ask(n);
+                if s.dead {
+                    // It stopped answering: this name and the rest are asked
+                    // the old way, and so is everything after this.
+                    *server = None;
+                    out.extend(names[out.len()..].iter().map(|n| spawn_one(n)));
+                    break;
+                }
+                out.push(match answer {
+                    Ok(lines) => pick(n, &lines),
+                    Err(Unaskable) => spawn_one(n),
+                });
+            }
+            return out;
+        }
+    }
+    spawn_batch(names)
+}
+
+fn pick<S: AsRef<str>>(name: &str, lines: &[S]) -> Option<PathBuf> {
+    lines
+        .iter()
+        .map(|l| l.as_ref().trim())
+        .find(|l| l.rsplit('/').next() == Some(name) && Path::new(l).is_file())
+        .map(PathBuf::from)
+}
+
+fn spawn_one(name: &str) -> Option<PathBuf> {
+    spawn_batch(std::slice::from_ref(&name.to_string()))
+        .into_iter()
+        .next()
+        .flatten()
+}
+
+/// One `kpsewhich NAME...` process.
+fn spawn_batch(names: &[String]) -> Vec<Option<PathBuf>> {
+    let Ok(out) = Command::new("kpsewhich").args(names).output() else {
         return vec![None; names.len()];
     };
     // Non-zero when ANY name is missing, so the lines are read, not the status.
     let text = String::from_utf8_lossy(&out.stdout);
-    let mut by_name: BTreeMap<&str, PathBuf> = BTreeMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        let path = PathBuf::from(line);
-        if let Some(file) = line.rsplit('/').next() {
-            if path.is_file() {
-                by_name.entry(file).or_insert(path);
-            }
+    let lines: Vec<&str> = text.lines().collect();
+    names.iter().map(|n| pick(n, &lines)).collect()
+}
+
+/// A name the interactive process cannot be asked: it reads a line per name and
+/// stops at `q` or `quit`, so those, and anything a line cannot carry, are
+/// asked of a process of their own.
+struct Unaskable;
+
+/// Printed after every name, so the end of an answer -- including the empty
+/// answer for a name that is not there -- is known. `kpsewhich` answers an
+/// existing absolute path with itself.
+const SENTINEL: &str = "/dev/null";
+
+struct Server {
+    input: ChildStdin,
+    output: BufReader<File>,
+    _child: Child,
+    dead: bool,
+}
+
+impl Server {
+    #[cfg(unix)]
+    fn start() -> Option<Server> {
+        let (master, slave) = pty()?;
+        let mut child = Command::new("kpsewhich")
+            .args(["-interactive", SENTINEL])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(slave))
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let input = child.stdin.take()?;
+        let mut s = Server {
+            input,
+            output: BufReader::new(master),
+            _child: child,
+            dead: false,
+        };
+        // The answer to the name on the command line says it is ready, and
+        // that it understood `-interactive`.
+        let mut line = String::new();
+        match s.output.read_line(&mut line) {
+            Ok(n) if n > 0 && line.trim() == SENTINEL => Some(s),
+            _ => None,
         }
     }
-    names
-        .iter()
-        .map(|n| by_name.get(n.as_str()).cloned())
-        .collect()
+
+    #[cfg(not(unix))]
+    fn start() -> Option<Server> {
+        None
+    }
+
+    /// The lines `kpsewhich` printed for `name`. Sets `dead`, with no lines,
+    /// when the process stopped answering.
+    fn ask(&mut self, name: &str) -> Result<Vec<String>, Unaskable> {
+        if name.is_empty()
+            || name.trim() != name
+            || name.contains(['\n', '\r'])
+            || matches!(name, "q" | "quit")
+        {
+            return Err(Unaskable);
+        }
+        if writeln!(self.input, "{name}\n{SENTINEL}")
+            .and_then(|()| self.input.flush())
+            .is_err()
+        {
+            self.dead = true;
+            return Ok(Vec::new());
+        }
+        let mut lines = Vec::new();
+        loop {
+            let mut line = String::new();
+            match self.output.read_line(&mut line) {
+                Ok(n) if n > 0 => {}
+                _ => {
+                    self.dead = true;
+                    return Ok(Vec::new());
+                }
+            }
+            if line.trim() == SENTINEL {
+                return Ok(lines);
+            }
+            lines.push(line);
+        }
+    }
+}
+
+/// The one interactive `kpsewhich`, started on first use; `None` when it could
+/// not be, which sends every ask to a process of its own.
+fn server() -> &'static Mutex<Option<Server>> {
+    static SERVER: OnceLock<Mutex<Option<Server>>> = OnceLock::new();
+    SERVER.get_or_init(|| Mutex::new(Server::start()))
+}
+
+/// A pseudo-terminal, master and slave, both close-on-exec so no other child
+/// of this process holds the slave open. Output post-processing is off, so a
+/// line arrives as written rather than with `\r\n`.
+#[cfg(unix)]
+fn pty() -> Option<(File, File)> {
+    use std::os::fd::{FromRawFd, RawFd};
+    fn cloexec(fd: RawFd) {
+        // SAFETY: fcntl on a descriptor this function owns.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    // SAFETY: each descriptor is checked before use and handed to a File,
+    // which closes it; `ptsname` is read at once, before any other call.
+    unsafe {
+        let m = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+        if m < 0 {
+            return None;
+        }
+        let master = File::from_raw_fd(m);
+        cloexec(m);
+        if libc::grantpt(m) != 0 || libc::unlockpt(m) != 0 {
+            return None;
+        }
+        let name = libc::ptsname(m);
+        if name.is_null() {
+            return None;
+        }
+        let name = std::ffi::CStr::from_ptr(name).to_owned();
+        let s = libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
+        if s < 0 {
+            return None;
+        }
+        let slave = File::from_raw_fd(s);
+        cloexec(s);
+        let mut t: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(s, &mut t) == 0 {
+            t.c_oflag &= !libc::OPOST;
+            t.c_lflag &= !(libc::ECHO | libc::ICANON);
+            libc::tcsetattr(s, libc::TCSANOW, &t);
+        }
+        Some((master, slave))
+    }
 }
 
 /// Names whose search path is not the default one are not looked up here; the
@@ -203,6 +392,7 @@ fn disk_cache_path() -> Option<PathBuf> {
         "TEXMFDIST",
         "TEXMF",
         "TEXMFCNF",
+        "TEXMFDBS",
         "TEXMFVAR",
         "TEXMFCONFIG",
     ] {
@@ -213,24 +403,110 @@ fn disk_cache_path() -> Option<PathBuf> {
     Some(dir.parent()?.join(format!("kpse-{:016x}.tsv", h.finish())))
 }
 
+/// The files whose change means the TeX tree changed: `ls-R` in every tree
+/// kpathsea keeps a database for and `texmf.cnf` in every directory it reads
+/// configuration from, as `kpsewhich` itself reports them. Asked of a process
+/// of its own, once, and only on a run that starts the disk cache over.
+fn tree_files() -> Vec<PathBuf> {
+    let Ok(out) = Command::new("kpsewhich")
+        .args(["-show-path=ls-R", "-var-value=TEXMFCNF"])
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+    let (Some(dbs), Some(cnfs)) = (lines.next(), lines.next()) else {
+        return Vec::new();
+    };
+    // The first is a search path, `:`-separated; the second the variable, which
+    // TeX Live writes as a `{a,b,...}` brace list.
+    let dirs = |line: &str, file: &'static str| -> Vec<PathBuf> {
+        line.trim_start_matches('{')
+            .trim_end_matches('}')
+            .split([':', ','])
+            .map(|d| d.trim_start_matches('!'))
+            .filter(|d| !d.is_empty())
+            .map(|d| Path::new(d).join(file))
+            .collect()
+    };
+    let mut files = dirs(dbs, "ls-R");
+    files.extend(dirs(cnfs, "texmf.cnf"));
+    files
+}
+
+/// `#tree` header lines naming each of `files` and its size and modification
+/// time, or `-` for one that is not there (yet).
+fn stamp_of(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|f| format!("#tree\t{}\t{}\n", f.display(), file_stamp(f)))
+        .collect()
+}
+
+fn file_stamp(f: &Path) -> String {
+    let Ok(meta) = std::fs::metadata(f) else {
+        return "-".to_string();
+    };
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
+    format!("{}:{mtime}", meta.len())
+}
+
+/// The header a restarted disk file opens with; `None` when the tree cannot be
+/// stamped, and then nothing is recorded, since nothing could be validated.
+fn tree_stamp() -> Option<&'static str> {
+    static STAMP: OnceLock<Option<String>> = OnceLock::new();
+    STAMP
+        .get_or_init(|| {
+            let files = tree_files();
+            (!files.is_empty()).then(|| stamp_of(&files))
+        })
+        .as_deref()
+}
+
 /// A file found through the working directory is not a property of the TeX tree.
 fn under_cwd(p: &Path) -> bool {
     std::env::current_dir().is_ok_and(|d| p.starts_with(d))
 }
 
-fn read_disk(file: &Path) -> BTreeMap<String, PathBuf> {
-    let Ok(text) = std::fs::read_to_string(file) else {
-        return BTreeMap::new();
-    };
-    // Later lines win: a stale path re-resolved is appended, not rewritten.
-    text.lines()
-        .filter_map(|l| l.split_once('\t'))
-        .map(|(n, p)| (n.to_string(), PathBuf::from(p)))
-        .collect()
+/// The recorded paths, or `None` when the file is missing, carries no stamp, or
+/// its stamp no longer matches the tree.
+fn read_disk(file: &Path) -> Option<BTreeMap<String, PathBuf>> {
+    let text = std::fs::read_to_string(file).ok()?;
+    parse_disk(&text)
 }
 
-fn append_disk(file: &Path, names: &[String], found: &[Option<PathBuf>]) {
-    use std::io::Write;
+fn parse_disk(text: &str) -> Option<BTreeMap<String, PathBuf>> {
+    let (header, body): (Vec<&str>, Vec<&str>) = text.lines().partition(|l| l.starts_with('#'));
+    let mut stamped = false;
+    for line in header {
+        let mut fields = line.strip_prefix("#tree\t")?.splitn(2, '\t');
+        let (Some(path), Some(stamp)) = (fields.next(), fields.next()) else {
+            return None;
+        };
+        if file_stamp(Path::new(path)) != stamp {
+            return None;
+        }
+        stamped = true;
+    }
+    if !stamped {
+        return None;
+    }
+    // Later lines win: a stale path re-resolved is appended, not rewritten.
+    Some(
+        body.into_iter()
+            .filter_map(|l| l.split_once('\t'))
+            .map(|(n, p)| (n.to_string(), PathBuf::from(p)))
+            .collect(),
+    )
+}
+
+fn append_disk(st: &State, file: &Path, names: &[String], found: &[Option<PathBuf>]) {
     let mut text = String::new();
     for (n, f) in names.iter().zip(found) {
         if let Some(p) = f.as_ref().filter(|p| p.is_absolute() && !under_cwd(p)) {
@@ -240,15 +516,107 @@ fn append_disk(file: &Path, names: &[String], found: &[Option<PathBuf>]) {
     if text.is_empty() {
         return;
     }
+    let Ok(mut restart) = st.restart.lock() else {
+        return;
+    };
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
+    if *restart {
+        let Some(stamp) = tree_stamp() else {
+            return;
+        };
+        // A whole new file, renamed into place, so a concurrent reader sees the
+        // old file or the new one and never a header without its paths.
+        let tmp = file.with_extension(format!("tsv.{}", std::process::id()));
+        if std::fs::write(&tmp, format!("{stamp}{text}")).is_ok()
+            && std::fs::rename(&tmp, file).is_ok()
+        {
+            *restart = false;
+        }
+        return;
+    }
     // One write call per batch: appends of this size do not interleave.
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(file)
-    {
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(file) {
         let _ = f.write_all(text.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cache_stamped_against_a_tree_that_changed_is_discarded() {
+        // What a TeX Live update does: a package moves to a new path, the old
+        // file stays behind, and `mktexlsr` rewrites `ls-R`. The recorded path
+        // still exists, so only the stamp can say it is stale.
+        let dir = std::env::temp_dir().join(format!("texrs-kpse-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("ls-R");
+        let old = dir.join("old.sty");
+        std::fs::write(&db, "% ls-R -- filename database\n./:\nold.sty\n").unwrap();
+        std::fs::write(&old, "").unwrap();
+        let cnf = dir.join("absent").join("texmf.cnf");
+
+        let cache = format!(
+            "{}x.sty\t{}\n",
+            stamp_of(&[db.clone(), cnf.clone()]),
+            old.display()
+        );
+        let read = parse_disk(&cache).expect("an unchanged tree keeps the cache");
+        assert_eq!(read.get("x.sty"), Some(&old));
+
+        // Same size, new time: a rewrite that happens to be as long counts.
+        std::fs::write(&db, "% ls-R -- filename database\n./:\nnew.sty\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        File::options()
+            .write(true)
+            .open(&db)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(parse_disk(&cache).is_none(), "a rewritten ls-R discards it");
+
+        // A database or configuration file that appears where there was none
+        // changes the search as much as one that changes.
+        let cache = format!("{}x.sty\t{}\n", stamp_of(&[cnf.clone()]), old.display());
+        assert!(parse_disk(&cache).is_some());
+        std::fs::create_dir_all(cnf.parent().unwrap()).unwrap();
+        std::fs::write(&cnf, "TEXINPUTS = .\n").unwrap();
+        assert!(parse_disk(&cache).is_none(), "a new texmf.cnf discards it");
+
+        // A file from before stamps existed is never trusted.
+        assert!(parse_disk(&format!("x.sty\t{}\n", old.display())).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_interactive_process_answers_as_a_process_per_name_does() {
+        // A found name, a missing one, and a name the interactive process must
+        // not be sent (`q` would stop it). Skipped without a TeX installation.
+        let names: Vec<String> = ["article.cls", "texrs-no-such-file.sty", "q", "cmr10.tfm"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let batch = spawn_batch(&names);
+        if batch[0].is_none() {
+            eprintln!("skipping: kpsewhich cannot find article.cls");
+            return;
+        }
+        let Some(mut s) = Server::start() else {
+            panic!("kpsewhich is installed but -interactive could not be started");
+        };
+        let asked: Vec<Option<PathBuf>> = names
+            .iter()
+            .map(|n| match s.ask(n) {
+                Ok(lines) => pick(n, &lines),
+                Err(Unaskable) => spawn_one(n),
+            })
+            .collect();
+        assert!(!s.dead);
+        assert_eq!(asked, batch);
+        assert!(asked[1].is_none());
     }
 }
