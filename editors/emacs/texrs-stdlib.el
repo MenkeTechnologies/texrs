@@ -78,6 +78,7 @@
     "\\divide"
     "\\intercept"
     "\\proceed"
+    "\\char"
     "\\chardef"
     "\\countdef"
     "\\long"
@@ -266,6 +267,7 @@
     (puthash "\\divide" "\\divide  —  Divide a register, truncating toward zero as TeX's does. [Registers]" table)
     (puthash "\\intercept" "\\intercept  —  Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. [Intercepts]" table)
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
+    (puthash "\\char" "\\char  —  Set the character of a code in the text (tex.web §1110): `A\\char66 C` sets `ABC`. [Registers]" table)
     (puthash "\\chardef" "\\chardef  —  Define a control sequence that IS a number: `\\chardef\\active=13` makes `\\active` usable wherever a number is scanned, which is how plain.tex writes `\\catcode`\\~=\\active`. [Registers]" table)
     (puthash "\\countdef" "\\countdef  —  Give a count register a name, usable in every position the register itself is: assignment, `\\advance` and `\\the` all reach the same register through either spelling. [Registers]" table)
     (puthash "\\long" "\\long  —  A definition prefix: the macro's arguments may contain `\\par`. [Macro definition]" table)

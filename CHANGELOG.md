@@ -13,6 +13,8 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\char` and a `\chardef`ed name set the character of their code in a
+  document body (§1110, §1141), where `\char` stopped the run.
 - A definition whose name is missing is `Missing control sequence inserted`
   (§1215): the token is read again and the definition names `\inaccessible`,
   where it stopped the run.

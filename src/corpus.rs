@@ -441,6 +441,12 @@ pub const CORPUS: &[Entry] = &[
         "\\def\\loud{<<\\proceed>>}\n\\intercept{around}{greet}{\\loud}\n\\message{\\greet{WORLD}}   % => <<HELLO-WORLD>>",
     ),
     (
+        "\\char",
+        "Registers",
+        "Set the character of a code in the text (tex.web \u{a7}1110): `A\\char66 C` sets `ABC`. The code is scanned as a number and must be known while lowering, so a register is refused; a code outside 0..255 is `Bad character code`. A name made by `\\chardef` does the same without the command.",
+        "A\\char66 \\char\"43",
+    ),
+    (
         "\\chardef",
         "Registers",
         "Define a control sequence that IS a number: `\\chardef\\active=13` makes `\\active` usable wherever a number is scanned, which is how plain.tex writes `\\catcode`\\~=\\active`. The code is 0..255 and a wider one is `! Bad character code (N).`. The value is fixed when it is defined, so it folds while lowering rather than being read at run time.",

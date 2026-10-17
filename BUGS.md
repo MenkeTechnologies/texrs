@@ -322,16 +322,10 @@ and that could not be seen before `\titleformat` delivered anything at all.
   exactly this drift was written listing the files it knew about, and a file
   added later inherits no protection from it.
 
-- **`\char` is not implemented.** `A\char65 B` in a document body stops the run
-  with `! Undefined control sequence \char.`, where tex sets an `A`. §434's
-  `\char` is how a document reaches a glyph by number, and it is what
-  `\symbol` and much of a package's character handling are built on.
-
-  Worth knowing how it hides: inside a `\message` the two engines AGREE.
-  `\message{[\char65]}` prints `[\char 65]` from tex and `[\char 65]` from
-  texrs, because `\char` is unexpandable there and both write its name. The
-  parity corpus compares `\message` streams, so no case in it can see this —
-  the probe cannot reach the place the primitive acts.
+- **`\char` and a `\chardef`ed name set the character of their code** in a
+  document body (§1110, §1141), for a code known while lowering. `\char\count1`
+  is refused: a register's value is the run's and the character is chosen
+  at lowering. A code outside 0-255 is `Bad character code`.
 
 - **A document that loads `fontspec` prints a second diagnostic**:
   `package fontspec is not loadable: Missing number, found \luatexversion`,

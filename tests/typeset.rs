@@ -3806,3 +3806,20 @@ fn the_page_builder_reads_the_penalties_the_document_set() {
         }
     );
 }
+
+#[test]
+fn char_and_a_chardefed_name_set_the_character_of_their_code() {
+    // §1110 `\char` and §1141's chardef: both put the character of the code in
+    // the text, and the code is scanned as a number (here a decimal, a hex
+    // and an octal).
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2 \n\
+               A\\char66 \\char\"43\\chardef\\q=68 \\q\\char'103\n\\end\n";
+    let text = texrs::run_text(src).expect("\\char is a primitive");
+    assert_eq!(text.split_whitespace().collect::<String>(), "ABCDC");
+}
+
+#[test]
+fn char_outside_zero_to_255_is_refused() {
+    let src = "\\char256\n\\end\n";
+    assert!(texrs::run_text(src).is_err());
+}

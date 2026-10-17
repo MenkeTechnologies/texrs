@@ -545,6 +545,18 @@ impl Lowerer {
     /// agreeing: in Arimo at 10pt a literal pair of backticks is 6.660pt
     /// against 3.330pt for the one character it stands for, so a quoted line
     /// measured from the literal is set too wide for the page it is broken to.
+    /// A character by code (§1110's `\char`, a `\chardef`ed name), written to
+    /// the text stream when there is one. §434 bounds the code to 0..255.
+    fn push_char_code(&mut self, out: &mut Vec<Cmd>, code: i64) -> R<()> {
+        if !(0..=255).contains(&code) {
+            return Err(TexError(format!("Bad character code ({code})")));
+        }
+        if self.text_output {
+            self.push_text_char(out, char::from(code as u8));
+        }
+        Ok(())
+    }
+
     fn push_text_char(&mut self, out: &mut Vec<Cmd>, c: char) {
         let mut at = out.len();
         while at > 0 && matches!(out[at - 1], Cmd::Line(_)) {
@@ -1665,6 +1677,15 @@ impl Lowerer {
                 // `\unless\ifnum ...` runs the ELSE arm when the test holds.
                 "unless" => self.eng.set_unless(true),
                 "relax" => {}
+                // §1110 and §1141: `\char` and a `\chardef`ed name set the
+                // character of that code. The font draws it, as for any other.
+                "char" => {
+                    let Num::Literal(code) = self.number(lx)? else {
+                        // A register's value is the run's, and a character is chosen here.
+                        return Err(TexError("\\char needs a number known while lowering".into()));
+                    };
+                    self.push_char_code(&mut out, code)?;
+                }
                 // A blank line IS a `\par` -- the mouth synthesises one per
                 // blank line, §304 -- and dropping it is why a whole book came
                 // out as a single paragraph. The line breaker starts a fresh
@@ -1677,6 +1698,13 @@ impl Lowerer {
                     if self.text_output {
                         self.push_text(&mut out, "\n\n");
                     }
+                }
+                _ if matches!(self.eng.meanings.get(&name), Some(Meaning::CharDef(_))) => {
+                    let Some(Meaning::CharDef(code)) = self.eng.meanings.get(&name) else {
+                        unreachable!("just matched");
+                    };
+                    let code = *code;
+                    self.push_char_code(&mut out, code)?;
                 }
                 other => {
                     // TeX's loop idiom -- a macro whose last act is to call

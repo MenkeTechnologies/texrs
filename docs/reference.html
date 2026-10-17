@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">184</div>
+            <div class="stat-val">185</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -294,6 +294,7 @@
 \count1=7 \multiply\count1 by 3   % =&gt; 21</pre></td></tr>
             <tr><td><code>\divide</code></td><td>Divide a register, truncating toward zero as TeX's does.</td><td><pre>\divide\count&lt;N&gt; by &lt;number&gt;
 \count1=7 \divide\count1 by 2   % =&gt; 3</pre></td></tr>
+            <tr><td><code>\char</code></td><td>Set the character of a code in the text (tex.web §1110): <code>A\char66 C</code> sets <code>ABC</code>. The code is scanned as a number and must be known while lowering, so a register is refused; a code outside 0..255 is <code>Bad character code</code>. A name made by <code>\chardef</code> does the same without the command.</td><td><pre>A\char66 \char"43</pre></td></tr>
             <tr><td><code>\chardef</code></td><td>Define a control sequence that IS a number: <code>\chardef\active=13</code> makes <code>\active</code> usable wherever a number is scanned, which is how plain.tex writes <code>\catcode</code>\~=\active<code>. The code is 0..255 and a wider one is </code>! Bad character code (N).<code>. The value is fixed when it is defined, so it folds while lowering rather than being read at run time.</code></td><td><pre>\chardef\active=13
 \catcode`\~=\active</pre></td></tr>
             <tr><td><code>\countdef</code></td><td>Give a count register a name, usable in every position the register itself is: assignment, <code>\advance</code> and <code>\the</code> all reach the same register through either spelling. plain.tex's <code>\pageno</code> is <code>\countdef\pageno=0</code>. The register number is 0..255 and a wider one is <code>! Bad register code (N).</code>.</td><td><pre>\countdef\pageno=0
