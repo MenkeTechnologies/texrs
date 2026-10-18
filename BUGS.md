@@ -195,8 +195,8 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
   the program runs, and `src/dvi/out.rs` writes the DVI (§583-§643). Every
   document dvi-parity measures comes out byte for byte as tex writes it.
   What that path does not do yet:
-  - alignments (`\halign`, `\valign`, and so plain.tex's `\matrix`, `\cases`,
-    `\eqalign` and the cedilla `\c`, which is built with `\ooalign`);
+  - after a display alignment (§1206), the assignments before the closing
+    `$$` are not carried out;
   - `\the\parshape`, and between `\accent` and its character any assignment
     but a font selection or an integer parameter (§1123's `do_assignments`);
   - `\showgroups` names a box's or a formula's group by the token that opened

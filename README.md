@@ -623,8 +623,10 @@ it. Formulas are built there too: math mode's commands make an mlist
 (§1136-§1193, `src/stomach/math.rs`), `mlist_to_hlist` sets it from the
 families the document loaded, and a display is placed with its equation number
 as §1199-§1205 place it. The documents in `tests/math_cases` come out as tex's
-DVI byte for byte, and so do `\accent` (§1123-§1125) and `\parshape`
-(§1248). That path sets no alignments yet; `BUGS.md` lists the rest.
+DVI byte for byte, and so do `\accent` (§1123-§1125), `\parshape` (§1248)
+and alignments (§768-§812): tables, and plain.tex's displays and matrices
+built with `\halign` (`tests/align_cases`). `BUGS.md` lists what that path
+still lacks.
 `--pdf` and every LaTeX document still take the string path. There the page
 breaker reads its penalties once per document, and the shipper is handed line
 boxes built from already-broken strings.
