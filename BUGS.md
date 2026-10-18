@@ -901,9 +901,15 @@ luahbtex rather than against expectations written by hand. What does not:
 - **The typesetting path.** The stomach calls neither: `--pdf` still measures an
   OpenType face by its `hmtx` advances, with no kerning and no OpenType
   ligatures.
-- **Name lookup.** `name:` and anonymous requests need luaotfload's font
-  names database (`luaotfload-database.lua`): which directories it scans, how a
-  family, a style and an optical size pick a file. Only the grammar is ported.
+- **Name lookup, the rest.** `name:` requests are resolved from the names
+  database luaotfload has built (`src/otf/names.rs`); building it -- which
+  directories `luaotfload-database.lua` scans and how it reads each face --
+  and rebuilding it when a lookup misses (`update_live`) are not ported, so a
+  machine whose luaotfload never built one resolves no `name:`.
+- **Font embedding.** The TrueType and CFF subsetters and the ToUnicode
+  writer match luatex's bytes but the PDF writer (`src/pdf.rs`) does not call
+  them yet. A CFF2 table is not subset: `make_cff_subset` reads only a
+  `CFF ` table of major version 1.
 - **Variable fonts, the rest.** Node mode loads a TrueType variable font at the
   instance `axis=` or `instance=` asks for, as the fontloader does; a CFF2 one
   is still read at its default (the fontloader blends CFF2 charstrings, which

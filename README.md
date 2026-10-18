@@ -485,9 +485,24 @@ than none.
   (`script=math`) carries luaotfload's MathConstants, variant chains,
   extensible recipes, italics, top accents and math kerns, checked against
   luahbtex for Latin Modern, STIX Two, TeX Gyre Termes and Pagella Math
-  (`tests/node_math.rs`).
+  (`tests/node_math.rs`). `name:` and unprefixed requests resolve through
+  luaotfload's own names database and its lookup cache, read where luaotfload
+  keeps them (`src/otf/names.rs`, checked request by request against
+  luaotfload's resolver by `tests/node_names.rs`).
   Neither this nor the harf shaper is on the typesetting path yet; [0x06] says
   what is missing.
+- The font programs luatex embeds for an OpenType font, as libraries for the
+  PDF writer: a TrueType face's `/FontFile2` subset (`src/otf/ttsubset.rs`,
+  writetype2.c's `make_tt_subset` with sfnt.c's table writer), a CFF face's
+  `/FontFile3` subset (`src/otf/cffsubset.rs`, writecff.c's `write_cff` and
+  `write_cid_cff`: name-keyed fonts made CID-keyed, subroutines inlined), each
+  with its `/CIDSet`, and the CID font's `/ToUnicode` CMap
+  (`src/otf/cidcmap.rs`, tounicode.c's `write_cid_tounicode`). Each is
+  compared byte for byte with what luahbtex writes for the same glyphs
+  (`tests/ttsubset.rs` and `tests/cffsubset.rs`, frozen by
+  `scripts/ttsubset-freeze.sh` and `scripts/cffsubset-freeze.sh`): DejaVu
+  Sans, Arimo and Noto Serif; Latin Modern Roman, TeX Gyre Termes, STIX Two
+  Math and the CID-keyed Harano Aji Mincho.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
   chosen by minimising total demerits across the whole paragraph (`tex.web`
   §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
