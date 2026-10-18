@@ -451,6 +451,16 @@ than none.
   and the file's `/ID` made by luatex's recipes. LuaTeX's page-stream writer is
   ported too (`src/pdfpage.rs`: text in `BT`/`TJ` with kerns, rules, `pdf:`
   specials, save, restore and matrices), for pages built from node lists.
+- LuaTeX's backend commands. `\pdfvariable` expands to the parameter its key
+  names, assigned, read and grouped like any; `\pdffeedback` answers
+  `lastobj`, `lastannot`, `lastlink`, `pageref`, `colorstackinit`, `version`
+  and the rest; `\pdfextension` reads every one of luatex's keywords. Objects,
+  outlines (with the destinations they name, in a name tree), `info`,
+  `catalog` with `openaction`, `names`, `trailer`, `pageattr`, `pagesattr` and
+  `pageresources` reach the file numbered, ordered and spelled as luatex writes
+  them: measured on a document using all of them, every object agrees with
+  luatex's byte for byte but the content stream, the font program and the
+  information dictionary (`tests/pdf_backend.rs`).
 - Readers for the binary formats a TeX installation is made of, each printing
   what it read: `.tfm`, `.vf`, `.pk`, `.otf`, `.pfb`, `.map`, `.enc`, `.dvi`,
   `.bib`/`.aux`/`.bst`, and tar bundles.
@@ -546,7 +556,9 @@ refused with a message saying so, and `src/postline.rs` and `src/page.rs` are
 still a library beside the path rather than the path itself.
 
 The same missing node list is why a `\write`, `\openout`, `\closeout` or
-`\special` without `\immediate` does nothing yet. Each is read and built as the
+`\special` without `\immediate` does nothing yet, nor a `\pdfextension
+literal`, `dest`, `annot`, link, thread, `save`, `restore`, `setmatrix`,
+`colorstack` or `refobj`, a `\useimageresource` or a `\savepos`. Each is read and built as the
 whatsit §1341 describes, and `Lowerer::ship_whatsit` is §1373's `out_what` for
 it -- the `\write` expanded when it is shipped, not when it was read -- but a
 whatsit has to sit in the list of the page it is shipped with, and until pages

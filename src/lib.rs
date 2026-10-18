@@ -14,6 +14,7 @@
 pub mod agl;
 pub mod aot;
 pub mod aot_runtime;
+pub mod backend;
 pub mod banner;
 pub mod bib;
 pub mod box_;
@@ -458,7 +459,9 @@ pub fn run_pdf_with_messages(
         }
         _ => lower_for_pdf(path, &src_d, latex),
     };
-    let ran = ran?;
+    let mut ran = ran?;
+    // The file is written on this thread, by the page builder below.
+    crate::pdfdoc::prepare(std::mem::take(&mut ran.backend));
     let ahead = ran.pipeline.and_then(crate::typeset::Pipeline::finish);
     let pdf = crate::typeset::to_pdf_ahead(
         &ran.text,
@@ -485,6 +488,8 @@ struct Lowered {
     page_colour: Option<crate::colour::Rgb>,
     /// The paragraphs broken while the document was lowered, when they were.
     pipeline: Option<crate::typeset::Pipeline>,
+    /// See [`PdfProgram::backend`].
+    backend: crate::backend::Prepared,
 }
 
 /// The bytecode of a PDF run and what the page builder reads beside it: the
@@ -498,6 +503,10 @@ pub struct PdfProgram {
     pub families: crate::typeset::Families,
     pub layout: crate::typeset::Layout,
     pub page_colour: Option<crate::colour::Rgb>,
+    /// What the document gave LuaTeX's PDF backend while it was lowered: its
+    /// variables, the objects it wrote, its catalogue and outline entries
+    /// (`crate::backend`).
+    pub backend: crate::backend::Prepared,
 }
 
 /// [`PdfProgram`] for `src`, read the way [`run_pdf_with_messages`] reads it:
@@ -542,6 +551,7 @@ fn lower_for_pdf(
         layout: program.layout,
         page_colour: program.page_colour,
         pipeline,
+        backend: program.backend,
     })
 }
 
@@ -576,12 +586,20 @@ fn pdf_program(
     // preamble, and until they were read every document was set on plain.tex's
     // 10pt-on-12pt, 1in-margin page whatever it asked for.
     let layout = lowerer.layout.clone();
+    let backend = {
+        let eng = &mut lowerer.eng;
+        let mut b = std::mem::take(&mut eng.backend);
+        let prepared = b.take(eng);
+        eng.backend = b;
+        prepared
+    };
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     Ok(PdfProgram {
         chunk,
         families,
         layout,
         page_colour,
+        backend,
     })
 }
 

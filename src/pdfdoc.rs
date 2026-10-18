@@ -286,7 +286,7 @@ impl Writer {
 
     /// `pdf_finish_file`'s tail: the last object stream, then the cross
     /// reference stream, which is the trailer.
-    pub fn finish(mut self, root: u32, info: Option<u32>, id: [u8; 16]) -> Vec<u8> {
+    pub fn finish(mut self, root: u32, info: Option<u32>, trailer: &str, id: [u8; 16]) -> Vec<u8> {
         self.flush_objstm();
         let xref = self.create();
         let xref_offset = self.out.len();
@@ -340,6 +340,12 @@ impl Writer {
         );
         if let Some(info) = info {
             keys.push_str(&format!(" /Info {info} 0 R"));
+        }
+        // `\pdfextension trailer`, between the information dictionary and the
+        // identifier.
+        if !trailer.is_empty() {
+            keys.push(' ');
+            keys.push_str(trailer);
         }
         keys.push_str(&format!(" /ID [ <{hex}> <{hex}> ]"));
         self.stream(xref, &keys, &rows, true);
@@ -426,10 +432,36 @@ struct PagesNode {
     pages: usize,
 }
 
+thread_local! {
+    /// What the run that just lowered gave the backend, for the file it is
+    /// about to write: see [`prepare`].
+    static PREPARED: std::cell::RefCell<Option<crate::backend::Prepared>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Hand the next document written on this thread what its run gave the
+/// backend: its variables, the objects it already wrote, its `info`,
+/// `catalog`, `names` and `trailer`, its outlines and the destinations they
+/// name.
+pub fn prepare(prepared: crate::backend::Prepared) {
+    PREPARED.with(|p| *p.borrow_mut() = Some(prepared));
+}
+
+/// What [`prepare`] handed over, once.
+pub fn take_prepared() -> Option<crate::backend::Prepared> {
+    PREPARED.with(|p| p.borrow_mut().take())
+}
+
 /// The file for `pages`, whose content streams are `contents`, one a page,
-/// with LuaTeX's object numbering and order.
-pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> {
-    let mut w = Writer::new(vars);
+/// with LuaTeX's object numbering and order, and what the run gave the
+/// backend (`prepared`): the file it began with the objects it wrote while
+/// reading the document, and what it asked the catalogue, the information
+/// dictionary, the page tree and each page to carry.
+pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Prepared) -> Vec<u8> {
+    let mut prepared = prepared;
+    let vars = prepared.vars;
+    let mut w = prepared.writer.take().unwrap_or_else(|| Writer::new(vars));
+    w.vars = vars;
     let pictures = crate::pdf::picture_classes(pages);
 
     // The content streams are deflated before any is written: each reads only
@@ -448,6 +480,7 @@ pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> 
     };
 
     let mut fonts: Vec<UsedFont> = Vec::new();
+    let mut last_page = 0u32;
     let mut images: Vec<Option<u32>> = Vec::new();
     let mut tree: Vec<PagesNode> = Vec::new();
     for ((page, classes), stream) in pages.iter().zip(&pictures).zip(streams) {
@@ -463,7 +496,12 @@ pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> 
         }
         // `pdf_begin_page`: the resources, the page, the content.
         let resources = w.create();
-        let page_number = w.create();
+        // `pdf_get_obj(pdf, obj_type_page, total_pages + 1, 0)`: a page
+        // something asked for before it existed was numbered then.
+        let page_number = match prepared.pages.get(&(tree_pages(&tree) as i64 + 1)) {
+            Some(&k) => k,
+            None => w.create(),
+        };
         let content = w.create();
         let content_at = w.out.len();
         w.places[content as usize] = Place::File(content_at);
@@ -517,24 +555,20 @@ pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> 
             node.pages += 1;
             node.number
         };
-        let mut body = Vec::new();
-        Object::dict([
-            ("Type", Object::name("Page")),
-            ("Contents", Object::Reference(content)),
-            ("Resources", Object::Reference(resources)),
-            (
-                "MediaBox",
-                Object::Array(vec![
-                    Object::Integer(0),
-                    Object::Integer(0),
-                    Object::Raw(bp_text(page.width, vars.decimal_digits)),
-                    Object::Raw(bp_text(page.height, vars.decimal_digits)),
-                ]),
-            ),
-            ("Parent", Object::Reference(parent)),
-        ])
-        .write_into(&mut body);
-        w.object(page_number, OBJSTM_ALWAYS, &body);
+        // `pdf_end_page`'s page dictionary, `\pdfvariable pageattr` after the
+        // media box.
+        let mut body = format!(
+            "<< /Type /Page /Contents {content} 0 R /Resources {resources} 0 R \
+             /MediaBox [ 0 0 {} {} ]",
+            bp_text(page.width, vars.decimal_digits),
+            bp_text(page.height, vars.decimal_digits)
+        );
+        if !prepared.page_attr.is_empty() {
+            body.push(' ');
+            body.push_str(&prepared.page_attr);
+        }
+        body.push_str(&format!(" /Parent {parent} 0 R >>"));
+        w.object(page_number, OBJSTM_ALWAYS, body.as_bytes());
         // The pictures this page used for the first time, as `pdf_end_page`
         // writes pending images.
         let mut procset = BTreeSet::new();
@@ -571,30 +605,83 @@ pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> 
             }
             res.insert("ProcSet".to_string(), Object::Array(set));
         }
+        // `\pdfvariable pageresources` first, then what the page drew with.
         let mut body = Vec::new();
         Object::Dict(res).write_into(&mut body);
+        if !prepared.page_resources.is_empty() {
+            let rest = String::from_utf8_lossy(&body[2..]).into_owned();
+            body = format!("<< {}{rest}", prepared.page_resources).into_bytes();
+        }
         w.object(resources, OBJSTM_ALWAYS, &body);
+        last_page = page_number;
+    }
+
+    // `check_nonexisting_destinations`: a destination something named and no
+    // page set goes to the last page, newest first as `head_tab` lists them.
+    let mut dests: Vec<u32> = prepared.dests.values().copied().collect();
+    dests.sort_unstable();
+    for &d in dests.iter().rev() {
+        let body = format!("[ {last_page} 0 R /Fit ]");
+        w.object(d, OBJSTM_ALWAYS, body.as_bytes());
     }
 
     write_fonts(&mut w, &fonts);
-    let root_pages = write_page_tree(&mut w, tree);
+    let root_pages = write_page_tree(&mut w, tree, &prepared.pages_attr);
+    let outlines = write_outlines(&mut w, &prepared);
+    let names = write_name_tree(&mut w, &prepared);
 
+    // The catalogue: the page tree, the outlines, the name tree, then what
+    // `\pdfextension catalog` added and its `openaction`.
     let catalog = w.create();
-    let mut body = Vec::new();
-    let mut dict = Dict::from([("Type".to_string(), Object::name("Catalog"))]);
+    let mut body = String::from("<< /Type /Catalog");
     if let Some(pages) = root_pages {
-        dict.insert("Pages".to_string(), Object::Reference(pages));
+        body.push_str(&format!(" /Pages {pages} 0 R"));
+        if let Some(o) = outlines {
+            body.push_str(&format!(" /Outlines {o} 0 R"));
+        }
+        if let Some(n) = names {
+            body.push_str(&format!(" /Names {n} 0 R"));
+        }
+        if !prepared.catalog.is_empty() {
+            body.push(' ');
+            body.push_str(&prepared.catalog);
+        }
     }
-    Object::Dict(dict).write_into(&mut body);
-    w.object(catalog, OBJSTM_ALWAYS, &body);
+    if let Some(a) = prepared.open_action {
+        body.push_str(&format!(" /OpenAction {a} 0 R"));
+    }
+    body.push_str(" >>");
+    w.object(catalog, OBJSTM_ALWAYS, body.as_bytes());
 
+    // `pdf_print_info`: what `\pdfextension info` said first, then each key
+    // it did not give.
     let info = w.create();
     let date = crate::pdf::pdf_date(crate::pdf::stamp());
-    let body = format!(
-        "<< /Producer (texrs-{v}) /Creator (TeX) /CreationDate ({date}) /ModDate ({date}) \
-         /Trapped /False /PTEX.FullBanner (This is texrs, Version {v}) >>",
-        v = env!("CARGO_PKG_VERSION")
-    );
+    let given = |key: &str| prepared.info.contains(key);
+    let mut body = String::from("<<");
+    if !prepared.info.is_empty() {
+        body.push(' ');
+        body.push_str(&prepared.info);
+    }
+    let v = env!("CARGO_PKG_VERSION");
+    if !given("/Producer") {
+        body.push_str(&format!(" /Producer (texrs-{v})"));
+    }
+    if !given("/Creator") {
+        body.push_str(" /Creator (TeX)");
+    }
+    if !given("/CreationDate") {
+        body.push_str(&format!(" /CreationDate ({date})"));
+    }
+    if !given("/ModDate") {
+        body.push_str(&format!(" /ModDate ({date})"));
+    }
+    if !given("/Trapped") {
+        body.push_str(" /Trapped /False");
+    }
+    body.push_str(&format!(
+        " /PTEX.FullBanner (This is texrs, Version {v}) >>"
+    ));
     w.object(info, INFO_THRESHOLD, body.as_bytes());
 
     let cwd = std::env::current_dir()
@@ -605,7 +692,185 @@ pub fn write(pages: &[Page], contents: Vec<String>, vars: Variables) -> Vec<u8> 
         &cwd,
         &format!("{}.pdf", crate::lua::jobname()),
     );
-    w.finish(catalog, Some(info), id)
+    w.finish(catalog, Some(info), &prepared.trailer, id)
+}
+
+/// How many pages the tree holds so far, which is the number of the page
+/// being begun, less one.
+fn tree_pages(tree: &[PagesNode]) -> usize {
+    tree.iter().map(|n| n.pages).sum()
+}
+
+/// `print_outlines`: the outline dictionary and every entry, newest entry
+/// first as `head_tab` lists them.
+fn write_outlines(w: &mut Writer, p: &crate::backend::Prepared) -> Option<u32> {
+    if p.first_outline == 0 {
+        return None;
+    }
+    let mut entries = p.outlines.clone();
+    let find = |entries: &[crate::backend::OutlineEntry], k: u32| {
+        entries.iter().position(|e| e.number == k)
+    };
+    // `open_subentries`: count each entry's open descendants, set its
+    // parent and its last child, and make a closed entry's count negative.
+    fn open(entries: &mut Vec<crate::backend::OutlineEntry>, at: usize) -> i64 {
+        let mut k = 0;
+        let mut l = entries[at].first;
+        let me = entries[at].number;
+        while l != 0 {
+            let Some(i) = entries.iter().position(|e| e.number == l) else {
+                break;
+            };
+            k += 1;
+            let c = open(entries, i);
+            if entries[i].count > 0 {
+                k += c;
+            }
+            entries[i].parent = me;
+            let r = entries[i].next;
+            if r == 0 {
+                entries[at].last = l;
+            }
+            l = r;
+        }
+        entries[at].count = match entries[at].count > 0 {
+            true => k,
+            false => -k,
+        };
+        k
+    }
+    let outlines = w.create();
+    let mut k = 0;
+    let mut l = p.first_outline;
+    while let Some(i) = find(&entries, l) {
+        k += 1;
+        let a = open(&mut entries, i);
+        if entries[i].count > 0 {
+            k += a;
+        }
+        // LuaTeX sets a top-level entry's parent to `pdf->obj_ptr`, which
+        // is the outline dictionary just numbered.
+        entries[i].parent = outlines;
+        l = entries[i].next;
+        if l == 0 {
+            break;
+        }
+    }
+    let body = format!(
+        "<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count {k} >>",
+        p.first_outline, p.last_outline
+    );
+    w.object(outlines, OBJSTM_ALWAYS, body.as_bytes());
+    for e in &entries {
+        let mut body = format!("<< /Title {} 0 R /A {} 0 R", e.title, e.action);
+        for (key, v) in [
+            ("Parent", e.parent),
+            ("Prev", e.prev),
+            ("Next", e.next),
+            ("First", e.first),
+            ("Last", e.last),
+        ] {
+            if v != 0 {
+                body.push_str(&format!(" /{key} {v} 0 R"));
+            }
+        }
+        if e.count != 0 {
+            body.push_str(&format!(" /Count {}", e.count));
+        }
+        if let Some(attr) = &e.attr {
+            body.push_str(&format!("\n{attr}\n"));
+        }
+        body.push_str(" >>");
+        w.object(e.number, OBJSTM_ALWAYS, body.as_bytes());
+    }
+    Some(outlines)
+}
+
+/// `dest_cmp`: two destination names in the order a name tree needs, a
+/// hexadecimal string compared as the bytes it stands for.
+fn dest_order(a: &str, b: &str) -> std::cmp::Ordering {
+    let bytes = |s: &str| -> Vec<u8> {
+        let raw = s.as_bytes();
+        let hex = raw.len() >= 2
+            && raw[0] == b'<'
+            && raw[raw.len() - 1] == b'>'
+            && raw.len() % 2 == 0
+            && raw[1..raw.len() - 1].iter().all(u8::is_ascii_hexdigit);
+        match hex {
+            true => raw[1..raw.len() - 1]
+                .chunks(2)
+                .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap_or("0"), 16).unwrap_or(0))
+                .collect(),
+            false => raw.to_vec(),
+        }
+    };
+    let empty = |s: &str| s.is_empty() || s == "<>";
+    match (empty(a), empty(b)) {
+        (true, false) => return std::cmp::Ordering::Less,
+        (false, true) => return std::cmp::Ordering::Greater,
+        _ => {}
+    }
+    bytes(a).cmp(&bytes(b))
+}
+
+/// `output_name_tree`: the named destinations in leaves of 32, the levels
+/// above them, and the `/Names` dictionary with `\pdfextension names` in it.
+fn write_name_tree(w: &mut Writer, p: &crate::backend::Prepared) -> Option<u32> {
+    const KIDS_MAX: usize = 32;
+    let mut names = p.dest_names.clone();
+    names.sort_by(|a, b| dest_order(&a.0, &b.0));
+    let mut dests = 0;
+    if !names.is_empty() {
+        // (number, first name, last name) of each node of the level built.
+        let mut level: Vec<(u32, String, String)> = Vec::new();
+        for chunk in names.chunks(KIDS_MAX) {
+            let l = w.create();
+            let pairs: String = chunk
+                .iter()
+                .map(|(n, k)| format!(" {} {k} 0 R", crate::backend::pdf_string(n)))
+                .collect();
+            let (first, last) = (chunk[0].0.clone(), chunk[chunk.len() - 1].0.clone());
+            let body = format!(
+                "<< /Names [{pairs} ] /Limits [ {} {} ] >>",
+                crate::backend::pdf_string(&first),
+                crate::backend::pdf_string(&last)
+            );
+            w.object(l, OBJSTM_ALWAYS, body.as_bytes());
+            level.push((l, first, last));
+        }
+        while level.len() > 1 {
+            let mut above = Vec::new();
+            for chunk in level.chunks(KIDS_MAX) {
+                let l = w.create();
+                let kids: String = chunk.iter().map(|(k, ..)| format!(" {k} 0 R")).collect();
+                let (first, last) = (chunk[0].1.clone(), chunk[chunk.len() - 1].2.clone());
+                let body = format!(
+                    "<< /Kids [{kids} ] /Limits [ {} {} ] >>",
+                    crate::backend::pdf_string(&first),
+                    crate::backend::pdf_string(&last)
+                );
+                w.object(l, OBJSTM_ALWAYS, body.as_bytes());
+                above.push((l, first, last));
+            }
+            level = above;
+        }
+        dests = level[0].0;
+    }
+    if dests == 0 && p.names.is_empty() {
+        return None;
+    }
+    let m = w.create();
+    let mut body = String::from("<<");
+    if dests != 0 {
+        body.push_str(&format!(" /Dests {dests} 0 R"));
+    }
+    if !p.names.is_empty() {
+        body.push(' ');
+        body.push_str(&p.names);
+    }
+    body.push_str(" >>");
+    w.object(m, OBJSTM_ALWAYS, body.as_bytes());
+    Some(m)
 }
 
 /// A page dimension given in big points, as `pdf_add_bp` prints one.
@@ -633,14 +898,14 @@ fn image_procset(image: &crate::image::Image) -> Vec<&'static str> {
 
 /// `output_pages_tree`: the leaf nodes, and the nodes above them while there
 /// is more than one, written bottom up; the root's number.
-fn write_page_tree(w: &mut Writer, leaves: Vec<PagesNode>) -> Option<u32> {
+fn write_page_tree(w: &mut Writer, leaves: Vec<PagesNode>, attr: &str) -> Option<u32> {
     let mut level = leaves;
     loop {
         match level.len() {
             0 => return None,
             1 => {
                 let root = &level[0];
-                write_pages_node(w, root, None);
+                write_pages_node(w, root, None, attr);
                 return Some(root.number);
             }
             _ => {
@@ -665,7 +930,7 @@ fn write_page_tree(w: &mut Writer, leaves: Vec<PagesNode>) -> Option<u32> {
                     q.kids.push(node.number);
                     q.pages += node.pages;
                     let parent = q.number;
-                    write_pages_node(w, node, Some(parent));
+                    write_pages_node(w, node, Some(parent), attr);
                 }
                 level = parents;
             }
@@ -673,14 +938,16 @@ fn write_page_tree(w: &mut Writer, leaves: Vec<PagesNode>) -> Option<u32> {
     }
 }
 
-/// `write_pages`. The root is spelled with two spaces before `/Count`: LuaTeX
-/// writes one after the page-tree attributes, which are empty, and the next
-/// key writes its own.
-fn write_pages_node(w: &mut Writer, node: &PagesNode, parent: Option<u32>) {
+/// `write_pages`. The root carries `\pdfvariable pagesattr`, and is spelled
+/// with the spaces LuaTeX leaves: one after the attributes when there are
+/// any, one after the (empty) Lua table's, and the next key's own -- so two
+/// before `/Count` when there are none.
+fn write_pages_node(w: &mut Writer, node: &PagesNode, parent: Option<u32>, attr: &str) {
     let kids: String = node.kids.iter().map(|k| format!(" {k} 0 R")).collect();
-    let head = match parent {
-        None => "/Type /Pages  ".to_string(),
-        Some(p) => format!("/Type /Pages /Parent {p} 0 R "),
+    let head = match (parent, attr.is_empty()) {
+        (None, true) => "/Type /Pages  ".to_string(),
+        (None, false) => format!("/Type /Pages {attr}   "),
+        (Some(p), _) => format!("/Type /Pages /Parent {p} 0 R "),
     };
     let body = format!("<< {head}/Count {} /Kids [{kids} ] >>", node.pages);
     w.object(node.number, OBJSTM_ALWAYS, body.as_bytes());
@@ -1001,7 +1268,7 @@ mod tests {
             text.contains("3 0 obj\n<< /Type /ObjStm /N 100 /First"),
             "{text}"
         );
-        let out = w.finish(a, None, [0; 16]);
+        let out = w.finish(a, None, "", [0; 16]);
         let text = String::from_utf8_lossy(&out).into_owned();
         assert!(text.contains("/W [ 1 2 1 ]"), "{text}");
         // The table's rows, four bytes each: object 0 heads the free list and

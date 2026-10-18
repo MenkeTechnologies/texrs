@@ -26,7 +26,7 @@
 //! constants `crate::page` was written with, which `BUGS.md` records.
 
 /// §236's integer parameters, in order.
-pub const NAMES: [&str; 121] = [
+pub const NAMES: [&str; 149] = [
     "pretolerance",
     "tolerance",
     "linepenalty",
@@ -153,6 +153,40 @@ pub const NAMES: [&str; 121] = [
     "tracingnesting",
     "tracingscantokens",
     "variablefam",
+    // LuaTeX's backend integers (`backend_int_base`): integer parameters in
+    // every way but their names, which they have none of. `\pdfvariable`
+    // expands to one (`do_variable_backend_int` in `textoken.c`), and these
+    // are the names `crate::backend` gives the token it expands to, in
+    // `do_variable_pdf`'s order. No document can type one: the name has a
+    // space in it.
+    "pdfvariable compresslevel",
+    "pdfvariable decimaldigits",
+    "pdfvariable imageresolution",
+    "pdfvariable pkresolution",
+    "pdfvariable uniqueresname",
+    "pdfvariable majorversion",
+    "pdfvariable minorversion",
+    "pdfvariable pagebox",
+    "pdfvariable inclusionerrorlevel",
+    "pdfvariable ignoreunknownimages",
+    "pdfvariable gamma",
+    "pdfvariable imageapplygamma",
+    "pdfvariable imagegamma",
+    "pdfvariable imagehicolor",
+    "pdfvariable imageaddfilename",
+    "pdfvariable objcompresslevel",
+    "pdfvariable inclusioncopyfonts",
+    "pdfvariable gentounicode",
+    "pdfvariable pkfixeddpi",
+    "pdfvariable suppressoptionalinfo",
+    "pdfvariable omitcidset",
+    "pdfvariable recompress",
+    "pdfvariable omitcharset",
+    "pdfvariable omitinfodict",
+    "pdfvariable omitmediabox",
+    "pdfvariable linking",
+    "pdfvariable omitprocset",
+    "pdfvariable ptexprefix",
 ];
 
 /// Where `name` is in [`NAMES`], if it is one of them.
@@ -193,7 +227,7 @@ pub struct IntPars {
     /// document set and keeps plain.tex's value for one it did not, because
     /// texrs loads no format and INITEX's values (`\tolerance=10000`,
     /// `\pretolerance=0`) are not what any document is set with.
-    written: u128,
+    written: [u128; 2],
 }
 
 impl IntPars {
@@ -236,7 +270,10 @@ impl IntPars {
         ] {
             values[index(name).expect("a §236 name")] = v;
         }
-        Self { values, written: 0 }
+        Self {
+            values,
+            written: [0; 2],
+        }
     }
 
     pub fn get(&self, i: usize) -> i64 {
@@ -245,12 +282,12 @@ impl IntPars {
 
     pub fn set(&mut self, i: usize, v: i64) {
         self.values[i] = v;
-        self.written |= 1u128 << i;
+        self.written[i / 128] |= 1u128 << (i % 128);
     }
 
     /// The value of parameter `i` if anything has assigned it, else `None`.
     pub fn assigned(&self, i: usize) -> Option<i64> {
-        (self.written & (1u128 << i) != 0).then(|| self.values[i])
+        (self.written[i / 128] & (1u128 << (i % 128)) != 0).then(|| self.values[i])
     }
 
     /// The parameters that differ from `other`, by name, for a format dump.

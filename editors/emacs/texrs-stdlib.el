@@ -204,6 +204,17 @@
     "\\currentgrouplevel"
     "\\currentgrouptype"
     "\\showgroups"
+    "\\pdfvariable"
+    "\\pdffeedback"
+    "\\pdfextension"
+    "\\saveimageresource"
+    "\\useimageresource"
+    "\\saveboxresource"
+    "\\useboxresource"
+    "\\lastsavedimageresourceindex"
+    "\\lastsavedimageresourcepages"
+    "\\lastsavedboxresourceindex"
+    "\\savepos"
     "\\newcommand"
     "\\renewcommand"
     "\\providecommand"
@@ -470,6 +481,17 @@
     (puthash "\\currentgrouplevel" "\\currentgrouplevel  —  How many groups are open, a read-only integer: 0 outside every group. [Grouping]" table)
     (puthash "\\currentgrouptype" "\\currentgrouptype  —  What opened the innermost group, as eTeX numbers it: 0 outside every group, 1 for a brace, 14 for `\\begingroup`. [Grouping]" table)
     (puthash "\\showgroups" "\\showgroups  —  List the open groups, innermost first, each with its level, the line it was entered on and what opened it -- `### simple group (level 1) entered at line 3 ({)` -- then `### bottom level`, followed by `! OK` and the context. [Grouping]" table)
+    (puthash "\\pdfvariable" "\\pdfvariable  —  LuaTeX's backend parameters (`textoken.c`'s `do_variable_pdf`): expands to the integer, dimension or token-list parameter its keyword names, which is then assigned, read by `\\the` and wherever a number is scanned, and restored by a group like any parameter. [PDF backend]" table)
+    (puthash "\\pdffeedback" "\\pdffeedback  —  What LuaTeX's backend knows, as characters (`do_feedback_pdf`): `lastobj`, `lastannot`, `lastlink` and `retval`; `pageref N`, the object page N is or will be; `colorstackinit [page] [direct|page|text|raw|origin] {init}`, which makes a colour stack and gives its number; `creationdate`; `fontsize <font>`; `version` (140) and `revision` (0). [PDF backend]" table)
+    (puthash "\\pdfextension" "\\pdfextension  —  LuaTeX's backend commands (`do_extension_pdf`), each read with luatex's keywords. [PDF backend]" table)
+    (puthash "\\saveimageresource" "\\saveimageresource  —  Read a picture for later use (`scan_pdfximage`): the `width`/`height`/`depth`, `attr`, `page`, password, `colorspace` and box keywords and the file name. [PDF backend]" table)
+    (puthash "\\useimageresource" "\\useimageresource  —  Place a saved picture (`scan_pdfrefximage`): optional dimensions, `keepopen`, and the number. [PDF backend]" table)
+    (puthash "\\saveboxresource" "\\saveboxresource  —  Save a box as a form (`scan_pdfxform`): `type`, `attr`, `resources`, `margin` and the box register. [PDF backend]" table)
+    (puthash "\\useboxresource" "\\useboxresource  —  Place a saved form (`scan_pdfrefxform`): optional dimensions and the number. [PDF backend]" table)
+    (puthash "\\lastsavedimageresourceindex" "\\lastsavedimageresourceindex  —  The number the last `\\saveimageresource` gave its picture: an internal integer. [PDF backend]" table)
+    (puthash "\\lastsavedimageresourcepages" "\\lastsavedimageresourcepages  —  How many pages the last `\\saveimageresource`'s file holds: 1, since only a picture's file is counted yet. [PDF backend]" table)
+    (puthash "\\lastsavedboxresourceindex" "\\lastsavedboxresourceindex  —  The number the last `\\saveboxresource` gave its form. [PDF backend]" table)
+    (puthash "\\savepos" "\\savepos  —  A whatsit that records where on the page it is shipped, for `\\lastxpos` and `\\lastypos` to read after. [PDF backend]" table)
     (puthash "\\newcommand" "\\newcommand  —  Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. [LaTeX]" table)
     (puthash "\\renewcommand" "\\renewcommand  —  Redefine a macro. [LaTeX]" table)
     (puthash "\\providecommand" "\\providecommand  —  Define a macro only if the name is free. [LaTeX]" table)

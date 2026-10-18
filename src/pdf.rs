@@ -1506,10 +1506,12 @@ pub fn document_from(mut pages: Vec<Page>) -> Vec<u8> {
 }
 
 /// The file for `pages`, whose content streams are `contents`, one a page:
-/// LuaTeX's layout, numbering and spelling (`crate::pdfdoc`), at the
-/// `\pdfvariable`s LuaTeX's own format sets.
+/// LuaTeX's layout, numbering and spelling (`crate::pdfdoc`), with what the run
+/// that lowered the document gave the backend (`crate::pdfdoc::prepare`), or
+/// the `\pdfvariable`s LuaTeX's own format sets when nothing did.
 fn assemble(pages: &[Page], contents: Vec<String>) -> Vec<u8> {
-    crate::pdfdoc::write(pages, contents, crate::pdfdoc::Variables::default())
+    let prepared = crate::pdfdoc::take_prepared().unwrap_or_default();
+    crate::pdfdoc::write(pages, contents, prepared)
 }
 
 /// What a page's resources carry beside its fonts and pictures: the

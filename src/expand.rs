@@ -374,6 +374,8 @@ pub struct Engine {
     /// message stream in front of whatever is printed next, which is where tex
     /// prints it.
     errors: Vec<String>,
+    /// LuaTeX's PDF backend as the document reaches it: see `crate::backend`.
+    pub backend: crate::backend::Backend,
     /// Whether an undefined control sequence is what tex says it is -- an
     /// error that is reported, expands to nothing, and lets the run go on --
     /// rather than the stop an embedder's `Result` asks for. Off for the
@@ -565,6 +567,7 @@ impl Engine {
             fonts: crate::stomach::font::Table::new(),
             cur_font: 0,
             errors: Vec::new(),
+            backend: crate::backend::Backend::default(),
             recover: false,
             error_count: 0,
             halted: false,
@@ -887,6 +890,12 @@ impl Engine {
             false => WARNING_ISSUED.to_string(),
         };
         self.errors.push(line);
+    }
+
+    /// A line for the terminal that is neither an error nor tracing: what
+    /// luatex's `normal_warning` prints, which `crate::backend` reports with.
+    pub fn terminal_note(&mut self, text: &str) {
+        self.errors.push(format!("{DIAGNOSTIC}{text}"));
     }
 
     /// How many reports and diagnostics are waiting; see [`Self::drain_diagnostics`].
@@ -1807,6 +1816,16 @@ impl Engine {
                 if let Some(id) = self.last_cs_name {
                     lx.back_input(&[Token::Cs(id)]);
                 }
+                Ok(true)
+            }
+            // LuaTeX's backend: `\pdfvariable` expands to the parameter its key
+            // names, `\pdffeedback` to what the backend knows.
+            "pdfvariable" => {
+                crate::backend::variable(self, lx)?;
+                Ok(true)
+            }
+            "pdffeedback" => {
+                crate::backend::feedback(self, lx)?;
                 Ok(true)
             }
             _ => Ok(false),
@@ -4577,6 +4596,11 @@ impl Engine {
                 Some(GroupKind::Simple) => 1,
                 Some(GroupKind::SemiSimple) => 14,
             }),
+            // The backend's last items (`crate::backend`): what the last
+            // `\saveimageresource` and `\saveboxresource` numbered.
+            "lastsavedimageresourceindex" => Some(i64::from(self.backend.last_image)),
+            "lastsavedimageresourcepages" => Some(self.backend.last_image_pages),
+            "lastsavedboxresourceindex" => Some(i64::from(self.backend.last_box)),
             _ => None,
         }
     }

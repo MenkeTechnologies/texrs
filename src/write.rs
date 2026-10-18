@@ -87,6 +87,8 @@ pub enum Whatsit {
     /// (§1354), or kept unexpanded for ship-out under `shipout` (LuaTeX's
     /// `late_special_node`).
     Special { tokens: Vec<Token>, late: bool },
+    /// One of LuaTeX's PDF backend whatsits (`crate::backend`).
+    Pdf(crate::backend::PdfWhatsit),
 }
 
 /// §1374 (`wrapup_leader` in `texfileio.c`): the name an `\openout` file is

@@ -40,6 +40,7 @@ pub const CHAPTERS: &[&str] = &[
     "Intercepts",
     "Inline Rust",
     "Files",
+    "PDF backend",
     "LaTeX",
 ];
 
@@ -1201,6 +1202,73 @@ pub const CORPUS: &[Entry] = &[
         "Grouping",
         "List the open groups, innermost first, each with its level, the line it was entered on and what opened it -- `### simple group (level 1) entered at line 3 ({)` -- then `### bottom level`, followed by `! OK` and the context. The listing reaches the terminal only under a positive `\\tracingonline`; otherwise `! OK (see the transcript file)` says where it went. An eTeX primitive.",
         "{\\tracingonline=1 \\showgroups}",
+    ),
+    // ══ PDF backend — backend.rs, pdfdoc.rs, pdfpage.rs ═══════════════════
+    (
+        "\\pdfvariable",
+        "PDF backend",
+        "LuaTeX's backend parameters (`textoken.c`'s `do_variable_pdf`): expands to the integer, dimension or token-list parameter its keyword names, which is then assigned, read by `\\the` and wherever a number is scanned, and restored by a group like any parameter. The keys are luatex's 28 integers (`compresslevel`, `objcompresslevel`, `decimaldigits`, `gentounicode`, `minorversion`, ...), six dimensions (`horigin`, `vorigin`, the margins) and seven lists (`pageattr`, `pageresources`, `pagesattr`, ...); an unknown one is luatex's `unexpected use of \\pdfvariable` warning. `\\the` answers INITEX's zero for one nothing assigned; the file is written with what the document assigned and with `luatex.fmt`'s values for the rest (compression 9, object streams 2, three decimal digits, PDF 1.7).",
+        "\\pdfvariable compresslevel=0   % streams written plain\n\\message{\\the\\pdfvariable compresslevel}   % => 0\n\\pdfvariable pageresources{/ExtGState 12 0 R}",
+    ),
+    (
+        "\\pdffeedback",
+        "PDF backend",
+        "What LuaTeX's backend knows, as characters (`do_feedback_pdf`): `lastobj`, `lastannot`, `lastlink` and `retval`; `pageref N`, the object page N is or will be; `colorstackinit [page] [direct|page|text|raw|origin] {init}`, which makes a colour stack and gives its number; `creationdate`; `fontsize <font>`; `version` (140) and `revision` (0). Objects are numbered as luatex numbers them, the object stream an immediate object opens included: `\\immediate\\pdfextension obj{...}` then `\\pdfextension obj reserveobjnum` gives 1 and 3. `fontname` and `fontobjnum` answer 0: a font is numbered by the shipout that first draws it.",
+        "\\immediate\\pdfextension obj{<< /A 1 >>}\n\\message{\\pdffeedback lastobj}   % => 1",
+    ),
+    (
+        "\\pdfextension",
+        "PDF backend",
+        "LuaTeX's backend commands (`do_extension_pdf`), each read with luatex's keywords. Done when read: `obj` (`reserveobjnum`, `useobjnum`, `uncompressed`, `stream [attr {...}]`, `file`), written then under `\\immediate` and otherwise held for a page to refer to it; `outline`, whose action and title objects are written then; `info`, `catalog` (with `openaction`), `names` and `trailer`, which accumulate into the information dictionary, the catalogue, the `/Names` dictionary and the trailer; `glyphtounicode`, `fontattr`, `mapfile`, `mapline`, `includechars`. Placed in the list for the page they ship with: `literal` (`direct`, `page`, `text`, `raw`, `origin`, `shipout`), `lateliteral`, `dest`, `annot`, `startlink`/`endlink`, `startthread`/`thread`/`endthread`, `save`, `restore`, `setmatrix`, `linkstate`, `refobj` and `colorstack`; no shipout reaches those yet. Destinations an outline names are written pointing at the last page, as luatex writes one no page set, and enter the name tree.",
+        "\\pdfextension outline goto name{intro} count 0 {Introduction}\n\\pdfextension info{/Title (A report)}\n\\pdfextension literal{1 0 0 rg}",
+    ),
+    (
+        "\\saveimageresource",
+        "PDF backend",
+        "Read a picture for later use (`scan_pdfximage`): the `width`/`height`/`depth`, `attr`, `page`, password, `colorspace` and box keywords and the file name. The picture is numbered when read, and `\\lastsavedimageresourceindex` is the number; it is not yet read or written.",
+        "\\saveimageresource width 2cm {figure.png}\n\\useimageresource\\lastsavedimageresourceindex",
+    ),
+    (
+        "\\useimageresource",
+        "PDF backend",
+        "Place a saved picture (`scan_pdfrefximage`): optional dimensions, `keepopen`, and the number. A whatsit for the page; no shipout reaches it yet.",
+        "\\useimageresource width 1in \\lastsavedimageresourceindex",
+    ),
+    (
+        "\\saveboxresource",
+        "PDF backend",
+        "Save a box as a form (`scan_pdfxform`): `type`, `attr`, `resources`, `margin` and the box register. The form is numbered when read and `\\lastsavedboxresourceindex` is the number; the box itself is the stomach's, and is not yet shipped as a form.",
+        "\\saveboxresource 0\n\\useboxresource\\lastsavedboxresourceindex",
+    ),
+    (
+        "\\useboxresource",
+        "PDF backend",
+        "Place a saved form (`scan_pdfrefxform`): optional dimensions and the number. A whatsit for the page.",
+        "\\useboxresource\\lastsavedboxresourceindex",
+    ),
+    (
+        "\\lastsavedimageresourceindex",
+        "PDF backend",
+        "The number the last `\\saveimageresource` gave its picture: an internal integer.",
+        "\\message{\\the\\lastsavedimageresourceindex}",
+    ),
+    (
+        "\\lastsavedimageresourcepages",
+        "PDF backend",
+        "How many pages the last `\\saveimageresource`'s file holds: 1, since only a picture's file is counted yet.",
+        "\\message{\\the\\lastsavedimageresourcepages}",
+    ),
+    (
+        "\\lastsavedboxresourceindex",
+        "PDF backend",
+        "The number the last `\\saveboxresource` gave its form.",
+        "\\message{\\the\\lastsavedboxresourceindex}",
+    ),
+    (
+        "\\savepos",
+        "PDF backend",
+        "A whatsit that records where on the page it is shipped, for `\\lastxpos` and `\\lastypos` to read after. No shipout reaches it yet, so both stay 0.",
+        "\\savepos\\message{\\the\\lastxpos}",
     ),
     // ══ LaTeX — latex.rs, expand::do_newcommand ════════════════════════════
     (

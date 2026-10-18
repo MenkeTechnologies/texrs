@@ -1584,11 +1584,28 @@ impl Lowerer {
                     Some((_, Some(p))) if matches!(p.name(), "openout" | "write" | "closeout") => {
                         self.extension(lx, p.name(), true, &mut out)?
                     }
+                    // LuaTeX's `do_extension` with `immediate` set: an object
+                    // or a picture written now rather than when a page refers
+                    // to it.
+                    Some((_, Some(p)))
+                        if matches!(
+                            p.name(),
+                            "pdfextension" | "saveimageresource" | "saveboxresource"
+                        ) =>
+                    {
+                        self.backend_extension(lx, p.name(), true)?
+                    }
                     Some((t, _)) => lx.push_back(&[t]),
                     None => {}
                 },
                 "openout" | "write" | "closeout" | "special" => {
                     self.extension(lx, name.name(), false, &mut out)?
+                }
+                "pdfextension" | "saveimageresource" | "useimageresource" => {
+                    self.backend_extension(lx, name.name(), false)?
+                }
+                "saveboxresource" | "useboxresource" | "savepos" => {
+                    self.backend_extension(lx, name.name(), false)?
                 }
                 // `\input FILE` reads another file HERE, sharing every piece of
                 // state: a macro it defines is defined afterwards, a `\catcode`
@@ -4080,6 +4097,34 @@ impl Lowerer {
         }
     }
 
+    /// LuaTeX's backend extensions (`crate::backend`): what is done now is
+    /// done there, and a whatsit a page has to carry waits with the others in
+    /// `deferred_whatsits` (see there).
+    fn backend_extension(&mut self, lx: &mut Lexer, which: &str, immediate: bool) -> R<()> {
+        use crate::write::Whatsit;
+        let whatsit = match which {
+            "pdfextension" => crate::backend::extension(&mut self.eng, lx, immediate)?,
+            "saveimageresource" => {
+                crate::backend::save_image(&mut self.eng, lx)?;
+                None
+            }
+            "useimageresource" => Some(crate::backend::use_image(&mut self.eng, lx)?),
+            "useboxresource" => Some(crate::backend::use_box(&mut self.eng, lx)?),
+            "savepos" => Some(crate::backend::PdfWhatsit::SavePos),
+            // `\saveboxresource` takes a box, which only the stomach holds:
+            // what is read here is the keywords and the register, and the form
+            // is numbered as `scan_pdfxform` numbers it.
+            _ => {
+                crate::backend::save_box(&mut self.eng, lx)?;
+                None
+            }
+        };
+        if let Some(w) = whatsit {
+            self.deferred_whatsits.push(Whatsit::Pdf(w));
+        }
+        Ok(())
+    }
+
     /// `scan_limited_int(last_file_selector)`: a stream for `\openout` or
     /// `\closeout`, reported and read as 0 when it is out of range.
     fn scan_out_stream(&mut self, lx: &mut Lexer) -> R<usize> {
@@ -4208,6 +4253,9 @@ impl Lowerer {
             // there is no page, and LuaTeX's `do_extension` never ships one
             // immediately either.
             Whatsit::Special { .. } => {}
+            // A backend whatsit is never done immediately; what `\immediate`
+            // does for one is done when it is read (`crate::backend`).
+            Whatsit::Pdf(_) => {}
         }
         Ok(())
     }
@@ -4566,6 +4614,10 @@ impl Lowerer {
                 }
                 // `\jobname` is expandable: the job's name, as text.
                 "jobname" => text.push_str(&crate::lua::jobname()),
+                // The backend's two expandable commands put their expansion
+                // back, where this loop reads it (`crate::backend`).
+                "pdffeedback" => crate::backend::feedback(&mut self.eng, work)?,
+                "pdfvariable" => crate::backend::variable(&mut self.eng, work)?,
                 n if crate::expand::constant_text(n).is_some() => {
                     text.push_str(crate::expand::constant_text(n).expect("just matched"))
                 }

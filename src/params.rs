@@ -73,7 +73,7 @@ pub const GLUE_NAMES: [&str; 18] = [
 /// LuaTeX's dimension parameters (its `assign_dimen` commands past §247's),
 /// out of `crate::luatex_primitives`. They have slots of their own past
 /// TeX82's, so adding them moved none of those.
-pub const LUATEX_DIMEN_NAMES: [&str; 7] = [
+pub const LUATEX_DIMEN_NAMES: [&str; 13] = [
     "pagewidth",
     "pageheight",
     "pxdimen",
@@ -81,6 +81,14 @@ pub const LUATEX_DIMEN_NAMES: [&str; 7] = [
     "pagerightoffset",
     "pagetopoffset",
     "pagebottomoffset",
+    // LuaTeX's backend dimensions (`backend_dimen_base`), reached only through
+    // `\pdfvariable`; see `crate::intpar::NAMES` for why they are named so.
+    "pdfvariable horigin",
+    "pdfvariable vorigin",
+    "pdfvariable threadmargin",
+    "pdfvariable destmargin",
+    "pdfvariable linkmargin",
+    "pdfvariable xformmargin",
 ];
 
 /// LuaTeX's glue parameters past §224's: `\mathsurroundskip`.
@@ -90,7 +98,7 @@ pub const LUATEX_GLUE_NAMES: [&str; 1] = ["mathsurroundskip"];
 pub const ORDINARY_GLUE: usize = 15;
 
 /// §230's token parameters, in order, and e-TeX's `\everyeof`.
-pub const TOKS_NAMES: [&str; 10] = [
+pub const TOKS_NAMES: [&str; 17] = [
     "output",
     "everypar",
     "everymath",
@@ -102,6 +110,15 @@ pub const TOKS_NAMES: [&str; 10] = [
     "errhelp",
     // e-TeX's: what is inserted when a file ends (etex.ch).
     "everyeof",
+    // LuaTeX's backend token lists (`backend_toks_base`), reached only
+    // through `\pdfvariable`; see `crate::intpar::NAMES`.
+    "pdfvariable pageattr",
+    "pdfvariable pageresources",
+    "pdfvariable pagesattr",
+    "pdfvariable xformattr",
+    "pdfvariable xformresources",
+    "pdfvariable pkmode",
+    "pdfvariable trailerid",
 ];
 
 /// Where the token parameters are numbered among the expander's token lists:
@@ -153,7 +170,9 @@ pub fn name_of_slot(slot: i64) -> Option<&'static str> {
         };
     }
     if slot >= LUADIMPAR_BASE {
-        return LUATEX_DIMEN_NAMES.get((slot - LUADIMPAR_BASE) as usize).copied();
+        return LUATEX_DIMEN_NAMES
+            .get((slot - LUADIMPAR_BASE) as usize)
+            .copied();
     }
     if (DIMPAR_BASE..GLUEPAR_BASE).contains(&slot) {
         return DIMEN_NAMES.get((slot - DIMPAR_BASE) as usize).copied();
@@ -188,7 +207,8 @@ mod tests {
             .iter()
             .chain(GLUE_NAMES.iter())
             .chain(LUATEX_DIMEN_NAMES.iter())
-            .chain(LUATEX_GLUE_NAMES.iter()) {
+            .chain(LUATEX_GLUE_NAMES.iter())
+        {
             let slot = register_slot(name).expect("a parameter");
             assert_eq!(name_of_slot(slot), Some(*name));
         }

@@ -81,11 +81,11 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">262</div>
+            <div class="stat-val">273</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">11</div>
+            <div class="stat-val">12</div>
             <div class="stat-label">Chapters</div>
           </div>
           <div class="stat-card">
@@ -500,6 +500,33 @@
 \closein3</pre></td></tr>
             <tr><td><code>\read</code></td><td>Define a macro as the next line of a stream (tex.web §482): the line is read with the category codes in force and ended by <code>\endlinechar</code>, and more lines are read while a brace is open. A blank line reads as <code>\par</code>, and so does the line a file that has run out did not have — which is when the stream closes. A closed stream would read the terminal, which nonstop mode does not have, so that stops the run.</td><td><pre>\read&lt;number&gt; to &lt;control sequence&gt;
 \openin3=data \read3 to\line \message{\meaning\line}</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="ch-pdf-backend">
+        <h2>PDF backend</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\pdfvariable</code></td><td>LuaTeX's backend parameters (<code>textoken.c</code>'s <code>do_variable_pdf</code>): expands to the integer, dimension or token-list parameter its keyword names, which is then assigned, read by <code>\the</code> and wherever a number is scanned, and restored by a group like any parameter. The keys are luatex's 28 integers (<code>compresslevel</code>, <code>objcompresslevel</code>, <code>decimaldigits</code>, <code>gentounicode</code>, <code>minorversion</code>, ...), six dimensions (<code>horigin</code>, <code>vorigin</code>, the margins) and seven lists (<code>pageattr</code>, <code>pageresources</code>, <code>pagesattr</code>, ...); an unknown one is luatex's <code>unexpected use of \pdfvariable</code> warning. <code>\the</code> answers INITEX's zero for one nothing assigned; the file is written with what the document assigned and with <code>luatex.fmt</code>'s values for the rest (compression 9, object streams 2, three decimal digits, PDF 1.7).</td><td><pre>\pdfvariable compresslevel=0   % streams written plain
+\message{\the\pdfvariable compresslevel}   % =&gt; 0
+\pdfvariable pageresources{/ExtGState 12 0 R}</pre></td></tr>
+            <tr><td><code>\pdffeedback</code></td><td>What LuaTeX's backend knows, as characters (<code>do_feedback_pdf</code>): <code>lastobj</code>, <code>lastannot</code>, <code>lastlink</code> and <code>retval</code>; <code>pageref N</code>, the object page N is or will be; <code>colorstackinit [page] [direct|page|text|raw|origin] {init}</code>, which makes a colour stack and gives its number; <code>creationdate</code>; <code>fontsize &lt;font&gt;</code>; <code>version</code> (140) and <code>revision</code> (0). Objects are numbered as luatex numbers them, the object stream an immediate object opens included: <code>\immediate\pdfextension obj{...}</code> then <code>\pdfextension obj reserveobjnum</code> gives 1 and 3. <code>fontname</code> and <code>fontobjnum</code> answer 0: a font is numbered by the shipout that first draws it.</td><td><pre>\immediate\pdfextension obj{&lt;&lt; /A 1 &gt;&gt;}
+\message{\pdffeedback lastobj}   % =&gt; 1</pre></td></tr>
+            <tr><td><code>\pdfextension</code></td><td>LuaTeX's backend commands (<code>do_extension_pdf</code>), each read with luatex's keywords. Done when read: <code>obj</code> (<code>reserveobjnum</code>, <code>useobjnum</code>, <code>uncompressed</code>, <code>stream [attr {...}]</code>, <code>file</code>), written then under <code>\immediate</code> and otherwise held for a page to refer to it; <code>outline</code>, whose action and title objects are written then; <code>info</code>, <code>catalog</code> (with <code>openaction</code>), <code>names</code> and <code>trailer</code>, which accumulate into the information dictionary, the catalogue, the <code>/Names</code> dictionary and the trailer; <code>glyphtounicode</code>, <code>fontattr</code>, <code>mapfile</code>, <code>mapline</code>, <code>includechars</code>. Placed in the list for the page they ship with: <code>literal</code> (<code>direct</code>, <code>page</code>, <code>text</code>, <code>raw</code>, <code>origin</code>, <code>shipout</code>), <code>lateliteral</code>, <code>dest</code>, <code>annot</code>, <code>startlink</code>/<code>endlink</code>, <code>startthread</code>/<code>thread</code>/<code>endthread</code>, <code>save</code>, <code>restore</code>, <code>setmatrix</code>, <code>linkstate</code>, <code>refobj</code> and <code>colorstack</code>; no shipout reaches those yet. Destinations an outline names are written pointing at the last page, as luatex writes one no page set, and enter the name tree.</td><td><pre>\pdfextension outline goto name{intro} count 0 {Introduction}
+\pdfextension info{/Title (A report)}
+\pdfextension literal{1 0 0 rg}</pre></td></tr>
+            <tr><td><code>\saveimageresource</code></td><td>Read a picture for later use (<code>scan_pdfximage</code>): the <code>width</code>/<code>height</code>/<code>depth</code>, <code>attr</code>, <code>page</code>, password, <code>colorspace</code> and box keywords and the file name. The picture is numbered when read, and <code>\lastsavedimageresourceindex</code> is the number; it is not yet read or written.</td><td><pre>\saveimageresource width 2cm {figure.png}
+\useimageresource\lastsavedimageresourceindex</pre></td></tr>
+            <tr><td><code>\useimageresource</code></td><td>Place a saved picture (<code>scan_pdfrefximage</code>): optional dimensions, <code>keepopen</code>, and the number. A whatsit for the page; no shipout reaches it yet.</td><td><pre>\useimageresource width 1in \lastsavedimageresourceindex</pre></td></tr>
+            <tr><td><code>\saveboxresource</code></td><td>Save a box as a form (<code>scan_pdfxform</code>): <code>type</code>, <code>attr</code>, <code>resources</code>, <code>margin</code> and the box register. The form is numbered when read and <code>\lastsavedboxresourceindex</code> is the number; the box itself is the stomach's, and is not yet shipped as a form.</td><td><pre>\saveboxresource 0
+\useboxresource\lastsavedboxresourceindex</pre></td></tr>
+            <tr><td><code>\useboxresource</code></td><td>Place a saved form (<code>scan_pdfrefxform</code>): optional dimensions and the number. A whatsit for the page.</td><td><pre>\useboxresource\lastsavedboxresourceindex</pre></td></tr>
+            <tr><td><code>\lastsavedimageresourceindex</code></td><td>The number the last <code>\saveimageresource</code> gave its picture: an internal integer.</td><td><pre>\message{\the\lastsavedimageresourceindex}</pre></td></tr>
+            <tr><td><code>\lastsavedimageresourcepages</code></td><td>How many pages the last <code>\saveimageresource</code>'s file holds: 1, since only a picture's file is counted yet.</td><td><pre>\message{\the\lastsavedimageresourcepages}</pre></td></tr>
+            <tr><td><code>\lastsavedboxresourceindex</code></td><td>The number the last <code>\saveboxresource</code> gave its form.</td><td><pre>\message{\the\lastsavedboxresourceindex}</pre></td></tr>
+            <tr><td><code>\savepos</code></td><td>A whatsit that records where on the page it is shipped, for <code>\lastxpos</code> and <code>\lastypos</code> to read after. No shipout reaches it yet, so both stay 0.</td><td><pre>\savepos\message{\the\lastxpos}</pre></td></tr>
           </tbody>
         </table>
       </section>

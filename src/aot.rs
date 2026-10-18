@@ -36,6 +36,9 @@ pub fn compile_executable(file: &str, out: &Path) -> Result<PathBuf, String> {
         families,
         layout,
         page_colour,
+        // What the document gave the PDF backend is not carried into the
+        // binary: BUGS.md records it.
+        backend: _,
     } = program.map_err(|e| e.0)?;
     chunk.source = file.to_string();
     let embedded = crate::aot_runtime::Embedded {

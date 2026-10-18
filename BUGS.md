@@ -325,6 +325,41 @@ disk with the run's value and read back with the lowering's.
 There is no `.log`, so the `\openout3 = foo.tex` line luatex writes there for
 every file it opens is not written anywhere.
 
+## LuaTeX's backend commands are read, and half of them done
+
+`\pdfvariable`, `\pdffeedback` and `\pdfextension` are read with every one of
+luatex's keywords (`crate::backend`), and what LuaTeX does when it READS one is
+done: objects are numbered as luatex numbers them -- the object stream an
+immediate object opens takes a number too -- an immediate object, an outline's
+action and its title are written into the file then, and `info`, `catalog`,
+`names`, `trailer` and the page and page-tree attributes reach the file
+(`tests/pdf_backend.rs` holds every one of those objects against luatex's).
+
+What waits for pages built from node lists is everything LuaTeX does when a
+page SHIPS: a literal, a destination, an annotation, a link, a thread,
+`save`/`restore`/`setmatrix`, a colour stack, `refobj`, `\useimageresource`,
+`\useboxresource` and `\savepos` are read and held as whatsits
+(`crate::backend::PdfWhatsit`, in `Lowerer::deferred_whatsits`), and
+`crate::pdfpage::PageWriter` writes literals, specials, save, restore and
+matrices as luatex does, but nothing places one on a page yet. So a
+destination an outline names is written as one no page set -- `[ N 0 R /Fit ]`
+at the last page, which is what luatex writes for one too -- and `\lastxpos`
+stays 0. Beside that:
+
+- `\the` of a variable nothing assigned is INITEX's zero, as under `luatex
+  -ini`; the file is written with `luatex.fmt`'s values for it (compression 9,
+  object streams 2, three decimal digits, PDF 1.7), since texrs loads no format.
+- `\pdffeedback fontname` and `fontobjnum` answer 0: a font is numbered by the
+  shipout that first draws it.
+- `\saveimageresource` numbers the picture and reads no file; `\saveboxresource`
+  numbers the form and takes no box. Neither is written.
+- An object made after a page was shipped is numbered as if it came first:
+  the pages are numbered when the file is written, after the whole document.
+- luatex's warnings at the end of a file -- `unreferenced destination with
+  name ...` -- are not printed, and destination names are ordered as their
+  bytes, without undoing the escapes in a literal string first.
+- A `--aot` binary does not carry what the document gave the backend.
+
 ## `\directlua` does not expand inside a `\message`
 
 `\directlua` is EXPANDABLE, so luatex runs the chunk while it reads a
