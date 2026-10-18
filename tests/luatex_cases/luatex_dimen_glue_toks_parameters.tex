@@ -1,0 +1,10 @@
+% primitives: pagewidth pageheight pxdimen pageleftoffset pagerightoffset pagetopoffset pagebottomoffset mathsurroundskip everyeof
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\the\pagewidth][\the\pageheight][\the\pxdimen][\the\pageleftoffset][\the\pagerightoffset][\the\pagetopoffset][\the\pagebottomoffset][\the\mathsurroundskip][\the\everyeof]}
+\pagewidth=210mm \pageheight=\pagewidth \advance\pageheight by 87mm
+\message{[\the\pagewidth][\the\pageheight][\number\pagewidth]}
+{\pxdimen=2pt \message{[\the\pxdimen]}}\message{[\the\pxdimen]}
+\mathsurroundskip=1pt plus 2fil \message{[\the\mathsurroundskip]}
+\everyeof{\relax#} \message{[\the\everyeof][\meaning\pagewidth]}
+\ifdim\pagewidth>200mm \message{wide}\fi
+\end

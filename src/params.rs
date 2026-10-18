@@ -70,11 +70,27 @@ pub const GLUE_NAMES: [&str; 18] = [
     "thickmuskip",
 ];
 
+/// LuaTeX's dimension parameters (its `assign_dimen` commands past §247's),
+/// out of `crate::luatex_primitives`. They have slots of their own past
+/// TeX82's, so adding them moved none of those.
+pub const LUATEX_DIMEN_NAMES: [&str; 7] = [
+    "pagewidth",
+    "pageheight",
+    "pxdimen",
+    "pageleftoffset",
+    "pagerightoffset",
+    "pagetopoffset",
+    "pagebottomoffset",
+];
+
+/// LuaTeX's glue parameters past §224's: `\mathsurroundskip`.
+pub const LUATEX_GLUE_NAMES: [&str; 1] = ["mathsurroundskip"];
+
 /// How many of [`GLUE_NAMES`] are ordinary glue; the rest are math glue.
 pub const ORDINARY_GLUE: usize = 15;
 
-/// §230's token parameters, in order.
-pub const TOKS_NAMES: [&str; 9] = [
+/// §230's token parameters, in order, and e-TeX's `\everyeof`.
+pub const TOKS_NAMES: [&str; 10] = [
     "output",
     "everypar",
     "everymath",
@@ -84,6 +100,8 @@ pub const TOKS_NAMES: [&str; 9] = [
     "everyjob",
     "everycr",
     "errhelp",
+    // e-TeX's: what is inserted when a file ends (etex.ch).
+    "everyeof",
 ];
 
 /// Where the token parameters are numbered among the expander's token lists:
@@ -96,6 +114,12 @@ pub fn register_slot(name: &str) -> Option<i64> {
     if let Some(i) = DIMEN_NAMES.iter().position(|n| *n == name) {
         return Some(DIMPAR_BASE + i as i64);
     }
+    if let Some(i) = LUATEX_DIMEN_NAMES.iter().position(|n| *n == name) {
+        return Some(crate::compiler::LUADIMPAR_BASE + i as i64);
+    }
+    if let Some(i) = LUATEX_GLUE_NAMES.iter().position(|n| *n == name) {
+        return Some(crate::compiler::LUAGLUEPAR_BASE + i as i64 * SKIP_STRIDE);
+    }
     let i = GLUE_NAMES.iter().position(|n| *n == name)?;
     Some(match i < ORDINARY_GLUE {
         true => GLUEPAR_BASE + i as i64 * SKIP_STRIDE,
@@ -103,9 +127,34 @@ pub fn register_slot(name: &str) -> Option<i64> {
     })
 }
 
+/// What INITEX puts in `slot` before the first line is read: zero, except
+/// for the LuaTeX parameters luatex's `initialize` sets (maincontrol.c) --
+/// the four page offsets at `one_inch` and `\pxdimen` at `one_bp`, measured
+/// as 4736287sp and 65781sp.
+pub fn initial_value(slot: i64) -> i64 {
+    match name_of_slot(slot) {
+        Some("pageleftoffset" | "pagetopoffset" | "pagerightoffset" | "pagebottomoffset") => {
+            4_736_287
+        }
+        Some("pxdimen") => 65_781,
+        _ => 0,
+    }
+}
+
 /// The parameter whose (first) slot is `slot`, by name, if it is one.
 pub fn name_of_slot(slot: i64) -> Option<&'static str> {
     use crate::compiler::{DIMPAR_BASE, GLUEPAR_BASE, MUGLUEPAR_BASE, SKIP_STRIDE};
+    use crate::compiler::{LUADIMPAR_BASE, LUAGLUEPAR_BASE};
+    if slot >= LUAGLUEPAR_BASE {
+        let i = slot - LUAGLUEPAR_BASE;
+        return match i % SKIP_STRIDE == 0 {
+            true => LUATEX_GLUE_NAMES.get((i / SKIP_STRIDE) as usize).copied(),
+            false => None,
+        };
+    }
+    if slot >= LUADIMPAR_BASE {
+        return LUATEX_DIMEN_NAMES.get((slot - LUADIMPAR_BASE) as usize).copied();
+    }
     if (DIMPAR_BASE..GLUEPAR_BASE).contains(&slot) {
         return DIMEN_NAMES.get((slot - DIMPAR_BASE) as usize).copied();
     }
@@ -135,7 +184,11 @@ mod tests {
 
     #[test]
     fn every_slot_names_its_parameter_back() {
-        for name in DIMEN_NAMES.iter().chain(GLUE_NAMES.iter()) {
+        for name in DIMEN_NAMES
+            .iter()
+            .chain(GLUE_NAMES.iter())
+            .chain(LUATEX_DIMEN_NAMES.iter())
+            .chain(LUATEX_GLUE_NAMES.iter()) {
             let slot = register_slot(name).expect("a parameter");
             assert_eq!(name_of_slot(slot), Some(*name));
         }

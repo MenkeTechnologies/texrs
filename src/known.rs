@@ -37,7 +37,7 @@ impl Known {
         }
         match self.map.get(&slot) {
             Some(v) => *v,
-            None => Some(0),
+            None => Some(crate::params::initial_value(slot)),
         }
     }
 

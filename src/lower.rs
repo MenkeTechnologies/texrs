@@ -577,6 +577,42 @@ impl Lowerer {
         }
     }
 
+    /// LuaTeX's `assign_internal_value` (maincontrol.c): `\hoffset` and
+    /// `\pageleftoffset`, and `\voffset` and `\pagetopoffset`, are one
+    /// setting in two spellings, an inch apart, so an assignment to either
+    /// sets the other, under the same prefix. The inch is `one_true_inch`,
+    /// which luatex leaves at `one_inch` (4736287sp, measured) until
+    /// `prepare_mag` has seen a `\mag` other than 1000; texrs takes it as
+    /// `one_inch` always, which BUGS.md records.
+    fn couple_offsets(&mut self, out: &mut Vec<Cmd>, slot: i64) {
+        let Some(name) = crate::params::name_of_slot(slot) else {
+            return;
+        };
+        // Each spelling, its partner, and which way the inch goes.
+        const PAIRS: [(&str, &str, i64); 4] = [
+            ("pageleftoffset", "hoffset", -1),
+            ("hoffset", "pageleftoffset", 1),
+            ("pagetopoffset", "voffset", -1),
+            ("voffset", "pagetopoffset", 1),
+        ];
+        let Some(&(_, partner, sign)) = PAIRS.iter().find(|(n, ..)| *n == name) else {
+            return;
+        };
+        let Some(partner) = crate::params::register_slot(partner) else {
+            return;
+        };
+        const ONE_INCH: i64 = 4_736_287;
+        self.note_global(&[partner]);
+        out.push(Cmd::SetCount(
+            partner,
+            Num::Expr {
+                op: crate::etex_arith::Op::Add,
+                max: i64::MAX / 2,
+                args: vec![Num::Count(slot), Num::Literal(sign * ONE_INCH)],
+            },
+        ));
+    }
+
     /// Batch mode's terminal: the reports waiting to be printed are not, but
     /// a run that had them still ends with §1335's pointer to the transcript.
     fn withhold_reports(&mut self, out: &mut Vec<Cmd>) {
@@ -1316,6 +1352,7 @@ impl Lowerer {
                         self.note_global(&[reg]);
                         self.note_scaling_site(&mut out, lx, &v);
                         out.push(Cmd::SetCount(reg, v));
+                        self.couple_offsets(&mut out, reg);
                     }
                 }
                 // `\advance\tolerance by 5`: the parameter is frontend state,
@@ -1418,6 +1455,7 @@ impl Lowerer {
                             self.note_scaling_site(&mut out, lx, &v);
                             self.note_error_site(&mut out, lx, op);
                             out.push(Cmd::Arith(op, reg, v));
+                            self.couple_offsets(&mut out, reg);
                         }
                     }
                 }

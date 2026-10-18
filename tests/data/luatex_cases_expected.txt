@@ -17,6 +17,8 @@
 ! Arithmetic overflow.<recently read> \relax                        l.3 \message{[\the\numexpr 2147483647+1\relax                                             ][\the\numexpr 65536*65536\rela...! Arithmetic overflow.<recently read> \relax                        l.3 ...647+1\relax][\the\numexpr 65536*65536\relax                                                  ][\the\numexpr 1/0\relax]}! Arithmetic overflow.<recently read> \relax                        l.3 ...r 65536*65536\relax][\the\numexpr 1/0\relax                                                  ]}[0][0][0]! Arithmetic overflow.<recently read> \relax                        l.4 \message{[\the\dimexpr 16383pt*2\relax                                          ][\the\numexpr 2147483647*2/4\rela...! Missing ) inserted for expression.<to be read again>                    \relax l.4 ...47483647*2/4\relax][\the\numexpr (1+2\relax                                                  ]}[0.0pt][1073741824][3]! Arithmetic overflow.<recently read> \relax                        l.6 \message{[\the\numexpr\count1+\count1\relax                                               ]}[0])(see the transcript file for additional information
 #==# expr_registers.tex
 [12][-4][10.5pt] [22][3.00009pt][196608] Y N [-70] [16][26][5]
+#==# factor_from_macro.tex
+[10.0pt] [10.0pt] [2.5pt] [3.0pt] [11.0pt] [10.0pt plus 2.5pt] [3.0pt] [-10.0pt]
 #==# general_text.tex
 [macro:->\a b|\a b] [macro:->AAA|\a b] [\a ][\a ] [macro:->\b A]
 #==# glueexpr.tex
@@ -29,8 +31,14 @@
 a! Bad interaction mode (7).l.3 \message{a}\interactionmode=7                                   \message{b}bc)(see the transcript file for additional information
 #==# interaction_modes.tex
 [1][2] a[1][2][1] nonstop [1]
+#==# luatex_dimen_glue_toks_parameters.tex
+[0.0pt][0.0pt][1.00374pt][72.27pt][72.27pt][72.27pt][72.27pt][0.0pt][] [597.50787pt][845.04684pt][39158276] [2.0pt] [1.00374pt] [1.0pt plus 2.0fil] [\relax ##][\pagewidth] wide
+#==# luatex_integer_parameters.tex
+[0][0][45][10000][-1][-1][0] [701] [500] [1][-1] [x\par y] [2]
 #==# numexpr.tex
 [7][9][4] [-4][48][14]
+#==# page_offsets_follow_hoffset.tex
+[4801823] [-4736287] [65536] [1]
 #==# protected.tex
 [\protected macro:->P][macro:->\p Q] [\protected\long macro:#1->S]
 #==# show_tokens_and_groups.tex

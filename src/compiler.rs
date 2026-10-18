@@ -177,10 +177,12 @@ impl Compiler {
     /// not write is to see the full pool and report it, and a `\message`
     /// naming the limit is a better answer than an abort inside the VM.
     pub fn compile(mut self, cmds: &[Cmd]) -> Result<Chunk, TexError> {
-        // Every count register starts at zero, as INITEX leaves them; the slots
-        // have to be written before they are read or a read finds `Undef`.
+        // Every register starts as INITEX leaves it -- zero, but for the few
+        // parameters `params::initial_value` names; the slots have to be
+        // written before they are read or a read finds `Undef`.
         for reg in 0..TOTAL_SLOTS {
-            self.b.emit(Op::LoadInt(0), self.line);
+            let initial = crate::params::initial_value(i64::from(reg));
+            self.b.emit(Op::LoadInt(initial), self.line);
             self.b.emit(Op::SetSlot(reg), self.line);
         }
         self.block(cmds)?;
@@ -678,8 +680,9 @@ fn slot(reg: i64) -> u16 {
 /// Every register kind that lives in the slot file, end to end: 256 counts, 256
 /// dimensions, 256 glues and 256 math glues at four slots each, then the
 /// dimension, glue and math glue PARAMETERS (`crate::params`), then what the
-/// stomach mirrors for the program to read (`crate::stomach::Mirror`).
-pub const TOTAL_SLOTS: u16 = STOMACH_END as u16;
+/// stomach mirrors for the program to read (`crate::stomach::Mirror`), then
+/// LuaTeX's parameters.
+pub const TOTAL_SLOTS: u16 = LUAGLUEPAR_END as u16;
 
 /// Where §247's dimension parameters start: one slot each, past every register.
 pub const DIMPAR_BASE: i64 = MUSKIP_BASE + 256 * SKIP_STRIDE;
@@ -691,6 +694,12 @@ pub const MUGLUEPAR_BASE: i64 = GLUEPAR_BASE + crate::params::ORDINARY_GLUE as i
 /// One past the last parameter slot.
 const MUGLUEPAR_END: i64 = MUGLUEPAR_BASE
     + (crate::params::GLUE_NAMES.len() - crate::params::ORDINARY_GLUE) as i64 * SKIP_STRIDE;
+/// Where LuaTeX's glue parameters start, four slots each.
+pub const LUAGLUEPAR_BASE: i64 =
+    LUADIMPAR_BASE + crate::params::LUATEX_DIMEN_NAMES.len() as i64;
+/// One past the last of them.
+const LUAGLUEPAR_END: i64 =
+    LUAGLUEPAR_BASE + crate::params::LUATEX_GLUE_NAMES.len() as i64 * SKIP_STRIDE;
 
 /// Where `\wd n`, `\ht n` and `\dp n` of the 256 box registers are
 /// mirrored, three slots per register (`crate::stomach::box_dimen_slot`).
@@ -705,6 +714,9 @@ pub const BOXKIND_BASE: i64 = BOXDIM_BASE + 3 * 256;
 pub const INTERNAL_BASE: i64 = BOXKIND_BASE + 256;
 /// One past the last stomach slot.
 const STOMACH_END: i64 = INTERNAL_BASE + crate::stomach::INTERNAL_SLOTS;
+/// Where LuaTeX's dimension parameters start (`crate::params::LUATEX_DIMEN_NAMES`),
+/// past every slot that was there before them, so adding them moved none.
+pub const LUADIMPAR_BASE: i64 = STOMACH_END;
 
 /// Whether `slot` is one the stomach writes: a box dimension or kind, or an
 /// internal quantity. Such a slot is not an `eqtb` entry, so a group does not
@@ -717,7 +729,9 @@ pub fn is_stomach_slot(slot: i64) -> bool {
 /// Whether `slot` holds (a component of) a glue: a `\skip` or `\muskip`
 /// register, or a glue parameter of either kind.
 pub fn is_glue_slot(slot: i64) -> bool {
-    (SKIP_BASE..DIMPAR_BASE).contains(&slot) || (GLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+    (SKIP_BASE..DIMPAR_BASE).contains(&slot)
+        || (GLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+        || (LUAGLUEPAR_BASE..LUAGLUEPAR_END).contains(&slot)
 }
 
 /// Whether `slot` holds (a component of) a MATH glue: a `\muskip` register or

@@ -296,6 +296,13 @@ than none.
   `\currentgrouptype`, `\showtokens`, `\showgroups`, and the four interaction
   modes with `\interactionmode`: global, ending the terminal line, and batch mode
   withholding what the lowerer would print.
+- e-TeX's and LuaTeX's parameters -- every integer one luatex has
+  (`\tracingassigns`, `\lastlinefit`, `\suppresslongerror`, `\outputmode`, ...),
+  the page dimensions and offsets, `\mathsurroundskip` and `\everyeof` --
+  assigned, read and scoped like TeX82's, from luatex's INITEX values.
+  `\suppresslongerror` lets a `\par` into a macro argument, and `\hoffset` and
+  `\pageleftoffset` set each other an inch apart. What the stomach and the
+  backend make of the rest is theirs.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).
@@ -538,14 +545,12 @@ package's own `\RequirePackage`s are followed, so `keyval` is read before the
 `graphicx` that asks for it. `article.cls` is read to its last line and
 stops one token into it, in `\@floatplacement` — the ninth reason it has
 stopped on, each visible only from the one before (BUGS.md lists all nine).
-`10\p@` in a document still prints `! Illegal unit of measure (pt inserted).`,
-but for none of the reasons this paragraph has given it over three rewrites:
-§453's `<factor><internal unit>` is implemented (`\dimendef\pp=3 \pp=1pt`
-then `\dimen5=10\pp` gives `10.0pt`), and so are `em` and `ex`, which are the
-font's `\fontdimen6` and `\fontdimen5` out of `cmr10.tfm` and agree with tex to
-the scaled point — `[em=10.00002pt][ex=4.30554pt]` from both engines. What stops
-a document now is a factor arriving from a macro, which the factor scanner takes
-without expanding. Three unrelated faults, one string. A package that loads and then breaks what the
+`10\p@` reads as `10.0pt`, whether the factor is written out or arrives from a
+macro (`\def\x{10}\dimen0=\x\p@`), in plain TeX and in a LaTeX preamble, as
+luatex and lualatex read it: §453's `<factor><internal unit>` is implemented,
+and so are `em` and `ex`, which are the font's `\fontdimen6` and `\fontdimen5`
+out of `cmr10.tfm` and agree with tex to the scaled point —
+`[em=10.00002pt][ex=4.30554pt]` from both engines. A package that loads and then breaks what the
 preamble already promised is reported rather than committed — measured, letting
 `calc` through took the corpus sweep from 229 documents to 145. For everything
 still refused, the report is the list of what each one wants. What is kept

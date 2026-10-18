@@ -1,0 +1,8 @@
+% primitives: tracingassigns tracinggroups tracingifs tracingscantokens tracingnesting lastlinefit predisplaydirection savinghyphcodes savingvdiscards outputmode suppresslongerror exhyphenchar prebinoppenalty showstream variablefam
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\the\tracingassigns][\the\lastlinefit][\the\exhyphenchar][\the\prebinoppenalty][\the\showstream][\the\variablefam][\the\outputmode]}
+\lastlinefit=500 {\lastlinefit=700 \advance\lastlinefit by 1 \message{[\the\lastlinefit]}}\message{[\the\lastlinefit]}
+\global\savinghyphcodes=1 \predisplaydirection-1 \message{[\number\savinghyphcodes][\the\predisplaydirection]}
+\def\a#1{[#1]}\suppresslongerror=1 \message{\a{x\par y}}
+\count1=\outputmode \advance\count1 by 2 \message{[\the\count1]}
+\end

@@ -1,7 +1,8 @@
 //! TeX's integer parameters (`tex.web` §236), as frontend state.
 //!
-//! The 55 names are the `int_pars` of §236, in §236's order, spelt as §238's
-//! `primitive` calls spell them. Each is an internal integer (§413): it is
+//! The first 55 names are the `int_pars` of §236, in §236's order, spelt as
+//! §238's `primitive` calls spell them; e-TeX's and LuaTeX's integer
+//! parameters follow them. Each is an internal integer (§413): it is
 //! assigned with or without `=`, read wherever a number is scanned, written by
 //! `\the` and `\number`, changed by `\advance`/`\multiply`/`\divide`, and
 //! restored at the end of a group like any other `eqtb` entry (§283).
@@ -25,7 +26,7 @@
 //! constants `crate::page` was written with, which `BUGS.md` records.
 
 /// §236's integer parameters, in order.
-pub const NAMES: [&str; 55] = [
+pub const NAMES: [&str; 121] = [
     "pretolerance",
     "tolerance",
     "linepenalty",
@@ -81,6 +82,77 @@ pub const NAMES: [&str; 55] = [
     "righthyphenmin",
     "holdinginserts",
     "errorcontextlines",
+    // The integer parameters e-TeX and LuaTeX add (their `assign_int`
+    // commands, out of `crate::luatex_primitives`), after §236's so that
+    // its positions stay what they are. `\catcodetable` and `\setlanguage`
+    // are `assign_int` too but are not parameters: one switches the
+    // category-code table, the other is §1376's whatsit.
+    "adjustspacing",
+    "automatichyphenmode",
+    "automatichyphenpenalty",
+    "breakafterdirmode",
+    "compoundhyphenmode",
+    "discretionaryligaturemode",
+    "draftmode",
+    "exceptionpenalty",
+    "exhyphenchar",
+    "explicithyphenpenalty",
+    "firstvalidlanguage",
+    "fixupboxesmode",
+    "glyphdimensionsmode",
+    "hyphenationbounds",
+    "hyphenpenaltymode",
+    "ignoreprimitiveerror",
+    "lastlinefit",
+    "localbrokenpenalty",
+    "localinterlinepenalty",
+    "luacopyinputnodes",
+    "mathdefaultsmode",
+    "mathdelimitersmode",
+    "mathdisplayskipmode",
+    "mathemptydisplaymode",
+    "matheqdirmode",
+    "matheqnogapstep",
+    "mathflattenmode",
+    "mathitalicsmode",
+    "mathnolimitsmode",
+    "mathpenaltiesmode",
+    "mathrulesfam",
+    "mathrulesmode",
+    "mathrulethicknessmode",
+    "mathscriptboxmode",
+    "mathscriptcharmode",
+    "mathscriptsmode",
+    "mathsurroundmode",
+    "nokerns",
+    "noligs",
+    "nospaces",
+    "outputbox",
+    "outputmode",
+    "partokencontext",
+    "prebinoppenalty",
+    "predisplaydirection",
+    "predisplaygapfactor",
+    "prerelpenalty",
+    "protrudechars",
+    "savinghyphcodes",
+    "savingvdiscards",
+    "shapemode",
+    "showstream",
+    "suppressfontnotfounderror",
+    "suppressifcsnameerror",
+    "suppresslongerror",
+    "suppressmathparerror",
+    "suppressoutererror",
+    "suppressprimitiveerror",
+    "synctex",
+    "tracingassigns",
+    "tracingfonts",
+    "tracinggroups",
+    "tracingifs",
+    "tracingnesting",
+    "tracingscantokens",
+    "variablefam",
 ];
 
 /// Where `name` is in [`NAMES`], if it is one of them.
@@ -117,11 +189,11 @@ pub const NEW_LINE_CHAR: usize = 49;
 pub struct IntPars {
     values: [i64; NAMES.len()],
     /// Which parameters an assignment has written, one bit per [`NAMES`]
-    /// position (55 fit in 64). The typesetting path reads a parameter a
+    /// position. The typesetting path reads a parameter a
     /// document set and keeps plain.tex's value for one it did not, because
     /// texrs loads no format and INITEX's values (`\tolerance=10000`,
     /// `\pretolerance=0`) are not what any document is set with.
-    written: u64,
+    written: u128,
 }
 
 impl IntPars {
@@ -137,6 +209,21 @@ impl IntPars {
             ("maxdeadcycles", 25),
             ("escapechar", i64::from(b'\\')),
             ("endlinechar", 13),
+            // LuaTeX's own INITEX values, measured: luatex 1.24.0 starts
+            // these away from zero.
+            ("compoundhyphenmode", 1),
+            ("exhyphenchar", i64::from(b'-')),
+            ("mathdefaultsmode", 1),
+            ("matheqnogapstep", 1000),
+            ("mathflattenmode", 1),
+            ("mathscriptboxmode", 1),
+            ("mathscriptcharmode", 1),
+            ("outputbox", 255),
+            ("prebinoppenalty", 10000),
+            ("prerelpenalty", 10000),
+            ("predisplaygapfactor", 2000),
+            ("showstream", -1),
+            ("variablefam", -1),
         ] {
             values[index(name).expect("a §236 name")] = v;
         }
@@ -158,12 +245,12 @@ impl IntPars {
 
     pub fn set(&mut self, i: usize, v: i64) {
         self.values[i] = v;
-        self.written |= 1 << i;
+        self.written |= 1u128 << i;
     }
 
     /// The value of parameter `i` if anything has assigned it, else `None`.
     pub fn assigned(&self, i: usize) -> Option<i64> {
-        (self.written & (1 << i) != 0).then(|| self.values[i])
+        (self.written & (1u128 << i) != 0).then(|| self.values[i])
     }
 
     /// The parameters that differ from `other`, by name, for a format dump.

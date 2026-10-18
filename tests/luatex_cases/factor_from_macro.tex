@@ -1,0 +1,12 @@
+% primitives: dimendef
+\catcode`\{=1 \catcode`\}=2 \catcode`\@=11
+\dimendef\p@=3 \p@=1pt
+\dimen5=10\p@ \message{[\the\dimen5]}
+\def\x{10}\dimen6=\x\p@ \message{[\the\dimen6]}
+\def\y{2.5}\dimen7=\y\p@ \message{[\the\dimen7]}
+\def\z{3pt}\dimen8=\z \message{[\the\dimen8]}
+\def\u{1}\dimen9=\u\u pt \message{[\the\dimen9]}
+\skip1=\x\p@ plus\y\p@ \message{[\the\skip1]}
+\count1=3 \dimen10=\count1\p@ \message{[\the\dimen10]}
+\dimen11=-\x\p@ \message{[\the\dimen11]}
+\end

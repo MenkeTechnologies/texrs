@@ -4730,6 +4730,9 @@ impl Engine {
         long: bool,
         pending_only: bool,
     ) -> R<Option<Vec<Vec<Token>>>> {
+        // LuaTeX's `\suppresslongerror` (expand.c, `macro_call`): a `\par` in
+        // an argument is no runaway while it is positive, `\long` or not.
+        let long = long || self.intpar_named("suppresslongerror") > 0;
         let mut args: Vec<Vec<Token>> = Vec::new();
         let mut i = 0;
         while i < params.len() {
@@ -6660,5 +6663,12 @@ pub fn constant_text(primitive: &str) -> Option<&'static str> {
         "eTeXVersion" => Some("2.2"),
         "luatexrevision" => Some("0"),
         _ => None,
+    }
+}
+
+impl Engine {
+    /// The integer parameter `name` (`crate::intpar::NAMES`), by name.
+    pub fn intpar_named(&self, name: &str) -> i64 {
+        crate::intpar::index(name).map_or(0, |i| self.intpars.get(i))
     }
 }
