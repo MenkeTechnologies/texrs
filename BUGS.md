@@ -113,7 +113,28 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
 
   `--pdf` breaks its pages by penalty as well (§970-§1010): widows, orphans,
   hyphenated lines and stranded headings, priced over the whole document.
-  `--dvi` stacks a fixed number of lines on each page.
+
+  A plain document's `--dvi`, and its message run (the one the parity corpus
+  compares), are set the way `tex` sets them. plain.tex is lowered first as
+  the preloaded format, and the stomach builds every list (`src/stomach.rs`).
+  Paragraphs are broken from their node lists by `src/parbreak.rs`
+  (§813-§876), with the second pass's hyphenation (§891-§918,
+  `src/stomach/hyph.rs`). The page builder and plain's own `\output` run while
+  the program runs, and `src/dvi/out.rs` writes the DVI (§583-§643). Every
+  document dvi-parity measures comes out byte for byte as tex writes it.
+  What that path does not do yet:
+  - maths: a formula's characters are set as text in the current font, not
+    through `mlist_to_hlist`;
+  - alignments (`\halign`, `\valign`), `\accent`, `\parshape` and `\vcenter`;
+  - the marks' text in an output routine: `\topmark` and its siblings expand
+    to nothing;
+  - `\write`, `\openout` and `\special` without `\immediate`: they are not yet
+    put on the page they belong to.
+
+  The output routine is lowered at each place the page builder may fire it,
+  and emitted again only when what it lowers to changes. So a macro it
+  expands is taken as it was defined at the last such place. A LaTeX document
+  still takes the string path described next.
 
   `tex.web`'s own machinery underneath is ported: §108's integer badness and
   §644-§679's `hpack`/`vpack` with order-of-infinity glue setting
@@ -123,13 +144,9 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
   `\box255` (`src/page.rs`). Maths is there too (§680-§767 plus §810 and
   §1204-§1206, `src/math.rs`).
 
-  Box construction is on the run's path now (`src/stomach.rs`, see "Box
-  registers" below), but the outer vertical list is not, and with it neither
-  paragraphs nor pages.   What is NOT wired is the last join: `src/shipout.rs` is handed line boxes
-  built from broken strings rather than a node list with breakpoint indices, so
-  `src/postline.rs`'s §877-§890 assembly and `src/page.rs`'s page builder are
-  still a library beside the path a `--dvi` run takes rather than the path
-  itself. The breaker in `src/linebreak.rs` reads `\tolerance`,
+  On the string path, which `--pdf` and every LaTeX document take,
+  `src/shipout.rs` is handed line boxes built from broken strings rather than a
+  node list. The breaker in `src/linebreak.rs` reads `\tolerance`,
   `\pretolerance`, `\linepenalty`, the two hyphen penalties and the three
   demerit weights a document assigned (`linebreak::Params`), and plain.tex's
   value for one it did not, since texrs loads no format -- per paragraph, as
@@ -139,24 +156,19 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
   (§831). The `--pdf` page breaker reads the `\clubpenalty`, `\widowpenalty`
   and `\brokenpenalty` a document assigned, and plain.tex's for one it did not
   (`typeset::PageParams`) -- but once, as the document left them, not per
-  paragraph. Every
-  document that both engines set now reaches STRUCTURE; what separates that
-  from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
-  and §607-§615's compact movement encoding.
+  paragraph.
 
 - **Box registers** are filled now, in a plain document: `\setbox`, `\hbox`,
   `\vbox` and the rest are built while the program runs (`src/stomach.rs`) and
   `\ifvoid`, `\ifhbox` and `\ifvbox` branch on what the register holds. What
   is not done: a LaTeX document keeps its prelude's text-macro `\hbox`, so its
-  registers stay void and its box conditionals are decided while lowering; a
-  paragraph inside a `\vbox` is refused, because the paragraph builder is not on
-  this path yet; a font identifier in a `\dump`ed format names a font number
+  registers stay void and its box conditionals are decided while lowering; a font identifier in a `\dump`ed format names a font number
   the loading run has not loaded; `\currentgrouptype` reports a box's group as
   a simple group; and register numbers past 255 are not mirrored into slots.
-  The reference `tex` loads plain.tex, which fills `\box0` and puts an `\hbox`
-  in `\strutbox`, and sets `\showboxdepth`, `\baselineskip` and the rest, so
-  `tests/cases` documents set what they read; `box_conditionals.tex` pins the
-  void registers. `\count`, `\dimen`, `\skip`,
+  The reference `tex` loads plain.tex, which fills `\box0`, puts an `\hbox` in
+  `\strutbox` and sets `\showboxdepth`, `\baselineskip` and the rest; a plain
+  document's message run now preloads it too, and `box_conditionals.tex` pins
+  registers plain.tex leaves void. `\count`, `\dimen`, `\skip`,
   `\toks` and `\muskip` are all registers now — `\muskip` is `\skip` in mu
   (§455 makes `mu` the only finite unit where a math glue is wanted, and no unit
   at all anywhere else), with `\muskipdef` and `\muexpr`, pinned against luatex

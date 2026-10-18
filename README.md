@@ -564,8 +564,7 @@ page by page: `\widowpenalty` and `\clubpenalty` keep one line of a paragraph
 off the top and the bottom of a page, `\brokenpenalty` discourages ending a
 page on a hyphenated line, and a heading is never left at the foot of a page
 away from the text it introduces (`\@secpenalty`, and the `\nobreak`
-`\@startsection` writes after a title). `--dvi` stacks a fixed number of lines
-on each page.
+`\@startsection` writes after a title).
 
 Under both, `tex.web`'s own machinery is ported rather than approximated:
 `hpack`/`vpack` with §108's integer badness and §658's order-of-infinity glue
@@ -579,15 +578,19 @@ routine over `\box255` (`src/page.rs`, §967-§1028). Maths is there too: `$…$
 converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
 `fontdimen`s (`src/math.rs`).
 
-What that leaves: the page breaker reads its penalties once per document
-rather than per paragraph, and the shipper is handed line boxes built from
-already-broken strings rather than a node list. Box construction is now on
-the run's path (`src/stomach.rs`: `\setbox`, `\hbox` and the rest, built while
-the program runs, [0x03]), but the OUTER vertical list is not: a paragraph is
-not yet broken from the node list it would be (§1091-§1096), so a character
-outside a box still goes to the string path, a paragraph inside a `\vbox` is
-refused with a message saying so, and `src/postline.rs` and `src/page.rs` are
-still a library beside the path rather than the path itself.
+A plain document's `--dvi`, and its message run, now take the list path.
+plain.tex is preloaded as `tex` preloads it, and the stomach builds every list
+(`src/stomach.rs`, [0x03]). Paragraphs are broken from their node lists
+(`src/parbreak.rs`, §813-§876, with §891-§918's hyphenation), plain's
+`\output` runs when the page builder fires it, and the DVI is written as
+§583-§643 write it (`src/dvi/out.rs`). Every document
+`cargo run --bin dvi-parity` measures comes out byte for byte as tex writes
+it. That path sets no maths yet (a formula's characters come out as text in the
+current font), and no
+alignments, `\accent`, `\parshape` or `\vcenter`; `BUGS.md` lists the rest.
+`--pdf` and every LaTeX document still take the string path. There the page
+breaker reads its penalties once per document, and the shipper is handed line
+boxes built from already-broken strings.
 
 The same missing node list is why a `\write`, `\openout`, `\closeout` or
 `\special` without `\immediate` does nothing yet, nor a `\pdfextension
@@ -855,8 +858,9 @@ and three of the things a document controls survive the trip:
   to nothing, `\pandocbounded` boxed every figure without setting the box, and
   once figures did reach the page they were placed at the file's own size.
 
-What `--dvi` still does not do is set maths, draw a picture or break its pages by penalty:
-it stacks a fixed number of lines on each, where `--pdf` prices the whole
+What `--dvi` still does not do is set maths or draw a picture. A plain
+document is set as tex sets it. A LaTeX one takes the string path, which
+stacks a fixed number of lines on each page where `--pdf` prices the whole
 document. A draft reads correctly either way; a book being sold on its
 typography should still be set by an engine that has been doing it for forty
 years, and `scripts/texrs-pdf` says the same thing where a build would meet it.
