@@ -1171,15 +1171,51 @@ pub const CORPUS: &[Entry] = &[
         "\\begincsname maybe\\endcsname",
     ),
     (
+        "\\gluestretch",
+        "Registers",
+        "The stretch of a glue, as a dimension: `\\gluestretch\\skip0` is `2.0pt` for `1pt plus 2fil`, whatever its order. `\\glueshrink` is the shrink. eTeX primitives; the glue may be a register the run holds.",
+        "\\dimen0=\\gluestretch\\skip0",
+    ),
+    (
+        "\\glueshrink",
+        "Registers",
+        "The shrink of a glue, as a dimension; see `\\gluestretch`.",
+        "\\dimen0=\\glueshrink\\skip0",
+    ),
+    (
+        "\\gluestretchorder",
+        "Registers",
+        "The order of a glue's stretch as LuaTeX counts it: 0 finite, 1 `fi`, 2 `fil`, 3 `fill`, 4 `filll`. `\\glueshrinkorder` is the shrink's.",
+        "\\count0=\\gluestretchorder\\skip0",
+    ),
+    (
+        "\\glueshrinkorder",
+        "Registers",
+        "The order of a glue's shrink, LuaTeX's numbering; see `\\gluestretchorder`.",
+        "\\count0=\\glueshrinkorder\\skip0",
+    ),
+    (
+        "\\eTeXgluestretchorder",
+        "Registers",
+        "The order of a glue's stretch as e-TeX counts it: 0 finite, 1 `fil`, 2 `fill`, 3 `filll`.",
+        "\\count0=\\eTeXgluestretchorder\\skip0",
+    ),
+    (
+        "\\eTeXglueshrinkorder",
+        "Registers",
+        "The order of a glue's shrink as e-TeX counts it.",
+        "\\count0=\\eTeXglueshrinkorder\\skip0",
+    ),
+    (
         "\\glueexpr",
         "Registers",
-        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. A higher-order stretch or shrink REPLACES the one it meets even when it is being subtracted, as luatex's `scan_expr` does. An eTeX primitive. The operands are glue WRITTEN OUT; a register standing where one is wanted is refused rather than read.",
+        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. A higher-order stretch or shrink REPLACES the one it meets even when it is being subtracted, as luatex's `scan_expr` does. An eTeX primitive. A register operand is read when the program runs.",
         "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4fil\\relax",
     ),
     (
         "\\muexpr",
         "Registers",
-        "The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts \u{2014} eTeX gives each unit its own primitive so the two cannot be mixed. Its operands are written in mu, and like `\\glueexpr`'s they are glue written out rather than registers.",
+        "The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts \u{2014} eTeX gives each unit its own primitive so the two cannot be mixed. Its operands are math glue, and like `\\glueexpr`'s they may be registers the run holds.",
         "\\muskip0=\\muexpr 3mu plus 1mu + 2mu plus 2mu\\relax   % => 5.0mu plus 3.0mu",
     ),
     // ══ Files — lower::open_input ═════════════════════════════════════════

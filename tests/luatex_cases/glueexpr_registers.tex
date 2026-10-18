@@ -1,0 +1,9 @@
+% primitives: glueexpr muexpr
+\catcode`\{=1 \catcode`\}=2
+\count1=\inputlineno \skip0=1pt plus 2fil minus 3pt
+\ifodd\count1 \skip0=2pt plus 1fill \fi
+\message{[\the\glueexpr\skip0*2-1pt\relax][\the\glueexpr(\skip0+\skip0)/2\relax][\the\glueexpr\skip0*3/2\relax]}
+\skip1=\glueexpr\skip0 - 1pt plus 1fil\relax \message{[\the\skip1]}
+\muskip0=1mu plus 2mu \muskip1=\muexpr\muskip0*\count1\relax \message{[\the\muskip1]}
+\skip2=\glueexpr 16383pt*2\relax \message{[\the\skip2]}
+\end

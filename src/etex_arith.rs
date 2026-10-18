@@ -38,6 +38,31 @@ pub enum Op {
     /// The magnitude, which `\ifabsnum` and `\ifabsdim` compare
     /// (conditional.c negates a negative side).
     Abs,
+    // The glue steps of `\glueexpr` and `\muexpr`. A glue is four values --
+    // its width, stretch and shrink, and the two orders packed as
+    // `stretch_order * 4 + shrink_order` -- and a step answers ONE of them:
+    // for these `max` is not a bound but which (0 to 3). See [`apply_glue`].
+    /// The sum of two glues (`args`: the four of each).
+    GlueAdd,
+    /// Their difference.
+    GlueSub,
+    /// A glue times an integer (the four, then the integer).
+    GlueMul,
+    /// A glue divided by an integer.
+    GlueDiv,
+    /// A glue times `n/d` taken as one scaling (the four, then `n` and `d`).
+    GlueScale,
+    /// The range check on a glue factor (the four).
+    GlueCheck,
+    /// An order out of a glue's packed orders (`args`: the packed value): for
+    /// this `max` says which -- 0 the stretch's and 1 the shrink's in e-TeX's
+    /// numbering (`\eTeXgluestretchorder`), 2 and 3 the same in LuaTeX's,
+    /// which counts its `fi` order and so is one more for every infinite
+    /// order (`\gluestretchorder`).
+    GlueOrder,
+    /// The end of a glue expression for a value [`ERROR`] does not report:
+    /// zero for it. One component of the four reports, and the rest settle.
+    Settle,
 }
 
 impl Op {
@@ -54,6 +79,14 @@ impl Op {
             Op::Scale,
             Op::Check,
             Op::Abs,
+            Op::GlueAdd,
+            Op::GlueSub,
+            Op::GlueMul,
+            Op::GlueDiv,
+            Op::GlueScale,
+            Op::GlueCheck,
+            Op::GlueOrder,
+            Op::Settle,
         ]
         .into_iter()
         .find(|op| op.code() == code)
@@ -62,8 +95,20 @@ impl Op {
 
 /// Apply `op` to `args` under the bound `max`. [`ERROR`] in, [`ERROR`] out.
 pub fn apply(op: Op, max: i64, args: &[i64]) -> i64 {
+    if op == Op::Settle {
+        return match args.first() {
+            Some(&ERROR) | None => 0,
+            Some(&v) => v,
+        };
+    }
     if args.contains(&ERROR) {
         return ERROR;
+    }
+    if matches!(
+        op,
+        Op::GlueAdd | Op::GlueSub | Op::GlueMul | Op::GlueDiv | Op::GlueScale | Op::GlueCheck
+    ) {
+        return apply_glue(op, max, args);
     }
     let arg = |i: usize| args.get(i).copied().unwrap_or(0);
     let v = match op {
@@ -74,6 +119,17 @@ pub fn apply(op: Op, max: i64, args: &[i64]) -> i64 {
         Op::Scale => fract(arg(0), arg(1), arg(2), max),
         Op::Check => (arg(0).abs() <= max).then_some(arg(0)),
         Op::Abs => Some(arg(0).abs()),
+        Op::GlueOrder => {
+            let order = match max % 2 {
+                0 => arg(0) / 4,
+                _ => arg(0) % 4,
+            };
+            Some(match max >= 2 && order > 0 {
+                true => order + 1,
+                false => order,
+            })
+        }
+        _ => None,
     };
     v.unwrap_or(ERROR)
 }
@@ -206,6 +262,45 @@ pub fn add_glue(e: Glue, t: Glue, negative: bool) -> Option<Glue> {
         out.shrink_order = t.shrink_order;
     }
     Some(normalize_glue(out))
+}
+
+/// A glue step (`Op::GlueAdd` and its siblings) on the packed glues in
+/// `args`, answering component `which` of the result; [`ERROR`] for every
+/// component when the step leaves the range, as luatex's `glue_error` zeroes
+/// the whole glue.
+fn apply_glue(op: Op, which: i64, args: &[i64]) -> i64 {
+    let unpack = |a: &[i64]| Glue {
+        natural: a[0],
+        stretch: a[1],
+        shrink: a[2],
+        stretch_order: a[3] / 4,
+        shrink_order: a[3] % 4,
+    };
+    if args.len() < 4 {
+        return ERROR;
+    }
+    let e = unpack(&args[..4]);
+    let result = match op {
+        Op::GlueAdd | Op::GlueSub if args.len() >= 8 => {
+            add_glue(e, unpack(&args[4..8]), op == Op::GlueSub)
+        }
+        Op::GlueMul | Op::GlueDiv if args.len() >= 5 => {
+            let int = if op == Op::GlueMul { Op::Mul } else { Op::Div };
+            scale_glue(int, e, &args[4..5])
+        }
+        Op::GlueScale if args.len() >= 6 => scale_glue(Op::Scale, e, &args[4..6]),
+        Op::GlueCheck => check_glue(e),
+        _ => None,
+    };
+    let Some(g) = result else {
+        return ERROR;
+    };
+    match which {
+        0 => g.natural,
+        1 => g.stretch,
+        2 => g.shrink,
+        _ => g.stretch_order * 4 + g.shrink_order,
+    }
 }
 
 #[cfg(test)]

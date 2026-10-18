@@ -8,9 +8,6 @@ edef_reads_general_text.tex
 #                  own general text and the `#' is never a parameter of the
 #                  definition. texrs reads the whole body first and expands it
 #                  after, so the `#}' is `Illegal parameter number'.
-glueexpr.tex       `\the\glueexpr' and `\the\muexpr' are refused
-#                  (`Unsupported \the'): only \numexpr and \dimexpr have an
-#                  expression the run evaluates.
 scantokens_file_end.tex
 #                  A pseudo file that ends inside a \message or \edef body is
 #                  `File ended while scanning ...' in luatex (check_outer_validity

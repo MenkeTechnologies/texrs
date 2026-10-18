@@ -3764,6 +3764,16 @@ impl Lowerer {
             // e-TeX's expressions are internal integers too (`last_item`):
             // `\dimexpr` where an integer is wanted is its scaled points.
             if let Token::Cs(n) = &t {
+                if let Some(part) = self.glue_part(lx, *n)? {
+                    return Ok(Some(match negative {
+                        true => step(
+                            crate::etex_arith::Op::Sub,
+                            crate::etex_arith::INFINITY,
+                            vec![Num::Literal(0), part],
+                        ),
+                        false => part,
+                    }));
+                }
                 if let Some(level) = expr_level_of(self.eng.primitive_meaning(*n).name()) {
                     let e = self.expr(lx, pending, level)?;
                     return Ok(Some(match negative {
@@ -3863,11 +3873,234 @@ impl Lowerer {
     /// `\skip1=\skip0` copies a register whose value is only known at run time,
     /// so the four writes are slot READS rather than constants; anything else
     /// is a glue the scanner reads now (`tex.web` §461's `scan_glue`).
+    /// e-TeX's `\glueexpr` (or `\muexpr`, `mu`), read after the primitive:
+    /// luatex's `scan_expr` at `glue_val_level`, as the run evaluates it. A
+    /// glue is its four slots' worth of `Num`s -- width, stretch, shrink and
+    /// the packed orders -- and each step answers one of the four
+    /// (`etex_arith::Op::GlueAdd` and its siblings), folded now when every
+    /// operand is known. An overflow is reported once, by the width.
+    fn glue_expr(&mut self, lx: &mut Lexer, mu: bool) -> R<[Num; 4]> {
+        use crate::etex_arith::Op;
+        let g = self.glue_expr_level(lx, mu, false)?;
+        let report = self.eng.report_text(lx, "Arithmetic overflow");
+        let [w, st, sh, o] = g;
+        let end = |n: Num| step(Op::Settle, 0, vec![n]);
+        let width = match w {
+            Num::Literal(crate::etex_arith::ERROR) => {
+                self.eng.report(lx, "Arithmetic overflow");
+                Num::Literal(0)
+            }
+            Num::Literal(v) => Num::Literal(v),
+            w => Num::ExprEnd {
+                value: Box::new(w),
+                report,
+            },
+        };
+        Ok([width, end(st), end(sh), end(o)])
+    }
+
+    /// One glue step: `op` on the operands, each component its own `Num`.
+    /// e-TeX's `\gluestretch`, `\glueshrink` and the four order primitives
+    /// (`last_item` commands over a glue), read after `name`: the component as
+    /// a `Num`, or `None` when `name` is none of them. The orders are LuaTeX's
+    /// numbering, `fi` counted, for `\gluestretchorder` and `\glueshrinkorder`,
+    /// and e-TeX's for the `\eTeX` spellings (measured).
+    fn glue_part(&mut self, lx: &mut Lexer, name: CsId) -> R<Option<Num>> {
+        use crate::etex_arith::Op;
+        let which = match self.eng.primitive_meaning(name).name() {
+            "gluestretch" => 1,
+            "glueshrink" => 2,
+            "eTeXgluestretchorder" => 10,
+            "eTeXglueshrinkorder" => 11,
+            "gluestretchorder" => 12,
+            "glueshrinkorder" => 13,
+            _ => return Ok(None),
+        };
+        let g = self.glue_factor(lx, false)?;
+        let [_, stretch, shrink, orders] = g;
+        Ok(Some(match which {
+            1 => stretch,
+            2 => shrink,
+            n => step(Op::GlueOrder, n - 10, vec![orders]),
+        }))
+    }
+
+    fn glue_step(op: crate::etex_arith::Op, operands: &[Num]) -> [Num; 4] {
+        std::array::from_fn(|k| step(op, k as i64, operands.to_vec()))
+    }
+
+    /// A glue factor: a glue register (negated by its signs), or a glue
+    /// written out, whose components may be §453's products of registers.
+    fn glue_factor(&mut self, lx: &mut Lexer, mu: bool) -> R<[Num; 4]> {
+        // e-TeX's `\gluetomu` and `\mutoglue`: the same four numbers, taken
+        // from the other kind of glue.
+        let convert = if mu { "gluetomu" } else { "mutoglue" };
+        match self.eng.next_x_nonblank(lx, false)? {
+            Some(Token::Cs(n)) if self.eng.primitive_meaning(n).name() == convert => {
+                return self.glue_factor(lx, !mu);
+            }
+            Some(t) => lx.back_input(&[t]),
+            None => {}
+        }
+        if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
+            return Ok(std::array::from_fn(|i| {
+                signed(negative && i < 3, from + i as i64)
+            }));
+        }
+        let g = match mu {
+            true => self.eng.scan_muglue_parts(lx)?,
+            false => self.eng.scan_glue_parts(lx)?,
+        };
+        Ok([
+            scaled_num(g.natural),
+            scaled_num(g.stretch),
+            scaled_num(g.shrink),
+            Num::Literal(g.stretch_order * 4 + g.shrink_order),
+        ])
+    }
+
+    /// One level of the glue `scan_expr`, up to the end or, `nested`, its
+    /// `)`; the same machine as [`Self::expr_level`] with glue terms.
+    fn glue_expr_level(&mut self, lx: &mut Lexer, mu: bool, nested: bool) -> R<[Num; 4]> {
+        use crate::etex_arith::{Op, INFINITY};
+        let zero = || {
+            [
+                Num::Literal(0),
+                Num::Literal(0),
+                Num::Literal(0),
+                Num::Literal(0),
+            ]
+        };
+        let (mut r, mut e) = (None::<Op>, zero());
+        let (mut s, mut t, mut n) = (None::<Op>, zero(), Num::Literal(0));
+        loop {
+            let opened = match self.eng.next_x_nonblank(lx, false)? {
+                Some(Token::Char('(', Cat::Other)) => true,
+                other => {
+                    if let Some(tok) = other {
+                        lx.back_input(&[tok]);
+                    }
+                    false
+                }
+            };
+            // A glue opens a term; a factor after `*` or `/` is an integer.
+            let (glue, int) = match (s.is_some(), opened) {
+                (false, true) => (Some(self.glue_expr_level(lx, mu, true)?), None),
+                (false, false) => (Some(self.glue_factor(lx, mu)?), None),
+                (true, true) => (
+                    None,
+                    Some(self.expr_level(lx, false, ExprLevel::Int, true)?),
+                ),
+                (true, false) => (None, Some(self.number(lx)?)),
+            };
+            let next = self.eng.next_x_nonblank(lx, false)?;
+            let mut o = match &next {
+                Some(Token::Char('+', Cat::Other)) => Some(Op::Add),
+                Some(Token::Char('-', Cat::Other)) => Some(Op::Sub),
+                Some(Token::Char('*', Cat::Other)) => Some(Op::Mul),
+                Some(Token::Char('/', Cat::Other)) => Some(Op::Div),
+                _ => None,
+            };
+            if o.is_none() {
+                match next {
+                    Some(Token::Char(')', Cat::Other)) if nested => {}
+                    Some(tok) if nested => {
+                        lx.back_input(&[tok]);
+                        self.eng.report(lx, "Missing ) inserted for expression");
+                    }
+                    Some(tok) if !self.eng.means_relax(&tok) => lx.back_input(&[tok]),
+                    _ => {}
+                }
+            }
+            match (s, glue, int) {
+                (None, Some(g), _) => {
+                    t = Self::glue_step(Op::GlueCheck, &g);
+                    // `normalize_glue` on a first factor an operator follows:
+                    // adding a zero glue is that and nothing more.
+                    if o.is_some() {
+                        let mut args = t.to_vec();
+                        args.extend(zero());
+                        t = Self::glue_step(Op::GlueAdd, &args);
+                    }
+                }
+                (Some(op), _, Some(f)) => {
+                    let f = step(Op::Check, INFINITY, vec![f]);
+                    match op {
+                        Op::Mul if o == Some(Op::Div) => {
+                            n = f;
+                            o = Some(Op::Scale);
+                        }
+                        Op::Scale => {
+                            let mut args = t.to_vec();
+                            args.push(std::mem::replace(&mut n, Num::Literal(0)));
+                            args.push(f);
+                            t = Self::glue_step(Op::GlueScale, &args);
+                        }
+                        op => {
+                            let glue_op = if op == Op::Mul {
+                                Op::GlueMul
+                            } else {
+                                Op::GlueDiv
+                            };
+                            let mut args = t.to_vec();
+                            args.push(f);
+                            t = Self::glue_step(glue_op, &args);
+                        }
+                    }
+                }
+                _ => unreachable!("a glue opens a term and an integer follows * or /"),
+            }
+            match o {
+                Some(Op::Mul | Op::Div | Op::Scale) => s = o,
+                _ => {
+                    s = None;
+                    e = match r {
+                        None => t.clone(),
+                        Some(add_or_sub) => {
+                            let glue_op = if add_or_sub == Op::Sub {
+                                Op::GlueSub
+                            } else {
+                                Op::GlueAdd
+                            };
+                            let mut args = e.to_vec();
+                            args.extend(t.iter().cloned());
+                            Self::glue_step(glue_op, &args)
+                        }
+                    };
+                    r = o;
+                }
+            }
+            if o.is_none() {
+                return Ok(e);
+            }
+        }
+    }
+
     fn glue_assign(&mut self, lx: &mut Lexer, base: i64) -> R<Vec<Cmd>> {
         // Which glue file the destination is in decides the units the source is
         // read in: `tex.web` §1228 assigns a `mu_val` from a `mu_val` and a
         // `glue_val` from a `glue_val`, and never mixes them.
         let mu = crate::compiler::is_mu_slot(base);
+        // `\glueexpr` stands where a glue does and `\muexpr` where a math glue
+        // does; the expression is the run's when its operands are registers.
+        let want = if mu { "muexpr" } else { "glueexpr" };
+        let convert = if mu { "gluetomu" } else { "mutoglue" };
+        match self.eng.next_x_nonblank(lx, false)? {
+            Some(Token::Cs(n)) if matches!(self.eng.primitive_meaning(n).name(), m if m == want || m == convert) =>
+            {
+                let g = match self.eng.primitive_meaning(n).name() == want {
+                    true => self.glue_expr(lx, mu)?,
+                    false => self.glue_factor(lx, !mu)?,
+                };
+                return Ok(g
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, part)| Cmd::SetCount(base + i as i64, part))
+                    .collect());
+            }
+            Some(t) => lx.back_input(&[t]),
+            None => {}
+        }
         if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
             // Negating a glue negates its three widths and keeps its orders.
             return Ok((0..crate::compiler::SKIP_STRIDE)
@@ -3986,6 +4219,12 @@ impl Lowerer {
             let n = *n;
             if self.eng.primitive_meaning(n).name() == "dimexpr" {
                 return self.expr(lx, pending, ExprLevel::Dimen);
+            }
+            if matches!(
+                self.eng.primitive_meaning(n).name(),
+                "gluestretch" | "glueshrink"
+            ) {
+                return Ok(self.glue_part(lx, n)?.expect("a glue part"));
             }
             match n.name() {
                 "dimen" => {
@@ -4560,6 +4799,47 @@ impl Lowerer {
                                     (ExprLevel::Int, e) => out.push(MsgOp::Number(e)),
                                     (ExprLevel::Dimen, e) => out.push(MsgOp::Dimen(e)),
                                 }
+                                continue;
+                            }
+                            Some(Token::Cs(w))
+                                if matches!(
+                                    self.eng.primitive_meaning(w).name(),
+                                    "gluestretch" | "glueshrink"
+                                ) =>
+                            {
+                                let part = self.glue_part(work, w)?.expect("a glue part");
+                                out.push(MsgOp::Dimen(part));
+                                continue;
+                            }
+                            Some(Token::Cs(w))
+                                if matches!(
+                                    self.eng.primitive_meaning(w).name(),
+                                    "gluestretchorder"
+                                        | "glueshrinkorder"
+                                        | "eTeXgluestretchorder"
+                                        | "eTeXglueshrinkorder"
+                                ) =>
+                            {
+                                let part = self.glue_part(work, w)?.expect("a glue order");
+                                out.push(MsgOp::Number(part));
+                                continue;
+                            }
+                            Some(Token::Cs(w))
+                                if matches!(
+                                    self.eng.primitive_meaning(w).name(),
+                                    "glueexpr" | "muexpr" | "gluetomu" | "mutoglue"
+                                ) =>
+                            {
+                                let prim = self.eng.primitive_meaning(w).name();
+                                let mu = matches!(prim, "muexpr" | "gluetomu");
+                                let g = match prim {
+                                    "glueexpr" | "muexpr" => self.glue_expr(work, mu)?,
+                                    _ => self.glue_factor(work, !mu)?,
+                                };
+                                out.push(match mu {
+                                    true => MsgOp::MuGlue(g),
+                                    false => MsgOp::Glue(g),
+                                });
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "count" => {}

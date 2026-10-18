@@ -1,0 +1,10 @@
+% primitives: gluestretch glueshrink gluestretchorder glueshrinkorder eTeXgluestretchorder eTeXglueshrinkorder gluetomu mutoglue
+\catcode`\{=1 \catcode`\}=2
+\skip0=1pt plus 2fil minus 3fill \skip1=1pt plus 1pt
+\message{[\the\gluestretch\skip0][\the\glueshrink\skip0][\the\gluestretchorder\skip0][\the\glueshrinkorder\skip0][\the\eTeXgluestretchorder\skip0][\the\gluestretchorder\skip1]}
+\message{[\the\gluetomu\skip0][\the\mutoglue\thinmuskip][\the\gluestretch 1pt plus 3pt]}
+\count1=\inputlineno \ifodd\count1 \skip1=2pt plus 5fill\fi
+\dimen0=\gluestretch\skip1 \count2=\gluestretchorder\skip1 \muskip0=\gluetomu\skip1
+\message{[\the\dimen0][\the\count2][\the\muskip0][\number\glueshrink\skip0]}
+\ifdim\gluestretch\skip1>4pt \message{big}\fi
+\end

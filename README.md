@@ -289,8 +289,9 @@ than none.
   parentheses, a multiplication-then-division taken as one rounded scaling,
   `! Arithmetic overflow` and `Missing ) inserted for expression` -- with
   register operands read when the program runs, in an assignment, a
-  conditional and a `\message` alike. `\glueexpr` and `\muexpr` over glue
-  written out.
+  conditional and a `\message` alike. `\glueexpr` and `\muexpr` the same way over
+  glue, and `\gluestretch`, `\glueshrink`, `\gluestretchorder`,
+  `\glueshrinkorder`, `\gluetomu` and `\mutoglue`.
 - e-TeX's and LuaTeX's version numbers and strings (`\eTeXversion`, `\eTeXrevision`,
   `\luatexversion`, `\luatexrevision`, ...), `\currentgrouplevel` and
   `\currentgrouptype`, `\showtokens`, `\showgroups`, and the four interaction

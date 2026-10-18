@@ -35,8 +35,12 @@ a b)(\end occurred inside a group at level 2)### semi simple group (level 2) ent
 [10.0pt] [10.0pt] [2.5pt] [3.0pt] [11.0pt] [10.0pt plus 2.5pt] [3.0pt] [-10.0pt]
 #==# general_text.tex
 [macro:->\a b|\a b] [macro:->AAA|\a b] [\a ][\a ] [macro:->\b A]
+#==# glue_parts.tex
+[2.0pt][3.0pt][2][3][1][0] [1.0mu plus 2.0fil minus 3.0fill][0.0pt][3.0pt] [1.0pt][0][1.0mu plus 1.0mu][196608]
 #==# glueexpr.tex
 [2.0pt plus 4.0pt minus 6.0pt][3.0pt plus 1.0fil][6.0mu plus 2.0fill]
+#==# glueexpr_registers.tex
+[3.0pt plus 2.0fill][2.0pt plus 1.0fill][3.0pt plus 1.5fill] [1.0pt plus 1.0fill] [3.0mu plus 6.0mu]! Arithmetic overflow.<recently read> \relax                        l.8 \skip2=\glueexpr 16383pt*2\relax                                     \message{[\the\skip2]}[0.0pt])(see the transcript file for additional information
 #==# ifdefined.tex
 [Y][N][Y] [Y][N][N]
 #==# ifdefined_edges.tex
