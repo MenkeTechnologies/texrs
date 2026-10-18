@@ -84,15 +84,25 @@
 //!   are read as `crate::linebreak::Params`. They REFUSE, naming which of the two it
 //!   is; they answered `nil` until that was seen for what it is, which is a
 //!   claim that LuaTeX has no such parameter.
-//! - **`token`'s userdata half** — `token.create`, `token.get_next`,
-//!   `token.scan_token`, `token.scan_glue`, `token.scan_toks`,
-//!   `token.scan_list`. See `crate::lua::token`; the SCANNERS are implemented
-//!   and reach the real input.
-//! - **Callbacks.** `luatexbase.add_to_callback` accepts a registration and
-//!   never fires it, because every callback LuaTeX defines is about a node list
-//!   TeX is building or a file being opened, and neither reaches here.
+//! - **Callbacks fired by the engine.** `callback` (`crate::lua::callback`)
+//!   keeps LuaTeX's registry; the hook points that would call into it are not
+//!   wired yet, and the list callbacks wait on a stomach that builds the list
+//!   they are handed.
 //!
-//! What came OFF this list when the node library landed: `tex.skip`,
+//! ## The rest of LuaTeX's state
+//!
+//! [`build`] follows luastuff.c's `luainterpreter()`: `crate::lua::libs`
+//! opens Lua's libraries and LuaTeX's C ones (LPeg, slnunicode, LuaFileSystem,
+//! bit32, zlib, gzip -- compiled from the sources LuaTeX ships), `md5`, `sha2`
+//! and the `string`/`os` extensions; then come `tex`, `token`, `node`, `texio`,
+//! `kpse` (`crate::lua::kpse`, with the `require` searcher), `callback`, `lua`
+//! (`crate::lua::lualib`) and `status`, and last `luatex-core.lua`'s
+//! gap-filling. The engine a library function needs is lent to it for the
+//! length of each call into Lua (`crate::lua::ctx`), so a function a package
+//! keeps from one chunk works in the next, as a C function over TeX's globals
+//! does in LuaTeX.
+//!
+//! What came OFF the list above when the node library landed: `tex.skip`,
 //! `tex.getskip`, `tex.setskip` and the whole `\muskip` family. Those refused
 //! for want of a `glue_spec` userdata, and a `glue_spec` is a node the arena
 //! carries faithfully — five integers, no subtype and no `prev`, exactly as
@@ -108,8 +118,15 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+pub mod callback;
+mod ctx;
+mod kpse;
+mod libs;
+mod lualib;
 mod node;
 mod token;
+
+pub use kpse::set_progname;
 
 type R<T> = Result<T, TexError>;
 
@@ -132,6 +149,9 @@ fn is_primitive(name: &str) -> bool {
             | "luafunctioncall"
             | "lateluafunction"
             | "luadef"
+            | "luabytecode"
+            | "luabytecodecall"
+            | "luatexrevision"
     )
 }
 
@@ -186,10 +206,18 @@ struct Bridge {
     toks_names: HashMap<String, i64>,
     /// What `tex.error` was called with, reported once the chunk is done.
     error: Option<String>,
-    /// What `texio.write` wrote, which is terminal output rather than input.
-    messages: Vec<String>,
+    /// What `texio.write` and `texio.write_nl` wrote, which is terminal output
+    /// rather than input.
+    messages: Vec<Message>,
     /// The chain `luaotfload.add_fallback` named, when a chunk called it.
     fallbacks: Option<Vec<String>>,
+}
+
+/// One line of terminal output from `texio`.
+struct Message {
+    text: String,
+    /// `write_nl`: on a fresh line, as tex.web's `print_nl`.
+    nl: bool,
 }
 
 /// One print call's payload, with the regime it asked for.
@@ -249,6 +277,19 @@ fn take_fallbacks() -> Option<Vec<String>> {
     })
 }
 
+/// A warning from inside a library function, which goes where `texio.write_nl`
+/// goes: the run's terminal output.
+fn warn(text: &str) {
+    RUNTIME.with(|slot| {
+        if let Some(rt) = slot.borrow().as_ref() {
+            rt.bridge.borrow_mut().messages.push(Message {
+                text: text.to_string(),
+                nl: true,
+            });
+        }
+    });
+}
+
 /// Throw away the Lua state. For a caller that knows a document has ended.
 pub fn reset() {
     RUNTIME.with(|r| *r.borrow_mut() = None);
@@ -278,7 +319,7 @@ pub fn lower(
 ) -> R<()> {
     match name {
         "directlua" | "luadirect" => {
-            let chunk = read_chunk(eng, lx)?;
+            let (name, chunk) = read_chunk(eng, lx)?;
             // Read out of the TEXT before anything runs, which is where it was
             // read from when nothing could: a chunk that fails half way through
             // for a reason of its own must not cost the document its fallback
@@ -287,7 +328,7 @@ pub fn lower(
             if !chain.is_empty() {
                 fonts.fallbacks = chain;
             }
-            let result = run(eng, lx, out, &chunk, Yield::ToInput);
+            let result = run(eng, lx, out, name.as_deref(), &chunk, Yield::ToInput);
             // And again from the CALL, which is authoritative: a document that
             // builds its chain rather than writing it out gets the list it
             // actually passed.
@@ -302,8 +343,8 @@ pub fn lower(
         // however it is timed, so dropping the print output is the one part of
         // this that is not an approximation.
         "latelua" => {
-            let chunk = read_chunk(eng, lx)?;
-            run(eng, lx, out, &chunk, Yield::Discard)
+            let (name, chunk) = read_chunk(eng, lx)?;
+            run(eng, lx, out, name.as_deref(), &chunk, Yield::Discard)
         }
         "luaescapestring" => {
             let text = read_group(eng, lx)?;
@@ -319,6 +360,22 @@ pub fn lower(
         "lateluafunction" => {
             let n = eng.scan_number_file(lx)?;
             call_function(eng, lx, out, n, Yield::Discard)
+        }
+        // `\luabytecode n` and `\luabytecodecall n` run bytecode register `n`
+        // (llualib.c `luabytecodecall`), the first as an expandable command
+        // and the second as an unexpandable one -- which here is the same thing.
+        "luabytecode" | "luabytecodecall" => {
+            let n = eng.scan_number_file(lx)?;
+            let (lua, bridge) = runtime(eng)?;
+            snapshot(eng, &bridge);
+            let result = ctx::enter(eng, lx, || lualib::call(&lua, n));
+            finish(eng, lx, out, &bridge, Yield::ToInput, result)
+        }
+        // `\luatexrevision` (a convert command): "0" for 1.24.0, the release
+        // whose Lua interface this module implements.
+        "luatexrevision" => {
+            lx.push_back(&[Token::Char('0', Cat::Other)]);
+            Ok(())
         }
         "luadef" => {
             let Some(Token::Cs(cs)) = eng.take_file(lx) else {
@@ -361,12 +418,13 @@ enum Yield {
 /// have. `tokens_text` is `\the\toks`'s own serialisation, trailing space after
 /// a control word included.
 ///
-/// The optional ⟨16-bit number⟩ before the group names a chunk in `lua.name`
-/// for error messages. It is read and dropped: nothing here reports a Lua error
-/// by chunk name.
-fn read_chunk(eng: &mut Engine, lx: &mut Lexer) -> R<String> {
-    skip_chunk_name(eng, lx);
-    read_group(eng, lx)
+/// Before the group, textoken.c's `scan_lua_state` reads what names the chunk
+/// in Lua's error messages: `name {...}`, an expanded name of its own, or a
+/// register number whose `lua.name[n]` is set. Without either, the chunk is
+/// `=[\directlua]`, which Lua prints as `[\directlua]:1:`.
+fn read_chunk(eng: &mut Engine, lx: &mut Lexer) -> R<(Option<String>, String)> {
+    let name = scan_lua_state(eng, lx)?;
+    Ok((name, read_group(eng, lx)?))
 }
 
 /// A braced group, expanded and serialised.
@@ -443,32 +501,28 @@ fn group_after(toks: &[Token], at: usize) -> Option<(Vec<Token>, usize)> {
     None
 }
 
-/// Consume `\directlua 5 {...}`'s `5`, if it is there.
-fn skip_chunk_name(eng: &mut Engine, lx: &mut Lexer) {
-    let mut held = Vec::new();
-    let mut digits = 0usize;
-    while let Some(t) = eng.take_file(lx) {
-        match t {
-            Token::Char(c, _) if c.is_ascii_digit() => {
-                digits += 1;
-                held.clear();
-            }
-            _ => {
-                held.push(t);
-                break;
-            }
+/// `scan_lua_state` (textoken.c): spaces and `\relax` skipped, then nothing if a
+/// brace follows, `name` and an expanded group, or a register number, which
+/// names the chunk only when `lua.name` has a name for it.
+fn scan_lua_state(eng: &mut Engine, lx: &mut Lexer) -> R<Option<String>> {
+    let next = loop {
+        match eng.take_file(lx) {
+            Some(t) if t.is_space() || t.is_cs("relax") => continue,
+            other => break other,
         }
+    };
+    let Some(tok) = next else {
+        return Ok(None);
+    };
+    lx.push_back(std::slice::from_ref(&tok));
+    if matches!(tok, Token::Char(_, Cat::BeginGroup)) {
+        return Ok(None);
     }
-    // Nothing numeric was there: put back exactly what was taken.
-    if digits == 0 {
-        for t in held.into_iter().rev() {
-            lx.push_back(&[t]);
-        }
-        return;
+    if eng.scan_keyword(lx, "name", false)? {
+        return read_group(eng, lx).map(Some);
     }
-    for t in held.into_iter().rev() {
-        lx.push_back(&[t]);
-    }
+    let n = eng.scan_number_file(lx)?;
+    Ok(lualib::chunk_name(n))
 }
 
 /// `\luaescapestring`'s escaping (§2.4.3): "embedded backslashes, double and
@@ -497,23 +551,19 @@ fn run(
     eng: &mut Engine,
     lx: &mut Lexer,
     out: &mut Vec<Cmd>,
+    name: Option<&str>,
     chunk: &str,
     yield_to: Yield,
 ) -> R<()> {
     let (lua, bridge) = runtime(eng)?;
     snapshot(eng, &bridge);
-    let result = token::with(&lua, eng, lx, |lua| {
-        lua.load(chunk).set_name("\\directlua").exec()
-    });
-    finish(eng, lx, out, &bridge, yield_to, flatten(result))
-}
-
-/// A failure to install the `token` library reads as the chunk's own failure.
-///
-/// There is nothing else it could be: the library is built fresh for every
-/// chunk, so a state that cannot take it is a state the chunk cannot run in.
-fn flatten(result: mlua::Result<mlua::Result<()>>) -> mlua::Result<()> {
-    result.and_then(|inner| inner)
+    let default = match yield_to {
+        Yield::ToInput => "=[\\directlua]",
+        Yield::Discard => "=[\\latelua]",
+    };
+    let name = name.unwrap_or(default);
+    let result = ctx::enter(eng, lx, || lua.load(chunk).set_name(name).exec());
+    finish(eng, lx, out, &bridge, yield_to, result)
 }
 
 /// Call `lua.get_functions_table()[n]`, which is what `\luafunction n` is.
@@ -529,16 +579,16 @@ fn call_function(
 ) -> R<()> {
     let (lua, bridge) = runtime(eng)?;
     snapshot(eng, &bridge);
-    // The `token` library is installed here too, and that is the whole point of
-    // the manual's second worked example: `\def\mymacro{\directlua{mymacro()}}`
-    // with `local d = token.scan_dimen()` inside `mymacro` reads `\mymacro 12pt`
-    // by fetching from the input rather than by being handed a string.
-    let result = token::with(&lua, eng, lx, |lua| {
-        functions_table(lua)
+    // The engine is lent here too, and that is the whole point of the manual's
+    // second worked example: `\def\mymacro{\directlua{mymacro()}}` with
+    // `local d = token.scan_dimen()` inside `mymacro` reads `\mymacro 12pt` by
+    // fetching from the input rather than by being handed a string.
+    let result = ctx::enter(eng, lx, || {
+        functions_table(&lua)
             .and_then(|t| t.get::<mlua::Function>(n))
             .and_then(|f| f.call::<()>(n))
     });
-    finish(eng, lx, out, &bridge, yield_to, flatten(result))
+    finish(eng, lx, out, &bridge, yield_to, result)
 }
 
 /// Apply a finished chunk: its register writes, its output, its error.
@@ -565,8 +615,16 @@ fn finish(
     // What the chunk logged is terminal output, and the terminal output of a
     // compiled document is its `Cmd::Message` stream — `Engine::messages` is
     // the interpreting path's, which a lowered document never reaches.
-    for text in std::mem::take(&mut b.messages) {
-        out.push(Cmd::Message(vec![crate::ir::MsgOp::Text(text)]));
+    for m in std::mem::take(&mut b.messages) {
+        let op = match m.nl {
+            // `print_nl` is a line end and then the text. The message stream
+            // does not track the terminal's column, so the line end is always
+            // written; a report is glued to what precedes it, as `print_nl` is, and
+            // marked as a DIAGNOSTIC so it is not counted as an error.
+            true => crate::ir::MsgOp::Report(format!("{}\n{}", crate::expand::DIAGNOSTIC, m.text)),
+            false => crate::ir::MsgOp::Text(m.text),
+        };
+        out.push(Cmd::Message(vec![op]));
     }
     if let Some(e) = b.error.take() {
         return Err(TexError(e));
@@ -829,33 +887,43 @@ fn scan(text: &str, line: LineMode, cats: &crate::catcode::CatTable) -> Vec<Toke
 
 // ── the Lua side ─────────────────────────────────────────────────────────
 
-/// Where `lua.get_functions_table()`'s table is kept.
-const FUNCTIONS_KEY: &str = "__texrs_lua_functions";
-
+/// `lua.get_functions_table()`'s table, which `\luafunction n` indexes; it
+/// lives in the registry, as llualib.c keeps it.
 fn functions_table(lua: &Lua) -> mlua::Result<Table> {
-    lua.globals().get::<Table>(FUNCTIONS_KEY)
+    lua.named_registry_value::<Table>(lualib::FUNCTIONS)
 }
 
-/// Build the state: PUC-Lua 5.3 with its standard libraries, plus the `tex`
-/// table a document reaches TeX through.
-///
-/// `Lua::new()` loads mlua's `StdLib::ALL_SAFE`, which is every standard
-/// library except `debug` — so `string`, `table`, `math`, `os`, `io`, `utf8`,
-/// `coroutine` and `package` are the ones PUC-Lua ships, not re-implementations.
+/// Build the state the way `luainterpreter()` does (luatexdir/lua/luastuff.c):
+/// Lua's libraries and LuaTeX's extra C libraries ([`libs`]), then the TeX
+/// libraries in its order -- `tex`, `token`, `node`, `texio`, `kpse`,
+/// `callback`, `lua`, `status` -- then the empty `texconfig` table, the kpse
+/// `require` searcher (luainit.c's `setup_lua_path`) and last the gap-filling
+/// half of `luatex-core.lua`.
 fn build(owner: usize) -> mlua::Result<Runtime> {
-    let lua = Lua::new();
+    let lua = libs::new_state()?;
+    callback::reset();
     let bridge = Rc::new(RefCell::new(Bridge::default()));
     // One arena per document, alongside the bridge and for the same reason: a
     // node a chunk made must still be there for the next chunk, and must be
     // gone by the next document.
     let arena = Rc::new(RefCell::new(node::Arena::default()));
     let globals = lua.globals();
-    globals.set(FUNCTIONS_KEY, lua.create_table()?)?;
-    globals.set("tex", tex_table(&lua, &bridge, &arena)?)?;
-    globals.set("node", node::table(&lua, &arena)?)?;
-    globals.set("lua", lua_table(&lua)?)?;
-    globals.set("texio", texio_table(&lua, &bridge)?)?;
-    globals.set("status", status_table(&lua)?)?;
+    let register = |name: &str, t: Table| -> mlua::Result<()> {
+        let loaded: Table = globals.get::<Table>("package")?.get("loaded")?;
+        loaded.set(name, t.clone())?;
+        globals.set(name, t)
+    };
+    register("tex", tex_table(&lua, &bridge, &arena)?)?;
+    register("token", token::table(&lua, &arena)?)?;
+    register("node", node::table(&lua, &arena)?)?;
+    register("texio", texio_table(&lua, &bridge)?)?;
+    register("kpse", kpse::table(&lua)?)?;
+    register("callback", callback::table(&lua)?)?;
+    register("lua", lualib::table(&lua)?)?;
+    register("status", status_table(&lua)?)?;
+    globals.set("texconfig", lua.create_table()?)?;
+    kpse::install_searcher(&lua)?;
+    libs::core(&lua)?;
     globals.set("luatexbase", luatexbase_table(&lua)?)?;
     globals.set("luaotfload", luaotfload_table(&lua, &bridge)?)?;
     Ok(Runtime { lua, bridge, owner })
@@ -1377,6 +1445,9 @@ fn tex_table(
     // A field rather than a function, as the manual lists it. The job name is
     // fixed for a run, so it is read once here rather than per chunk.
     tex.set("jobname", jobname())?;
+    // The version of the Lua interface this is (see `status_table`).
+    tex.set("luatexversion", 124)?;
+    tex.set("luatexrevision", "0")?;
     let b = Rc::clone(bridge);
     tex.set(
         "error",
@@ -2037,83 +2108,153 @@ fn register_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>, kind: Kind) -> mlua::
     Ok(t)
 }
 
-/// The `lua` table: the version, and the function registry `\luafunction` calls.
-fn lua_table(lua: &Lua) -> mlua::Result<Table> {
-    let t = lua.create_table()?;
-    // "<string> s = lua.version — This returns the Lua version identifier
-    // string." `_VERSION` is the interpreter's own answer, so this cannot drift
-    // from the interpreter that is actually running.
-    t.set("version", lua.globals().get::<Value>("_VERSION")?)?;
-    t.set(
-        "get_functions_table",
-        lua.create_function(|lua, ()| functions_table(lua))?,
-    )?;
-    Ok(t)
-}
-
-/// `texio.write` and `texio.write_nl`: terminal output, not input.
+/// `texio`: terminal output, not input (luatexdir/lua/ltexiolib.c).
 ///
-/// texrs's terminal output IS its `\message` stream, so that is where these go.
-/// The selector argument (`"term"`, `"log"`, `"term and log"`) is accepted and
-/// ignored — there is one stream here.
+/// texrs's terminal output IS its message stream, so that is where these go:
+/// `write_nl` as tex.web's `print_nl` -- a fresh line unless the terminal is at
+/// the start of one -- and `write` as a message after whatever came before it.
+///
+/// The selector is ltexiolib.c's `get_selector_value`, quirks included. It is
+/// looked for only when there is more than one argument, and then the FIRST
+/// argument is always taken as one: `"term"`, `"log"`, `"term and log"`, and
+/// any other string counts as `"term and log"` -- so `texio.write_nl("a", "b")`
+/// prints only `b`, in luatex as here. A number names a `\write` stream.
+/// What goes to the log ALONE is not printed: texrs writes no transcript, and a
+/// `"log"` line on the terminal is exactly what luatex never shows there.
 fn texio_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
     let t = lua.create_table()?;
-    for name in ["write", "write_nl"] {
+    for (name, nl) in [("write", false), ("write_nl", true)] {
         let b = Rc::clone(bridge);
         t.set(
             name,
             lua.create_function(move |lua, args: Variadic<Value>| {
-                let mut parts = Vec::new();
-                for v in args.iter() {
-                    let s = lua_tostring(lua, v)?;
-                    if matches!(s.as_str(), "term" | "log" | "term and log") && parts.is_empty() {
-                        continue;
-                    }
-                    parts.push(s);
+                let printable = |v: &Value| {
+                    matches!(v, Value::String(_) | Value::Integer(_) | Value::Number(_))
+                };
+                if args.is_empty() || !printable(&args[args.len() - 1]) {
+                    return Err(mlua::Error::runtime("no string to print"));
                 }
-                b.borrow_mut().messages.push(parts.join(""));
+                let mut rest = &args[..];
+                let mut to_terminal = true;
+                if args.len() > 1 {
+                    match &args[0] {
+                        Value::String(s) => to_terminal = &*s.to_str()? != "log",
+                        Value::Integer(_) | Value::Number(_) => {}
+                        _ => {
+                            return Err(mlua::Error::runtime(
+                                "first argument is not 'term and log', 'term', 'log' or a number",
+                            ))
+                        }
+                    }
+                    rest = &args[1..];
+                }
+                let mut text = String::new();
+                for v in rest {
+                    if !printable(v) {
+                        return Err(mlua::Error::runtime("argument is not a string"));
+                    }
+                    text.push_str(&lua_tostring(lua, v)?);
+                }
+                if to_terminal {
+                    b.borrow_mut().messages.push(Message { text, nl });
+                }
                 Ok(())
             })?,
         )?;
     }
+    // `setescape` switches how control characters are shown on the terminal,
+    // which texrs prints as they are; `closeinput` ends the current input
+    // file, which a chunk running at lowering time cannot reach.
+    t.set("setescape", lua.create_function(|_, _: Value| Ok(()))?)?;
+    t.set(
+        "closeinput",
+        lua.create_function(|_, ()| {
+            Err::<(), _>(mlua::Error::runtime(
+                "texio.closeinput ends the input file TeX is reading, which texrs's mouth \
+                 does not let a chunk close",
+            ))
+        })?,
+    )?;
     Ok(t)
 }
 
-/// `status`: what the run is.
+/// `status`: what the run is (luatexdir/lua/lstatslib.c).
 ///
-/// Deliberately texrs's own identity rather than a forged LuaTeX version. A
-/// document that branches on `status.luatex_version` is asking which engine it
-/// is in, and answering "LuaTeX" would be a lie that only shows up later, in
-/// the output — so `status.luatex_version` is ABSENT here, and a document that
-/// reads it gets nil rather than `124`. (`luatex` 1.24.0 answers `124`, its
-/// `status.banner` is `This is LuaTeX, Version 1.24.0 (TeX Live 2026)` and its
-/// `status.engine` is `luatex`; none of those is what this engine is.)
+/// LuaTeX's `status` holds three functions -- `list`, `resetmessages`,
+/// `setexitcode` -- and answers every field through `__index`, computing it
+/// when asked. The fields are answered here in three groups:
 ///
-/// `status.list()` is the one function of the library: it hands back every
-/// field as a table, which is how a document that wants to log what it is
-/// running under does it without naming a field that may not exist.
+/// - **The interface version.** `luatex_version` 124, `luatex_revision` "0",
+///   `luatex_engine` "luatex", `development_id` 7724: the LuaTeX release whose
+///   Lua interface this module implements, measured off `luatex` 1.24.0 (TeX
+///   Live 2026). They are what a package tests -- ltluatex.lua takes
+///   `token.create` only when `tex.luatexversion > 81`, luaotfload refuses to
+///   load below its minimum -- so a different answer would refuse the very
+///   packages this interface exists to run. `banner` is texrs's own, because
+///   it is the one field that says which program is running.
+/// - **The run's options.** `ini_version` false (texrs has no format to
+///   build), `shell_escape` 0 (no shell commands are run, see
+///   `crate::lua::libs`), `safer_option` 0, `luadebug_option` 0,
+///   `kpse_used` 1, `output_active` false.
+/// - **The run's position**, live: `linenumber`, when a chunk is running;
+///   `log_name` from the job name. `filename` is absent: the lexer holds the
+///   text it reads, not the name of the file it came from.
+///
+/// TeX's memory statistics -- `str_ptr`, `pool_size`, `var_used`, `cs_count`
+/// and the rest of lstatslib.c's table -- describe luatex's arrays, which texrs
+/// does not have; they answer nil rather than a number nothing measured.
 fn status_table(lua: &Lua) -> mlua::Result<Table> {
     let t = lua.create_table()?;
-    t.set("banner", format!("texrs {}", env!("CARGO_PKG_VERSION")))?;
-    t.set("engine", "texrs")?;
-    t.set("jobname", jobname())?;
-    // "-ini" is what LuaTeX calls a run that is building a format rather than
-    // reading one. texrs has no format files to build, so no run is one.
-    t.set("ini_version", false)?;
-    let fields = t.clone();
-    t.set(
-        "list",
-        lua.create_function(move |lua, ()| {
-            let out = lua.create_table()?;
-            for pair in fields.clone().pairs::<Value, Value>() {
-                let (k, v) = pair?;
-                if !matches!(v, Value::Function(_)) {
-                    out.set(k, v)?;
-                }
-            }
-            Ok(out)
-        })?,
+    let fields = |lua: &Lua| -> mlua::Result<Table> {
+        let f = lua.create_table()?;
+        f.set(
+            "banner",
+            format!("This is texrs, Version {}", env!("CARGO_PKG_VERSION")),
+        )?;
+        f.set("luatex_version", 124)?;
+        f.set("luatex_revision", "0")?;
+        f.set("luatex_engine", "luatex")?;
+        f.set("development_id", 7724)?;
+        f.set("luatex_hashtype", "lua")?;
+        f.set("luatex_hashchars", 6)?;
+        f.set("ini_version", false)?;
+        f.set("shell_escape", libs::SHELL_ESCAPE)?;
+        f.set("safer_option", 0)?;
+        f.set("luadebug_option", 0)?;
+        f.set("kpse_used", 1)?;
+        f.set("output_active", false)?;
+        f.set("jobname", jobname())?;
+        f.set("log_name", format!("{}.log", jobname()))?;
+        f.set("callbacks", 0)?;
+        for (name, var) in [
+            ("lc_ctype", "LC_CTYPE"),
+            ("lc_collate", "LC_COLLATE"),
+            ("lc_numeric", "LC_NUMERIC"),
+        ] {
+            let v = std::env::var(var)
+                .or_else(|_| std::env::var("LC_ALL"))
+                .or_else(|_| std::env::var("LANG"))
+                .unwrap_or_else(|_| "C".to_string());
+            f.set(name, v)?;
+        }
+        if let Ok(line) = ctx::with("status", |_, lx| Ok(lx.line())) {
+            f.set("linenumber", line as i64)?;
+        }
+        Ok(f)
+    };
+    let mt = lua.create_table()?;
+    mt.set(
+        "__index",
+        lua.create_function(move |lua, (_, key): (Table, Value)| fields(lua)?.get::<Value>(key))?,
     )?;
+    t.set_metatable(Some(mt))?;
+    // `statslist`: every field, as a table.
+    t.set("list", lua.create_function(move |lua, ()| fields(lua))?)?;
+    // `resetmessages` clears the last error and warning strings, which are
+    // not kept here; `setexitcode` sets the code the run exits with, which
+    // the driver decides.
+    t.set("resetmessages", lua.create_function(|_, ()| Ok(()))?)?;
+    t.set("setexitcode", lua.create_function(|_, _: i64| Ok(()))?)?;
     Ok(t)
 }
 

@@ -162,6 +162,21 @@ ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 # the same interpreter; fusevm is not an option here, it hosts seventeen
 # frontends and none of them is Lua.
 mlua = { version = "0.12.1", features = ["lua53", "vendored"] }
+# Named directly, not for its API, but because `build.rs` compiles the C
+# libraries LuaTeX links into its Lua (LPeg, slnunicode, LuaFileSystem, bit32;
+# see `vendor/luatex/`) against the SAME Lua headers mlua builds with. Cargo
+# hands a `links = "lua"` crate's include directory only to the build script of
+# a crate that depends on it directly, as `DEP_LUA_INCLUDE`.
+mlua-sys = { version = "0.12.0", features = ["lua53", "vendored"] }
+# `md5.sum` (src/lua/libs.rs): LuaTeX's md5 library is an MD5 digest plus three
+# functions built on it, and the digest is RFC 1321's whoever computes it.
+md-5 = "0.10"
+# The `zlib` and `gzip` Lua libraries (vendor/luatex/luazlib, built by build.rs)
+# are bindings to zlib itself, and lualibs reads with them. `static` builds the
+# zlib C sources libz-sys ships -- the same deflate LuaTeX links -- so a chunk's
+# `zlib.compress` output is the bytes luatex's is, and no system libz is
+# needed. Only those two libraries use it; the PDF writer keeps flate2.
+libz-sys = { version = "1", default-features = false, features = ["static"] }
 
 # Shaping an OpenType font the way LuaHBTeX's `mode=harf` does (src/shape.rs).
 # luaotfload hands each run to HarfBuzz, and the LuaHBTeX of TeX Live 2026
@@ -173,6 +188,11 @@ harfrust = "0.14.0"
 # The raw tables luaotfload reads beside the shaper (`post`, `OS/2`, `GPOS`),
 # from the same parse harfrust is built on.
 read-fonts = { version = "0.45.1", default-features = false, features = ["std"] }
+
+[build-dependencies]
+# The vendored LuaTeX C libraries; `cc` is already in the tree through
+# mlua's own vendored Lua build.
+cc = "1"
 
 [[bench]]
 name = "pipeline"

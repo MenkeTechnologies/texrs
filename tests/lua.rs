@@ -370,9 +370,17 @@ fn texio_write_reaches_the_terminal_stream() {
     // texrs's terminal output IS its message stream, so that is where a
     // document's own logging goes.
     assert_eq!(out("\\directlua{texio.write(\"[logged]\")}"), "[logged]");
+    // `write_nl` is tex.web's `print_nl`: the text on a line of its own.
     assert_eq!(
         out("\\directlua{texio.write_nl(\"term\", \"[selected]\")}"),
-        "[selected]"
+        "\n[selected]"
+    );
+    // ltexiolib.c reads the first of several arguments as the selector
+    // whatever it says, and what goes to the log alone is not on the
+    // terminal: luatex prints neither `a` nor `[hidden]` here.
+    assert_eq!(
+        out("\\directlua{texio.write(\"a\", \"[b]\") texio.write_nl(\"log\", \"[hidden]\")}"),
+        "[b]"
     );
 }
 
@@ -733,16 +741,23 @@ fn a_luafunction_can_fetch_its_own_argument_from_the_input() {
 }
 
 #[test]
-fn the_scanners_are_gone_once_the_chunk_that_had_them_is() {
-    // A scanner holds the engine's input pointer, so it is built for one chunk
-    // and dropped with it. A chunk that squirrels one away and calls it later
-    // gets an error — which is the right answer, because by then there is
-    // nothing to scan — and never a stale pointer.
-    let e = fails("\\directlua{saved = token.scan_int}1\\directlua{saved()}");
-    assert!(
-        !e.is_empty(),
-        "calling a dead scanner must not succeed silently"
-    );
+fn a_scanner_kept_from_one_chunk_reads_the_input_of_a_later_one() {
+    // A library function is a C function over TeX's globals in LuaTeX, so one
+    // a package keeps -- ltluatex.lua's `createtoken = token.create`,
+    // luaotfload's scanners, both taken into locals at load time -- reaches the
+    // input of whatever chunk later calls it. This used to be refused here,
+    // when the scanners were built for one chunk and dropped with it, and that
+    // refusal is what stopped those packages loading.
+    let body = "\\directlua{saved = token.scan_int}\
+                \\directlua{tex.sprint(string.char(92) .. \"message{[\" .. saved() * 2 .. \"]}\")}21";
+    assert_eq!(out(body), "[42]");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (want, got) = both(&lua, body);
+    assert_eq!(want, "[42]", "the oracle");
+    assert_eq!(got, want);
 }
 
 #[test]
@@ -1326,5 +1341,88 @@ fn an_internal_parameter_refuses_and_names_where_the_value_really_lives() {
     assert_eq!(
         text("\\directlua{tex.foo = 123 tex.print(tex.foo .. \" \" .. tostring(tex.bar))}"),
         "123 nil"
+    );
+}
+
+/// One expression's value, as luatex 1.24.0 printed it, through the same
+/// `\message` both engines write.
+fn says_value(expr: &str) -> String {
+    format!(
+        "\\directlua{{tex.sprint(string.char(92) .. \"message{{[\" .. tostring({expr}) .. \"]}}\")}}"
+    )
+}
+
+#[test]
+fn the_c_libraries_are_the_ones_luatex_links() {
+    // LPeg, slnunicode, LuaFileSystem and bit32 are compiled from the copies
+    // LuaTeX ships, so these are not re-implementations agreeing by luck: each
+    // value was printed by luatex 1.24.0 for the same expression. The checks
+    // that need no TeX installation run everywhere; the oracle half below
+    // re-measures them when luatex is there.
+    let cases: &[(&str, &str)] = &[
+        ("lpeg.version()", "1.0.1"),
+        ("lpeg.match(lpeg.Cs((lpeg.P'a'/'A' + 1)^0), 'banana')", "bAnAnA"),
+        ("unicode.utf8.upper('straße äöü')", "STRAßE ÄÖÜ"),
+        ("unicode.utf8.len('äöü€x')", "5"),
+        ("unicode.utf8.sub('äöü€x', 2, 4)", "öü€"),
+        ("unicode.grapheme.len('e' .. string.char(204, 129) .. 'a')", "2"),
+        ("md5.sumhexa('The quick brown fox')", "a2004f37730b9445670a738fa0fc9ee5"),
+        ("md5.decrypt(md5.crypt('secret message', 'key', 'seed'), 'key')", "secret message"),
+        ("(sha2.digest256('abc'):gsub('.', function(c) return string.format(string.char(37) .. '02x', c:byte()) end))",
+         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+        ("bit32.arshift(-16, 2)", "4294967292"),
+        ("bit32.replace(0, 7, 4, 3)", "112"),
+        ("math.pow(2, 10)", "1024.0"),
+        ("table.concat(string.explode('  a  b c '), '|')", "a|b|c"),
+        ("table.concat(string.explode('a,,b,', ','), '|')", "a||b|"),
+        ("string.utflength('aä€' .. string.char(128) .. 'x')", "5"),
+        ("select('#', string.utfvalue('aä€' .. string.char(226, 130) .. 'b'))", "3"),
+        ("(function() local z = zlib.compress('hello hello hello hello') return zlib.decompress(z) end)()", "hello hello hello hello"),
+        // compress answers two values, and the second reaches decompress as its
+        // window size: nil, in luatex as here.
+        ("zlib.decompress(zlib.compress('hello hello hello hello'))", "nil"),
+        ("(zlib.compress('hello hello hello hello'):gsub('.', function(c) return string.format(string.char(37) .. '02x', c:byte()) end))",
+         "789ccb48cdc9c957c8402701680308b1"),
+        ("lfs.isdir('.')", "true"),
+        ("#package.searchers", "2"),
+        ("debug.getinfo", "nil"),
+        ("tex.luatexversion", "124"),
+        ("callback.register('pre_linebreak_filter', function() end)", "45"),
+        ("select(2, callback.register('no_such', function() end))", "No such callback exists."),
+    ];
+    for (expr, want) in cases {
+        assert_eq!(out(&says_value(expr)), format!("[{want}]"), "{expr}");
+    }
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    for (expr, want) in cases {
+        let (oracle, got) = both(&lua, &says_value(expr));
+        assert_eq!(oracle, format!("[{want}]"), "the oracle, for {expr}");
+        assert_eq!(got, oracle, "{expr}");
+    }
+}
+
+#[test]
+fn require_finds_a_module_the_way_luatexs_kpse_searcher_does() {
+    // luainit.c's `luatex_kpse_lua_find`: a module is a file of kpathsea's
+    // `lua` format, so `require` reaches the TeX tree rather than
+    // `package.path`. What a missing one says is the searcher's own line.
+    assert_eq!(
+        out(&says_value("select(2, pcall(require, 'no-such-module-xyz')):match('kpse lua searcher[^' .. string.char(10) .. ']*')")),
+        "[kpse lua searcher] file not found: 'no-such-module-xyz']"
+    );
+    if texrs::kpse::locate("lualibs.lua").is_none() {
+        eprintln!("skipping the TeX-tree half: kpsewhich cannot find lualibs.lua");
+        return;
+    }
+    // lualibs is LPeg and zlib end to end; loading it at all is the test that
+    // both are LuaTeX's.
+    assert_eq!(
+        out(&says_value(
+            "(function() require('lualibs') return type(lpeg.patterns) end)()"
+        )),
+        "[table]"
     );
 }

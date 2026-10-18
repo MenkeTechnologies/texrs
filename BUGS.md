@@ -302,6 +302,41 @@ same cause: tex.web §1279 expands a message body while reading it from the file
 and texrs slurps it first. It is not in `tests/cases` because the oracle there
 is `tex`, which has no `\directlua` to compare against.
 
+## LuaTeX's Lua side, where it is not luatex's
+
+The state `src/lua` builds is compared against `luatex` 1.24.0 by running the
+same chunk in both (`tests/lua.rs`). Where they still differ:
+
+- **No engine hook calls a callback.** `callback.register`, `callback.find`
+  and `callback.list` keep LuaTeX's registry and answer its slot numbers, but
+  no file is opened through `find_read_file`/`open_read_file`, no line passes
+  through `process_input_buffer`, no font through `define_font`, and the list
+  callbacks wait on a stomach that builds the list they are handed.
+- **Missing libraries:** `font`, `lang`, `pdf`, `vf`, `img`, `mplib`, `pdfe`,
+  `pdfscanner`, `fio`, `sio`, `ffi`, `socket`/`mime`, `zip`. lualibs and the
+  luaotfload font loader test for `fio` and `sio` and use their own Lua readers
+  without them.
+- **No shell.** `status.shell_escape` is 0 and `os.execute`, `os.exec`,
+  `os.spawn`, `io.popen`/`os.kpsepopen` and `kpse.check_permission` refuse with
+  luatex's own messages; luatex in TeX Live's default configuration is
+  restricted (2) and runs the commands `shell_escape_commands` lists.
+- **`luatex-core.lua`'s file policy is not applied.** `io.open`, `io.lines`
+  and the `lfs` functions are Lua's own, not wrapped in
+  `kpse.in_name_ok_silent_extended`/`out_name_ok_silent_extended`; the two
+  checks themselves are ported (`openout_any`'s paranoia, measured rules).
+- **`texio` to the log alone is dropped:** texrs writes no transcript, so a
+  `"log"` line goes nowhere rather than to the terminal. `write_nl` always
+  writes its line end, where `print_nl` omits it at the start of a line.
+- **An error raised by a Rust library function is a userdata**, given
+  `__tostring`, `__concat` and the string methods so it reads as luatex's
+  string; `type(err)` is `userdata` and it carries no `file:line:` prefix.
+- **`status`** answers the LuaTeX 1.24.0 interface (`luatex_version` 124,
+  `luatex_engine` `luatex`) with texrs's own `banner`, `ini_version` false, no
+  `filename`, and none of luatex's memory statistics.
+- **Token userdata:** `mode` of a macro and of a primitive, `id`, and `tok` of
+  a control sequence are luatex memory addresses and are not reproduced;
+  `token.expand`, `token.scan_list` and `token.scan_toks(true)` refuse.
+
 ## A section's number carried a chapter a class has not got -- fixed
 
 `typeset::unit_numbers` counted the contents marks and joined chapter, section

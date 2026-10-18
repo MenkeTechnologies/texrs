@@ -352,7 +352,18 @@ than none.
   Greek and symbol tables plain.tex names — with §764's spacing table ported
   verbatim.
 - Lua. `\directlua` runs its chunk in PUC-Lua 5.3, with `tex`, `token`,
-  `texio`, `status` and `luatexbase` reaching the engine's real state.
+  `texio`, `status` and `luatexbase` reaching the engine's real state. The
+  state is built the way LuaTeX's `luainterpreter()` builds it: LPeg,
+  slnunicode (`unicode`), LuaFileSystem and `bit32` compiled from the C sources
+  LuaTeX itself ships (`vendor/luatex/`), `zlib` and `gzip` over zlib, `md5`
+  and `sha2`, the `string` and `os` extensions, the compatibility functions
+  TeX Live's Lua is built with (`module`, `package.seeall`, `math.pow`,
+  `__ipairs`), `kpse`, `lua` (bytecode registers, `\luabytecode`), `callback`
+  (LuaTeX's registry and slot numbers) and `status` answering for the LuaTeX
+  1.24 interface. `require` finds a module as a file of kpathsea's `lua`
+  format, through `kpsewhich`, so lualibs loads as it does in luatex. A library
+  function a package keeps in a local reaches the input of whichever chunk
+  later calls it.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), broken into total-fit
   lines by the same breaker as `--pdf`, packed into boxes and shipped through
   `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
@@ -538,7 +549,14 @@ boxes from already-broken strings rather than from a node list, so there is no
 CURRENT node list — `tex.getbox`, `node.write`
 and every callback that would pass Lua the list TeX is building refuse by name,
 and a document that walks the document's own list is refused rather than quietly
-wrong.
+wrong. `callback.register` keeps LuaTeX's registry, slot for slot, but nothing in
+the engine calls a registered function yet. Of LuaTeX's other libraries,
+`font`, `lang`, `pdf`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and `socket`
+are not there, the shell is disabled (`os.execute`, `io.popen` and
+`kpse.check_permission` answer as `luatex -no-shell-escape` does), and an error
+a Rust library function raises is a userdata that prints, concatenates and
+matches like the string luatex's C would raise, but is not `type` string. See
+BUGS.md for each.
 
 The number, run against 274 `.tex` files — a real LaTeX/LuaLaTeX corpus of
 Pandoc-generated books of 16,000 lines and up, with fontspec, TikZ,
