@@ -9,11 +9,13 @@
 //! native node-mode processing (`super::ots::process`) is not to be run on
 //! it: [`is_lua_font`] says which fonts those are.
 //!
-//! The registry is per process and keyed by font id, the way one run's
-//! fonts are numbered; [`clear_lua_fonts`] empties it for the next run.
+//! The registry is per thread -- a document is lowered and run on one
+//! thread, and several documents run at once in one process, each
+//! numbering its fonts from 1 -- and keyed by font id; [`clear_lua_fonts`]
+//! empties it for the thread's next run.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::RwLock;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LuaFont {
@@ -24,7 +26,9 @@ pub struct LuaFont {
     pub glyphs: BTreeMap<u32, (u32, Option<String>)>,
 }
 
-static FONTS: RwLock<BTreeMap<u16, LuaFont>> = RwLock::new(BTreeMap::new());
+thread_local! {
+    static FONTS: RefCell<BTreeMap<u16, LuaFont>> = const { RefCell::new(BTreeMap::new()) };
+}
 
 /// Record the font luaotfload's definer made for stomach font `id`.
 /// `glyphs` are (character code, glyph index, tounicode).
@@ -44,27 +48,23 @@ pub fn register_lua_font(
             .map(|(c, g, t)| (*c, (*g, t.clone())))
             .collect(),
     };
-    if let Ok(mut m) = FONTS.write() {
-        m.insert(id, font);
-    }
+    FONTS.with(|m| m.borrow_mut().insert(id, font));
 }
 
 /// The font registered for `id`, if any.
 pub fn lua_font(id: u16) -> Option<LuaFont> {
-    FONTS.read().ok()?.get(&id).cloned()
+    FONTS.with(|m| m.borrow().get(&id).cloned())
 }
 
 /// Whether font `id` came from luaotfload's definer (and so is processed
 /// by its callbacks, not natively).
 pub fn is_lua_font(id: u16) -> bool {
-    FONTS.read().is_ok_and(|m| m.contains_key(&id))
+    FONTS.with(|m| m.borrow().contains_key(&id))
 }
 
 /// Forget every registered font.
 pub fn clear_lua_fonts() {
-    if let Ok(mut m) = FONTS.write() {
-        m.clear();
-    }
+    FONTS.with(|m| m.borrow_mut().clear());
 }
 
 #[cfg(test)]
