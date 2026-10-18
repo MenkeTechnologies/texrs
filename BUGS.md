@@ -201,8 +201,10 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
     but a font selection or an integer parameter (§1123's `do_assignments`);
   - `\showgroups` names a box's or a formula's group by the token that opened
     it, without the spec and context etex.ch's `show_save_groups` prints;
-  - the marks' text in an output routine: `\topmark` and its siblings expand
-    to nothing;
+  - `\topmark` and its siblings in an `\edef`, `\message` or `\write` expand
+    to nothing; in vertical mode, once a mark has been written, they stop the
+    run as unsupported; and a mark whose text reads a register only the run
+    knows has no tokens for them to read again;
   - `\write`, `\openout` and `\special` without `\immediate`: they are not yet
     put on the page they belong to.
 

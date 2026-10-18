@@ -124,6 +124,11 @@
     "\\leaders"
     "\\discretionary"
     "\\mark"
+    "\\topmark"
+    "\\firstmark"
+    "\\botmark"
+    "\\splitfirstmark"
+    "\\splitbotmark"
     "\\insert"
     "\\shipout"
     "\\unhcopy"
@@ -461,6 +466,11 @@
     (puthash "\\leaders" "\\leaders  —  Glue filled with copies of a box or a rule (§1078): the box or rule, then the glue it fills. [Boxes]" table)
     (puthash "\\discretionary" "\\discretionary  —  A discretionary break with its pre-break, post-break and replacement lists, each built in restricted horizontal mode (§1117-§1121). [Boxes]" table)
     (puthash "\\mark" "\\mark  —  A mark node holding its text, expanded as `\\message` expands it (§1101). [Boxes]" table)
+    (puthash "\\topmark" "\\topmark  —  The mark that was `\\botmark` when the current page began (§1012), read as the tokens it was written with; empty on the first page. [Boxes]" table)
+    (puthash "\\firstmark" "\\firstmark  —  The first mark on the page the output routine is working on, or `\\topmark` when the page has none (§1014, §1012). [Boxes]" table)
+    (puthash "\\botmark" "\\botmark  —  The last mark on the page the output routine is working on (§1014). [Boxes]" table)
+    (puthash "\\splitfirstmark" "\\splitfirstmark  —  The first mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
+    (puthash "\\splitbotmark" "\\splitbotmark  —  The last mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
     (puthash "\\insert" "\\insert  —  An insertion of class N, its vertical list built in internal vertical mode and packed with `\\splittopskip`, `\\splitmaxdepth` and `\\floatingpenalty` as they stand at its end (§1099-§1100). [Boxes]" table)
     (puthash "\\shipout" "\\shipout  —  Ship the box that follows as a page (§638-§641): the terminal says `[` and `\\count0..9` and `]`, as tex does. [Boxes]" table)
     (puthash "\\unhcopy" "\\unhcopy  —  `\\unhbox` that leaves the register as it was (§1110). [Boxes]" table)

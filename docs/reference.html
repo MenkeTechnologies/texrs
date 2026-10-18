@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">333</div>
+            <div class="stat-val">338</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -410,6 +410,11 @@
             <tr><td><code>\leaders</code></td><td>Glue filled with copies of a box or a rule (§1078): the box or rule, then the glue it fills. <code>\cleaders</code> centres the copies and <code>\xleaders</code> spreads them.</td><td><pre>\leaders\hrule\hfil  \cleaders\hbox{.}\hfil</pre></td></tr>
             <tr><td><code>\discretionary</code></td><td>A discretionary break with its pre-break, post-break and replacement lists, each built in restricted horizontal mode (§1117-§1121). <code>\-</code> is one whose pre-break text is the font's hyphen character.</td><td><pre>\discretionary{a}{b}{c}  ab\-cd</pre></td></tr>
             <tr><td><code>\mark</code></td><td>A mark node holding its text, expanded as <code>\message</code> expands it (§1101).</td><td><pre>\mark{hello}</pre></td></tr>
+            <tr><td><code>\topmark</code></td><td>The mark that was <code>\botmark</code> when the current page began (§1012), read as the tokens it was written with; empty on the first page. In a paragraph, a box or a formula each mark the document has written is a branch on which one the page builder holds when the program runs. Inside an <code>\edef</code> or a <code>\message</code> it expands to nothing, and in vertical mode once a mark exists it is refused as unsupported.</td><td><pre>\headline={\hfil\topmark}</pre></td></tr>
+            <tr><td><code>\firstmark</code></td><td>The first mark on the page the output routine is working on, or <code>\topmark</code> when the page has none (§1014, §1012). Read as <code>\topmark</code> is.</td><td><pre>\headline={\firstmark\hfil}</pre></td></tr>
+            <tr><td><code>\botmark</code></td><td>The last mark on the page the output routine is working on (§1014). Read as <code>\topmark</code> is.</td><td><pre>\footline={\hfil\botmark}</pre></td></tr>
+            <tr><td><code>\splitfirstmark</code></td><td>The first mark in the material the last <code>\vsplit</code> took off (§979). Read as <code>\topmark</code> is.</td><td><pre>\setbox2\vsplit1 to 1in [\splitfirstmark]</pre></td></tr>
+            <tr><td><code>\splitbotmark</code></td><td>The last mark in the material the last <code>\vsplit</code> took off (§979). Read as <code>\topmark</code> is.</td><td><pre>\setbox2\vsplit1 to 1in [\splitbotmark]</pre></td></tr>
             <tr><td><code>\insert</code></td><td>An insertion of class N, its vertical list built in internal vertical mode and packed with <code>\splittopskip</code>, <code>\splitmaxdepth</code> and <code>\floatingpenalty</code> as they stand at its end (§1099-§1100). <code>\vadjust</code> is the same with material for the enclosing vertical list.</td><td><pre>\insert100{\hbox{n}}  \vadjust{\kern2pt}</pre></td></tr>
             <tr><td><code>\shipout</code></td><td>Ship the box that follows as a page (§638-§641): the terminal says <code>[</code> and <code>\count0..9</code> and <code>]</code>, as tex does.</td><td><pre>\shipout\hbox{page}</pre></td></tr>
             <tr><td><code>\unhcopy</code></td><td><code>\unhbox</code> that leaves the register as it was (§1110).</td><td><pre>\unhcopy&lt;N&gt;</pre></td></tr>

@@ -720,6 +720,36 @@ pub const CORPUS: &[Entry] = &[
         "\\mark{hello}",
     ),
     (
+        "\\topmark",
+        "Boxes",
+        "The mark that was `\\botmark` when the current page began (\u{a7}1012), read as the tokens it was written with; empty on the first page. In a paragraph, a box or a formula each mark the document has written is a branch on which one the page builder holds when the program runs. Inside an `\\edef` or a `\\message` it expands to nothing, and in vertical mode once a mark exists it is refused as unsupported.",
+        "\\headline={\\hfil\\topmark}",
+    ),
+    (
+        "\\firstmark",
+        "Boxes",
+        "The first mark on the page the output routine is working on, or `\\topmark` when the page has none (\u{a7}1014, \u{a7}1012). Read as `\\topmark` is.",
+        "\\headline={\\firstmark\\hfil}",
+    ),
+    (
+        "\\botmark",
+        "Boxes",
+        "The last mark on the page the output routine is working on (\u{a7}1014). Read as `\\topmark` is.",
+        "\\footline={\\hfil\\botmark}",
+    ),
+    (
+        "\\splitfirstmark",
+        "Boxes",
+        "The first mark in the material the last `\\vsplit` took off (\u{a7}979). Read as `\\topmark` is.",
+        "\\setbox2\\vsplit1 to 1in [\\splitfirstmark]",
+    ),
+    (
+        "\\splitbotmark",
+        "Boxes",
+        "The last mark in the material the last `\\vsplit` took off (\u{a7}979). Read as `\\topmark` is.",
+        "\\setbox2\\vsplit1 to 1in [\\splitbotmark]",
+    ),
+    (
         "\\insert",
         "Boxes",
         "An insertion of class N, its vertical list built in internal vertical mode and packed with `\\splittopskip`, `\\splitmaxdepth` and `\\floatingpenalty` as they stand at its end (\u{a7}1099-\u{a7}1100). `\\vadjust` is the same with material for the enclosing vertical list.",
