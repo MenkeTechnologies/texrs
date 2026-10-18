@@ -2314,7 +2314,30 @@ impl Lowerer {
                     // §478 writes a count as digits and a dimension as `3.0pt`;
                     // the scratch register is of the same kind, so `\the` of
                     // it writes the frozen value the way tex froze it.
-                    let (file, kind) = match work.pending.pop() {
+                    let next = work.pending.pop();
+                    // A quantity the stomach holds -- plain.tex's `\footnote`
+                    // freezes `\the\spacefactor` -- is read from the slot it
+                    // is mirrored in, into a scratch register of its kind.
+                    let internal = match &next {
+                        Some(Token::Cs(w)) => crate::stomach::Internal::of_name(w.name()),
+                        None | Some(_) => None,
+                    };
+                    if let Some(i) = internal {
+                        let (file, kind) = match i.is_dimen() {
+                            true => (crate::compiler::DIMEN_BASE, "dimen"),
+                            false => (0, "count"),
+                        };
+                        let scratch = self.next_scratch;
+                        self.next_scratch -= 1;
+                        snapshots.push(Cmd::SetCount(file + scratch, Num::Count(i.slot())));
+                        new_body.push(Token::cs("the"));
+                        new_body.push(Token::cs(kind));
+                        for ch in scratch.to_string().chars() {
+                            new_body.push(Token::Char(ch, Cat::Other));
+                        }
+                        continue;
+                    }
+                    let (file, kind) = match next {
                         Some(Token::Cs(w)) if w.name() == "count" => (0, "count"),
                         Some(Token::Cs(w)) if w.name() == "dimen" => {
                             (crate::compiler::DIMEN_BASE, "dimen")
