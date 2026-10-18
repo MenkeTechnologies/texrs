@@ -37,9 +37,17 @@ const HEAD: &str = "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n";
 
 #[test]
 fn a_conditional_still_has_two_branches_here_and_a_jump_only_after_codegen() {
+    // The register's value has to be one only the RUN has -- a `\rustcall`'s.
+    // A value the lowerer can follow (`\count0=7`) decides the conditional
+    // while lowering, as tex decides it when the mouth reaches it, and then
+    // there is one arm and no branch to show.
     let path = write(
         "cond.tex",
-        &format!("{HEAD}\\count0=7\n\\ifnum\\count0>5 \\message{{big}}\\else\\message{{small}}\\fi\n\\end\n"),
+        &format!(
+            "{HEAD}\\rust{{\n#[no_mangle]\npub extern \"C\" fn seven() -> i64 {{ 7 }}\n}}\n\
+             \\count0=\\rustcall seven\\endrust\n\
+             \\ifnum\\count0>5 \\message{{big}}\\else\\message{{small}}\\fi\n\\end\n"
+        ),
     );
     let ast = dump(&path);
     assert!(ast.contains("IfNum \\count0 > 5"), "no conditional: {ast}");

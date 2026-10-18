@@ -14,7 +14,6 @@ use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 /// The token a list keeps for one read from the stream: §358's `dont_expand`
@@ -266,7 +265,9 @@ pub struct Engine {
     pub meanings: FxHashMap<CsId, Meaning>,
     /// Default values recorded by `\newcommand{\x}[n][default]`.
     optional_defaults: FxHashMap<CsId, Vec<Token>>,
-    pub count: HashMap<i64, i64>,
+    /// The registers, as far as the frontend can follow them; see
+    /// [`crate::known`].
+    pub known: crate::known::Known,
     pub messages: Vec<String>,
     /// The line `\inputlineno` was last read on (§1382's `line`). A read
     /// primitive answers the line of the token that named it, so the mouth
@@ -499,7 +500,7 @@ impl Engine {
             cats: CatTable::new(),
             meanings: FxHashMap::default(),
             optional_defaults: FxHashMap::default(),
-            count: HashMap::new(),
+            known: crate::known::Known::default(),
             messages: Vec::new(),
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
@@ -602,14 +603,7 @@ impl Engine {
                     let _ = self.charcodes.set(t, c, v);
                 }
                 Save::IntPar(i, v) => self.store_intpar(i, v),
-                Save::Count(reg, old) => match old {
-                    Some(v) => {
-                        self.count.insert(reg, v);
-                    }
-                    None => {
-                        self.count.remove(&reg);
-                    }
-                },
+                Save::Count(reg, old) => self.known.set(reg, old),
                 Save::Meaning(name, old) => match old {
                     Some(m) => {
                         self.meanings.insert(name, m);
@@ -1107,10 +1101,25 @@ impl Engine {
         self.meanings.insert(name, m);
     }
 
+    /// The value in register slot `slot`, as §413's `scan_something_internal`
+    /// reads it out of `eqtb`.
+    ///
+    /// The table is [`crate::known`]'s, which follows every assignment the
+    /// lowerer has made up to this token. A register whose value only the run
+    /// has -- one a `\rustcall` assigned -- cannot be read here, and the error
+    /// says so rather than answering with a value the run would contradict.
+    pub fn count_value(&self, slot: i64) -> R<i64> {
+        self.known.get(slot).ok_or_else(|| {
+            TexError(format!(
+                "Register slot {slot} is known only when the program runs"
+            ))
+        })
+    }
+
     fn set_count(&mut self, reg: i64, val: i64) {
-        let old = self.count.get(&reg).copied();
+        let old = self.known.get(reg);
         self.save(Save::Count(reg, old));
-        self.count.insert(reg, val);
+        self.known.set(reg, Some(val));
     }
 
     /// The escape character `\escapechar` currently selects.
@@ -1673,7 +1682,15 @@ impl Engine {
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
-        match truth != negated {
+        self.enter_decided(lx, truth != negated, pending_only)
+    }
+
+    /// §498's ending, once the test is decided: a true test runs on into its
+    /// own text and leaves the conditional open for its `\else` or `\fi`; a
+    /// false one skips (§494's `pass_text`) to the `\else`, whose text then
+    /// runs, or past the `\fi`.
+    fn enter_decided(&mut self, lx: &mut Lexer, truth: bool, pending_only: bool) -> R<()> {
+        match truth {
             true => self.conds.push(CondState::Taken),
             false => {
                 // Skip to `\else` (run that branch) or `\fi` (run nothing).
@@ -1684,6 +1701,15 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// A conditional in running text whose test the LOWERER decided -- an
+    /// `\ifnum` over registers whose values it has followed (`crate::known`).
+    /// From here on it is the expander's like any other, so its `\else` and
+    /// `\fi` are met on the one condition stack. `truth` already carries any
+    /// `\unless`.
+    pub fn enter_decided_file(&mut self, lx: &mut Lexer, truth: bool) -> R<()> {
+        self.enter_decided(lx, truth, false)
     }
 
     /// `\ifcase<n>` selects the nth `\or` branch, `\else` being the default.
@@ -4652,7 +4678,7 @@ impl Engine {
         let reg = self.scan_number(lx, false)?;
         self.skip_by(lx)?;
         let val = self.scan_number(lx, false)?;
-        let cur = *self.count.get(&reg).unwrap_or(&0);
+        let cur = self.count_value(reg)?;
         let next = match op {
             Arith::Add => cur + val,
             Arith::Mul => cur * val,
@@ -4780,7 +4806,7 @@ impl Engine {
             }
             if name.name() == "count" {
                 let reg = self.scan_register_any(lx, pending_only)?;
-                return Ok(sign * *self.count.get(&reg).unwrap_or(&0));
+                return Ok(sign * self.count_value(reg)?);
             }
             // `tex.web` §413: each of the six code tables is an INTERNAL
             // INTEGER, so `\catcode`\@' stands wherever a number is scanned and
@@ -4817,7 +4843,7 @@ impl Engine {
             match self.numeric_cs(name) {
                 Some(NumericCs::Value(v)) => return Ok(sign * v),
                 Some(NumericCs::Register(r)) => {
-                    return Ok(sign * *self.count.get(&r).unwrap_or(&0));
+                    return Ok(sign * self.count_value(r)?);
                 }
                 None => {}
             }

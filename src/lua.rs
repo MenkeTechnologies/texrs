@@ -45,7 +45,7 @@
 //! uses.
 //!
 //! The corollary is what a chunk can SEE. `\count` registers live in fusevm
-//! slots at run time and in `Engine::count` while lowering, so `tex.count[10]`
+//! slots at run time and in `Engine::known` while lowering, so `tex.count[10]`
 //! reads the lowering-time value, and a write goes to both: the frontend table
 //! (so `\the\count10` inside an `\edef` agrees) and a `Cmd::SetCount` (so the
 //! same register in the compiled program agrees). `\dimen` and `\skip` are the
@@ -501,7 +501,7 @@ fn run(
     yield_to: Yield,
 ) -> R<()> {
     let (lua, bridge) = runtime(eng)?;
-    snapshot(eng, out, &bridge);
+    snapshot(eng, &bridge);
     let result = token::with(&lua, eng, lx, |lua| {
         lua.load(chunk).set_name("\\directlua").exec()
     });
@@ -528,7 +528,7 @@ fn call_function(
     yield_to: Yield,
 ) -> R<()> {
     let (lua, bridge) = runtime(eng)?;
-    snapshot(eng, out, &bridge);
+    snapshot(eng, &bridge);
     // The `token` library is installed here too, and that is the whole point of
     // the manual's second worked example: `\def\mymacro{\directlua{mymacro()}}`
     // with `local d = token.scan_dimen()` inside `mymacro` reads `\mymacro 12pt`
@@ -554,7 +554,7 @@ fn finish(
     // Register writes stand even when the chunk then failed, exactly as an
     // assignment made before an error stands in TeX.
     for (&reg, &v) in &b.counts_written {
-        eng.count.insert(reg, v);
+        eng.known.set(reg, Some(v));
         out.push(Cmd::SetCount(reg, Num::Literal(v)));
     }
     let toks_written = std::mem::take(&mut b.toks_written);
@@ -674,12 +674,15 @@ fn runtime(eng: &mut Engine) -> R<(Lua, Rc<RefCell<Bridge>>)> {
 }
 
 /// What the frontend reads out of the engine before handing control to Lua.
-fn snapshot(eng: &Engine, out: &[Cmd], bridge: &Rc<RefCell<Bridge>>) {
+fn snapshot(eng: &Engine, bridge: &Rc<RefCell<Bridge>>) {
     let mut b = bridge.borrow_mut();
     b.prints.clear();
     b.error = None;
-    b.counts.clone_from(&eng.count);
-    fold_registers(out, &mut b.counts);
+    // Everything the lowerer has emitted so far has been followed into
+    // `Engine::known`, so the chunk reads the value the program will hold
+    // when it reaches this point -- `\count10=20` then `tex.count[10]` is 20,
+    // the manual's own worked example.
+    b.counts = eng.known.values();
     b.counts_written.clear();
     b.toks_written.clear();
     b.count_names.clear();
@@ -699,70 +702,6 @@ fn snapshot(eng: &Engine, out: &[Cmd], bridge: &Rc<RefCell<Bridge>>) {
             Meaning::ToksDef(r) => {
                 b.toks_names.insert(name.name().to_string(), *r);
             }
-            _ => {}
-        }
-    }
-}
-
-/// The registers the program will hold when it reaches this point.
-///
-/// `\count10=20` at the top of a document is not a frontend fact: a count lives
-/// in a fusevm slot, so lowering emits `Cmd::SetCount` and `Engine::count`
-/// stays empty. A chunk asking `tex.count[10]` would then read 0 where LuaTeX
-/// reads 20 — the manual's own worked example. So the straight-line prefix of
-/// the program that has been emitted so far is evaluated here, which is exactly
-/// the part whose value is decided before the chunk runs.
-///
-/// What is deliberately NOT folded, because its value is not decided yet:
-/// either arm of a run-time conditional, a loop body, and a group — a group
-/// saves and restores every register it assigns, so its writes do not reach
-/// here in the first place. A register whose only assignment is inside one of
-/// those reads as whatever it was before it, and that is the one place a chunk
-/// sees less than LuaTeX would.
-fn fold_registers(cmds: &[Cmd], into: &mut HashMap<i64, i64>) {
-    let value = |n: &Num, seen: &HashMap<i64, i64>| match n {
-        Num::Literal(v) => Some(*v),
-        Num::Count(r) => seen.get(r).copied(),
-        Num::Neg(r) => seen.get(r).map(|v| -v),
-        // The factor is known while lowering; the register it scales is known
-        // only if some earlier straight-line assignment settled it.
-        Num::Scaled { int, frac, reg } => seen
-            .get(reg)
-            .map(|v| crate::dimen::scale_by_factor(*int, *frac, *v)),
-        // Both halves are registers, so both have to have been settled.
-        Num::ByCount { .. } => None,
-        Num::Rust { .. } => None,
-    };
-    for cmd in cmds {
-        match cmd {
-            Cmd::SetCount(reg, n) => match value(n, into) {
-                Some(v) => {
-                    into.insert(*reg, v);
-                }
-                // An unknown value must not leave a stale one behind.
-                None => {
-                    into.remove(reg);
-                }
-            },
-            Cmd::Arith(op, reg, n) => {
-                let (cur, by) = (into.get(reg).copied(), value(n, into));
-                match (cur, by) {
-                    (Some(a), Some(b)) => {
-                        let v = match op {
-                            crate::ir::Arith::Add => a + b,
-                            crate::ir::Arith::Mul => a * b,
-                            crate::ir::Arith::Div if b != 0 => a / b,
-                            crate::ir::Arith::Div => a,
-                        };
-                        into.insert(*reg, v);
-                    }
-                    _ => {
-                        into.remove(reg);
-                    }
-                }
-            }
-            // Colour wraps text, and its body runs unconditionally.
-            Cmd::Color { body, .. } => fold_registers(body, into),
             _ => {}
         }
     }

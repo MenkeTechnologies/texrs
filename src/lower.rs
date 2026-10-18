@@ -215,8 +215,6 @@ pub struct Lowerer {
     /// boundary, which is what makes `-{}-` two hyphens: the spelling a LaTeX
     /// document has always used to ask for them.
     lig: Option<char>,
-    /// What is known of the registers; see [`Known`].
-    known: Known,
 }
 
 /// A list environment that is open, and how many items it has had.
@@ -328,7 +326,6 @@ impl Lowerer {
             listing_depth: 0,
             lig: None,
             toc_depth: 2,
-            known: Known::default(),
         }
     }
 
@@ -761,7 +758,7 @@ impl Lowerer {
         while let Some(tok) = {
             self.flush_keeps(&mut out);
             for cmd in &out[followed..] {
-                self.known.apply(cmd);
+                self.eng.known.apply(cmd);
             }
             followed = out.len();
             // The document's own level is the one whose commands are its text
@@ -842,7 +839,7 @@ impl Lowerer {
                         // lowered and wrapped in save/restore.
                         self.eng.compile_time_begin_group(GroupKind::Simple);
                         let mark = self.globals.len();
-                        let known_mark = self.known.mark();
+                        let known_mark = self.eng.known.mark();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
                         // Whatever `\aftergroup` held for this group is read
@@ -1499,6 +1496,9 @@ impl Lowerer {
                     }
                 }
                 "ifnum" => {
+                    // `\unless` belongs to this conditional, so it is taken
+                    // before the test can expand a conditional of its own.
+                    let negated = self.eng.take_unless();
                     let left = self.number(lx)?;
                     let rel = match self.eng.read_relation_file(lx, "ifnum")? {
                         '<' => Rel::Less,
@@ -1506,6 +1506,17 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.number(lx)?;
+                    // §498 decides the test when the mouth reaches it. When
+                    // every register it reads has a value the lowerer has
+                    // followed (`crate::known`), that is now, and only the arm
+                    // taken is read: a `\def` in the other never runs, as in
+                    // tex. Lowering both arms ran both definitions and the
+                    // losing one won.
+                    if let Some(truth) = self.known_truth(&left, rel, &right) {
+                        self.eng.enter_decided_file(lx, truth != negated)?;
+                        continue;
+                    }
+                    self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
@@ -1521,6 +1532,7 @@ impl Lowerer {
                 // dimension is an integer in a slot -- so it lowers to the same
                 // real branch rather than being recognised and skipped.
                 "ifdim" => {
+                    let negated = self.eng.take_unless();
                     let left = self.dimen_number(lx, false)?;
                     let rel = match self.eng.read_relation_file(lx, "ifdim")? {
                         '<' => Rel::Less,
@@ -1528,6 +1540,12 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.dimen_number(lx, false)?;
+                    // Decided now when both dimensions are known; see `\ifnum`.
+                    if let Some(truth) = self.known_truth(&left, rel, &right) {
+                        self.eng.enter_decided_file(lx, truth != negated)?;
+                        continue;
+                    }
+                    self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
@@ -1546,7 +1564,12 @@ impl Lowerer {
                 // to the expander answered from its own copy of the register,
                 // which no run-time `\count1=2` ever reaches.
                 "ifcase" => match self.number(lx)? {
-                    Num::Literal(n) => self.eng.ifcase_file(lx, n)?,
+                    // A selector whose value is known -- a constant, or a
+                    // register the lowerer has followed -- is the expander's.
+                    value if self.eng.known.num(&value).is_some() => {
+                        let n = self.eng.known.num(&value).expect("just matched");
+                        self.eng.ifcase_file(lx, n)?
+                    }
                     value => {
                         self.flush_reports(&mut out);
                         let branches = self.case_arms(lx)?;
@@ -1554,7 +1577,13 @@ impl Lowerer {
                     }
                 },
                 "ifodd" => {
+                    let negated = self.eng.take_unless();
                     let value = self.number(lx)?;
+                    if let Some(v) = self.eng.known.num(&value) {
+                        self.eng.enter_decided_file(lx, (v % 2 != 0) != negated)?;
+                        continue;
+                    }
+                    self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfOdd {
@@ -1696,7 +1725,7 @@ impl Lowerer {
                 "begingroup" => {
                     self.eng.compile_time_begin_group(GroupKind::SemiSimple);
                     let mark = self.globals.len();
-                    let known_mark = self.known.mark();
+                    let known_mark = self.eng.known.mark();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
                     // The `\endgroup` that stopped the block was pushed back
                     // for this arm to consume; at end of input there is none.
@@ -3315,13 +3344,13 @@ impl Lowerer {
         let negated = self.eng.take_unless();
         // Each arm starts from what was known before the conditional; which one
         // runs is the run's, so what they assign is unknown afterwards.
-        let known_mark = self.known.mark();
+        let known_mark = self.eng.known.mark();
         let mut then_branch = self.block(lx, Some(&["else", "fi"]))?;
         self.flush_reports(&mut then_branch);
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
             Some(Token::Cs(n)) if n.name() == "else" => {
-                self.known.undo_to(known_mark, None);
+                self.eng.known.undo_to(known_mark, None);
                 else_branch = self.block(lx, Some(&["fi"]))?;
                 self.flush_reports(&mut else_branch);
                 // Consume the `\fi`.
@@ -3338,7 +3367,7 @@ impl Lowerer {
                 return Err(TexError("Incomplete \\ifnum; missing \\fi".into()));
             }
         }
-        self.known.undo_to(known_mark, None);
+        self.eng.known.undo_to(known_mark, None);
         // A negated conditional is this one with its arms exchanged.
         match negated {
             true => Ok((else_branch, then_branch)),
@@ -3349,20 +3378,20 @@ impl Lowerer {
     /// The `\or`-separated cases of a file-level `\ifcase`, the last being
     /// `\else`'s (empty when there is none).
     fn case_arms(&mut self, lx: &mut Lexer) -> R<Vec<Vec<Cmd>>> {
-        let known_mark = self.known.mark();
+        let known_mark = self.eng.known.mark();
         let mut arms = Vec::new();
         loop {
             let mut arm = self.block(lx, Some(&["or", "else", "fi"]))?;
             self.flush_reports(&mut arm);
             arms.push(arm);
-            self.known.undo_to(known_mark, None);
+            self.eng.known.undo_to(known_mark, None);
             match lx.next_token(&self.eng.cats) {
                 Some(Token::Cs(n)) if n.name() == "or" => continue,
                 Some(Token::Cs(n)) if n.name() == "else" => {
                     let mut arm = self.block(lx, Some(&["fi"]))?;
                     self.flush_reports(&mut arm);
                     arms.push(arm);
-                    self.known.undo_to(known_mark, None);
+                    self.eng.known.undo_to(known_mark, None);
                     let _ = lx.next_token(&self.eng.cats);
                     return Ok(arms);
                 }
@@ -3846,7 +3875,7 @@ impl Lowerer {
     /// as far as the lowerer has followed it. A message prints them at run
     /// time; text that goes back into the mouth cannot wait for that.
     fn static_text(&self, parts: &[MsgOp]) -> String {
-        let value = |n: &Num| self.known.num(n).unwrap_or(0);
+        let value = |n: &Num| self.eng.known.num(n).unwrap_or(0);
         let mut out = String::new();
         for part in parts {
             match part {
@@ -4413,11 +4442,11 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.msg_number(work)?;
-                    // Two literals are a frontend fact: decide here, as §498
-                    // does, so only the arm taken is lowered. Lowering both
+                    // Two known values are a frontend fact: decide here, as
+                    // §498 does, so only the arm taken is lowered. Lowering both
                     // made `\def\r#1{\ifnum#1>0 \r{0}\fi}` unbounded
                     // for a call whose test is false.
-                    if let Some(truth) = literal_truth(&left, rel, &right) {
+                    if let Some(truth) = self.known_truth(&left, rel, &right) {
                         self.open_decided(work, truth, &mut decided)?;
                         continue;
                     }
@@ -4441,7 +4470,7 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = self.dimen_number(work, true)?;
-                    if let Some(truth) = literal_truth(&left, rel, &right) {
+                    if let Some(truth) = self.known_truth(&left, rel, &right) {
                         self.open_decided(work, truth, &mut decided)?;
                         continue;
                     }
@@ -4457,7 +4486,7 @@ impl Lowerer {
                 }
                 "ifodd" => {
                     let value = self.msg_number(work)?;
-                    if let Num::Literal(v) = value {
+                    if let Some(v) = self.eng.known.num(&value) {
                         self.open_decided(work, v % 2 != 0, &mut decided)?;
                         continue;
                     }
@@ -4648,16 +4677,17 @@ impl Lowerer {
     }
 }
 
-/// A comparison whose two operands are both literals, decided now.
-fn literal_truth(left: &Num, rel: Rel, right: &Num) -> Option<bool> {
-    let (Num::Literal(l), Num::Literal(r)) = (left, right) else {
-        return None;
-    };
-    Some(match rel {
-        Rel::Less => l < r,
-        Rel::Equal => l == r,
-        Rel::Greater => l > r,
-    })
+impl Lowerer {
+    /// A comparison whose two operands both have values known now -- a
+    /// constant, or a register `crate::known` has followed -- decided now.
+    fn known_truth(&self, left: &Num, rel: Rel, right: &Num) -> Option<bool> {
+        let (l, r) = (self.eng.known.num(left)?, self.eng.known.num(right)?);
+        Some(match rel {
+            Rel::Less => l < r,
+            Rel::Equal => l == r,
+            Rel::Greater => l > r,
+        })
+    }
 }
 
 /// A register read, negated when §440's signs before it said so.
@@ -4953,9 +4983,9 @@ impl Lowerer {
     /// not follow.
     #[inline(never)]
     fn known_after_group(&mut self, mark: usize, saves: &[i64], keeps: &[(i64, u16)]) {
-        self.known.undo_to(mark, Some(saves));
+        self.eng.known.undo_to(mark, Some(saves));
         for (reg, _) in keeps {
-            self.known.set(*reg, None);
+            self.eng.known.set(*reg, None);
         }
     }
 
@@ -5217,7 +5247,7 @@ fn glue_add_orders(base: i64, stretch: (Num, i64), shrink: (Num, i64)) -> Vec<Cm
 }
 
 /// Every count register a command block assigns, so a group knows what to save.
-fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
+pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
     let mut regs = Vec::new();
     fn walk(cmds: &[Cmd], regs: &mut Vec<i64>) {
         for c in cmds {
@@ -5338,104 +5368,6 @@ impl Lowerer {
         if *size_open > 0 {
             *size_open -= 1;
             self.push_text(out, &crate::typeset::SIZE_POP.to_string());
-        }
-    }
-}
-
-/// What the lowerer can say about a register's value at the point it is
-/// lowering.
-///
-/// A register is a VM slot, so its value is the run's -- except that a
-/// straight-line program is run in the order it is lowered, and `\dimen0=3pt`
-/// followed by `\kern\dimen0` is a kern of 3pt whatever else the program does.
-/// The boxes a document builds are measured while lowering, so this is what
-/// they measure with.
-///
-/// Three states per register. Never assigned, so INITEX's zero (the code
-/// generator writes zero into every slot first). Assigned to a value this
-/// tracked. Assigned to something it could not follow, which is unknown and
-/// makes whatever depends on it a refusal rather than a guess.
-#[derive(Default)]
-struct Known {
-    map: rustc_hash::FxHashMap<i64, Option<i64>>,
-    /// Every change, with what it replaced, so a group or a conditional arm
-    /// can put the state back without cloning the table.
-    trail: Vec<(i64, Option<Option<i64>>)>,
-}
-
-impl Known {
-    /// The value of `slot`, if it is known.
-    fn get(&self, slot: i64) -> Option<i64> {
-        match self.map.get(&slot) {
-            Some(v) => *v,
-            None => Some(0),
-        }
-    }
-
-    fn set(&mut self, slot: i64, value: Option<i64>) {
-        let old = self.map.insert(slot, value);
-        self.trail.push((slot, old));
-    }
-
-    /// Where the trail stands, for [`Known::undo_to`].
-    fn mark(&self) -> usize {
-        self.trail.len()
-    }
-
-    /// Put back everything changed since `mark`, or only `only` of it.
-    fn undo_to(&mut self, mark: usize, only: Option<&[i64]>) {
-        while self.trail.len() > mark {
-            let (slot, old) = self.trail.pop().expect("longer than the mark");
-            if only.is_some_and(|set| !set.contains(&slot)) {
-                continue;
-            }
-            match old {
-                Some(v) => self.map.insert(slot, v),
-                None => self.map.remove(&slot),
-            };
-        }
-    }
-
-    /// What a number is, if the register it reads is known.
-    fn num(&self, n: &Num) -> Option<i64> {
-        match n {
-            Num::Literal(v) => Some(*v),
-            Num::Count(s) => self.get(*s),
-            Num::Neg(s) => self.get(*s).map(|v| -v),
-            _ => None,
-        }
-    }
-
-    /// Follow one lowered command.
-    #[inline(never)]
-    fn apply(&mut self, cmd: &Cmd) {
-        const LIMIT: i64 = i32::MAX as i64;
-        match cmd {
-            Cmd::SetCount(reg, n) => {
-                let v = self.num(n);
-                self.set(*reg, v);
-            }
-            Cmd::Arith(op, reg, n) => {
-                let next = match (self.get(*reg), self.num(n)) {
-                    (Some(cur), Some(by)) => match op {
-                        Arith::Add => Some(cur.wrapping_add(by)),
-                        Arith::Mul => cur.checked_mul(by),
-                        Arith::Div if by != 0 => Some(cur / by),
-                        Arith::Div => None,
-                    },
-                    _ => None,
-                };
-                self.set(*reg, next.filter(|v| v.abs() <= LIMIT));
-            }
-            // A group puts its registers back itself, where it is lowered.
-            Cmd::Group { .. } => {}
-            // Which arm runs, and how often, is the run's.
-            Cmd::IfNum { .. } | Cmd::IfOdd { .. } | Cmd::Loop { .. } => {
-                for reg in assigned_counts(std::slice::from_ref(cmd)) {
-                    self.set(reg, None);
-                }
-            }
-            _ => {}
         }
     }
 }

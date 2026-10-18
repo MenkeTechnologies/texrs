@@ -106,13 +106,7 @@ impl Format {
                 catcodes.push((code, cat_to_u8(cat)));
             }
         }
-        let mut counts: Vec<(i64, i64)> = engine
-            .count
-            .iter()
-            .filter(|(_, v)| **v != 0)
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        counts.sort_unstable();
+        let counts = engine.known.counts();
 
         let mut meanings: Vec<(String, MeaningRepr)> = engine
             .meanings
@@ -158,9 +152,9 @@ impl Format {
         // the `\endlinechar` the format set.
         let end_line_char = engine.intpars.get(crate::intpar::END_LINE_CHAR);
         engine.cats.set_end_line_char(end_line_char);
-        engine.count.clear();
+        engine.known.clear();
         for (register, value) in &self.counts {
-            engine.count.insert(*register, *value);
+            engine.known.set(*register, Some(*value));
         }
         engine.meanings.clear();
         for (name, meaning) in &self.meanings {
@@ -310,12 +304,12 @@ mod tests {
 
         // And the converse, which is why the document layer checks: a preamble
         // that DOES something lowers to commands, and those have nowhere to go
-        // in a format. `\count7=42` is an assignment at run time, not a
-        // compile-time fact — the engine's own register map is still empty
-        // after lowering it.
+        // in a format. `\count7=42` lowers to a run-time assignment; the
+        // frontend follows its value as well (`crate::known`), as tex's
+        // `eqtb` would hold it, but the command still has to run.
         let (engine, _, commands) = preamble("\\count7=42\n");
         assert!(commands > 0, "an assignment lowers to run-time commands");
-        assert_eq!(engine.count.get(&7), None, "which has not run yet");
+        assert_eq!(engine.known.get(7), Some(42), "and the frontend follows it");
     }
 
     #[test]

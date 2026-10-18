@@ -46,6 +46,7 @@ pub mod intpar;
 pub mod io;
 pub mod ir;
 pub mod itar;
+pub mod known;
 pub mod kpse;
 pub mod latex;
 pub mod lexer;
