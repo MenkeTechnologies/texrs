@@ -437,9 +437,11 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `filename`, and none of luatex's memory statistics.
 - **Token userdata:** `mode` of a macro and of a primitive, `id`, and `tok` of
   a control sequence are luatex memory addresses and are not reproduced.
-- **Internal parameters texrs does not hold** -- `tex.prevdepth`,
-  `tex.pagegoal`, e-TeX's and LuaTeX's integer parameters such as
-  `tex.lastlinefit` -- refuse where luatex answers.
+- **Internal quantities texrs does not hold** -- `tex.prevdepth`,
+  `tex.spacefactor`, `tex.prevgraf`, `tex.pagegoal`, `tex.deadcycles`,
+  `tex.insertpenalties`, `tex.lastpenalty` and the other `last` items, the
+  direction parameters (`tex.bodydir`, `tex.pagedir`, ...) and
+  `tex.catcodetable` -- refuse where luatex answers.
 - **`\catcode` from Lua past code 255** is set straight into the table and
   not saved for the enclosing group: the engine's `\catcode` reads a code of
   0..255. `tex.setmathcode` refuses a family past 15 or a character past 255

@@ -59,7 +59,9 @@ fn param(name: &str) -> Option<Param> {
         return Some(Param::Int(i));
     }
     if let Some(slot) = crate::params::register_slot(name) {
-        if crate::params::DIMEN_NAMES.contains(&name) {
+        if crate::params::DIMEN_NAMES.contains(&name)
+            || crate::params::LUATEX_DIMEN_NAMES.contains(&name)
+        {
             return Some(Param::Dimen(slot));
         }
         return Some(Param::Glue { slot });
@@ -83,9 +85,7 @@ fn get_param(
             let v = ctx::with("tex.get", |eng, _| Ok(eng.intpars.get(*i)))?;
             one(Value::Integer(v))
         }
-        Param::Dimen(slot) => one(Value::Integer(
-            bridge.borrow().counts.get(slot).copied().unwrap_or(0),
-        )),
+        Param::Dimen(slot) => one(Value::Integer(slot_value(&bridge.borrow(), *slot))),
         Param::Glue { slot, .. } => {
             let g = glue_get(&bridge.borrow(), *slot);
             match all {

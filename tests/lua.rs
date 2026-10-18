@@ -1567,3 +1567,28 @@ fn the_real_luaotfload_loads_and_registers_its_font_definer() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn a_parameter_never_assigned_reads_its_initial_value_and_a_zero_reads_zero() {
+    // LuaTeX's own dimensions start where luatex starts them, `\pxdimen` at
+    // 65781sp and a page offset at an inch, so `tex.pxdimen` answers that
+    // before anything assigns it; and one assigned zero answers zero, not the
+    // initial value it replaced.
+    let body = shows(
+        "local a = tex.pxdimen .. ' ' .. tex.pageleftoffset .. ' ' .. tex.pagewidth \
+         tex.pxdimen = 0 local out = a .. ' ' .. tex.pxdimen ",
+    );
+    let want = "[65781 4736287 0 0]";
+    assert_eq!(out(&body), want);
+    assert_eq!(
+        out("\\pxdimen=0pt \\directlua{tex.sprint(string.char(92) .. 'message{[' .. tex.pxdimen .. ']}')}"),
+        "[0]"
+    );
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

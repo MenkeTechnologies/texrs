@@ -1729,6 +1729,10 @@ fn parameter_reason_text(name: &str) -> Option<String> {
         "holdinginserts",
         "insertpenalties",
         "interlinepenalties",
+        "lastkern",
+        "lastnodetype",
+        "lastpenalty",
+        "lastskip",
         "localbrokenpenalty",
         "localinterlinepenalty",
         "mag",
@@ -1861,11 +1865,30 @@ impl Kind {
 /// never set is LuaTeX's `UNUSED_ATTRIBUTE`, -0x7FFFFFFF, which
 /// `tex.attribute[0]` answers in luatex 1.24.0 before anything sets it.
 fn register_value(b: &Bridge, kind: Kind, reg: i64) -> i64 {
-    let unset = match kind {
-        Kind::Attribute => node::UNUSED_ATTRIBUTE,
-        _ => 0,
-    };
-    b.counts.get(&reg).copied().unwrap_or(unset)
+    match kind {
+        Kind::Attribute => b
+            .counts
+            .get(&reg)
+            .copied()
+            .unwrap_or(node::UNUSED_ATTRIBUTE),
+        _ => slot_value(b, reg),
+    }
+}
+
+/// A slot's value as the chunk sees it: what the chunk wrote, else what the
+/// engine knows (the snapshot leaves out the zeros, and the slots never
+/// assigned, whose initial value is `\pxdimen`'s 65781sp or a page offset's
+/// inch for some), else the initial value when no chunk is running.
+fn slot_value(b: &Bridge, slot: i64) -> i64 {
+    if let Some(v) = b.counts.get(&slot) {
+        return *v;
+    }
+    if ctx::depth() > 0 {
+        if let Ok(Some(v)) = ctx::with("tex", |eng, _| Ok(eng.known.get(slot))) {
+            return v;
+        }
+    }
+    crate::params::initial_value(slot)
 }
 
 /// Attribute registers, kept clear of the count and dimension slots.
@@ -1952,7 +1975,7 @@ fn resolve(b: &Bridge, kind: Kind, key: &Value) -> mlua::Result<i64> {
 /// `1`. A document that branches on the order it got is written against THOSE
 /// numbers, so that is what it is given.
 fn glue_get(b: &Bridge, base: i64) -> (i64, i64, i64, i64, i64) {
-    let at = |i: i64| b.counts.get(&(base + i)).copied().unwrap_or(0);
+    let at = |i: i64| slot_value(b, base + i);
     let packed = at(3);
     (
         at(0),
