@@ -427,7 +427,13 @@ than none.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
   chosen by minimising total demerits across the whole paragraph (`tex.web`
   §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
-  which is what makes pricing glue usable at all.
+  which is what makes pricing glue usable at all. The file is written as
+  LuaTeX's backend writes one: its objects numbered, ordered and packed into
+  object streams as luatex does, its streams deflated by zlib at luatex's
+  level, a TeX font's widths and descriptor taken from its TFM, its subset tag
+  and the file's `/ID` made by luatex's recipes. LuaTeX's page-stream writer is
+  ported too (`src/pdfpage.rs`: text in `BT`/`TJ` with kerns, rules, `pdf:`
+  specials, save, restore and matrices), for pages built from node lists.
 - Readers for the binary formats a TeX installation is made of, each printing
   what it read: `.tfm`, `.vf`, `.pk`, `.otf`, `.pfb`, `.map`, `.enc`, `.dvi`,
   `.bib`/`.aux`/`.bst`, and tar bundles.
@@ -897,7 +903,10 @@ when their oracle or the tools that read the output are missing.
 Byte equality is a reachable goal for DVI, which carries no fonts and no
 compression, and a distant one for PDF: `Hello world.` is 224 bytes from `tex`
 against 192 from texrs, where the same document in PDF is 11,729 from `luatex`
-against 15,435.
+against 14,592. The file is laid out, numbered and compressed as luatex lays it
+out (`src/pdfdoc.rs`), so what still differs is inside the objects: the page's
+content stream, which waits on pages shipped from node lists, and the font
+program; `BUGS.md` has the object-by-object count.
 
 ## [0x09] Fuzzing
 
@@ -1018,9 +1027,13 @@ document back to the one-by-one comparison. Object numbers are handed out by a
 serial walk in the order the old single loop added objects, and each page's
 content stream and page dictionary are then built in parallel into the numbers
 reserved for them; each page's content moves into its stream rather than
-being copied there. The SHA-256 for `/ID` digests the streams where they lie,
-while they are copied into the file and while the object stream is packed and
-deflated. Subsetting and the cross-reference table stay
+being copied there. The content streams are deflated at luatex's level 9 on
+the pool before the file is laid out, each reading only its own page; the
+`/ID` is luatex's, a digest of the time, the directory and the file's name, so
+the file itself is no longer hashed. Measured 2026-10-17 on a 6000-paragraph
+plain document (`--pdf`, release, best of 8 at load averages 25 to 30): 3.06 s
+before the luatex layout and 3.11 s after, for a file of 176,967 bytes where it
+was 1,918,708. Subsetting and the cross-reference table stay
 sequential; output is byte-identical across runs and thread counts (set
 `SOURCE_DATE_EPOCH` to pin the creation date). Medians of interleaved runs
 at 8 threads, `pdf::document` alone: 55 to 16 ms on a 1401-page document
@@ -1400,7 +1413,7 @@ serial, and most of it is in three places:
 Smaller: `pdf::document` spends most of its time in the SHA-256 of the whole
 file for `/ID` (`pdf::file_identifier`), hashed in software on aarch64 at the
 time (sha2's `asm` feature, which uses the ARMv8 SHA-2 instructions, is on
-since); the page count was taken by inflating
+since, and the `/ID` has since become luatex's, which hashes no file at all); the page count was taken by inflating
 the finished PDF, once in `main.rs` `write_pdf` and again in
 `pdf_output_line` (since this measurement it is the writer's own count,
 carried beside the bytes in `texrs::Pdf`, and nothing is inflated);

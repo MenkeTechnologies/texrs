@@ -71,6 +71,11 @@ pub unsafe extern "C" fn texrs_aot_main(data: *const u8, len: usize) -> i64 {
     let text = crate::runtime::take_text();
 
     let path = std::path::Path::new(&embedded.name);
+    // The job is the document the binary was compiled from, whatever the
+    // binary itself is called: the PDF's `/ID` is made from the job's name.
+    if let Some(stem) = path.file_stem() {
+        crate::lua::set_jobname(&stem.to_string_lossy());
+    }
     let pdf = crate::typeset::to_pdf(
         &text,
         &embedded.families,

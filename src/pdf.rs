@@ -25,11 +25,12 @@
 //! enough to find a key, and `unpacked` puts the `N 0 obj` headers back for a
 //! reader that walks the graph.
 //!
-//! What is here is the model and the writer, and enough of the document
-//! structure to make a page: a catalogue, a page tree, a content stream and a
-//! resource dictionary. What is not here is the typesetting -- there is nothing
-//! yet to lay a page out -- nor font embedding, which is the next piece and
-//! wants the Type 1 and OpenType readers this crate already has.
+//! What is here is the object model, a plain writer for it ([`Pdf`], which
+//! `crate::include` and the tests build files with), the page a typesetter
+//! draws on ([`Page`]) and the fonts and pictures it draws with. The DOCUMENT
+//! a run writes is laid out by `crate::pdfdoc`, which numbers, orders, packs
+//! and spells the objects as LuaTeX's backend does; a page's content stream as
+//! LuaTeX writes one is `crate::pdfpage`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -157,6 +158,12 @@ impl Object {
 
     pub fn string(text: &str) -> Object {
         Object::Str(text.to_string())
+    }
+
+    /// Write this object into `out`, as the writers in `crate::pdfdoc` spell
+    /// a packed object's body.
+    pub(crate) fn write_into(&self, out: &mut Vec<u8>) {
+        self.write(out)
     }
 
     /// Write this object into `out`.
@@ -328,7 +335,7 @@ fn file_identifier(digest: sha2::Sha256) -> Vec<u8> {
 /// engine that cares is told to use a fixed one instead, LuaTeX included, and
 /// texrs honours it here for the same reason: it is what makes byte equality
 /// with LuaTeX a question that can be asked at all.
-fn stamp() -> i64 {
+pub(crate) fn stamp() -> i64 {
     std::env::var("SOURCE_DATE_EPOCH")
         .ok()
         .and_then(|text| text.trim().parse::<i64>().ok())
@@ -349,7 +356,7 @@ fn stamp() -> i64 {
 /// machine five hours west -- and which makes the same document build to
 /// different bytes on two machines. A stamp that a reproducible build can rely
 /// on is worth more here than one more matching key.
-fn pdf_date(epoch: i64) -> String {
+pub(crate) fn pdf_date(epoch: i64) -> String {
     let (days, seconds) = (epoch.div_euclid(86_400), epoch.rem_euclid(86_400));
     let (year, month, day) = civil_from_days(days);
     let (hour, minute, second) = (seconds / 3600, (seconds / 60) % 60, seconds % 60);
@@ -362,6 +369,11 @@ fn pdf_date(epoch: i64) -> String {
 /// of two. This is the standard closed form for it -- shift the era to start
 /// in March so the leap day falls at the end of a year, count eras of 400
 /// years, and undo the shift at the end.
+/// [`civil_from_days`], for `crate::pdfdoc`'s identifier.
+pub(crate) fn civil(days: i64) -> (i64, i64, i64) {
+    civil_from_days(days)
+}
+
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -615,7 +627,7 @@ impl Pdf {
     /// information), and a `/Type /XRef /W [1 2 1]` object last. What is NOT
     /// reachable this way is LuaTeX's object NUMBERING -- 3, 9, 11, 6, 12 for
     /// that file, which is the order its own allocator handed numbers out in
-    /// and not a property of the format.
+    /// -- and that is why a document is written by `crate::pdfdoc` instead.
     pub fn finish(&self) -> Vec<u8> {
         let mut out = Vec::new();
         // §7.5.2: the header, and a comment of high bytes that tells anything
@@ -863,6 +875,143 @@ impl Pdf {
     }
 }
 
+/// Where a font's or a picture's objects go as they are built: the plain
+/// [`Pdf`] model, or LuaTeX's layout in `crate::pdfdoc::Writer`.
+pub(crate) trait Sink {
+    fn add(&mut self, object: Object) -> Object;
+}
+
+impl Sink for Pdf {
+    fn add(&mut self, object: Object) -> Object {
+        Pdf::add(self, object)
+    }
+}
+
+/// A TeX font as LuaTeX's backend embeds it: the metrics out of its `.tfm`,
+/// which say what each code is and how wide, and the Type 1 program a map line
+/// names for it (`pdftex.map`'s `cmr10 CMR10 <cmr10.pfb`).
+///
+/// The widths in the file and the descriptor's heights are the TFM's, as
+/// `write_charwidth_array` and `preset_fontmetrics` take them; the bounding
+/// box, the italic angle, the stem and the name are the program's, as
+/// `writet1` reads them over the preset.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TexFont {
+    /// The TFM's name, which orders the font dictionaries (`fo_tree`).
+    pub tfm_name: String,
+    /// The program's file name, which orders the descriptors (`fd_tree`).
+    pub program_file: String,
+    pub program: crate::type1::Type1,
+    /// The design size, in scaled points.
+    pub size: i64,
+    /// Each code's width at the design size, `None` where the TFM has no
+    /// character.
+    pub widths: Vec<Option<i64>>,
+    /// `preset_fontmetrics`, in thousandths: the height of `h`, of `H`, the
+    /// depth of `y` (negated), a third of the width of `.`, and the x-height.
+    pub ascent: i64,
+    pub cap_height: i64,
+    pub descent: i64,
+    pub stem_v: i64,
+    pub x_height: i64,
+}
+
+impl TexFont {
+    /// The TFM `tfm_name` and the program in `program_file`, both found by
+    /// `kpsewhich`.
+    pub fn open(tfm_name: &str, program_file: &str) -> Option<TexFont> {
+        let tfm = crate::tfm::Tfm::open(crate::kpse::locate(&format!("{tfm_name}.tfm"))?).ok()?;
+        let program = crate::type1::Type1::open(crate::type1::installed(program_file)?).ok()?;
+        let (size, widths, [ascent, cap_height, descent, stem_v, x_height]) =
+            crate::pdfdoc::tex_metrics(&tfm);
+        Some(TexFont {
+            tfm_name: tfm_name.to_string(),
+            program_file: program_file.to_string(),
+            program,
+            size,
+            widths,
+            ascent,
+            cap_height,
+            descent,
+            stem_v,
+            x_height,
+        })
+    }
+
+    /// The glyph code `code` draws: see [`glyph_for_code`].
+    pub fn glyph_for(&self, code: u8) -> Option<String> {
+        glyph_for_code(&self.program, code)
+    }
+
+    /// Whether the program draws `code` as the TFM describes it -- the glyph
+    /// its own encoding puts there -- rather than as a driver re-encoded it.
+    fn tfm_speaks_for(&self, code: u8) -> bool {
+        self.widths[usize::from(code)].is_some()
+            && self.program.encoded(code).map(|g| &g.name) == self.glyph_for(code).as_ref()
+    }
+
+    /// Whether anything can be drawn at `code`.
+    pub fn exists(&self, code: u8) -> bool {
+        match self.tfm_speaks_for(code) {
+            true => true,
+            false => self
+                .glyph_for(code)
+                .is_some_and(|g| self.program.glyph(&g).is_some()),
+        }
+    }
+
+    /// `pdf_char_width` at `cw.e` = 1: a code's width in ten-thousandths of
+    /// the size, rounded -- printed with one decimal, `277.8`. A code a driver
+    /// re-encoded is not the TFM's character, and has its glyph's own width.
+    pub fn char_width_e1(&self, code: u8) -> i64 {
+        if self.tfm_speaks_for(code) {
+            let w = self.widths[usize::from(code)].unwrap_or(0);
+            return (w as f64 / self.size as f64 * 10_000.0).round() as i64;
+        }
+        self.glyph_for(code)
+            .and_then(|g| {
+                self.program
+                    .glyph(&g)
+                    .map(|g| (g.width * 10.0).round() as i64)
+            })
+            .unwrap_or(0)
+    }
+}
+
+/// Which glyph of a Type 1 program a driver's code asks for.
+///
+/// §9.3.3 gives word spacing to the single-byte code 32 and to nothing else,
+/// and `Page::text_set` writes a `Tw` for it, so this driver has already told
+/// every reader that 32 is the space. A TeX font's own encoding says otherwise
+/// -- cmr10 puts `suppress`, the Polish suppressed-l, in that slot -- and
+/// believing it draws a small stroke in the middle of every word gap on the
+/// page: measured, `Hello world.` came out as `Hello`, a stroke, `world.`.
+///
+/// Past that the program's own encoding answers, and a code it leaves empty is
+/// one the driver used in WinAnsi: `emdash` is at 124 in CMR10 and at 151 in
+/// WinAnsi, so a page that drew an em dash asked CMR10 for code 151 and got an
+/// unfilled slot. §9.6.6 is exactly this case: `/Differences` remaps a code to
+/// a glyph by NAME, so the code the driver used is pointed at the glyph the
+/// font calls it. The join is through what a glyph MEANS rather than what it is
+/// called, because the two vocabularies do not agree by name either:
+/// `agl::unicode` turns each of the font's glyph names into the characters it
+/// draws, and the code's character comes from WinAnsi.
+pub(crate) fn glyph_for_code(font: &crate::type1::Type1, code: u8) -> Option<String> {
+    if code == b' ' {
+        if let Some(glyph) = font.glyph("space") {
+            return Some(glyph.name.clone());
+        }
+    }
+    if let Some(glyph) = font.encoded(code) {
+        return Some(glyph.name.clone());
+    }
+    let character = crate::typeset::winansi_unicode(code)?.to_string();
+    font.glyph_names()
+        .into_iter()
+        .find(|name| crate::agl::unicode(name).as_deref() == Some(character.as_str()))
+        .map(str::to_string)
+}
+
 /// A font a page sets text in.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Font {
@@ -874,6 +1023,8 @@ pub enum Font {
     /// wherever it is opened. This is what a TeX document needs: nobody has
     /// Computer Modern installed.
     Embedded(Box<crate::type1::Type1>),
+    /// A TeX font, written as LuaTeX's backend writes one: see [`TexFont`].
+    Tex(Box<TexFont>),
     /// A TrueType or OpenType font carried in the file.
     ///
     /// What `\setmainfont{Arimo}` actually asks for. Naming one of the
@@ -930,6 +1081,7 @@ impl Font {
         match self {
             Font::Base14(name) => name.clone(),
             Font::Embedded(font) => font.font_name.clone(),
+            Font::Tex(font) => font.program.font_name.clone(),
             Font::TrueType { name, .. } | Font::Glyphs { name, .. } => name.clone(),
         }
     }
@@ -963,9 +1115,8 @@ impl Font {
         // the face once per `to_pdf` call and there is no reason to pay twice.
         static FACE: std::sync::OnceLock<Option<Font>> = std::sync::OnceLock::new();
         FACE.get_or_init(|| {
-            let path = crate::type1::installed("cmr10.pfb")?;
-            let font = crate::type1::Type1::open(path).ok()?;
-            Some(Font::Embedded(Box::new(font)))
+            let font = TexFont::open("cmr10", "cmr10.pfb")?;
+            Some(Font::Tex(Box::new(font)))
         })
         .clone()
     }
@@ -1243,13 +1394,13 @@ impl Page {
 /// A font or picture used on every page is one allocation shared by all of
 /// them, and comparing it with itself by value reads the whole font program or
 /// the whole pixel buffer once per page per resource.
-fn same<T: PartialEq>(a: &T, b: &T) -> bool {
+pub(crate) fn same<T: PartialEq>(a: &T, b: &T) -> bool {
     std::ptr::eq(a, b) || a == b
 }
 
 /// Fewer pages, or pictures, than this are built and compared on the calling
 /// thread: fanning out costs more than a handful of them are worth.
-const PARALLEL_PAGES: usize = 8;
+pub(crate) const PARALLEL_PAGES: usize = 8;
 
 /// Which distinct picture each of each page's pictures is, the classes
 /// numbered in the order they are first used: what a walk over the pages
@@ -1262,7 +1413,7 @@ const PARALLEL_PAGES: usize = 8;
 /// that confirm those matches are made in parallel. Equal pictures always
 /// match, so a confirmed walk is the one the slow walk makes; two that match
 /// and still differ send it the slow way, which is what it always was.
-fn picture_classes(pages: &[Page]) -> Vec<Vec<usize>> {
+pub(crate) fn picture_classes(pages: &[Page]) -> Vec<Vec<usize>> {
     use crate::image::Image;
     use rayon::prelude::*;
     let key = |image: &Image| {
@@ -1354,197 +1505,81 @@ pub fn document_from(mut pages: Vec<Page>) -> Vec<u8> {
     assemble(&pages, contents)
 }
 
-/// The file for `pages`, whose content streams are `contents`, one a page.
+/// The file for `pages`, whose content streams are `contents`, one a page:
+/// LuaTeX's layout, numbering and spelling (`crate::pdfdoc`), at the
+/// `\pdfvariable`s LuaTeX's own format sets.
 fn assemble(pages: &[Page], contents: Vec<String>) -> Vec<u8> {
-    let mut pdf = Pdf::new();
-    let tree = pdf.reserve();
+    crate::pdfdoc::write(pages, contents, crate::pdfdoc::Variables::default())
+}
 
-    // A font is written ONCE and referred to from every page that uses it.
-    // Adding it per page instead is correct PDF and unusable in practice: a
-    // 144-page book carrying an embedded Arimo came out at 72 MB, one whole
-    // copy of the font per page.
-    let mut font_objects: Vec<(&Font, Object)> = Vec::new();
-    let mut image_objects: Vec<Object> = Vec::new();
-
-    // Which codes each font was asked for anywhere in the document. A font is
-    // written once, so what it has to carry is the union over the pages -- and
-    // it has to be known BEFORE the first page is written, since that is when
-    // the font program goes into the file.
-    let mut drawn: Vec<(&Font, std::collections::BTreeSet<u8>)> = Vec::new();
-    for page in pages {
-        for (name, font) in &page.fonts {
-            let font: &Font = font;
-            let codes = page.used.get(name).cloned().unwrap_or_default();
-            match drawn.iter_mut().find(|(seen, _)| same(*seen, font)) {
-                Some((_, all)) => all.extend(codes),
-                None => drawn.push((font, codes)),
-            }
-        }
-    }
-    let codes_of = |font: &Font| {
-        drawn
+/// What a page's resources carry beside its fonts and pictures: the
+/// graphics-state and shading dictionaries its content names, which a picture
+/// asks for through the page resources (`pdf_page_resources`), so they come
+/// first in LuaTeX's resource dictionary.
+pub(crate) fn extra_resources(page: &Page) -> Dict {
+    let mut resources = Dict::new();
+    // The graphics states the content named. Built up rather than matched on,
+    // because a page may have either or both.
+    if !page.ext_gstates.is_empty() {
+        let states: Dict = page
+            .ext_gstates
             .iter()
-            .find(|(seen, _)| same(*seen, font))
-            .map(|(_, codes)| codes.clone())
-            .unwrap_or_default()
-    };
-
-    let pictures = picture_classes(pages);
-
-    // Numbers are handed out in the order a single walk over the pages would
-    // add the objects -- the content, the fonts and pictures first used on the
-    // page, the page -- and the content and the page are only RESERVED here:
-    // what goes in them reads nothing another page decides, so they are built
-    // afterwards, in parallel, and filled in.
-    let mut numbered = Vec::with_capacity(pages.len());
-    for ((page, classes), data) in pages.iter().zip(&pictures).zip(contents) {
-        let content = pdf.reserve();
-        let mut fonts = Dict::new();
-        for (name, font) in &page.fonts {
-            let font: &Font = font;
-            let object = match font_objects.iter().find(|(seen, _)| same(*seen, font)) {
-                Some((_, object)) => object.clone(),
-                None => {
-                    let object = add_font(&mut pdf, font, &codes_of(font));
-                    font_objects.push((font, object.clone()));
-                    object
-                }
-            };
-            fonts.insert(name.clone(), object);
-        }
-        let mut images = Dict::new();
-        for ((name, image), &class) in page.images.iter().zip(classes) {
-            // A class is numbered by the picture that first uses it, so the
-            // next new class is always the next one to be written.
-            if class == image_objects.len() {
-                image_objects.push(add_image(&mut pdf, image));
-            }
-            images.insert(name.clone(), image_objects[class].clone());
-        }
-        numbered.push((content, fonts, images, pdf.reserve(), data));
+            .map(|(name, key, value)| {
+                (
+                    name.clone(),
+                    Object::Dict(Dict::from([(key.clone(), Object::Real(*value))])),
+                )
+            })
+            .collect();
+        resources.insert("ExtGState".to_string(), Object::Dict(states));
     }
-
-    // One page's two objects, which read only the page and the numbers the
-    // walk above gave it.
-    let build = |page: &Page, numbered: (u32, Dict, Dict, u32, String)| {
-        let (content, fonts, images, number, data) = numbered;
-        let mut resources = Dict::from([("Font".to_string(), Object::Dict(fonts))]);
-        if !images.is_empty() {
-            resources.insert("XObject".to_string(), Object::Dict(images));
-        }
-        // The graphics states the content named. Built up rather than matched
-        // on, because a page may have any combination of the three.
-        if !page.ext_gstates.is_empty() {
-            let states: Dict = page
-                .ext_gstates
-                .iter()
-                .map(|(name, key, value)| {
-                    (
-                        name.clone(),
-                        Object::Dict(Dict::from([(key.clone(), Object::Real(*value))])),
-                    )
-                })
-                .collect();
-            resources.insert("ExtGState".to_string(), Object::Dict(states));
-        }
-        if !page.shadings.is_empty() {
-            let shades: Dict = page
-                .shadings
-                .iter()
-                .map(|(name, dictionary)| (name.clone(), Object::Raw(dictionary.clone())))
-                .collect();
-            resources.insert("Shading".to_string(), Object::Dict(shades));
-        }
-        let resources = Object::Dict(resources);
-        // In LuaTeX's order -- measured, it writes `<< /Type /Page /Contents
-        // 3 0 R /Resources 1 0 R /MediaBox [ 0 0 612 792 ] /Parent 5 0 R >>`
-        // -- since a dictionary's keys reach the file in the order they were
-        // put in and two orders share no run of bytes.
-        let page_object = Object::dict([
-            ("Type", Object::name("Page")),
-            ("Contents", Object::Reference(content)),
-            ("Resources", resources),
-            (
-                "MediaBox",
-                Object::Array(vec![
-                    Object::Integer(0),
-                    Object::Integer(0),
-                    Object::Real(page.width),
-                    Object::Real(page.height),
-                ]),
-            ),
-            ("Parent", Object::Reference(tree)),
-        ]);
-        let content_object = Object::Stream {
-            dict: Dict::new(),
-            data: data.into_bytes(),
-        };
-        [(content, content_object), (number, page_object)]
-    };
-    let kids: Vec<Object> = numbered
-        .iter()
-        .map(|(_, _, _, number, _)| Object::Reference(*number))
-        .collect();
-    let built: Vec<[(u32, Object); 2]> = match pages.len() >= PARALLEL_PAGES {
-        true => {
-            use rayon::prelude::*;
-            pages
-                .par_iter()
-                .zip(numbered.into_par_iter())
-                .map(|(page, numbers)| build(page, numbers))
-                .collect()
-        }
-        false => pages
+    if !page.shadings.is_empty() {
+        let shades: Dict = page
+            .shadings
             .iter()
-            .zip(numbered)
-            .map(|(page, numbers)| build(page, numbers))
-            .collect(),
-    };
-    for (number, object) in built.into_iter().flatten() {
-        pdf.fill(number, object);
+            .map(|(name, dictionary)| (name.clone(), Object::Raw(dictionary.clone())))
+            .collect();
+        resources.insert("Shading".to_string(), Object::Dict(shades));
     }
+    resources
+}
 
-    pdf.fill(
-        tree,
-        Object::dict([
-            ("Type", Object::name("Pages")),
-            ("Count", Object::Integer(kids.len() as i64)),
-            ("Kids", Object::Array(kids)),
-        ]),
-    );
-    let catalog = pdf.add(Object::dict([
-        ("Type", Object::name("Catalog")),
-        ("Pages", Object::Reference(tree)),
-    ]));
-    if let Object::Reference(number) = catalog {
-        pdf.set_catalog(number);
-    }
-    // §14.3.3's document information dictionary, which LuaTeX writes for every
-    // file and texrs wrote for none. The keys are the ones LuaTeX writes:
-    // `/Producer`, `/Creator`, `/CreationDate`, `/ModDate` and `/Trapped`.
-    //
-    // `/Creator` is "the name of the conforming product that created the
-    // ORIGINAL document" and `/Producer` the one "that converted it to PDF"
-    // (Table 317), which for a TeX engine is TeX and the engine: LuaTeX writes
-    // `(TeX)` and `(LuaTeX-1.24.0)`, and this writes `(TeX)` and the same shape
-    // of its own name. The date is the same one in both places because nothing
-    // has modified the file since it was written.
-    let date = pdf_date(stamp());
-    let info = pdf.add(Object::dict([
-        (
-            "Producer",
-            Object::string(&format!("texrs-{}", env!("CARGO_PKG_VERSION"))),
-        ),
-        ("Creator", Object::string("TeX")),
-        ("CreationDate", Object::string(&date)),
-        ("ModDate", Object::string(&date)),
-        // "This shall be the name False, not the boolean value false."
-        ("Trapped", Object::name("False")),
-    ]));
-    if let Object::Reference(number) = info {
-        pdf.set_info(number);
-    }
-    pdf.finish()
+/// A picture written under the number it was given when it was first used,
+/// as LuaTeX writes a pending image when the page that uses it ends.
+pub(crate) fn write_image_as(
+    w: &mut crate::pdfdoc::Writer,
+    number: u32,
+    image: &crate::image::Image,
+) {
+    let Object::Stream { dict, data } = image_object(w, image) else {
+        return;
+    };
+    let own_filter = dict.get("Filter").is_some();
+    let keys: String = {
+        let mut body = Vec::new();
+        Object::Dict(dict).write(&mut body);
+        String::from_utf8_lossy(&body)
+            .trim_start_matches("<<")
+            .trim_end_matches(">>")
+            .trim()
+            .to_string()
+    };
+    w.stream(number, &keys, &data, !own_filter);
+}
+
+/// A font that is not a TeX font -- one of the fourteen, or a TrueType or
+/// OpenType face -- written with its dictionary under the number it was given
+/// when first used, and whatever it needs beside it added as it is built.
+pub(crate) fn write_font_as(
+    w: &mut crate::pdfdoc::Writer,
+    number: u32,
+    font: &Font,
+    codes: &std::collections::BTreeSet<u8>,
+) {
+    let dict = build_font(w, font, codes);
+    let mut body = Vec::new();
+    dict.write(&mut body);
+    w.object(number, 1, &body);
 }
 
 /// Add a picture to the file, as `pdf_ximage_load_image` does.
@@ -1553,7 +1588,7 @@ fn assemble(pages: &[Page], contents: Vec<String>) -> Vec<u8> {
 /// PNG's and JPEG's, so a JPEG becomes a `/DCTDecode` stream and a PNG's data
 /// becomes a `/FlateDecode` stream with the predictor PNG filtered its rows
 /// with. What the dictionary says is what the header said.
-fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
+fn image_object(pdf: &mut impl Sink, image: &crate::image::Image) -> Object {
     use crate::image::{Colours, Compression};
 
     let space = match (image.colours, &image.palette) {
@@ -1631,10 +1666,10 @@ fn add_image(pdf: &mut Pdf, image: &crate::image::Image) -> Object {
         dict.insert("SMask".to_string(), mask);
     }
 
-    pdf.add(Object::Stream {
+    Object::Stream {
         dict,
         data: image.data.clone(),
-    })
+    }
 }
 
 /// The six letters a subsetted font's name begins with (S9.6.4).
@@ -1694,6 +1729,44 @@ fn cut_to_codes(
     Some((subset_tag(name, keep.iter().copied()), cut))
 }
 
+/// One of the fourteen, named rather than embedded.
+fn base14_font(pdf: &mut impl Sink, font: &Font) -> Object {
+    let name = font.name();
+    // Symbol and ZapfDingbats are the two of the fourteen that are NOT in
+    // any standard encoding: their codes mean what their own built-in
+    // encoding says, and overlaying WinAnsi on one of them tells a reader
+    // that code 174 is a guillemot where the font draws a right arrow.
+    // Every other one of the fourteen is written with WinAnsi, which is the
+    // encoding this driver addresses them in.
+    let built_in = name == "Symbol" || name == "ZapfDingbats";
+    let mut entries = vec![
+        ("Type", Object::name("Font")),
+        ("Subtype", Object::name("Type1")),
+        ("BaseFont", Object::name(&name)),
+    ];
+    if !built_in {
+        entries.push(("Encoding", Object::name("WinAnsiEncoding")));
+    }
+    // What each of the fallback font's codes MEANS, as against which glyph
+    // it draws. Without it a page that draws an arrow is a page nobody can
+    // search for one -- `pdftotext` read the first of these back with the
+    // arrows simply absent from the text. The same thing is written beside
+    // an embedded Type 1 below, out of the same `agl`; only the table of
+    // what the codes mean is the font's own, and it lives beside the
+    // metrics it was read from.
+    if name == "Symbol" {
+        let meanings: Vec<(u8, String)> = (0u8..=255)
+            .filter_map(|code| Some((code, crate::typeset::symbol_unicode(code)?.to_string())))
+            .collect();
+        let map = pdf.add(Object::Stream {
+            dict: Dict::new(),
+            data: crate::agl::to_unicode(&name, &meanings).into_bytes(),
+        });
+        entries.push(("ToUnicode", map));
+    }
+    return Object::dict(entries);
+}
+
 /// Add a font to the file, embedding it when it is not one of the fourteen.
 ///
 /// Ported from `pdf_font_load_type1`. Embedding is four objects that have to
@@ -1706,7 +1779,7 @@ fn cut_to_codes(
 ///
 /// `codes` is what the document actually drew in this font, which is what says
 /// how much of it has to go into the file.
-fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) -> Object {
+fn build_font(pdf: &mut impl Sink, font: &Font, codes: &std::collections::BTreeSet<u8>) -> Object {
     if let Font::Glyphs {
         name,
         bytes,
@@ -1785,14 +1858,14 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             dict: Dict::new(),
             data: crate::agl::to_unicode_wide(name, &meanings).into_bytes(),
         });
-        return pdf.add(Object::dict([
+        return Object::dict([
             ("Type", Object::name("Font")),
             ("Subtype", Object::name("Type0")),
             ("BaseFont", Object::name(name)),
             ("Encoding", Object::name("Identity-H")),
             ("DescendantFonts", Object::Array(vec![descendant])),
             ("ToUnicode", to_unicode),
-        ]));
+        ]);
     }
     if let Font::TrueType {
         name,
@@ -1837,7 +1910,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             ("StemV", Object::Integer(80)),
             ("FontFile2", file),
         ]));
-        return pdf.add(Object::dict([
+        return Object::dict([
             ("Type", Object::name("Font")),
             ("Subtype", Object::name("TrueType")),
             ("BaseFont", Object::name(name)),
@@ -1849,84 +1922,20 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
             ),
             ("Encoding", Object::name("WinAnsiEncoding")),
             ("FontDescriptor", descriptor),
-        ]));
+        ]);
     }
-    let Font::Embedded(type1) = font else {
-        let name = font.name();
-        // Symbol and ZapfDingbats are the two of the fourteen that are NOT in
-        // any standard encoding: their codes mean what their own built-in
-        // encoding says, and overlaying WinAnsi on one of them tells a reader
-        // that code 174 is a guillemot where the font draws a right arrow.
-        // Every other one of the fourteen is written with WinAnsi, which is the
-        // encoding this driver addresses them in.
-        let built_in = name == "Symbol" || name == "ZapfDingbats";
-        let mut entries = vec![
-            ("Type", Object::name("Font")),
-            ("Subtype", Object::name("Type1")),
-            ("BaseFont", Object::name(&name)),
-        ];
-        if !built_in {
-            entries.push(("Encoding", Object::name("WinAnsiEncoding")));
-        }
-        // What each of the fallback font's codes MEANS, as against which glyph
-        // it draws. Without it a page that draws an arrow is a page nobody can
-        // search for one -- `pdftotext` read the first of these back with the
-        // arrows simply absent from the text. The same thing is written beside
-        // an embedded Type 1 below, out of the same `agl`; only the table of
-        // what the codes mean is the font's own, and it lives beside the
-        // metrics it was read from.
-        if name == "Symbol" {
-            let meanings: Vec<(u8, String)> = (0u8..=255)
-                .filter_map(|code| Some((code, crate::typeset::symbol_unicode(code)?.to_string())))
-                .collect();
-            let map = pdf.add(Object::Stream {
-                dict: Dict::new(),
-                data: crate::agl::to_unicode(&name, &meanings).into_bytes(),
-            });
-            entries.push(("ToUnicode", map));
-        }
-        return pdf.add(Object::dict(entries));
+    let type1: &crate::type1::Type1 = match font {
+        Font::Embedded(type1) => type1,
+        // `crate::pdfdoc` writes a TeX font itself; asked here, its program is
+        // written as a Type 1 program on its own.
+        Font::Tex(tex) => &tex.program,
+        _ => return base14_font(pdf, font),
     };
 
     // Which glyph of the WHOLE font each code the driver drew asks for. That is
     // what says how much of the font has to go into the file, so it is worked
     // out before the program is written rather than after.
-    let wanted = |font: &crate::type1::Type1, code: u8| -> Option<String> {
-        // §9.3.3 gives word spacing to the single-byte code 32 and to nothing
-        // else, and `Page::text_set` writes a `Tw` for it, so this driver has
-        // already told every reader that 32 is the space. A TeX font's own
-        // encoding says otherwise -- cmr10 puts `suppress`, the Polish
-        // suppressed-l, in that slot -- and believing it draws a small stroke
-        // in the middle of every word gap on the page: measured, `Hello world.`
-        // came out as `Hello`, a stroke, `world.`.
-        if code == b' ' {
-            if let Some(glyph) = font.glyph("space") {
-                return Some(glyph.name.clone());
-            }
-        }
-        if let Some(glyph) = font.encoded(code) {
-            return Some(glyph.name.clone());
-        }
-        // A code the DRIVER used that the font's own encoding leaves empty.
-        //
-        // The driver addresses a simple font in WinAnsi, and a TeX font is in
-        // none of the standard encodings: `emdash` is at 124 in CMR10 and at
-        // 151 in WinAnsi, so a page that drew an em dash asked CMR10 for code
-        // 151 and got an unfilled slot -- the dash was simply absent from the
-        // page. §9.6.6 is exactly this case: `/Differences` remaps a code to a
-        // glyph by NAME, so the code the driver used is pointed at the glyph
-        // the font calls it.
-        //
-        // The join is through what a glyph MEANS rather than what it is called,
-        // because the two vocabularies do not agree by name either:
-        // `agl::unicode` turns each of the font's glyph names into the
-        // characters it draws, and the code's character comes from WinAnsi.
-        let character = crate::typeset::winansi_unicode(code)?.to_string();
-        font.glyph_names()
-            .into_iter()
-            .find(|name| crate::agl::unicode(name).as_deref() == Some(character.as_str()))
-            .map(str::to_string)
-    };
+    let wanted = |font: &crate::type1::Type1, code: u8| glyph_for_code(font, code);
 
     // The font cut down to those glyphs, under a subset name. A font nothing
     // was drawn in cannot be measured for use and goes in whole, which is what
@@ -2107,7 +2116,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
     // means, and says nothing at all about what a code MEANS in Unicode, so a
     // reader copying a ligature out of its file is guessing from the glyph
     // name where a reader of this one is told.
-    pdf.add(Object::dict([
+    Object::dict([
         ("Type", Object::name("Font")),
         ("Subtype", Object::name("Type1")),
         ("BaseFont", Object::name(&type1.font_name)),
@@ -2117,7 +2126,7 @@ fn add_font(pdf: &mut Pdf, font: &Font, codes: &std::collections::BTreeSet<u8>) 
         ("Widths", Object::Array(widths)),
         ("Encoding", encoding),
         ("ToUnicode", to_unicode),
-    ]))
+    ])
 }
 
 #[cfg(test)]
@@ -2364,10 +2373,13 @@ mod tests {
         second.text("Times-Roman", 12.0, 72.0, 700.0, "two");
         let bytes = document(&[first, second]);
 
-        // The page tree, two content streams, two fonts, two pages and the
-        // catalogue are objects 1 to 8; 9 is the object stream that held six of
-        // them and 10 is the table. Unpacked, all eight come back and the
-        // object stream does not, because what it held stands in its place.
+        // Numbered as LuaTeX numbers them (`crate::pdfdoc`): each page's
+        // resources, page and content as it begins (1-3 and 7-9), its font
+        // when first drawn (4, 10), the page tree as the first page ends (5),
+        // the object stream when the first object went into it (6), then the
+        // catalogue, the information dictionary and the table (11-13).
+        // Unpacked, every one comes back but the object stream, because what
+        // it held stands in its place.
         let plain = String::from_utf8_lossy(&unpacked(&bytes)).into_owned();
         let numbers: Vec<u32> = plain
             .match_indices(" 0 obj\n")
@@ -2377,9 +2389,11 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), numbers.len(), "an object came back twice");
-        // Nine objects and the table: the information dictionary §14.3.3 asks
-        // for is one of them, which is why this is not the eight it was.
-        assert_eq!(sorted, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 11], "{plain}");
+        assert_eq!(
+            sorted,
+            vec![1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13],
+            "{plain}"
+        );
 
         // The object stream itself is gone: what it held is what stands in its
         // place.

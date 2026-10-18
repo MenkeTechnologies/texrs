@@ -285,7 +285,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\special",
         "Expansion",
-        "A whatsit for the driver (tex.web \u{a7}1354): the text is expanded now as `\\xdef` expands, or kept unexpanded for the shipout after LuaTeX's `shipout` keyword. In PDF mode LuaTeX's backend ignores one, and so does `--pdf`; the whatsit is held for the page it lands on, and no shipout reaches it yet.",
+        "A whatsit for the driver (tex.web \u{a7}1354): the text is expanded now as `\\xdef` expands, or kept unexpanded for the shipout after LuaTeX's `shipout` keyword. At shipout LuaTeX's PDF backend writes one whose text begins `pdf:` as a literal, its mode named by `direct:`, `page:`, `text:`, `raw:` or `origin:`, and ignores any other with `Non-PDF special ignored!` (`crate::pdfpage` does both); the whatsit is held for the page it lands on, and no shipout reaches it yet.",
         "\\special{<text>}\n\\special shipout{<text>}",
     ),
     (

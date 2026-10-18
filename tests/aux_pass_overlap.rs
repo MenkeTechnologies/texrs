@@ -83,12 +83,13 @@ fn run(dir: &Path, threads: &str) -> Step {
     }
 }
 
-/// First run, unchanged rerun, renumbering edit -- in one fresh directory.
+/// First run, unchanged rerun, renumbering edit -- in one fresh directory,
+/// the same one at every thread count: the PDF's `/ID` is made from the
+/// directory a job runs in, as luatex makes it, so two directories are two
+/// identifiers whatever the threads did.
 fn history(threads: &str) -> Vec<Step> {
-    let dir: PathBuf = std::env::temp_dir().join(format!(
-        "texrs_aux_overlap_{}_{threads}",
-        std::process::id()
-    ));
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("texrs_aux_overlap_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     std::fs::write(dir.join("doc.tex"), document(false)).expect("write source");

@@ -30,9 +30,11 @@ struct Drawn {
 /// Every run drawn in a PDF, in the order the file draws them.
 ///
 /// The content streams are the only ones the documents here produce: the fonts
-/// are the standard fourteen, so nothing else is embedded.
+/// are the standard fourteen, so nothing else is embedded. They are deflated
+/// in the file, as luatex writes them, so they are read inflated.
 fn runs(pdf: &[u8]) -> Vec<Drawn> {
-    let text = String::from_utf8_lossy(pdf);
+    let plain = texrs::pdf::inflate_streams(pdf);
+    let text = String::from_utf8_lossy(&plain);
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim();

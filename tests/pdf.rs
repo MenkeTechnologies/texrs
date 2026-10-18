@@ -1239,17 +1239,19 @@ fn the_trailer_names_an_information_dictionary_and_a_stable_identifier() {
     assert_eq!(halves[0], halves[1], "the two identifiers differ: {id}");
     assert_eq!(halves[0].len(), 34, "not sixteen bytes of hex: {id}");
 
-    // The digest is of the CONTENTS, so a document that differs has a different
-    // name for its bytes -- which is what §14.4 asks the identifier to be.
+    // LuaTeX's identifier (`print_ID`) is MD5 of the start time, the working
+    // directory, a slash and the output file's name -- not of what the file
+    // holds -- so another document built as the same job in the same place at
+    // the same pinned time is named the same, as luatex names it.
     let mut other = Page::letter();
     other.text("Helvetica", 12.0, 72.0, 700.0, "Goodbye");
     let other =
         String::from_utf8_lossy(&texrs::pdf::inflate_streams(&document(&[other]))).into_owned();
     let other = other.split("/ID [").nth(1).expect("an /ID").to_string();
-    assert_ne!(
+    assert_eq!(
         halves[0],
         other.split_whitespace().next().expect("a first half"),
-        "two different documents share one identifier"
+        "the identifier depends on the contents, which luatex's does not"
     );
 }
 

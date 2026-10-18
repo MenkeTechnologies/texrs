@@ -4022,7 +4022,13 @@ impl Lowerer {
     /// `extensions.c` reads them: the whatsit is built, and then either done
     /// now (`immediate`, §1375) or kept for the shipout of the page it lands
     /// on (see `deferred_whatsits`).
-    fn extension(&mut self, lx: &mut Lexer, which: &str, immediate: bool, out: &mut Vec<Cmd>) -> R<()> {
+    fn extension(
+        &mut self,
+        lx: &mut Lexer,
+        which: &str,
+        immediate: bool,
+        out: &mut Vec<Cmd>,
+    ) -> R<()> {
         use crate::write::{Stream, Whatsit};
         let whatsit = match which {
             // `new_write_whatsit(open_node_size, 1)`: the stream is checked
@@ -4187,10 +4193,12 @@ impl Lowerer {
                     _ => out.extend(closed(self, parts)),
                 }
             }
-            // In PDF mode LuaTeX's backend has nothing to do with a `\special`
-            // but warn that it was ignored (`pdf_special` in `pdfgen.c`); the
-            // DVI writer is where one means something, and it reads specials
-            // from the text it is handed rather than from here.
+            // A `\special` is the shipped page's: `pdf_special` in
+            // `pdfliteral.c` writes one beginning `pdf:` into the page's
+            // content (`crate::pdfpage::PageWriter::special`) at the point it
+            // is shipped at, which only a shipout knows. Under `\immediate`
+            // there is no page, and LuaTeX's `do_extension` never ships one
+            // immediately either.
             Whatsit::Special { .. } => {}
         }
         Ok(())
@@ -5307,7 +5315,10 @@ impl Lowerer {
                 "TeX capacity exceeded, sorry [text input levels={MAX_LEVELS}]"
             )));
         }
-        match self.locate_written(name).or_else(|| Self::locate_input(name)) {
+        match self
+            .locate_written(name)
+            .or_else(|| Self::locate_input(name))
+        {
             Some((shown, src)) => Ok((shown, crate::latex::load::without_trailing_endinput(src))),
             None => Err(TexError(format!("I can't find file `{name}'"))),
         }

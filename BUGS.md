@@ -763,49 +763,61 @@ expectations written by hand. What does not:
 
 ## PDF output is not LuaTeX's
 
-The goal is byte-identical, and the distance is large: for `Hello world.`
-luatex writes 11,729 bytes and texrs writes 15,435, both of them mostly a subsetted Computer Modern. `cargo run --bin pdf-parity`
-measures it on a ladder rather than as a yes/no, because a harness that only
-answered "identical?" would say no every day and say nothing else.
+The goal is byte-identical. `cargo run --bin pdf-parity` measures it on a
+ladder rather than as a yes/no, because a harness that only answered
+"identical?" would say no every day and say nothing else.
 
 Where the ten corpus documents stand: seven at FONTS, two at TEXT, and the empty
-document at BYTES, which is the goal. The seven climbed when texrs stopped
-setting in Helvetica and began embedding a subsetted CMR10, as luatex does; the
-two at TEXT differ in where their lines break, which is line breaking rather
-than the writer.
+document at BYTES, which is the goal. The two at TEXT differ in where their lines
+break, which is line breaking rather than the writer. Past FONTS the ladder has
+only BYTES, so how far a document has come inside the file is measured object by
+object: inflate both files, unpack their object streams, blank the dates, the
+producer and the `/ID`, and compare each numbered object. Before the file was
+laid out as luatex lays it, NO object of any of the nine documents agreed with
+luatex's; now three of eleven or twelve do in eight of them (the page, its
+resources and the page tree), and eight of eleven in `nested_macros.tex`, whose
+widths, descriptor, font dictionary, catalogue and cross reference agree too.
 
-The face agrees now. A document that names no family is set in Computer Modern,
-because that is what TeX means by "the font" and what luatex embeds, and the
-program is cut to the glyphs the page drew, so `pdffonts` reports a subsetted
-CMR10 for both engines. Two bugs came out of that change and are worth recording
-because neither was visible in any test: CMR10 puts `emdash` at 124 where WinAnsi
-puts it at 151, so every em dash landed in an empty slot and VANISHED; and CMR10
-has `suppress` rather than a space at 32, so every word gap drew a small stroke.
-`add_font` now writes a `/Differences` array joining the code the driver used to
-the glyph the font calls it, matched through what a glyph MEANS rather than what
-it is named.
+The layout is luatex's (`src/pdfdoc.rs`): objects numbered when something first
+names them and written when complete, in luatex's order; streams written into
+the file at once, everything else packed into object streams of at most a
+hundred; the information dictionary never packed; each stream's `/Length` padded
+the way luatex leaves it after seeking back to write the number; FlateDecode at
+`\pdfvariable compresslevel` (9 in luatex's format) through zlib 1.3.2 itself,
+which is the zlib luatex 1.24.0 is built with, so a stream compresses to
+luatex's length; widths from the TFM as `277.8`; the descriptor's heights from
+the TFM and its box, angle, stem and name from the program; the subset tag by
+luatex's MD5 recipe (`KJJYRX` for `Hello world.`'s glyphs, measured); `/ID` by
+`print_ID`'s recipe, which is the start time, the working directory and the
+output name -- so two documents built as the same job in the same place at the
+same pinned time share it, as they do under luatex; and no `/ToUnicode` unless
+`gentounicode` asks.
 
-Dictionary key order is no longer a difference: `Object::Dict` holds its keys in
-the order they were put in, and the page, the font, the descriptor, the object
-stream and the cross-reference stream are all written in luatex's order — the
-descriptor agrees with it key for key. What is left, measured on `Hello world.`:
-luatex writes `/Resources 1 0 R` and `/Widths 7 0 R` where texrs inlines both;
-it compresses the content stream with FlateDecode where texrs writes it plain,
-and draws `[(Hello)-333(w)27(orld.)]TJ` at 9.96264 point where texrs draws
-`(Hello world.) Tj` at 10, which is line breaking and kerning rather than the
-writer; and it writes neither `/Encoding` nor `/ToUnicode`, leaving the subset's
-own encoding to speak, where texrs writes both so a copied ligature is told
-rather than guessed. `tests/typeset.rs` reads content streams as raw bytes and
-reads `/F1` out of the page dictionary, so the first two are test-shape questions
-as much as writer questions.
+What is left, measured on `Hello world.`:
 
-A Type 1 program is subsetted now — the cleartext header, the `/CharStrings`
-dictionary and the eexec encryption all rebuilt — which took `Hello world.` from
-40,094 bytes to 15,435. What is NOT cut is the 102 subroutines cmr10 carries:
-hint replacement pushes a subroutine number, hands it to OtherSubr 3 and takes it
-back with `pop`, so a scanner reading the operand before `callsubr` does not see
-the call and would stub a subroutine the font goes on using. `xdvipdfmx`'s
-`t1_subset`, which this is ported from, carries them all for the same reason.
+- The content stream. luatex draws `/F1 9.96264 Tf` and `[(Hello)-333(w)27(orld.)]TJ`
+  at `91.925 710.037`; texrs draws `(Hello world.) Tj` at 10 point at `72
+  703.2`. The size is the TFM's 10pt in big points, the unit a PDF is measured
+  in -- 10 x 72 / 72.27 -- and the typesetter writes TeX points as PDF points,
+  sizes and positions alike. The TJ is the shipper's: a glue and a font kern
+  become kerns in the array and no space is drawn. `src/pdfpage.rs` writes
+  luatex's stream byte for byte from shipped positions (its tests hold
+  `Hello world.` and a page of rules and specials against luatex's own
+  bytes), and is waiting for pages built from node lists to call it.
+- Because texrs draws the word space as code 32, its CMR10 carries a `space`
+  glyph and an `/Encoding` re-encoding 32 to it, and so a different glyph set,
+  subset tag and `/CharSet`. Without spaces (`nested_macros.tex`) the font
+  dictionary, the widths and the descriptor are luatex's byte for byte.
+- The font program. The Type 1 subset keeps all 102 of cmr10's subroutines:
+  hint replacement pushes a subroutine number, hands it to OtherSubr 3 and takes
+  it back with `pop`, so a scanner reading the operand before `callsubr` does
+  not see the call and would stub a subroutine the font goes on using.
+  `xdvipdfmx`'s `t1_subset`, which this is ported from, carries them all for the
+  same reason, and luatex's `writet1` does not.
+- The information dictionary. Its dates are UT where luatex writes the local
+  offset, so the same document is the same file on any machine, and its
+  `/PTEX.FullBanner` names texrs. The ladder blanks the dates and the producer
+  but not the banner, although `pdf_parity::drawn` says it removes `/PTEX.*`.
 
 Byte equality is only defined with `SOURCE_DATE_EPOCH` pinned: measured, luatex
 reproduces itself exactly when it is set and differs run to run when it is not,

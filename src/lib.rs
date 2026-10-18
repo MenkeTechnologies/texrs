@@ -68,6 +68,8 @@ pub mod params;
 pub mod parity;
 pub mod pdf;
 pub mod pdf_parity;
+pub mod pdfdoc;
+pub mod pdfpage;
 pub mod pdfread;
 pub mod pk;
 pub mod postline;

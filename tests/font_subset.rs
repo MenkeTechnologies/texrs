@@ -189,7 +189,9 @@ fn the_program_in_the_file_holds_the_outlines_that_were_drawn() {
     };
 
     let text = "Handgloves";
-    let pdf = page_of(font.clone(), text);
+    // Inflated first: the program is a deflated stream in the file, as luatex
+    // writes it at `\pdfvariable compresslevel`.
+    let pdf = inflate_streams(&page_of(font.clone(), text));
     // The program itself, out of the file's own BYTES: a font is not text and
     // a lossy string of it would not be one, so the search is over the bytes
     // and the length is what the dictionary said.

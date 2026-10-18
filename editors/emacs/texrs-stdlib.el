@@ -28,6 +28,18 @@
     "\\string"
     "\\show"
     "\\showthe"
+    "\\showtokens"
+    "\\interactionmode"
+    "\\batchmode"
+    "\\nonstopmode"
+    "\\scrollmode"
+    "\\errorstopmode"
+    "\\eTeXversion"
+    "\\eTeXminorversion"
+    "\\eTeXrevision"
+    "\\eTeXVersion"
+    "\\luatexversion"
+    "\\luatexrevision"
     "\\inputlineno"
     "\\meaning"
     "\\uppercase"
@@ -75,10 +87,66 @@
     "\\ifinner"
     "\\ifeof"
     "\\ifcsname"
+    "\\ifabsnum"
+    "\\ifabsdim"
+    "\\ifincsname"
+    "\\ifprimitive"
+    "\\ifcondition"
     "\\count"
     "\\advance"
     "\\multiply"
     "\\divide"
+    "\\setbox"
+    "\\hbox"
+    "\\vbox"
+    "\\vtop"
+    "\\box"
+    "\\copy"
+    "\\lastbox"
+    "\\vsplit"
+    "\\wd"
+    "\\ht"
+    "\\dp"
+    "\\showbox"
+    "\\unhbox"
+    "\\unvbox"
+    "\\raise"
+    "\\hskip"
+    "\\kern"
+    "\\penalty"
+    "\\hrule"
+    "\\leaders"
+    "\\discretionary"
+    "\\mark"
+    "\\insert"
+    "\\shipout"
+    "\\unhcopy"
+    "\\unvcopy"
+    "\\lower"
+    "\\moveleft"
+    "\\moveright"
+    "\\hfil"
+    "\\hfill"
+    "\\hss"
+    "\\hfilneg"
+    "\\vskip"
+    "\\vfil"
+    "\\vfill"
+    "\\vss"
+    "\\vfilneg"
+    "\\vrule"
+    "\\cleaders"
+    "\\xleaders"
+    "\\unpenalty"
+    "\\unkern"
+    "\\unskip"
+    "\\vadjust"
+    "\\prevdepth"
+    "\\spacefactor"
+    "\\indent"
+    "\\noindent"
+    "\\noboundary"
+    "\\prevgraf"
     "\\intercept"
     "\\proceed"
     "\\char"
@@ -112,6 +180,9 @@
     "\\Uchar"
     "\\expanded"
     "\\unexpanded"
+    "\\lastnamedcs"
+    "\\immediateassignment"
+    "\\immediateassigned"
     "\\begincsname"
     "\\glueexpr"
     "\\muexpr"
@@ -130,6 +201,9 @@
     "\\endgroup"
     "\\aftergroup"
     "\\afterassignment"
+    "\\currentgrouplevel"
+    "\\currentgrouptype"
+    "\\showgroups"
     "\\newcommand"
     "\\renewcommand"
     "\\providecommand"
@@ -220,6 +294,18 @@
     (puthash "\\string" "\\string  —  Print a control sequence as text, escape character included — the inverse of `\\csname`. [Expansion]" table)
     (puthash "\\show" "\\show  —  Print what the next token means (tex.web §1294), read UNEXPANDED: `> `, the name and `=`, the same text `\\meaning` gives, and a period, followed by the context an error shows — `\\show` ends by calling `error`, so the run closes with the transcript notice as it does after an error. [Expansion]" table)
     (puthash "\\showthe" "\\showthe  —  Print what `\\the` would make of an internal quantity (tex.web §1297): `> `, the value as §465 writes it — a count as digits, a dimension as `3.5pt`, a glue with its stretch and shrink, a token list with each `#` doubled — and a period, followed by the context an error shows, as `\\show` does. [Expansion]" table)
+    (puthash "\\showtokens" "\\showtokens  —  Print a token list as `\\show` prints a macro's body: `> `, the general text with each `#` doubled and a space after a control word, a period, and the context. [Expansion]" table)
+    (puthash "\\interactionmode" "\\interactionmode  —  The interaction mode as an integer -- 0 batch, 1 nonstop, 2 scroll, 3 errorstop -- read where a number is scanned and assigned like a parameter, though always globally. [Expansion]" table)
+    (puthash "\\batchmode" "\\batchmode  —  From here on nothing reaches the terminal: messages and error reports alike are withheld, and a run that reported anything still ends pointing to the transcript. [Expansion]" table)
+    (puthash "\\nonstopmode" "\\nonstopmode  —  Report errors and carry on without stopping; what a run starts in under the parity harnesses. [Expansion]" table)
+    (puthash "\\scrollmode" "\\scrollmode  —  The same as `\\nonstopmode` here, since texrs never stops to ask; `\\interactionmode` reads 2. [Expansion]" table)
+    (puthash "\\errorstopmode" "\\errorstopmode  —  The same as `\\nonstopmode` here, since texrs never stops to ask; `\\interactionmode` reads 3. [Expansion]" table)
+    (puthash "\\eTeXversion" "\\eTeXversion  —  e-TeX's major version, a read-only integer: 2, as luatex reports it. [Expansion]" table)
+    (puthash "\\eTeXminorversion" "\\eTeXminorversion  —  e-TeX's minor version, a read-only integer: 2, as luatex reports it. [Expansion]" table)
+    (puthash "\\eTeXrevision" "\\eTeXrevision  —  e-TeX's revision as characters: `.2`, as luatex expands it. [Expansion]" table)
+    (puthash "\\eTeXVersion" "\\eTeXVersion  —  e-TeX's version as characters: `2.2`, as luatex expands it. [Expansion]" table)
+    (puthash "\\luatexversion" "\\luatexversion  —  LuaTeX's version as a read-only integer, the one packages test to find the engine: 124, for the luatex 1.24.0 texrs is measured against. [Expansion]" table)
+    (puthash "\\luatexrevision" "\\luatexrevision  —  LuaTeX's revision as characters: `0`. [Expansion]" table)
     (puthash "\\inputlineno" "\\inputlineno  —  The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and `\\the` and `\\number` write it. [Expansion]" table)
     (puthash "\\meaning" "\\meaning  —  What a token MEANS, as characters (tex.web §296's print_meaning). [Expansion]" table)
     (puthash "\\uppercase" "\\uppercase  —  Read the following group WITHOUT expanding it, replace every character by its `\\uccode` and put the result back to be read again (tex.web §1288). [Expansion]" table)
@@ -240,8 +326,8 @@
     (puthash "\\ignorespaces" "\\ignorespaces  —  Skip the spaces that follow (tex.web §1060). [Expansion]" table)
     (puthash "\\end" "\\end  —  Stop the run, and ship what it built. [Expansion]" table)
     (puthash "\\fontname" "\\fontname  —  Expands to the name of the font the next token identifies, as category-12 characters (tex.web §470, §472). [Expansion]" table)
-    (puthash "\\nullfont" "\\nullfont  —  The null font (tex.web §552), the only font texrs has: it is the font identifier `\\fontname` accepts,. [Expansion]" table)
-    (puthash "\\font" "\\font  —  A font identifier as far as `\\fontname` is concerned (tex.web §470): `\\fontname\\font` names the current font, which in texrs is always the null font. [Expansion]" table)
+    (puthash "\\nullfont" "\\nullfont  —  The null font (tex.web §552): no characters, seven zero parameters, and the current font until a font identifier is selected. [Expansion]" table)
+    (puthash "\\font" "\\font  —  Load a font (tex.web §1257-§1260): `\\font\\x=cmr10 at 12pt` or `scaled 1200` reads the `.tfm`, or reuses a font already loaded at that size, and makes `\\x` a font identifier; selecting it is an assignment the group scopes. [Expansion]" table)
     (puthash "\\textfont" "\\textfont  —  A math family slot for text style (tex.web §230), named by a family number 0–15. [Expansion]" table)
     (puthash "\\scriptfont" "\\scriptfont  —  A math family slot for script style (tex.web §230), named by a family number 0–15. [Expansion]" table)
     (puthash "\\scriptscriptfont" "\\scriptscriptfont  —  A math family slot for scriptscript style (tex.web §230), named by a family number 0–15. [Expansion]" table)
@@ -258,19 +344,75 @@
     (puthash "\\fi" "\\fi  —  End a conditional. [Conditionals]" table)
     (puthash "\\ifcat" "\\ifcat  —  Compare two category codes after expansion, reading each operand as `\\if` does (`tex.web` §506-§507): a control sequence `\\let` to a character has that character's category, and any other one reads as `\\relax`, so `\\ifcat\\relax\\def` is true and `\\ifcat a1` is false. [Conditionals]" table)
     (puthash "\\ifdim" "\\ifdim  —  Compare two dimensions. [Conditionals]" table)
-    (puthash "\\ifvoid" "\\ifvoid  —  Is box register N empty? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
-    (puthash "\\ifhbox" "\\ifhbox  —  Does box register N hold an \\hbox? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
-    (puthash "\\ifvbox" "\\ifvbox  —  Does box register N hold a \\vbox? The register number is read as tex.web §433 reads one, and the answer is that the register is VOID — which is what it is: texrs has no `\\setbox`, §462's `box(n)` is null for a register nothing has filled, and all 256 of them are in that state. [Conditionals]" table)
+    (puthash "\\ifvoid" "\\ifvoid  —  Is box register N empty? A real branch on the register as the program holds it (tex.web §505): the stomach mirrors each register's kind into a slot, so `\\setbox0\\hbox{}` makes `\\ifvoid0` false. [Conditionals]" table)
+    (puthash "\\ifhbox" "\\ifhbox  —  Does box register N hold an \\hbox? A real branch on the kind the stomach mirrors, as `\\ifvoid` is. [Conditionals]" table)
+    (puthash "\\ifvbox" "\\ifvbox  —  Does box register N hold a \\vbox? A real branch on the kind the stomach mirrors, as `\\ifvoid` is. [Conditionals]" table)
     (puthash "\\ifvmode" "\\ifvmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifhmode" "\\ifhmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifmmode" "\\ifmmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifinner" "\\ifinner  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
     (puthash "\\ifeof" "\\ifeof  —  True when a `\\read` stream is closed (tex.web §501): every stream is, until `\\openin` finds a file, and again once `\\closein` closes it or a `\\read` finds nothing left. [Conditionals]" table)
     (puthash "\\ifcsname" "\\ifcsname  —  Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered — which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web §372) and so changes the answer for every later ask. [Conditionals]" table)
+    (puthash "\\ifabsnum" "\\ifabsnum  —  `\\ifnum` on the magnitudes: each side is made positive before the comparison, so `\\ifabsnum -5>3` is true. [Conditionals]" table)
+    (puthash "\\ifabsdim" "\\ifabsdim  —  `\\ifdim` on the magnitudes, as `\\ifabsnum` is to `\\ifnum`. [Conditionals]" table)
+    (puthash "\\ifincsname" "\\ifincsname  —  True while a `\\csname`, `\\ifcsname` or `\\begincsname` is reading its name, so a macro can tell it is being expanded into one. [Conditionals]" table)
+    (puthash "\\ifprimitive" "\\ifprimitive  —  Is the next token, unexpanded, a primitive that still means itself? A `\\let` copy under another name is not, and neither is a primitive's name once something has redefined it. [Conditionals]" table)
+    (puthash "\\ifcondition" "\\ifcondition  —  Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written `\\ifcondition\\mytest` and still nest. [Conditionals]" table)
     (puthash "\\count" "\\count  —  A count register. [Registers]" table)
     (puthash "\\advance" "\\advance  —  Add to a register. [Registers]" table)
     (puthash "\\multiply" "\\multiply  —  Multiply a register. [Registers]" table)
     (puthash "\\divide" "\\divide  —  Divide a register, truncating toward zero as TeX's does. [Registers]" table)
+    (puthash "\\setbox" "\\setbox  —  Assign a box register (tex.web §1241, §1077): the box after the optional `=` is built while the program runs and stored in register N. [Boxes]" table)
+    (puthash "\\hbox" "\\hbox  —  Build a horizontal list and package it (§1083-§1086): `to <dimen>` sets it to that width, `spread <dimen>` that much wider than natural, and the glue inside is set by §649's `hpack`. [Boxes]" table)
+    (puthash "\\vbox" "\\vbox  —  Build a vertical list and package it with §668's `vpackage`, its depth limited by `\\boxmaxdepth`; boxes on it are separated by `\\baselineskip` glue as §679 computes it. [Boxes]" table)
+    (puthash "\\vtop" "\\vtop  —  A `\\vbox` whose reference point is its first box's baseline (§1087): the height is the first item's, the rest is depth. [Boxes]" table)
+    (puthash "\\box" "\\box  —  The box in register N, which leaves the register void (§1079) -- at the same level, so no group brings it back. [Boxes]" table)
+    (puthash "\\copy" "\\copy  —  The box in register N, leaving the register as it was. [Boxes]" table)
+    (puthash "\\lastbox" "\\lastbox  —  The last box of the current list, taken off it with its shift cleared (§1080-§1081); void when the list does not end with a box, and refused in math mode and on the page's own list. [Boxes]" table)
+    (puthash "\\vsplit" "\\vsplit  —  Split a vbox register at the best place for a box of the given height (§977-§979): the top part is returned packed to that height, the register keeps the rest with `\\splittopskip` above it, and the marks of the top part become `\\splitfirstmark` and `\\splitbotmark`. [Boxes]" table)
+    (puthash "\\wd" "\\wd  —  The width of box register N, readable wherever a dimension is (`\\the\\wd0`, `\\ifdim\\wd0>\\hsize`, `.5\\wd0`) and assignable (§1247): the box changes in place, and a void register stays void and reads zero. [Boxes]" table)
+    (puthash "\\ht" "\\ht  —  The height of box register N, read and assigned as `\\wd` is. [Boxes]" table)
+    (puthash "\\dp" "\\dp  —  The depth of box register N, read and assigned as `\\wd` is. [Boxes]" table)
+    (puthash "\\showbox" "\\showbox  —  Display box register N as §1296 and §173-§198 do -- nesting dots, unit-less glue, `\\showboxdepth` and `\\showboxbreadth` -- and stop with `! OK.`. [Boxes]" table)
+    (puthash "\\unhbox" "\\unhbox  —  Append the contents of an hbox register to the current horizontal list and void the register (§1110); `\\unhcopy` keeps it. [Boxes]" table)
+    (puthash "\\unvbox" "\\unvbox  —  The vertical counterpart of `\\unhbox` (§1110); `\\unvcopy` keeps the register. [Boxes]" table)
+    (puthash "\\raise" "\\raise  —  Shift the box that follows up in a horizontal list (§1073): a NEGATIVE `shift_amount`, because DVI's vertical axis points down. [Boxes]" table)
+    (puthash "\\hskip" "\\hskip  —  Glue in a horizontal list (§1060), from a glue specification or a `\\skip` register; `\\hfil`, `\\hfill`, `\\hss` and `\\hfilneg` are the four fixed ones of §1058. [Boxes]" table)
+    (puthash "\\kern" "\\kern  —  A rigid space in the current list (§1061), explicit -- which `\\showbox` marks with a space after `\\kern` and a break may discard. [Boxes]" table)
+    (puthash "\\penalty" "\\penalty  —  A penalty node (§1103). [Boxes]" table)
+    (puthash "\\hrule" "\\hrule  —  A rule in a vertical list, 0.4pt tall and as wide as the box it lands in unless `width`, `height` and `depth` say otherwise (§463); the box after it gets no interline glue (§1056). [Boxes]" table)
+    (puthash "\\leaders" "\\leaders  —  Glue filled with copies of a box or a rule (§1078): the box or rule, then the glue it fills. [Boxes]" table)
+    (puthash "\\discretionary" "\\discretionary  —  A discretionary break with its pre-break, post-break and replacement lists, each built in restricted horizontal mode (§1117-§1121). [Boxes]" table)
+    (puthash "\\mark" "\\mark  —  A mark node holding its text, expanded as `\\message` expands it (§1101). [Boxes]" table)
+    (puthash "\\insert" "\\insert  —  An insertion of class N, its vertical list built in internal vertical mode and packed with `\\splittopskip`, `\\splitmaxdepth` and `\\floatingpenalty` as they stand at its end (§1099-§1100). [Boxes]" table)
+    (puthash "\\shipout" "\\shipout  —  Ship the box that follows as a page (§638-§641): the terminal says `[` and `\\count0..9` and `]`, as tex does. [Boxes]" table)
+    (puthash "\\unhcopy" "\\unhcopy  —  `\\unhbox` that leaves the register as it was (§1110). [Boxes]" table)
+    (puthash "\\unvcopy" "\\unvcopy  —  `\\unvbox` that leaves the register as it was (§1110). [Boxes]" table)
+    (puthash "\\lower" "\\lower  —  Shift the box that follows down in a horizontal list: a positive `shift_amount` (§1073). [Boxes]" table)
+    (puthash "\\moveleft" "\\moveleft  —  Shift the box that follows left in a vertical list: a negative `shift_amount` (§1073). [Boxes]" table)
+    (puthash "\\moveright" "\\moveright  —  Shift the box that follows right in a vertical list (§1073). [Boxes]" table)
+    (puthash "\\hfil" "\\hfil  —  `\\hskip 0pt plus 1fil` (§1058). [Boxes]" table)
+    (puthash "\\hfill" "\\hfill  —  `\\hskip 0pt plus 1fill` (§1058). [Boxes]" table)
+    (puthash "\\hss" "\\hss  —  `\\hskip 0pt plus 1fil minus 1fil` (§1058), which lets a box shrink past its contents. [Boxes]" table)
+    (puthash "\\hfilneg" "\\hfilneg  —  `\\hskip 0pt plus -1fil` (§1058), cancelling one `\\hfil`. [Boxes]" table)
+    (puthash "\\vskip" "\\vskip  —  Glue in a vertical list (§1060), as `\\hskip` is in a horizontal one. [Boxes]" table)
+    (puthash "\\vfil" "\\vfil  —  `\\vskip 0pt plus 1fil` (§1058). [Boxes]" table)
+    (puthash "\\vfill" "\\vfill  —  `\\vskip 0pt plus 1fill` (§1058). [Boxes]" table)
+    (puthash "\\vss" "\\vss  —  `\\vskip 0pt plus 1fil minus 1fil` (§1058). [Boxes]" table)
+    (puthash "\\vfilneg" "\\vfilneg  —  `\\vskip 0pt plus -1fil` (§1058). [Boxes]" table)
+    (puthash "\\vrule" "\\vrule  —  A rule in a horizontal list, 0.4pt wide and as tall and deep as the box it lands in unless `width`, `height` and `depth` say otherwise (§463). [Boxes]" table)
+    (puthash "\\cleaders" "\\cleaders  —  Leaders whose copies are centred in the glue (§1078, §626). [Boxes]" table)
+    (puthash "\\xleaders" "\\xleaders  —  Leaders whose leftover space is spread between the copies (§1078, §626). [Boxes]" table)
+    (puthash "\\unpenalty" "\\unpenalty  —  Remove the last node of the current list if it is a penalty (§1105). [Boxes]" table)
+    (puthash "\\unkern" "\\unkern  —  Remove the last node of the current list if it is a kern (§1105). [Boxes]" table)
+    (puthash "\\unskip" "\\unskip  —  Remove the last node of the current list if it is glue (§1105); on the page's own list, where the page builder has the node, it does nothing. [Boxes]" table)
+    (puthash "\\vadjust" "\\vadjust  —  Material for the vertical list enclosing the paragraph, built in internal vertical mode (§1099-§1100). [Boxes]" table)
+    (puthash "\\prevdepth" "\\prevdepth  —  The depth of the last box on the current vertical list, which the next interline glue is computed from (§679); assignable in vertical mode (§1242). [Boxes]" table)
+    (puthash "\\spacefactor" "\\spacefactor  —  The space factor of the current horizontal list (§1034, §1043), read and assigned in horizontal mode. [Boxes]" table)
+    (puthash "\\indent" "\\indent  —  In horizontal mode, an empty box `\\parindent` wide (§1093). [Boxes]" table)
+    (puthash "\\noindent" "\\noindent  —  In horizontal mode, nothing (§1093). [Boxes]" table)
+    (puthash "\\noboundary" "\\noboundary  —  Cancel the font's boundary character on that side of the next or previous run of characters (§1034, §1038), so a boundary ligature or kern is not made. [Boxes]" table)
+    (puthash "\\prevgraf" "\\prevgraf  —  The number of lines in the most recent paragraph of the nearest enclosing vertical list (§422), read and assigned (§1244). [Boxes]" table)
     (puthash "\\intercept" "\\intercept  —  Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. [Intercepts]" table)
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
     (puthash "\\char" "\\char  —  Set the character of a code in the text (tex.web §1110): `A\\char66 C` sets `ABC`. [Registers]" table)
@@ -304,6 +446,9 @@
     (puthash "\\Uchar" "\\Uchar  —  The character with the given code: `\\Uchar65` is `A`. [Expansion]" table)
     (puthash "\\expanded" "\\expanded  —  Expand the group's contents completely, here and now, and put the result back. [Expansion]" table)
     (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)
+    (puthash "\\lastnamedcs" "\\lastnamedcs  —  The control sequence the last `\\csname`, `\\begincsname` or `\\ifcsname` looked up, put back where this stands -- so a name built once can be used again without building it twice. [Expansion]" table)
+    (puthash "\\immediateassignment" "\\immediateassignment  —  Carry out the assignment that follows even while expanding. [Expansion]" table)
+    (puthash "\\immediateassigned" "\\immediateassigned  —  The same for every assignment in a braced text; the braces open no group. [Expansion]" table)
     (puthash "\\begincsname" "\\begincsname  —  `\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. [Expansion]" table)
     (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
     (puthash "\\muexpr" "\\muexpr  —  The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts — eTeX gives each unit its own primitive so the two cannot be mixed. [Registers]" table)
@@ -322,6 +467,9 @@
     (puthash "\\endgroup" "\\endgroup  —  Close a `\\begingroup`, undoing every non-global assignment made since it. [Grouping]" table)
     (puthash "\\aftergroup" "\\aftergroup  —  Hold the next token and insert it after the enclosing group closes (tex.web §326). [Grouping]" table)
     (puthash "\\afterassignment" "\\afterassignment  —  Hold the next token until the following ASSIGNMENT has finished (tex.web §1269). [Grouping]" table)
+    (puthash "\\currentgrouplevel" "\\currentgrouplevel  —  How many groups are open, a read-only integer: 0 outside every group. [Grouping]" table)
+    (puthash "\\currentgrouptype" "\\currentgrouptype  —  What opened the innermost group, as eTeX numbers it: 0 outside every group, 1 for a brace, 14 for `\\begingroup`. [Grouping]" table)
+    (puthash "\\showgroups" "\\showgroups  —  List the open groups, innermost first, each with its level, the line it was entered on and what opened it -- `### simple group (level 1) entered at line 3 ({)` -- then `### bottom level`, followed by `! OK` and the context. [Grouping]" table)
     (puthash "\\newcommand" "\\newcommand  —  Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. [LaTeX]" table)
     (puthash "\\renewcommand" "\\renewcommand  —  Redefine a macro. [LaTeX]" table)
     (puthash "\\providecommand" "\\providecommand  —  Define a macro only if the name is free. [LaTeX]" table)

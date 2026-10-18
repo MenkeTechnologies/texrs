@@ -15,9 +15,11 @@ fn metrics_available() -> bool {
     texrs::typeset::find_font("cmr10").is_some()
 }
 
-/// The text drawn on each baseline, topmost first.
+/// The text drawn on each baseline, topmost first, read out of the content
+/// streams inflated (they are deflated in the file, as luatex's are).
 fn lines(pdf: &[u8]) -> Vec<String> {
-    let text = String::from_utf8_lossy(pdf);
+    let plain = texrs::pdf::inflate_streams(pdf);
+    let text = String::from_utf8_lossy(&plain);
     let mut out: Vec<String> = Vec::new();
     let mut last = String::new();
     for line in text.lines() {

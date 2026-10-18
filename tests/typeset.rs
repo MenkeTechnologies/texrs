@@ -1507,9 +1507,15 @@ fn placed_faces(pdf: &[u8]) -> Vec<(f64, f64, String, String)> {
         let Some((_, stream)) = value_of(page, "/Contents ").and_then(by_number) else {
             continue;
         };
-        // `/F1 3 0 R /F2 8 0 R` -- the resource dictionary of THIS page.
+        // `/F1 3 0 R /F2 8 0 R` -- the resource dictionary of THIS page,
+        // which is an object of its own (`/Resources 1 0 R`), as luatex
+        // writes it.
+        let resources = value_of(page, "/Resources ")
+            .and_then(by_number)
+            .map(|(_, body)| *body)
+            .unwrap_or(page);
         let named = |name: &str| {
-            value_of(page, &format!("/{name} "))
+            value_of(resources, &format!("/{name} "))
                 .map(base)
                 .unwrap_or_else(|| "?".to_string())
         };
@@ -2293,13 +2299,13 @@ fn the_space_between_paragraphs_fills_the_page_sooner() {
 
 /// The text each page of a PDF draws, in page order.
 ///
-/// The content streams texrs writes are uncompressed and are written one to a
-/// page, in page order, ahead of anything else that page needs
+/// The content streams texrs writes are deflated, as luatex's are, and are
+/// written one to a page, in page order, ahead of anything else that page needs
 /// (`pdf::document`) -- and a document set in one of the fourteen base fonts
-/// carries no other stream at all. So the streams ARE the pages, which is the
-/// only way to ask which page a word came out on.
+/// carries no other stream at all. So the streams, inflated, ARE the pages,
+/// which is the only way to ask which page a word came out on.
 fn page_texts(pdf: &[u8]) -> Vec<String> {
-    let s = String::from_utf8_lossy(pdf).into_owned();
+    let s = String::from_utf8_lossy(&texrs::pdf::inflate_streams(pdf)).into_owned();
     let mut pages = Vec::new();
     let mut rest = s.as_str();
     while let Some(at) = rest.find("stream\n") {
