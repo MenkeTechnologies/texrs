@@ -255,7 +255,7 @@ impl Search<'_> {
     fn scan(&mut self) -> Option<(Option<usize>, i64)> {
         let list = self.list;
         let mut cur_p = 0usize;
-        let auto_breaking = true;
+        let mut auto_breaking = true;
         // §863: glue at the beginning is not a legal breakpoint.
         let mut prev_p = 0usize;
         while cur_p < list.len() && !self.active.is_empty() {
@@ -317,10 +317,9 @@ impl Search<'_> {
                     cur_p = s;
                     continue;
                 }
-                // §866: texrs's math node does not record its side, so a
-                // break after a formula's closing node is allowed as it is
-                // after its opening one.
-                Node::Math(width) => {
+                // §866: no break inside a formula, but after it.
+                Node::Math(width) | Node::MathOff(width) => {
+                    auto_breaking = matches!(list[cur_p], Node::MathOff(_));
                     let width = *width;
                     self.kern_break(cur_p, auto_breaking, width);
                 }
@@ -684,7 +683,7 @@ impl Search<'_> {
                     self.break_width[5] -= v.shrink;
                 }
                 Node::Penalty(_) => {}
-                Node::Math(w) => self.break_width[0] -= w,
+                Node::Math(w) | Node::MathOff(w) => self.break_width[0] -= w,
                 Node::Kern { width, explicit } => match explicit {
                     true => self.break_width[0] -= width,
                     false => break,

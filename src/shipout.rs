@@ -318,7 +318,7 @@ impl<W: Sink> Shipper<'_, W> {
                 }
                 // §621: a kern and the space around a formula are both a
                 // movement and nothing else.
-                Node::Kern { width, .. } | Node::Math(width) => *width,
+                Node::Kern { width, .. } | Node::Math(width) | Node::MathOff(width) => *width,
                 // §621's `othercases do_nothing`: a penalty, a mark, an
                 // insertion and a discretionary that was not taken carry no
                 // ink and no width.

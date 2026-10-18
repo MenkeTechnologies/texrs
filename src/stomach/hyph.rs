@@ -657,12 +657,17 @@ impl Stomach {
 
 impl Stomach {
     /// Every word after a glue node of the paragraph, hyphenated (§866's
-    /// "Try to hyphenate the following word", for the whole pass).
+    /// "Try to hyphenate the following word", for the whole pass): after
+    /// glue where `auto_breaking` holds, which is not inside a formula.
     pub fn hyphenate_all(&mut self, list: &mut Vec<Node>) {
+        let mut auto_breaking = true;
         let mut i = 0;
         while i < list.len() {
-            if matches!(list[i], Node::Glue(_)) {
-                self.hyphenate_after(list, i);
+            match list[i] {
+                Node::Math(_) => auto_breaking = false,
+                Node::MathOff(_) => auto_breaking = true,
+                Node::Glue(_) if auto_breaking => self.hyphenate_after(list, i),
+                _ => {}
             }
             i += 1;
         }

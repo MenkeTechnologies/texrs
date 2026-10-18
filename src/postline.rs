@@ -276,6 +276,11 @@ pub fn post_line_break(
                 line.push(right_skip);
                 next = brk + 1;
             }
+            Some(Node::MathOff(_)) => {
+                line.push(Node::MathOff(0));
+                line.push(right_skip);
+                next = brk + 1;
+            }
             Some(Node::Kern { explicit, .. }) => {
                 line.push(Node::Kern { width: 0, explicit });
                 line.push(right_skip);

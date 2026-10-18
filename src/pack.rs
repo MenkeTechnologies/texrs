@@ -160,6 +160,9 @@ pub struct Packed {
     pub badness: i64,
     /// What would have been reported, if anything.
     pub report: Option<Report>,
+    /// `total_shrink` (§646) per order, which §1201 reads after the `hpack`
+    /// of a display.
+    pub total_shrink: [Scaled; 4],
 }
 
 /// The four orders' worth of stretch or shrink found in a list (§646).
@@ -242,7 +245,7 @@ pub fn hpack(
                 shrink.add(g.spec.shrink, g.spec.shrink_order);
             }
             // §651: a kern and a math node contribute width and nothing else.
-            Node::Kern { width, .. } | Node::Math(width) => x += *width,
+            Node::Kern { width, .. } | Node::Math(width) | Node::MathOff(width) => x += *width,
             // §651's `othercases do_nothing`.
             Node::Disc(_) | Node::Whatsit(_) | Node::Penalty(_) => {}
             // §655: kept only when there is no adjustment list.
@@ -268,6 +271,7 @@ pub fn hpack(
         node: r,
         badness,
         report,
+        total_shrink: shrink.0,
     }
 }
 
@@ -333,6 +337,7 @@ pub fn vpackage(list: Vec<Node>, spec: Spec, max_depth: Scaled, tol: Tolerances)
         node: r,
         badness,
         report,
+        total_shrink: shrink.0,
     }
 }
 

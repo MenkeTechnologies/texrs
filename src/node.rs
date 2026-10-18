@@ -359,8 +359,11 @@ pub enum Node {
     Disc(DiscNode),
     /// `\special` and friends: no dimensions, carried through.
     Whatsit(String),
-    /// The space a maths formula reserves on each side (§147).
+    /// A `math_node` (§147) before a formula (`\mathon`), holding the
+    /// `\mathsurround` it reserves.
     Math(Scaled),
+    /// The `math_node` after a formula (`\mathoff`, subtype `after`).
+    MathOff(Scaled),
     Glue(GlueNode),
     /// `explicit` is `\kern`'s subtype (§155): an explicit kern is a legal
     /// breakpoint when glue follows it, an implicit one is not.
@@ -386,7 +389,7 @@ impl Node {
             Node::Ligature(..) => 6,
             Node::Disc(_) => 7,
             Node::Whatsit(_) => 8,
-            Node::Math(_) => 9,
+            Node::Math(_) | Node::MathOff(_) => 9,
             Node::Glue(_) => 10,
             Node::Kern { .. } => 11,
             Node::Penalty(_) => 12,

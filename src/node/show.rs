@@ -253,10 +253,13 @@ impl Display<'_> {
                 }
                 out.push_str(&print_scaled(*width));
             }
-            // §192. texrs's math node does not record which side of the
-            // formula it stands on, so it is shown as the opening one.
-            Node::Math(width) => {
-                self.esc(out, "mathon");
+            // §192.
+            Node::Math(width) | Node::MathOff(width) => {
+                let side = match p {
+                    Node::Math(_) => "mathon",
+                    _ => "mathoff",
+                };
+                self.esc(out, side);
                 if *width != 0 {
                     out.push_str(", surrounded ");
                     out.push_str(&print_scaled(*width));
@@ -363,7 +366,7 @@ impl Display<'_> {
                 }
                 Node::Rule(_) => out.push('|'),
                 Node::Glue(g) if g.spec != crate::glue::Glue::default() => out.push(' '),
-                Node::Math(_) => out.push('$'),
+                Node::Math(_) | Node::MathOff(_) => out.push('$'),
                 // §175: a ligature is shown as what it was made of.
                 Node::Ligature(c, lig) => {
                     if *font != Some(c.font) {

@@ -1289,7 +1289,11 @@ fn to_engine(arena: &Arena, at: usize) -> mlua::Result<Vec<ENode>> {
             Some(FV::V(Value::String(s))) => s.to_str()?.to_string(),
             _ => String::new(),
         }),
-        MATH => ENode::Math(cell.int("surround")),
+        // LuaTeX's math subtypes: 0 `beginmath`, 1 `endmath`.
+        MATH => match sub {
+            1 => ENode::MathOff(cell.int("surround")),
+            _ => ENode::Math(cell.int("surround")),
+        },
         GLUE => ENode::Glue(GlueNode {
             spec: glue(cell)?,
             kind: leader_kind(sub),
@@ -1458,8 +1462,9 @@ fn one_from_engine(arena: &mut Arena, n: &ENode) -> mlua::Result<usize> {
             }
             at
         }
-        ENode::Math(s) => {
-            let at = arena.make(MATH, Some(0));
+        ENode::Math(s) | ENode::MathOff(s) => {
+            let side = i64::from(matches!(n, ENode::MathOff(_)));
+            let at = arena.make(MATH, Some(side));
             arena.cell_mut(at)?.set("surround", Some(FV::I(*s)));
             at
         }
@@ -3050,7 +3055,7 @@ fn f_dimensions(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Varia
                 ENode::Rule(r) => r.width.max(0),
                 ENode::Char(c) | ENode::Ligature(c, _) => c.width,
                 ENode::Kern { width, .. } => *width,
-                ENode::Math(s) => *s,
+                ENode::Math(s) | ENode::MathOff(s) => *s,
                 _ => 0,
             })
             .sum();
