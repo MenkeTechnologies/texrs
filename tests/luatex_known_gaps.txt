@@ -2,12 +2,6 @@
 # line, with the reason. The gate fails on a case that diverges and is not
 # listed, and on a listed case that has started passing.
 
-edef_reads_general_text.tex
-#                  `\edef\c{\detokenize{\a #}}': tex.web 473 expands an \edef
-#                  body WHILE reading it, so \detokenize reads `{\a #}' as its
-#                  own general text and the `#' is never a parameter of the
-#                  definition. texrs reads the whole body first and expands it
-#                  after, so the `#}' is `Illegal parameter number'.
 scantokens_file_end.tex
 #                  A pseudo file that ends inside a \message or \edef body is
 #                  `File ended while scanning ...' in luatex (check_outer_validity
