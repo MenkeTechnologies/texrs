@@ -1,0 +1,19 @@
+% Latin Modern (CFF outlines) in mode=harf: HarfBuzz's default features,
+% so the AV and Te kerns, the fi/ffi/ffl ligatures and the hyphenation
+% discretionaries luatex puts into "office" and "difficult".
+\font\lm="file:lmroman10-regular.otf:mode=harf" at 10pt
+\setbox0\hbox{\lm AVAT office Tea. fluffy}\directlua{harfdump.box("latin default")}
+\setbox0\hbox{\lm dif\-fi\-cult e-mail}\directlua{harfdump.box("latin explicit discretionaries")}
+\font\lmnk="file:lmroman10-regular.otf:mode=harf;-kern;-liga" at 10pt
+\setbox0\hbox{\lmnk AVAT office}\directlua{harfdump.box("latin -kern -liga")}
+% At 500sp the scale is a half, so the rounding of every half unit shows.
+\font\lmtiny="file:lmroman10-regular.otf:mode=harf" at 500sp
+\setbox0\hbox{\lmtiny AV To office}\directlua{harfdump.box("latin at 500sp")}
+\font\lmit="file:lmroman10-italic.otf:mode=harf" at 12pt
+\setbox0\hbox{\lmit f\/ fluffy\/}\directlua{harfdump.box("italic correction")}
+% Discretionaries the ffi ligature spans, one after another: each is
+% reshaped from the clusters HarfBuzz says are safe to break at.
+\setbox0\hbox{\lm f\-f\-i dif\-fi\-c fi\-c}\directlua{harfdump.box("chained discretionaries")}
+\setbox0\hbox{\lm\discretionary{f-}{fi}{ffi}x Waffle-iron afflict}\directlua{harfdump.box("explicit discretionary and hyphen")}
+% A box inside a word is shaped as U+FFFC, and so breaks the kern.
+\setbox0\hbox{\lm A\hbox{}V A\vrule V}\directlua{harfdump.box("box and rule in a run")}

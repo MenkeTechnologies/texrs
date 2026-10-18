@@ -25,6 +25,7 @@ categories = ["command-line-utilities", "text-processing"]
 exclude = [
     "/.github/",
     "/tests/cases/",
+    "/tests/harf_cases/",
     "/tests/common/",
     "/tests/data/",
     "/tests/*.rs",
@@ -161,6 +162,17 @@ ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 # the same interpreter; fusevm is not an option here, it hosts seventeen
 # frontends and none of them is Lua.
 mlua = { version = "0.12.1", features = ["lua53", "vendored"] }
+
+# Shaping an OpenType font the way LuaHBTeX's `mode=harf` does (src/shape.rs).
+# luaotfload hands each run to HarfBuzz, and the LuaHBTeX of TeX Live 2026
+# links HarfBuzz 12.3.2 (`require'luaharfbuzz'.version()`); harfrust is the
+# HarfBuzz project's own Rust port and tracks HarfBuzz releases (0.14 follows
+# 14.5.1), where rustybuzz stopped following them. Pure Rust, no unsafe, so a
+# build needs no system HarfBuzz and the shaper can be shared across threads.
+harfrust = "0.14.0"
+# The raw tables luaotfload reads beside the shaper (`post`, `OS/2`, `GPOS`),
+# from the same parse harfrust is built on.
+read-fonts = { version = "0.45.1", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "pipeline"

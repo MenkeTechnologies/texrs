@@ -1,0 +1,6 @@
+% Two harf fonts in one list, and a font change inside a word.
+\font\a="file:lmroman10-regular.otf:mode=harf" at 10pt
+\font\b="file:Arimo-Regular.ttf:mode=harf" at 10pt
+\setbox0\hbox{\a To\b Va\a ffi \b office}\directlua{harfdump.box("two fonts")}
+% A kern and a penalty inside a run: each is shaped as U+FFFC.
+\setbox0\hbox{\a A\kern1pt V\penalty50 AT}\directlua{harfdump.box("nodes inside a run")}

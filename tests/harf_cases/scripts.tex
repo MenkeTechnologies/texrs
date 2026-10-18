@@ -1,0 +1,20 @@
+% Greek and Cyrillic in Noto Serif, with the script and language a
+% fontspec document would name.
+\font\gr="file:NotoSerif-Regular.ttf:mode=harf;script=grek;language=ELL" at 10pt
+\setbox0\hbox{\gr Καλημέρα κόσμε, ἀρχὴ ῥήτωρ}\directlua{harfdump.box("greek")}
+\font\cy="file:NotoSerif-Regular.ttf:mode=harf;script=cyrl;language=RUS" at 10pt
+\setbox0\hbox{\cy Съешь же ещё этих мягких булок}\directlua{harfdump.box("cyrillic")}
+\font\bg="file:NotoSerif-Regular.ttf:mode=harf;script=cyrl;language=BGR" at 10pt
+\setbox0\hbox{\bg вдъхновение}\directlua{harfdump.box("cyrillic bulgarian locl")}
+% Arabic, right to left, joined and with its marks positioned.
+\font\ara="file:Amiri-Regular.ttf:mode=harf;script=arab" at 10pt
+\setbox0\hbox{\ara\textdir TRT بِسْمِ اللَّهِ الرَّحْمَٰنِ}\directlua{harfdump.box("arabic")}
+% Devanagari: conjuncts, reordered matras, the dev2 shaper.
+\font\dev="file:Shobhika-Regular.otf:mode=harf;script=dev2" at 10pt
+\setbox0\hbox{\dev क्षत्रिय हिन्दी कि र्क}\directlua{harfdump.box("devanagari")}
+% Han and kana; nothing to shape but the widths and the punctuation.
+\font\han="file:FandolSong-Regular.otf:mode=harf;script=hani" at 10pt
+\setbox0\hbox{\han 汉字测试，中文。かな}\directlua{harfdump.box("cjk")}
+% No script given: HarfBuzz is not told one, and shapes with none.
+\font\nos="file:Amiri-Regular.ttf:mode=harf" at 10pt
+\setbox0\hbox{\nos\textdir TRT سلام}\directlua{harfdump.box("arabic without script")}
