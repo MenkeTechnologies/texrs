@@ -1,0 +1,6 @@
+% primitives: numexpr
+\catcode`\{=1 \catcode`\}=2
+\count1=7
+\message{[\the\numexpr 1+2*3\relax][\the\numexpr (1+2)*3\relax][\the\numexpr 7/2\relax]}
+\message{[\the\numexpr -7/2\relax][\the\numexpr\count1*\count1-1\relax][\number\numexpr 2*(3+4)\relax]}
+\end

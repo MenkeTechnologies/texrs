@@ -56,6 +56,10 @@ name = "parity-fuzz"
 path = "src/bin/parity_fuzz.rs"
 
 [[bin]]
+name = "primitive-census"
+path = "src/bin/primitive_census.rs"
+
+[[bin]]
 name = "gen-docs"
 path = "src/bin/gen_docs.rs"
 

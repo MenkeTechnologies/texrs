@@ -1,0 +1,7 @@
+% primitives: expanded
+\catcode`\{=1 \catcode`\}=2
+\def\a{A}\def\b{\a\a}
+\message{[\expanded{\b\noexpand\a}]}
+\edef\c{\expandafter\noexpand\expanded{\noexpand\b}}
+\message{[\meaning\c]}
+\end

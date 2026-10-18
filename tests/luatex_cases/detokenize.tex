@@ -1,0 +1,5 @@
+% primitives: detokenize
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\x{\y z}
+\message{[\detokenize{\a b{c}#}][\detokenize{}][\detokenize\expandafter{\x}]}
+\end

@@ -1,0 +1,6 @@
+% primitives: ifdefined ifcsname
+\catcode`\{=1 \catcode`\}=2
+\def\a{}
+\message{[\ifdefined\a Y\else N\fi][\ifdefined\zzz Y\else N\fi][\ifdefined\relax Y\else N\fi]}
+\message{[\ifcsname a\endcsname Y\else N\fi][\ifcsname zzz\endcsname Y\else N\fi][\ifdefined\zzz Y\else N\fi]}
+\end

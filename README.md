@@ -752,6 +752,19 @@ group. Every case is in parity except the ones `tests/known_gaps.txt` names,
 and the gate fails both on an unlisted divergence and on a listed case that has
 started passing, so the list cannot go stale.
 
+LuaTeX's own primitives -- e-TeX's, LuaTeX's, the ones TeX82 has not got -- are
+compared against `luatex` the same way, by the cases in `tests/luatex_cases`:
+INITEX luatex with every extra primitive enabled under its own name, the state
+a LaTeX format starts from. Each case names the primitives it exercises, the
+gaps are listed in `tests/luatex_known_gaps.txt` under the same two-way rule,
+and `bash scripts/primitive-census.sh` measures every primitive luatex has
+against texrs and writes the verdicts into `BUGS.md`:
+
+```sh
+bash scripts/primitive-census.sh                 # BUGS.md and the freeze
+cargo test --test luatex_primitives             # the replay, and the live check
+```
+
 The page is not compared that way, because nothing reaches byte equality yet.
 `tests/dvi_parity.rs` and `tests/pdf_parity.rs` are RATCHETS instead: each
 document has a rung it last reached, recorded in `tests/dvi_floor.txt` and

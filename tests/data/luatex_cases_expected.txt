@@ -1,0 +1,23 @@
+# Frozen output of luatex, written by `cargo run --bin primitive-census -- --freeze`.
+# One block per case in tests/luatex_cases; tests/luatex_primitives.rs replays
+# these with no TeX installed.
+#==# csstring.tex
+[relax][a][a][\relax]
+#==# detokenize.tex
+[\a b{c}##][][\y z]
+#==# dimexpr.tex
+[3.0pt][7.5pt][4.0pt][65536]
+#==# expanded.tex
+[AAA] [macro:->\b ]
+#==# glueexpr.tex
+[2.0pt plus 4.0pt minus 6.0pt][3.0pt plus 1.0fil][6.0mu plus 2.0fill]
+#==# ifdefined.tex
+[Y][N][Y] [Y][N][N]
+#==# numexpr.tex
+[7][9][4] [-4][48][14]
+#==# protected.tex
+[\protected macro:->P][macro:->\p Q] [\protected\long macro:#1->S]
+#==# unexpanded.tex
+[macro:->A\a \b B] [macro:->\a B]
+#==# unless.tex
+[Y][N][N]

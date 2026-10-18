@@ -1,0 +1,9 @@
+% primitives: unexpanded edef
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{A}\def\b{B}
+\edef\c{\a\unexpanded{\a\b}\b}
+\message{[\meaning\c]}
+\toks0={\a}
+\edef\d{\the\toks0 \unexpanded\expandafter{\b}}
+\message{[\meaning\d]}
+\end

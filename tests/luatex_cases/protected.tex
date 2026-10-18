@@ -1,0 +1,8 @@
+% primitives: protected
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\protected\def\p{P}\def\q{Q}
+\edef\r{\p\q}
+\message{[\meaning\p][\meaning\r]}
+\protected\long\def\s#1{S}
+\message{[\meaning\s]}
+\end
