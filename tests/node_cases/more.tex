@@ -1,0 +1,20 @@
+% Requested features and other scripts in mode=node: optional GSUB features
+% (smcp, onum, an alternate by number), a CJK font, and marks, kerns and
+% ligatures meeting discretionaries.
+\font\libsc="file:LibertinusSerif-Regular.otf:mode=node;+smcp;+onum" at 10pt
+\setbox0\hbox{\libsc Small Caps 1234567890 office}\directlua{harfdump.box("libertinus +smcp +onum")}
+\font\ebsalt="file:EBGaramond-Regular.otf:mode=node;salt=2;+swsh" at 10pt
+\setbox0\hbox{\ebsalt Quick Brown QJ \&}\directlua{harfdump.box("ebgaramond salt=2 +swsh")}
+\font\fs="file:FandolSong-Regular.otf:mode=node" at 10pt
+\setbox0\hbox{\fs 中文排版，测试“引号”。}\directlua{harfdump.box("fandol cjk")}
+\font\fsv="file:FandolSong-Regular.otf:mode=node;script=hani" at 10pt
+\setbox0\hbox{\fsv 中文排版。}\directlua{harfdump.box("fandol script=hani")}
+\font\free="file:FreeSerif.otf:mode=node" at 10pt
+\setbox0\hbox{\free Ä̈ ǘ ff\-i AV\-A Ὤιδή}\directlua{harfdump.box("freeserif marks and discs")}
+\font\ar="file:Arimo-Regular.ttf:mode=node" at 10pt
+\setbox0\hbox{\ar \discretionary{T-}{o}{To}x A\discretionary{V}{A}{VA}A y\-.}\directlua{harfdump.box("arimo kerns in explicit discretionaries")}
+\font\lm="file:lmroman10-regular.otf:mode=node" at 10pt
+\setbox0\hbox{\ar T\kern1pt o A\hskip 2pt V {\lm A}V}\directlua{harfdump.box("arimo kerns broken by kern and glue")}
+\setbox0\hbox{\ar A\lm V\ar A}\directlua{harfdump.box("two fonts in a row")}
+\font\dj="file:DejaVuSerif.ttf:mode=node" at 10pt
+\setbox0\hbox{\dj ﬁ ff\-l x\-̈y ŀl}\directlua{harfdump.box("dejavu serif")}
