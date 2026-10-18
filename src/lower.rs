@@ -19,8 +19,13 @@ use crate::token::{CsId, Token};
 
 type R<T> = Result<T, TexError>;
 
+mod stomach;
+
 pub struct Lowerer {
     pub eng: Engine,
+    /// The stomach's dispatch state: the mode nest, and what the program has
+    /// been told (see `stomach`).
+    st: stomach::State,
     /// Whether an `\end` in the source stopped the run.
     ///
     /// tex closes the file's paren differently depending on this: `\end` inside
@@ -291,6 +296,7 @@ fn stack_address() -> usize {
 impl Lowerer {
     pub fn new() -> Self {
         Self {
+            st: stomach::State::default(),
             input_depth: 0,
             eng: Engine::new(),
             ended: false,
@@ -426,6 +432,10 @@ impl Lowerer {
     /// `lower` puts them in front of the document's own commands, which is
     /// where the preamble ran.
     pub fn preload(&mut self, src: &str) -> R<()> {
+        // A LaTeX document: its prelude defines `\hbox` and its siblings as
+        // text macros for the PDF path, so the list commands are not lowered
+        // as lists.
+        self.st.enabled = false;
         let out = self.lower_located(src);
         // The prelude's own diagnostics belong to the prelude, and the document
         // is what tex is reporting on: an error the prelude recovered from must
@@ -865,6 +875,7 @@ impl Lowerer {
                         let known_mark = self.eng.known.mark();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
                         self.eng.compile_time_end_group()?;
+                        self.st_group_body(&mut body);
                         // Whatever `\aftergroup` held for this group is read
                         // next, which is what "after the group" means.
                         let after = self.eng.take_after_group();
@@ -922,6 +933,11 @@ impl Lowerer {
                     // now a boundary the typesetter builds columns from;
                     // outside one there are no columns, so it stays what
                     // separates two cells set side by side -- a space.
+                    // A character in a list the stomach builds (`stomach`).
+                    Token::Char(c, cat) if self.st_takes(*cat) => {
+                        let (c, cat) = (*c, *cat);
+                        self.st_char(c, cat, &mut out)?;
+                    }
                     Token::Char(_, Cat::AlignTab) if self.text_output => {
                         let boundary = match self.table_depth > 0 {
                             true => crate::typeset::TABLE_CELL,
@@ -1170,6 +1186,11 @@ impl Lowerer {
                     lx.push_back(&[Token::Cs(p)]);
                     continue;
                 }
+            }
+            // The commands that build lists, dispatched on the mode they
+            // meet (`stomach`).
+            if self.st_command(lx, name, &mut out)? {
+                continue;
             }
             match name.name() {
                 "end" => {
@@ -1781,6 +1802,7 @@ impl Lowerer {
                     let mark = self.globals.len();
                     let known_mark = self.eng.known.mark();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
+                    self.st_group_body(&mut body);
                     // The `\endgroup` that stopped the block was pushed back
                     // for this arm to consume; at end of input there is none.
                     if !self.ended {
@@ -3789,7 +3811,7 @@ impl Lowerer {
             Token::Cs(n) => {
                 matches!(
                     n.name(),
-                    "count" | "dimen" | "skip" | "muskip" | "toks" | "catcode"
+                    "count" | "dimen" | "skip" | "muskip" | "toks" | "catcode" | "wd" | "ht" | "dp"
                 ) || crate::charcodes::Table::from_name(n.name()).is_some()
             }
             Token::Char(..) => false,
@@ -3799,7 +3821,7 @@ impl Lowerer {
             // take a character code, which is checked where it is read.
             let is_register = matches!(
                 t,
-                Token::Cs(n) if matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks")
+                Token::Cs(n) if matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks" | "wd" | "ht" | "dp")
             );
             let n = match is_register {
                 true => self.eng.scan_register_file(lx)?,
@@ -3881,7 +3903,7 @@ impl Lowerer {
         for part in parts {
             match part {
                 MsgOp::Text(t) => out.push_str(t),
-                MsgOp::Report(_) | MsgOp::Discard(_) => {}
+                MsgOp::Report(_) | MsgOp::Discard(_) | MsgOp::ShowBox(_) => {}
                 MsgOp::Number(n) => out.push_str(&value(n).to_string()),
                 MsgOp::Dimen(n) => {
                     out.push_str(&crate::dimen::print_scaled(value(n)));
@@ -4210,6 +4232,12 @@ impl Lowerer {
                         if let Some(t) = &target {
                             if self.eng.cant_use_after_the(work, t) {
                                 text.push('0');
+                                continue;
+                            }
+                        }
+                        if let Some(Token::Cs(w)) = &target {
+                            if let Some(op) = self.st_the(*w, work)? {
+                                out.push(op);
                                 continue;
                             }
                         }
@@ -4600,6 +4628,21 @@ impl Lowerer {
                 // The box conditionals are here for the same reason, one step
                 // further on: every box register is void (see `do_conditional`),
                 // so what they answer is known while lowering too.
+                // §505 over a register the program fills: a real branch on the
+                // slot the stomach mirrors its kind in.
+                "ifvoid" | "ifhbox" | "ifvbox" if self.st_box_conditionals() => {
+                    let reg = self.eng.scan_register_pending(work)?;
+                    let (left, right) = Self::st_box_test(n.name(), reg);
+                    let (then_ops, else_ops) = self.msg_arms(work)?;
+                    flush!();
+                    out.push(MsgOp::If {
+                        left,
+                        rel: Rel::Equal,
+                        right,
+                        then_ops,
+                        else_ops,
+                    });
+                }
                 "ifdefined" | "ifcsname" | "ifvoid" | "ifhbox" | "ifvbox" | "ifeof" => {
                     let truth = match n.name() {
                         // Whether a `\read` stream is closed: the streams are
@@ -5392,9 +5435,13 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
     }
     for cmd in cmds {
         match cmd {
-            Cmd::SetCount(..) | Cmd::Arith(..) | Cmd::ErrorSite(_) | Cmd::KeepGlobal { .. } => {
-                out.push(cmd.clone())
-            }
+            // A list action changes what the stomach holds -- a box register, a
+            // font, a parameter it was told -- which is state the document reads.
+            Cmd::SetCount(..)
+            | Cmd::Arith(..)
+            | Cmd::ErrorSite(_)
+            | Cmd::KeepGlobal { .. }
+            | Cmd::List(_) => out.push(cmd.clone()),
             Cmd::Group { saves, keeps, body } => out.push(Cmd::Group {
                 saves: saves.clone(),
                 keeps: keeps.clone(),
@@ -5582,7 +5629,10 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::RustCompile(_)
                 | Cmd::FileClose
                 | Cmd::ErrorSite(_)
-                | Cmd::TranscriptNotice(_) => {}
+                | Cmd::TranscriptNotice(_)
+                // The stomach's slots are not saved by a group (see
+                // `crate::compiler::is_stomach_slot`).
+                | Cmd::List(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

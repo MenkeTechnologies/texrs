@@ -101,6 +101,9 @@ pub struct Tolerances {
     pub vbadness: i64,
     pub hfuzz: Scaled,
     pub vfuzz: Scaled,
+    /// `\overfullrule` (§247): the width of the rule §666 puts at the end of
+    /// an overfull hbox. Zero draws none.
+    pub overfull_rule: Scaled,
 }
 
 impl Tolerances {
@@ -112,6 +115,7 @@ impl Tolerances {
             vbadness: 1000,
             hfuzz: 6554,
             vfuzz: 6554,
+            overfull_rule: 0,
         }
     }
 }
@@ -250,6 +254,16 @@ pub fn hpack(
     r.depth = d;
     let (badness, report) = set_glue(&mut r, x, spec, stretch, shrink, &kept, tol);
     r.list = kept;
+    // §666: an overfull box past `\hfuzz` gets a rule `\overfullrule` wide
+    // at its end, running in height and depth.
+    if let Some(Report::Overfull(over)) = report {
+        if tol.overfull_rule > 0 && over > tol.hfuzz {
+            r.list.push(Node::Rule(RuleNode {
+                width: tol.overfull_rule,
+                ..RuleNode::running()
+            }));
+        }
+    }
     Packed {
         node: r,
         badness,

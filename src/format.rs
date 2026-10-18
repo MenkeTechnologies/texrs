@@ -64,6 +64,7 @@ enum MeaningRepr {
     CountDef(i64),
     ToksDef(i64),
     MathCharDef(i64),
+    Font(u16),
 }
 
 /// The dump itself.
@@ -252,6 +253,7 @@ fn meaning_repr(meaning: &Meaning) -> MeaningRepr {
         Meaning::CountDef(r) => MeaningRepr::CountDef(*r),
         Meaning::ToksDef(r) => MeaningRepr::ToksDef(*r),
         Meaning::MathCharDef(v) => MeaningRepr::MathCharDef(*v),
+        Meaning::Font(f) => MeaningRepr::Font(*f),
     }
 }
 
@@ -273,6 +275,7 @@ fn meaning_of(repr: &MeaningRepr) -> Meaning {
         MeaningRepr::Primitive(name) => Meaning::Primitive(CsId::intern(name)),
         MeaningRepr::Char(c, cat) => Meaning::Char(*c, u8_to_cat(*cat)),
         MeaningRepr::CharDef(v) => Meaning::CharDef(*v),
+        MeaningRepr::Font(f) => Meaning::Font(*f),
         MeaningRepr::CountDef(r) => Meaning::CountDef(*r),
         MeaningRepr::ToksDef(r) => Meaning::ToksDef(*r),
         MeaningRepr::MathCharDef(v) => Meaning::MathCharDef(*v),

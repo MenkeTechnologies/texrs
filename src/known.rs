@@ -30,6 +30,11 @@ pub struct Known {
 impl Known {
     /// The value of `slot`, if it is known.
     pub fn get(&self, slot: i64) -> Option<i64> {
+        // The stomach writes its slots while the program runs
+        // (`crate::stomach::Mirror`), so nothing here can know them.
+        if crate::compiler::is_stomach_slot(slot) {
+            return None;
+        }
         match self.map.get(&slot) {
             Some(v) => *v,
             None => Some(0),

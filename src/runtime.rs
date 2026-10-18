@@ -102,6 +102,39 @@ fn record(done: String) {
     });
 }
 
+/// What the stomach said during one list action, into the terminal stream
+/// in order (see `crate::stomach::Said`). `online` is `\tracingonline>0`.
+pub(crate) fn tell(said: Vec<crate::stomach::Said>, online: bool) {
+    use crate::stomach::Said;
+    for s in said {
+        match s {
+            Said::Error(msg) => report(&msg),
+            // §245: on the terminal only when `\tracingonline` is positive;
+            // in the log alone otherwise, which the terminal learns of as
+            // `history=warning_issued`.
+            Said::Diagnostic(text) => match online {
+                true => push_report(&text.replace('\n', "")),
+                false => REPORTED.with(|r| *r.borrow_mut() = true),
+            },
+            // texrs writes its terminal reports without the line ends tex
+            // puts in them, as `report` does with an error's context.
+            Said::Report(text) => push_report(&text.replace('\n', "")),
+            Said::Terminal(text) => {
+                let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+                if !held.is_empty() {
+                    record(held);
+                }
+                record(text);
+            }
+        }
+    }
+}
+
+/// Append text a builtin rendered to the message being built.
+pub(crate) fn append_to_message(text: &str) {
+    BUILDING.with(|b| b.borrow_mut().push_str(text));
+}
+
 /// Append a report to the message being built; see [`GLUED`].
 fn push_report(text: &str) {
     BUILDING.with(|b| {
@@ -499,6 +532,8 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
+    vm.register_builtin(ops::LIST, crate::stomach::run::b_list);
+    vm.register_builtin(ops::LIST_SHOWBOX, crate::stomach::run::b_list_showbox);
     vm.register_builtin(ops::OUT_OPEN, crate::write::b_out_open);
     vm.register_builtin(ops::OUT_WRITE, b_out_write);
     vm.register_builtin(ops::OUT_CLOSE, crate::write::b_out_close);
@@ -524,6 +559,7 @@ fn run_with(
     FAULT.with(|f| *f.borrow_mut() = None);
     ERROR_SITE.with(|s| s.borrow_mut().clear());
     REPORTED.with(|r| *r.borrow_mut() = false);
+    crate::stomach::run::reset();
     // The decision needs the ops, and `VM::new` takes the chunk by value.
     let chunk_for_jit = chunk.clone();
     let mut vm = VM::new(chunk);

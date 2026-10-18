@@ -70,6 +70,9 @@ pub enum Meaning {
     /// `\countdef\pageno=0` — another name for a count register, in every
     /// position `\count0` itself works: assignment, arithmetic and `\the`.
     CountDef(i64),
+    /// `\font\tenrm=cmr10` -- a font identifier (§1257's `set_font`), by
+    /// internal font number. `\meaning` prints `select font cmr10` (§1261).
+    Font(u16),
 }
 
 /// An argument as §392 read it, or what it held when a `\par` stopped it.
@@ -217,6 +220,9 @@ enum Save {
     /// own, which is what makes a nested group's tokens come out at its own
     /// closing brace and several in one group come out in order.
     AfterGroup(Token),
+    /// The current font (§230's `cur_font_loc`) as it stood before a
+    /// group selected another.
+    Font(u16),
 }
 
 impl Save {
@@ -232,6 +238,7 @@ impl Save {
             (Save::IntPar(a, _), Save::IntPar(b, _)) => a == b,
             (Save::Count(a, _), Save::Count(b, _)) => a == b,
             (Save::Meaning(a, _), Save::Meaning(b, _)) => a == b,
+            (Save::Font(_), Save::Font(_)) => true,
             _ => false,
         }
     }
@@ -341,6 +348,12 @@ pub struct Engine {
     /// opens a `.tfm`, and a run that never writes `em` must not pay for a font
     /// it never measures with. See `font_units`.
     font_units: Option<crate::tfm::FontUnits>,
+    /// Font memory (§549-§551) for the fonts `\font` has loaded, which
+    /// `\meaning` names and `crate::lower`'s stomach dispatch selects.
+    pub fonts: crate::stomach::font::Table,
+    /// The current font (§230's `cur_font_loc`), an internal font number;
+    /// `\nullfont` (0) until a font identifier is selected (§232).
+    pub cur_font: u16,
     /// Errors REPORTED rather than raised, in the order they happened.
     ///
     /// `tex.web` §82's `error` prints the message and carries on; only a few
@@ -519,6 +532,8 @@ impl Engine {
             unless: false,
             mu_units: false,
             font_units: None,
+            fonts: crate::stomach::font::Table::new(),
+            cur_font: 0,
             errors: Vec::new(),
             recover: false,
             error_count: 0,
@@ -613,6 +628,7 @@ impl Engine {
                     }
                 },
                 Save::Intercepts(old) => self.intercepts = old,
+                Save::Font(f) => self.cur_font = f,
                 // Already collected above; it is a token to insert, not a
                 // value to put back.
                 Save::AfterGroup(_) => {}
@@ -1157,6 +1173,21 @@ impl Engine {
         }
     }
 
+    /// §1257's `define(u,set_font,f)`: `name` becomes a font identifier.
+    pub fn define_font_identifier(&mut self, name: CsId, f: u16, global: bool) {
+        let was = std::mem::replace(&mut self.global, global);
+        self.set_meaning(name, Meaning::Font(f));
+        self.global = was;
+    }
+
+    /// §1217: selecting a font is an assignment to `cur_font_loc`, scoped
+    /// by the group it is made in.
+    pub fn select_font(&mut self, f: u16, global: bool) {
+        let old = self.cur_font;
+        self.save_as(Save::Font(old), self.global_defs_applied(global));
+        self.cur_font = f;
+    }
+
     fn set_meaning(&mut self, name: CsId, m: Meaning) {
         let old = self.meanings.get(&name).cloned();
         // A global assignment wipes the saved values other groups hold (see
@@ -1228,6 +1259,12 @@ impl Engine {
     /// Assign an integer parameter, saved for the enclosing group unless the
     /// assignment is `\global` -- in which case `save` drops the values the
     /// open groups saved, so no `}` puts one back.
+    /// `eq_word_define` of integer parameter `i` (§277): a local assignment
+    /// the enclosing group undoes, as §1070's `normal_paragraph` makes.
+    pub fn assign_intpar(&mut self, i: usize, v: i64) {
+        self.set_intpar(i, v);
+    }
+
     fn set_intpar(&mut self, i: usize, v: i64) {
         self.save(Save::IntPar(i, self.intpars.get(i)));
         self.store_intpar(i, v);
@@ -2058,7 +2095,7 @@ impl Engine {
 
     /// Whether `name` would expand (§366): a macro, an expandable primitive,
     /// or a name with no meaning at all, which tex expands to report it.
-    fn is_expandable(&self, name: CsId) -> bool {
+    pub fn is_expandable(&self, name: CsId) -> bool {
         match self.meanings.get(&name) {
             Some(Meaning::Macro(_)) => true,
             Some(Meaning::Primitive(p)) => Self::expandable_primitive(p.name()),
@@ -2361,6 +2398,28 @@ impl Engine {
                     "muskip" => Some(crate::compiler::MUSKIP_BASE),
                     _ => None,
                 };
+                // `\wd n`, `\ht n`, `\dp n` (§420) and the stomach's internal
+                // dimensions (§424) are slots the program writes
+                // (`crate::stomach::Mirror`), so they are internal units too.
+                let stomach = match n.name() {
+                    "wd" | "ht" | "dp" => {
+                        let which = match n.name() {
+                            "wd" => crate::stomach::BoxDimen::Wd,
+                            "ht" => crate::stomach::BoxDimen::Ht,
+                            _ => crate::stomach::BoxDimen::Dp,
+                        };
+                        let b = self.scan_register_any(lx, pending_only)?;
+                        Some(crate::stomach::box_dimen_slot(b as u16, which))
+                    }
+                    other => crate::stomach::Internal::of_name(other)
+                        .filter(|i| i.is_dimen())
+                        .map(|i| i.slot()),
+                };
+                if let Some(reg) = stomach {
+                    if !self.mu_units {
+                        return Ok(Some(reg));
+                    }
+                }
                 let reg = match spelt {
                     Some(base) => {
                         let stride = match base >= crate::compiler::SKIP_BASE {
@@ -2716,6 +2775,26 @@ impl Engine {
             _ => None,
         };
         let mut spelt = vec![Token::Cs(name)];
+        // A box dimension is three slots per register (`crate::stomach`).
+        if let Some(which) = match name.name() {
+            "wd" => Some(crate::stomach::BoxDimen::Wd),
+            "ht" => Some(crate::stomach::BoxDimen::Ht),
+            "dp" => Some(crate::stomach::BoxDimen::Dp),
+            _ => None,
+        } {
+            let reg = self.scan_register_any(lx, pending_only)?;
+            spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
+            spelt.push(Token::Char(' ', Cat::Space));
+            return Ok(Some((crate::stomach::box_dimen_slot(reg as u16, which), spelt)));
+        }
+        // §413's internal quantities the stomach computes are slots it writes.
+        // `\outputpenalty` is left to the integer parameters.
+        if let Some(i) = crate::stomach::Internal::of_name(name.name()) {
+            if i != crate::stomach::Internal::OutputPenalty && i != crate::stomach::Internal::LastSkip {
+                return Ok(Some((i.slot(), spelt)));
+            }
+        }
+        let mut spelt = vec![Token::Cs(name)];
         if let Some((base, stride)) = file {
             let reg = self.scan_register_any(lx, pending_only)?;
             spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
@@ -2992,6 +3071,7 @@ impl Engine {
             Some(Meaning::MathCharDef(v)) => format!("{}mathchar\"{v:X}", self.esc()),
             Some(Meaning::CountDef(r)) => self.register_name(*r),
             Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.esc()),
+            Some(Meaning::Font(f)) => format!("select font {}", self.fonts.describe(*f)),
             Some(Meaning::Primitive(p)) => self.unbound_meaning(*p),
             Some(Meaning::Macro(m)) => {
                 let mut out = String::new();

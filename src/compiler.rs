@@ -74,6 +74,12 @@ pub mod ops {
     /// Finish an `\immediate\write` and record it on a line of its own: glued
     /// to what came before, and the next message glued to it. No arguments.
     pub const WRITE_FLUSH: u16 = 4018;
+    /// A list action (`crate::ir::list::ListOp`): its opcode, then its
+    /// arguments in the order `ListOp::visit` gives them.
+    pub const LIST: u16 = 4100;
+    /// Append §1296's display of a box register to the message being built:
+    /// one argument, the register number.
+    pub const LIST_SHOWBOX: u16 = 4101;
     /// `\openout`: the stream, then the file name (`crate::write`).
     ///
     /// Numbered from 4200, clear of the numbers after 4018 that other builtins
@@ -261,6 +267,7 @@ impl Compiler {
                 }
                 self.b.emit(Op::SetSlot(slot(*reg)), self.line);
             }
+            Cmd::List(op) => self.list_op(op)?,
             Cmd::Text(t) => {
                 let k = self.str_const(t)?;
                 self.b.emit(Op::LoadConst(k), self.line);
@@ -429,6 +436,32 @@ impl Compiler {
         Ok(())
     }
 
+    /// A list action: the opcode and its arguments, then the call.
+    fn list_op(&mut self, op: &crate::ir::list::ListOp) -> Result<(), TexError> {
+        use crate::ir::list::Arg;
+        self.b.emit(Op::LoadInt(op.code()), self.line);
+        let mut args: Vec<Arg<'_, Num>> = Vec::new();
+        op.visit(&mut |a| args.push(a));
+        let argc = u8::try_from(args.len() + 1).map_err(|_| {
+            TexError(format!("a list action with {} arguments", args.len()))
+        })?;
+        for a in args {
+            match a {
+                Arg::Num(n) => self.num(n)?,
+                Arg::Int(v) => {
+                    self.b.emit(Op::LoadInt(v), self.line);
+                }
+                Arg::Str(s) => {
+                    let k = self.str_const(s)?;
+                    self.b.emit(Op::LoadConst(k), self.line);
+                }
+            }
+        }
+        self.b.emit(Op::CallBuiltin(ops::LIST, argc), self.line);
+        self.b.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
     /// Truncate the value on the stack to 32 bits, two's complement.
     ///
     /// `((v + 2^31) & 0xFFFFFFFF) - 2^31`, which is branch-free and made of ops
@@ -462,6 +495,11 @@ impl Compiler {
                     let k = self.str_const(t)?;
                     self.b.emit(Op::LoadConst(k), self.line);
                     self.b.emit(Op::CallBuiltin(ops::MSG_REPORT, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
+                MsgOp::ShowBox(n) => {
+                    self.b.emit(Op::LoadInt(i64::from(*n)), self.line);
+                    self.b.emit(Op::CallBuiltin(ops::LIST_SHOWBOX, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::Discard(n) => {
@@ -639,8 +677,9 @@ fn slot(reg: i64) -> u16 {
 
 /// Every register kind that lives in the slot file, end to end: 256 counts, 256
 /// dimensions, 256 glues and 256 math glues at four slots each, then the
-/// dimension, glue and math glue PARAMETERS (`crate::params`).
-pub const TOTAL_SLOTS: u16 = MUGLUEPAR_END as u16;
+/// dimension, glue and math glue PARAMETERS (`crate::params`), then what the
+/// stomach mirrors for the program to read (`crate::stomach::Mirror`).
+pub const TOTAL_SLOTS: u16 = STOMACH_END as u16;
 
 /// Where §247's dimension parameters start: one slot each, past every register.
 pub const DIMPAR_BASE: i64 = MUSKIP_BASE + 256 * SKIP_STRIDE;
@@ -652,6 +691,28 @@ pub const MUGLUEPAR_BASE: i64 = GLUEPAR_BASE + crate::params::ORDINARY_GLUE as i
 /// One past the last parameter slot.
 const MUGLUEPAR_END: i64 = MUGLUEPAR_BASE
     + (crate::params::GLUE_NAMES.len() - crate::params::ORDINARY_GLUE) as i64 * SKIP_STRIDE;
+
+/// Where `\wd n`, `\ht n` and `\dp n` of the 256 box registers are
+/// mirrored, three slots per register (`crate::stomach::box_dimen_slot`).
+/// They are slots so that every place a dimension is read -- `\ifdim`, `\the`,
+/// a factor like `.5\wd0` -- reads a box dimension the way it reads `\dimen`.
+pub const BOXDIM_BASE: i64 = MUGLUEPAR_END;
+/// Where what each box register holds is mirrored (`crate::stomach::KIND_VOID`
+/// and its siblings), which `\ifvoid`, `\ifhbox` and `\ifvbox` test.
+pub const BOXKIND_BASE: i64 = BOXDIM_BASE + 3 * 256;
+/// Where §413's internal quantities the stomach computes are mirrored
+/// (`crate::stomach::Internal`).
+pub const INTERNAL_BASE: i64 = BOXKIND_BASE + 256;
+/// One past the last stomach slot.
+const STOMACH_END: i64 = INTERNAL_BASE + crate::stomach::INTERNAL_SLOTS;
+
+/// Whether `slot` is one the stomach writes: a box dimension or kind, or an
+/// internal quantity. Such a slot is not an `eqtb` entry, so a group does not
+/// save or restore it (§1247 changes a box in place; `\prevdepth` belongs to
+/// the list, not to the group).
+pub fn is_stomach_slot(slot: i64) -> bool {
+    (BOXDIM_BASE..STOMACH_END).contains(&slot)
+}
 
 /// Whether `slot` holds (a component of) a glue: a `\skip` or `\muskip`
 /// register, or a glue parameter of either kind.

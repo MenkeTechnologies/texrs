@@ -533,6 +533,31 @@ impl Tfm {
         Some(k)
     }
 
+    /// The raw lig/kern instruction at `k` (§545's `four_quarters`:
+    /// skip, next, op and remainder bytes), for a caller that walks a
+    /// program the way §1039 does.
+    pub fn lig_kern_word(&self, k: usize) -> Option<[u8; 4]> {
+        self.lig_kern.get(k).copied()
+    }
+
+    /// Where the lig/kern program of `code` starts, `code` 256 being the
+    /// left boundary (§545's `bchar_label`), with §545's restart jump taken.
+    pub fn lig_kern_start(&self, code: u16) -> Option<usize> {
+        self.program_start(code)
+    }
+
+    /// §557's `char_kern`: the kern an instruction with `op` and `remainder`
+    /// names, in design-size units.
+    pub fn kern_value(&self, op: u8, remainder: u8) -> f64 {
+        let i = 256 * (op as usize).saturating_sub(KERN_FLAG as usize) + remainder as usize;
+        self.kerns.get(i).copied().unwrap_or(0.0)
+    }
+
+    /// §545's right boundary character, 256 (`non_char`) when there is none.
+    pub fn boundary_char(&self) -> u16 {
+        self.bchar
+    }
+
     /// What `codes` actually sets in this font: `tex.web` §906-§911's
     /// `reconstitute`, run over the whole run.
     ///

@@ -23,6 +23,7 @@
 
 use crate::glue::{Glue, Order};
 
+pub mod hooks;
 pub mod show;
 
 /// A dimension, in scaled points.

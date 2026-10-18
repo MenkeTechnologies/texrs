@@ -9,6 +9,8 @@
 //! is only what has to happen at run time: register writes, arithmetic,
 //! branches, and output.
 
+pub mod list;
+
 /// Where a number comes from at run time.
 #[derive(Clone, Debug)]
 pub enum Num {
@@ -131,6 +133,9 @@ pub enum MsgOp {
         then_ops: Vec<MsgOp>,
         else_ops: Vec<MsgOp>,
     },
+    /// §1296's `show_box` of box register `n`, as the program holds it:
+    /// `void`, or the box displayed as §198 displays one.
+    ShowBox(u16),
 }
 
 #[derive(Clone, Debug)]
@@ -283,6 +288,9 @@ pub enum Cmd {
         then_branch: Vec<Cmd>,
         else_branch: Vec<Cmd>,
     },
+    /// A list action: one of `main_control`'s cases, dispatched while
+    /// lowering and carried out by `crate::stomach` when the program runs.
+    List(list::ListOp),
 }
 
 /// The command stream as an indented tree, for `--dump-ast`.
@@ -304,6 +312,7 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
         match cmd {
             Cmd::RustCompile(_) => out.push_str(&format!("{pad}RustCompile <block>\n")),
             Cmd::Line(n) => out.push_str(&format!("{pad}Line {n}\n")),
+            Cmd::List(op) => out.push_str(&format!("{pad}List {op:?}\n")),
             Cmd::Color { rgb, body } => {
                 let (r, g, b) = rgb;
                 out.push_str(&format!("{pad}Color rgb {r} {g} {b}\n"));
@@ -425,6 +434,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
             MsgOp::Glue(parts) => out.push_str(&format!("{pad}Glue {}\n", num_text(&parts[0]))),
             MsgOp::MuGlue(parts) => out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0]))),
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
+            MsgOp::ShowBox(n) => out.push_str(&format!("{pad}ShowBox \\box{n}\n")),
             MsgOp::If {
                 left,
                 rel,

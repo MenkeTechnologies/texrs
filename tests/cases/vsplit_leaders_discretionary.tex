@@ -1,0 +1,18 @@
+% \vsplit (977) with its Underfull report, leaders, discretionaries,
+% \lastbox, a mark and an insertion inside a vbox, \vadjust, and \badness
+% after an underfull spread box (660-663).
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\font\tenrm=cmr10 \tenrm \showboxdepth=3 \showboxbreadth=5 \tracingonline1
+\baselineskip=12pt \lineskip=1pt \lineskiplimit=0pt \splittopskip=10pt \splitmaxdepth=16383.99998pt
+\setbox1\vbox{\hbox{one}\hbox{two}\penalty-50\hbox{three}\hbox{four}}
+\setbox2\vsplit1 to 20pt \showbox2 \showbox1
+\message{[\the\ht1][\the\ht2]}
+\setbox3\hbox to 40pt{a\leaders\hrule\hfil b}\showbox3
+\setbox3\hbox to 40pt{a\cleaders\hbox{.}\hfil b}\showbox3
+\setbox4\hbox{x\discretionary{a}{b}{c}y\-z}\showbox4
+\setbox5\hbox{\hbox{p}\hbox{q}\setbox6\lastbox\message{[\the\wd6]}}\showbox5
+\setbox7\vbox{\hbox{m}\mark{hello}\insert100{\hbox{n}}\kern1pt}\showbox7
+\setbox8\hbox{a\vadjust{\kern2pt}b}\showbox8
+\setbox9\hbox spread 5pt{a b}\showbox9
+\message{[\the\badness]}
+\end

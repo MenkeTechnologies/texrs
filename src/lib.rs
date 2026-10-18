@@ -81,6 +81,7 @@ pub mod shape;
 pub mod shipout;
 pub mod special;
 pub mod status;
+pub mod stomach;
 pub mod tfm;
 pub mod tiers;
 pub mod tikz;

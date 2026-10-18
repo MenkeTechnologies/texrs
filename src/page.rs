@@ -295,6 +295,9 @@ pub struct Split {
     pub first_mark: Option<String>,
     /// `\splitbotmark`.
     pub bot_mark: Option<String>,
+    /// What §677-§678 found to say about the extracted box, and its badness.
+    pub report: Option<crate::pack::Report>,
+    pub badness: i64,
 }
 
 /// `vsplit(n,h)` (§977-§979): cut a vbox in two at the best place for a box of
@@ -342,12 +345,14 @@ pub fn vsplit(
         true => None,
         false => Some(vpack(rest, NATURAL, tol).node),
     };
-    let extracted = vpackage(head, Spec::Exactly(h), split_max_depth, tol).node;
+    let packed = vpackage(head, Spec::Exactly(h), split_max_depth, tol);
     Some(Split {
-        extracted,
+        extracted: packed.node,
         remainder,
         first_mark,
         bot_mark,
+        report: packed.report,
+        badness: packed.badness,
     })
 }
 

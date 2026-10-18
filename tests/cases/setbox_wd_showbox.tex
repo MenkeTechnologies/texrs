@@ -1,0 +1,7 @@
+% \setbox, \wd, \showbox, \ifvoid/\ifhbox: the box registers are the
+% stomach's, filled while the program runs (tex.web 1077, 1247, 1296, 505).
+% The font and the display limits are set here because the oracle loads
+% plain.tex, which selects \tenrm and sets \showboxdepth=3.
+\catcode`\{=1 \catcode`\}=2 \font\tenrm=cmr10 \tenrm \showboxdepth=3 \showboxbreadth=5
+\setbox0\hbox{abc}\showthe\wd0 \tracingonline1 \showbox0 \message{[\the\wd0][\the\ht0]}
+\setbox1\hbox to 50pt{a\hfil b}\showbox1 \message{[\the\wd1]}\ifvoid2 \message{V}\fi\ifhbox1 \message{H}\fi\end

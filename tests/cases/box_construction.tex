@@ -1,0 +1,21 @@
+% Box construction on the stomach: ligatures and kerns from the main loop
+% (1034-1040), \raise/\lower, \vtop, a \setbox undone by its group and a
+% \global one kept (283), \box voiding, \wd assignment, \unhcopy/\unvbox
+% and \unskip/\unkern/\unpenalty (1105, 1110). The parameters plain.tex would
+% set are set explicitly.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\font\tenrm=cmr10 \tenrm \showboxdepth=3 \showboxbreadth=5 \tracingonline1
+\baselineskip=12pt \lineskip=1pt \lineskiplimit=0pt
+\setbox1\hbox{ffi fl}\showbox1
+\setbox2\hbox to 30pt{x\hss}\showbox2
+\setbox3\vbox{\hrule height 2pt\kern3pt\hbox{A}\vskip 4pt plus 1fil}\showbox3
+\message{[\the\wd3][\the\ht3][\the\dp3]}
+\setbox4\vtop{\hbox{a}\hbox{b}}\message{[\the\ht4][\the\dp4]}
+\setbox5\hbox{\raise2pt\hbox{a}\lower1pt\copy4}\showbox5
+{\setbox6\hbox{q}}\ifvoid6 \message{[void6]}\fi
+{\global\setbox7\hbox{q}}\ifhbox7 \message{[hbox7]}\fi
+\setbox8\copy7 \setbox9\box7 \ifvoid7 \message{[void7]}\fi\message{[\the\wd8][\the\wd9]}
+\wd8=10pt \message{[\the\wd8]}\showbox8
+\setbox0\hbox{\unhcopy1\unskip a\kern1pt\unkern\penalty5\unpenalty}\showbox0
+\setbox0\vbox{\unvbox3}\showbox0 \ifvoid3 \message{[void3]}\fi
+\end
