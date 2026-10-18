@@ -1836,7 +1836,7 @@ impl Engine {
         if matches!(
             name.name(),
             "directlua" | "luadirect" | "luaescapestring" | "luafunction" | "luabytecode"
-        ) {
+        ) || crate::lua::expands_in_gullet(name.name()) {
             let mut cmds = Vec::new();
             let mut families = crate::typeset::Families::default();
             crate::lua::lower(self, lx, name.name(), &mut cmds, &mut families)?;
@@ -2680,6 +2680,10 @@ impl Engine {
     /// Whether `name` would expand (§366): a macro, an expandable primitive,
     /// or a name with no meaning at all, which tex expands to report it.
     pub fn is_expandable(&self, name: CsId) -> bool {
+        // A `token.set_lua` name without "protected" expands like `\directlua`.
+        if crate::lua::expands_in_gullet(name.name()) {
+            return true;
+        }
         match self.meanings.get(&name) {
             Some(Meaning::Macro(_)) => true,
             Some(Meaning::Primitive(p)) => Self::expandable_primitive(p.name()),

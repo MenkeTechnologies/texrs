@@ -4735,6 +4735,12 @@ impl Lowerer {
                 self.eng.extra_conditional_end(work, kind);
                 continue;
             }
+            // A `token.set_lua` name without "protected" expands here as the
+            // gullet expands it (`lua_expandable_call`).
+            if crate::lua::expands_in_gullet(n.name()) {
+                self.eng.expand_pending(work, n)?;
+                continue;
+            }
             match n.name() {
                 "the" | "number" => {
                     flush!();
