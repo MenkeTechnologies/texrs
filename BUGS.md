@@ -395,12 +395,9 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `post_linebreak_filter` and `buildpage_filter` (a paragraph handed over
   from a `local_par` node, as luatex hands it); `vpack_filter`,
   `pre_output_filter`, `linebreak_filter`, `hyphenate`, `ligaturing`,
-  `kerning` and `contribute_filter` are not called yet. `find_read_file`,
-  `open_read_file` and `process_input_buffer` are called where luatex calls
-  them (`crate::input_hooks`), but one that returns nothing from
-  `open_read_file` reads the file as it is, where luatex fails to open it, and
-  what they print with `texio` while the document is lowered is not shown.
-  `token_filter` is not called. The stomach's `\font` calls the `define_font`
+  `kerning` and `contribute_filter` are not called yet. No file is opened through
+  `find_read_file`/`open_read_file`, no line passes through
+  `process_input_buffer`, and the stomach's `\font` calls the `define_font`
   hook point, which a registered Lua definer does not fill yet.
 - **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
   an attribute list, a disc's `penalty`, a glyph's offsets, `lang` and
@@ -835,10 +832,13 @@ luahbtex rather than against expectations written by hand. What does not:
 - **Name lookup.** `name:` and anonymous requests need luaotfload's font
   names database (`luaotfload-database.lua`): which directories it scans, how a
   family, a style and an optical size pick a file. Only the grammar is ported.
-- **Variable fonts.** Both modes load a variable font at its default instance:
-  `axis=`, `instance=` and the weight a `/B` modifier picks (harf-define.lua's
-  variation handling, the fontloader's `fvar`/`gvar`/`HVAR` readers) are not
-  ported, and the corpus's Arimo-VF and Orbitron-VF ask for `wght=700`.
+- **Variable fonts, the rest.** Node mode loads a TrueType variable font at the
+  instance `axis=` or `instance=` asks for, as the fontloader does; a CFF2 one
+  is still read at its default (the fontloader blends CFF2 charstrings, which
+  is not ported), the weight a `/B` modifier picks is not worked out, and harf
+  mode shapes every variable font at its default instance (harf-define.lua's
+  variation handling is not ported). luaotfload writes the instance's outlines into
+  the PDF (`streamprovider`); nothing here writes an instance's outlines yet.
 - **Node mode, the parts not ported.** The Indic analyzers of `font-osd.lua`
   (Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Tamil,
   Telugu, Sinhala), Khmer, Myanmar and Mongolian: a font with one of those
@@ -853,9 +853,12 @@ luahbtex rather than against expectations written by hand. What does not:
   does not promise: DejaVu Sans's U+EF19 and a few hundred of Amiri's Arabic
   presentation forms get a different `/ToUnicode` than luatex gives them on
   this machine.
-- **Math.** The MATH table is read, but its constants, variants, assemblies
-  and kerns are not carried into a font as `copytotfm` carries them, and
-  nothing of LuaTeX's OpenType math layout (`mlist.c`) uses them.
+- **Math layout.** A math font carries what luaotfload gives the engine --
+  MathConstants, variant chains, extensible recipes, italics, top accents,
+  math kerns -- but nothing of LuaTeX's OpenType math layout (`mlist.c`) uses
+  them yet, and `\Umath` parameters are not set from a font's constants.
+- **Fallback fonts.** luaotfload's `fallback=` (`luaotfload-fallback.lua`,
+  which the corpus's `symfb` uses) is not ported.
 - **In harf mode,** colour glyphs (`COLR`/`CPAL` layers, `sbix`/`CBDT`
   bitmaps) are drawn as outlines; and `+tlig`, which luaotfload implements as
   TFM-style ligatures the engine's own ligaturing pass applies after shaping,

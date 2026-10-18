@@ -477,6 +477,14 @@ than none.
   kerns, ligatures, space kerns and hyphenation discretionaries in CFF and
   TrueType faces, optional features and alternates, Greek, Cyrillic, combining
   marks, Han and ideographic variation sequences, and Arabic right to left.
+  A variable TrueType font is loaded at the instance `axis=` or `instance=`
+  asks for -- advances, bounding boxes from the varied outlines, and the GPOS
+  values that vary -- and checked against luahbtex at several instances
+  (`tests/node_var.rs`). A math font loaded as unicode-math loads one
+  (`script=math`) carries luaotfload's MathConstants, variant chains,
+  extensible recipes, italics, top accents and math kerns, checked against
+  luahbtex for Latin Modern, STIX Two, TeX Gyre Termes and Pagella Math
+  (`tests/node_math.rs`).
   Neither this nor the harf shaper is on the typesetting path yet; [0x06] says
   what is missing.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
