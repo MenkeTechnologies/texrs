@@ -967,15 +967,19 @@ fn a_nodes_glue_order_is_luatexs_fi_based_numbering() {
              local h = node.hpack(a, 1310720, \"exactly\") \
              local out = g.stretch_order .. \" \" .. h.glue_order .. \" \" .. h.glue_set ",
         ),
+        // Order 1 is `fi`, and a node holds it as luatex's does.
+        shows("local g = node.new(\"glue\") g.stretch_order = 1 local out = g.stretch_order "),
     ] {
         let (want, got) = both(&lua, &body);
         assert!(!want.is_empty(), "the oracle said nothing for {body}");
         assert_eq!(got, want, "{body}");
     }
-    // Order 1 is `fi`, which texrs's glue has no unit for. luatex accepts it,
-    // so this half cannot be differential: refusing is the divergence, and it
-    // is the same refusal `tex.setglue` already makes.
-    let e = fails("\\directlua{local g = node.new(\"glue\") g.stretch_order = 1}");
+    // Packaging a `fi` glue is where texrs's three infinities run out: the
+    // packer has no fourth order, and says so rather than setting it as `fil`.
+    let e = fails(
+        "\\directlua{local g = node.new(\"glue\") g.stretch = 65536 g.stretch_order = 1 \
+         node.hpack(g, 65536, \"exactly\")}",
+    );
     assert!(e.contains("fi"), "{e}");
 }
 
@@ -1111,28 +1115,23 @@ fn a_glyph_carries_the_only_font_there_is_and_measures_what_luatex_measures() {
 }
 
 #[test]
-fn everything_that_would_reach_the_documents_own_list_refuses_by_name() {
-    // The boundary the whole design turns on. texrs sets a page from runs of
-    // strings, so there is no current node list: a document that walks one is
-    // still refused rather than quietly wrong, because it cannot obtain one.
-    // Each of these names what is missing rather than being absent, so the
-    // failure says which of the two engines' worlds the chunk walked into.
+fn what_needs_the_stomach_or_a_font_program_still_refuses_by_name() {
+    // The list TeX is building, the box registers and a font's lig/kern
+    // program belong to the stomach and the fonts; each function that would
+    // reach them says what it waits on rather than being absent.
     for (chunk, want) in [
-        ("node.write(node.new(\"penalty\"))", "no current node list"),
-        ("node.last_node()", "no current node list"),
-        ("node.usedlist()", "arena"),
+        ("node.write(node.new(\"penalty\"))", "stomach"),
+        ("node.last_node()", "stomach"),
         ("tex.getbox(0)", "node lists"),
         ("tex.getlist(\"page_head\")", "node lists"),
         ("node.mlist_to_hlist(node.new(\"penalty\"))", "noad"),
-        ("node.ligaturing(node.new(\"penalty\"))", "lig/kern"),
-        ("node.kerning(node.new(\"penalty\"))", "lig/kern"),
+        (
+            "node.ligaturing(node.new(\"penalty\"))",
+            "handle_ligaturing",
+        ),
+        ("node.kerning(node.new(\"penalty\"))", "handle_kerning"),
         ("node.hyphenating(node.new(\"penalty\"))", "Liang"),
-        (
-            "node.set_attribute(node.new(\"penalty\"), 1, 1)",
-            "attribute",
-        ),
-        ("local d = node.direct.getfield", "node.direct"),
-        ("node.rangedimensions(1, 2)", "parent"),
+        ("node.direct.getbox(0)", "box registers"),
     ] {
         let e = fails(&format!("\\directlua{{{chunk}}}"));
         assert!(e.contains(want), "expected {want:?} in {e:?} for {chunk}");
@@ -1140,67 +1139,72 @@ fn everything_that_would_reach_the_documents_own_list_refuses_by_name() {
 }
 
 #[test]
-fn a_node_type_texrs_cannot_carry_is_refused_at_node_new_and_still_named_by_node_id() {
-    // The id is a documented constant a chunk may compare against long before
-    // it tries to make one, so `node.id` and `node.type` answer for every
-    // LuaTeX type. It is `node.new` that refuses, with the specific thing that
-    // is missing rather than one blanket sentence.
-    for (name, want) in [
-        ("ins", "glue_spec"),
-        ("mark", "token list"),
-        ("whatsit", "subtype"),
-        ("unset", "tex.web"),
-        ("local_par", "tex.web"),
-        ("noad", "noad"),
-        ("attribute", "attribute list"),
-    ] {
-        let e = fails(&format!("\\directlua{{node.new(\"{name}\")}}"));
-        assert!(e.contains(want), "expected {want:?} in {e:?} for {name}");
-        assert!(e.contains(name), "the message names the type: {e:?}");
-    }
-    assert_eq!(
-        text(
-            "\\directlua{tex.print(node.id(\"ins\") .. \" \" .. node.id(\"noad\") .. \" \" \
-             .. node.type(15) .. \" \" .. node.type(39))}"
-        ),
-        "3 18 unset glue_spec",
-        "the ids and names answer for a type node.new will not make"
+fn attributes_and_the_direct_face_answer_what_luatex_answers() {
+    // Attribute lists are LuaTeX's: an `attribute_list` node and an
+    // `attribute` node per number, in number order; a node made while an
+    // attribute register is set carries it. The direct face is the same
+    // nodes as integers.
+    let body = shows(
+        "tex.attribute[3] = 5 local q = node.new('penalty') \
+         node.set_attribute(q, 1, 10) node.set_attribute(q, 4, 40) \
+         local d = node.direct local dq = d.todirect(q) local dk = d.new('kern') d.setkern(dk, 300) \
+         d.setlink(dq, dk) \
+         local out = tostring(tex.attribute[0]) .. ' ' .. node.get_attribute(q, 3) .. ' ' \
+         .. tostring(node.has_attribute(q, 1, 11)) .. ' ' .. q.attr.id .. ' ' .. q.attr.next.number .. ' ' \
+         .. node.unset_attribute(q, 4) .. ' ' .. tostring(node.has_attribute(q, 4)) .. ' ' \
+         .. tostring(d.getnext(dq) == dk) .. ' ' .. d.getkern(dk) .. ' ' .. tostring(d.tonode(dk).kern) ",
     );
+    let want = "[-2147483647 5 nil 40 1 40 nil true 300.0 300]";
+    assert_eq!(out(&body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
 }
 
 #[test]
-fn a_field_luatex_has_and_texrs_has_not_is_an_error_rather_than_nil() {
-    // `nil` is what luatex itself answers for a name that is not a field at
-    // all, so answering `nil` for a field luatex DOES have would say "there is
-    // no such field" when the truth is "texrs has not got it" -- which is the
-    // quiet wrongness the whole module exists to avoid.
-    for (chunk, want) in [
-        ("local h = node.new(\"hlist\") local d = h.dir", "direction"),
-        (
-            "local k = node.new(\"kern\") local e = k.expansion_factor",
-            "expansion",
-        ),
-        (
-            "local d = node.new(\"disc\") local r = d.replace",
-            "replace_count",
-        ),
-        (
-            "local d = node.new(\"disc\") local p = d.penalty",
-            "hyphenpenalty",
-        ),
-        ("local m = node.new(\"math\") local w = m.width", "mathskip"),
-        (
-            "local g = node.new(\"glyph\") local c = g.components",
-            "component",
-        ),
-        (
-            "local p = node.new(\"penalty\") p.attr = 1",
-            "attribute list",
-        ),
-    ] {
-        let e = fails(&format!("\\directlua{{{chunk}}}"));
-        assert!(e.contains(want), "expected {want:?} in {e:?} for {chunk}");
-    }
+fn node_new_makes_every_type_luatex_makes_with_its_fields_in_luatexs_order() {
+    // `node.fields` numbers the fields as luatex does, from -1 when the type
+    // has a `prev`; a whatsit is made by subtype, by number or name; a mark
+    // carries a token list and a style node its style by name.
+    let body = shows(
+        "local f = node.fields('glyph') local w = node.fields(8, 'pdf_literal') \
+         local s = node.fields('glue_spec') \
+         local out = f[-1] .. ' ' .. f[4] .. ' ' .. f[17] .. ' ' .. w[4] .. ' ' .. w[5] .. ' ' \
+         .. s[0] .. ' ' .. s[2] .. ' ' .. tostring(s[-1]) .. ' ' \
+         .. node.new('whatsit', 'pdf_literal').subtype .. ' ' .. node.new(8, 3).subtype .. ' ' \
+         .. type(node.new('mark').mark) .. ' ' .. node.new('style').style .. ' ' \
+         .. node.id('ins') .. ' ' .. node.id('noad') .. ' ' .. node.type(15) .. ' ' .. node.type(39) ",
+    );
+    let want = "[prev char data mode data next width nil 16 3 table display 3 18 unset glue_spec]";
+    assert_eq!(out(&body), want);
+    let e = fails("\\directlua{node.new(\"whatsit\", \"no_such_whatsit\")}");
+    assert!(e.contains("invalid whatsit type id"), "{e}");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}
+
+#[test]
+fn every_field_luatex_gives_a_node_is_there_with_luatexs_starting_value() {
+    // A cell keeps every field a node of its type has in luatex 1.24.0, so the
+    // fields that used to be refused for want of room in `crate::node` read
+    // what a fresh node has in luatex: a rule's `left` 0, a glyph's `left`
+    // and `right` 1 (its hyphenation minimums), a disc's `penalty` and a
+    // kern's `expansion_factor` 0, a fraction's `fam` -1, a box's `dir` nil.
+    let reads = "local h, k, d, m, g, r, f = node.new('hlist'), node.new('kern'), node.new('disc'), \
+                 node.new('math'), node.new('glyph'), node.new('rule'), node.new('fraction') \
+                 local out = tostring(h.dir) .. ' ' .. k.expansion_factor .. ' ' .. tostring(d.replace) \
+                 .. ' ' .. d.penalty .. ' ' .. m.width .. ' ' .. tostring(g.components) .. ' ' \
+                 .. g.left .. g.right .. ' ' .. r.left .. ' ' .. f.fam .. ' ' .. tostring(h.attr) ";
+    assert_eq!(out(&shows(reads)), "[nil 0 nil 0 0 nil 11 0 -1 nil]");
     // A name that is a field in neither engine is `nil` on a read and luatex's
     // own wording on a write.
     let e = fails("\\directlua{local p = node.new(\"penalty\") p.width = 1}");
@@ -1212,6 +1216,13 @@ fn a_field_luatex_has_and_texrs_has_not_is_an_error_rather_than_nil() {
         text("\\directlua{local p = node.new(\"penalty\") tex.print(tostring(p.nosuchfield))}"),
         "nil"
     );
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (want, got) = both(&lua, &shows(reads));
+    assert_eq!(want, "[nil 0 nil 0 0 nil 11 0 -1 nil]", "the oracle");
+    assert_eq!(got, want);
 }
 
 #[test]
@@ -1303,45 +1314,39 @@ fn the_muskip_registers_reach_lua_the_same_way_the_skips_do() {
 }
 
 #[test]
-fn an_internal_parameter_refuses_and_names_where_the_value_really_lives() {
-    // These answered `nil` -- Lua's answer for a key a table has not got --
-    // which is exactly the wrong answer: it says "LuaTeX has no such parameter"
-    // where the truth is "texrs has not got it", and a chunk guarding with
-    // `tex.hsize or 0` would set its page to a measure the engine never used.
-    for (name, want) in [
-        ("hsize", "crate::typeset::Layout"),
-        ("parindent", "crate::typeset::Layout"),
-        ("baselineskip", "crate::typeset::Layout"),
-        ("parskip", "crate::typeset::Layout"),
-        ("tolerance", "crate::linebreak"),
-        ("pretolerance", "crate::linebreak"),
-        ("hbadness", "crate::linebreak"),
-        ("outputpenalty", "output routine"),
-        ("prevdepth", "output routine"),
-        ("everypar", "output routine"),
-    ] {
-        let e = fails(&format!("\\directlua{{local v = tex.{name}}}"));
-        assert!(
-            e.contains(want),
-            "expected {want:?} in {e:?} for tex.{name}"
-        );
-        // The write refuses too, or a chunk would set a parameter that reaches
-        // nothing and read its own value back as though TeX had taken it.
-        let e = fails(&format!("\\directlua{{tex.{name} = 1}}"));
-        assert!(
-            e.contains(want),
-            "expected {want:?} in {e:?} for tex.{name}"
-        );
-        // And through the function spelling, which is the same parameters.
-        let e = fails(&format!("\\directlua{{tex.get(\"{name}\")}}"));
-        assert!(e.contains(want), "expected {want:?} in {e:?} for tex.get");
-    }
+fn an_internal_parameter_is_read_and_assigned_as_luatex_reads_and_assigns_it() {
+    // `tex.<name>`, `tex.get` and `tex.set` reach the parameters the engine
+    // holds -- the §236 integers, the §247 dimensions, the §224 glues, the
+    // §230 token lists -- and an assignment goes through the engine's own,
+    // so `\the` sees it and a group restores it.
+    let body = shows(
+        "tex.tolerance = 200 tex.set('global', 'pretolerance', 150) tex.hsize = '100pt' \
+         tex.set('baselineskip', 786432) tex.everypar = 'abc' \
+         local out = tex.tolerance .. ' ' .. tex.get('pretolerance') .. ' ' .. tex.hsize .. ' ' \
+         .. tex.get('baselineskip', false) .. ' ' .. tex.baselineskip.width .. ' ' .. tex.everypar ",
+    );
+    let want = "[200 150 6553600 786432 786432 abc]";
+    assert_eq!(out(&body), want);
+    assert_eq!(
+        out("\\directlua{tex.tolerance = 321}\\message{[\\the\\tolerance]}"),
+        "[321]"
+    );
+    // A parameter texrs does not hold at all still says so.
+    let e = fails("\\directlua{local v = tex.prevdepth}");
+    assert!(e.contains("does not hold it"), "{e}");
     // The manual is explicit that `tex.foo = 123` is valid on this table, so a
     // name that is not a parameter has to keep behaving like a Lua field.
     assert_eq!(
         text("\\directlua{tex.foo = 123 tex.print(tex.foo .. \" \" .. tostring(tex.bar))}"),
         "123 nil"
     );
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
 }
 
 /// One expression's value, as luatex 1.24.0 printed it, through the same
@@ -1425,4 +1430,59 @@ fn require_finds_a_module_the_way_luatexs_kpse_searcher_does() {
         )),
         "[table]"
     );
+}
+
+#[test]
+fn an_hpack_filter_sees_the_list_the_stomach_packs_and_its_answer_is_packed() {
+    // `callback.register('hpack_filter', f)` fills the stomach's hook point
+    // (`crate::node::hooks`), so the function is called while the program
+    // runs, with luatex's arguments -- the list, the group code, the size and
+    // the pack type -- and the list it answers is what the box is made of.
+    // The callback adds a 5pt kern after the 1pt one: the box is 6pt wide in
+    // luatex 1.24.0 as here.
+    let body = "\\directlua{callback.register('hpack_filter', function(h, gc, size, pt) \
+                local k = node.new('kern') k.kern = 5 * 65536 h.next = k \
+                texio.write('[' .. gc .. ' ' .. pt .. ' ' .. node.type(h.id) .. ']') return h end)}\
+                \\setbox0\\hbox{\\kern1pt}\\message{[\\the\\wd0]}";
+    assert_eq!(out(body), "[hbox additional kern] [6.0pt]");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (want, got) = both(&lua, body);
+    assert_eq!(want, "[hbox additional kern] [6.0pt]", "the oracle");
+    assert_eq!(got, want);
+}
+
+#[test]
+fn a_font_defined_from_lua_is_kept_and_read_tfm_reads_what_luatex_reads() {
+    // `font.define` keeps the table it was given, and `font.getfont` answers
+    // that table; `font.read_tfm` builds luatex's own table for a TFM, the
+    // characters scaled to the size asked for.
+    let body = shows(
+        "local id = font.define({ name = 'x', size = 655360, characters = { [65] = { width = 100 } } }) \
+         local f = font.getfont(id) \
+         local out = f.name .. ' ' .. f.characters[65].width .. ' ' .. tostring(font.fonts[id] == f) \
+         .. ' ' .. tostring(font.getfont(0)) ",
+    );
+    assert_eq!(out(&body), "[x 100 true nil]");
+    if texrs::kpse::locate("cmr10.tfm").is_none() {
+        eprintln!("skipping the TFM half: kpsewhich cannot find cmr10.tfm");
+        return;
+    }
+    let tfm = shows(
+        "local f = font.read_tfm('cmr10', 655360) local c = f.characters \
+         local out = f.designsize .. ' ' .. f.parameters.quad .. ' ' .. c[65].width .. ' ' \
+         .. c[102].italic .. ' ' .. c[102].ligatures[105].char .. ' ' .. c[65].kerns[86] ",
+    );
+    assert_eq!(out(&tfm), "[655360 655361 491521 50973 12 -72819]");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    for b in [&body, &tfm] {
+        let (want, got) = both(&lua, b);
+        assert!(!want.is_empty(), "the oracle said nothing for {b}");
+        assert_eq!(got, want, "{b}");
+    }
 }

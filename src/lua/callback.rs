@@ -14,6 +14,7 @@
 
 use mlua::{Function, Lua, Table, Value, Variadic};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 /// `callbacknames[]`, index for index: slot 0 is "empty on purpose", and the
 /// rest are in `callback_callback_types` order (luatexcallbackids.h), which is
@@ -151,15 +152,17 @@ pub fn function(lua: &Lua, name: &str) -> Option<Function> {
 
 /// The `callback` table: `register`, `find`, `list` -- the three `luatex`
 /// 1.24.0 has (`listidx` is in the trunk source but not in that binary).
-pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
+pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>) -> mlua::Result<Table> {
     lua.set_named_registry_value(REGISTRY_KEY, lua.create_table()?)?;
+    crate::node::hooks::clear();
     let t = lua.create_table()?;
+    let arena = Rc::clone(arena);
     // `callback_register(name, f)`: nil-and-a-message for a bad first
     // argument, a bad second one or an unknown name; the slot number on
     // success.
     t.set(
         "register",
-        lua.create_function(|lua, (name, f): (Value, Value)| {
+        lua.create_function(move |lua, (name, f): (Value, Value)| {
             let fail = |msg: &str| -> mlua::Result<Variadic<Value>> {
                 Ok(Variadic::from_iter([
                     Value::Nil,
@@ -188,6 +191,7 @@ pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
             SET.with(|s| s.borrow_mut()[i] = state);
             let reg: Table = lua.named_registry_value(REGISTRY_KEY)?;
             reg.raw_set(i, f)?;
+            hook(lua, &arena, NAMES[i], state == State::Function);
             Ok(Variadic::from_iter([Value::Integer(i as i64)]))
         })?,
     )?;
@@ -227,6 +231,141 @@ pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
         })?,
     )?;
     Ok(t)
+}
+
+// ── the list callbacks, on the stomach's hook points ────────────────────
+
+/// Fill or empty the `crate::node::hooks` point for callback `name`, so the
+/// stomach calls the registered function where LuaTeX would.
+///
+/// The hooks run while the program runs, after the chunk that registered
+/// them has finished; each call looks the function up again, so a later
+/// `callback.register` of the same name takes effect, and a registration of
+/// nil or `false` empties the hook. What the function answers is LuaTeX's
+/// node-filter protocol (`lua_node_filter`): `true` keeps the list, `false`
+/// throws it away, a node is the new head.
+fn hook(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>, name: &'static str, on: bool) {
+    use crate::node::hooks::{Context, Hooks, ListFilter, Notice};
+    type Slot = fn(&mut Hooks) -> &mut Option<ListFilter>;
+    let list_slot: Option<Slot> = match name {
+        "pre_linebreak_filter" => Some(|h| &mut h.pre_linebreak_filter),
+        "linebreak_filter" => Some(|h| &mut h.linebreak_filter),
+        "post_linebreak_filter" => Some(|h| &mut h.post_linebreak_filter),
+        "hpack_filter" => Some(|h| &mut h.hpack_filter),
+        "vpack_filter" => Some(|h| &mut h.vpack_filter),
+        "pre_output_filter" => Some(|h| &mut h.pre_output_filter),
+        "hyphenate" => Some(|h| &mut h.hyphenate),
+        "ligaturing" => Some(|h| &mut h.ligaturing),
+        "kerning" => Some(|h| &mut h.kerning),
+        _ => None,
+    };
+    if let Some(slot) = list_slot {
+        let filter: Option<ListFilter> = on.then(|| {
+            let (lua, arena) = (lua.clone(), Rc::clone(arena));
+            Box::new(move |list: &mut Vec<crate::node::Node>, cx: &Context| {
+                if let Err(e) = run_list_callback(&lua, &arena, name, list, cx) {
+                    super::warn(&format!("callback {name}: {}", super::lua_error_text(&e)));
+                }
+            }) as ListFilter
+        });
+        crate::node::hooks::set(|h| *slot(h) = filter);
+        return;
+    }
+    type NoticeSlot = fn(&mut Hooks) -> &mut Option<Notice>;
+    let notice_slot: Option<NoticeSlot> = match name {
+        "buildpage_filter" => Some(|h| &mut h.buildpage_filter),
+        "contribute_filter" => Some(|h| &mut h.contribute_filter),
+        _ => None,
+    };
+    if let Some(slot) = notice_slot {
+        let notice: Option<Notice> = on.then(|| {
+            let lua = lua.clone();
+            Box::new(move |info: &str| {
+                if let Some(f) = function(&lua, name) {
+                    if let Err(e) = f.call::<()>(info) {
+                        super::warn(&format!("callback {name}: {}", super::lua_error_text(&e)));
+                    }
+                }
+            }) as Notice
+        });
+        crate::node::hooks::set(|h| *slot(h) = notice);
+    }
+}
+
+/// One call of a list callback: the list made into nodes, the function called
+/// with LuaTeX's arguments for that callback, and its answer made back into
+/// the stomach's list.
+fn run_list_callback(
+    lua: &Lua,
+    arena: &Rc<RefCell<super::node::Arena>>,
+    name: &str,
+    list: &mut Vec<crate::node::Node>,
+    cx: &crate::node::hooks::Context,
+) -> mlua::Result<()> {
+    let Some(f) = function(lua, name) else {
+        return Ok(());
+    };
+    // `lua_node_filter`: an empty list is not handed over at all.
+    if list.is_empty() {
+        return Ok(());
+    }
+    let head = super::node::from_engine(&mut arena.borrow_mut(), list)?;
+    let head_v = super::node::handle(lua, arena, head)?;
+    let s = |v: &str| lua.create_string(v).map(Value::String);
+    let args: Vec<Value> = match name {
+        "pre_linebreak_filter" | "post_linebreak_filter" => vec![head_v, s(cx.groupcode)?],
+        "linebreak_filter" => vec![head_v, Value::Boolean(cx.groupcode == "display")],
+        "hpack_filter" => vec![
+            head_v,
+            s(cx.groupcode)?,
+            Value::Integer(cx.size),
+            s(cx.packtype)?,
+            Value::Nil,
+        ],
+        "vpack_filter" | "pre_output_filter" => vec![
+            head_v,
+            s(cx.groupcode)?,
+            Value::Integer(cx.size),
+            s(cx.packtype)?,
+            Value::Integer(cx.maxdepth),
+            Value::Nil,
+        ],
+        // `hyphenate`, `ligaturing`, `kerning`: head and tail, the list edited
+        // in place and nothing answered.
+        _ => {
+            let tail = match head {
+                Some(h) => Some(arena_tail(arena, h)?),
+                None => None,
+            };
+            vec![head_v, super::node::handle(lua, arena, tail)?]
+        }
+    };
+    let answer: Value = f.call(Variadic::from_iter(args))?;
+    let new_head = match (name, &answer) {
+        ("hyphenate" | "ligaturing" | "kerning", _) => match head {
+            // The head may have gained nodes in front of it.
+            Some(h) => Some(arena_first(arena, h)?),
+            None => None,
+        },
+        (_, Value::Boolean(true)) => return Ok(()),
+        (_, Value::Boolean(false)) => None,
+        // Anything else is `nodelist_from_lua`: a node is the new head and nil
+        // an empty list.
+        (_, v) => super::node::index_of(arena, v)?,
+    };
+    *list = match new_head {
+        Some(h) => super::node::list_to_engine(&arena.borrow(), h)?,
+        None => Vec::new(),
+    };
+    Ok(())
+}
+
+fn arena_tail(arena: &Rc<RefCell<super::node::Arena>>, head: usize) -> mlua::Result<usize> {
+    super::node::tail_of(&arena.borrow(), head)
+}
+
+fn arena_first(arena: &Rc<RefCell<super::node::Arena>>, at: usize) -> mlua::Result<usize> {
+    super::node::first_of(&arena.borrow(), at)
 }
 
 #[cfg(test)]

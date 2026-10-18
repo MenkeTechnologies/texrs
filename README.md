@@ -398,7 +398,14 @@ than none.
   1.24 interface. `require` finds a module as a file of kpathsea's `lua`
   format, through `kpsewhich`, so lualibs loads as it does in luatex. A library
   function a package keeps in a local reaches the input of whichever chunk
-  later calls it.
+  later calls it. `node` is LuaTeX's whole vocabulary on both faces (userdata
+  and `node.direct`), with attribute lists and the properties table; `tex`
+  reads and assigns the internal parameters texrs holds and the catcode,
+  lccode, uccode, sfcode, mathcode and delcode tables through the engine's
+  own assignments; `font` defines fonts from Lua tables and reads TFMs as
+  luatex does. A list callback (`hpack_filter`, `pre_linebreak_filter` and the
+  rest) registered from a chunk is called by the stomach while the program
+  runs, with luatex's arguments, and its answer is what gets packed.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), broken into total-fit
   lines by the same breaker as `--pdf`, packed into boxes and shipped through
   `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
@@ -580,22 +587,18 @@ is a catcode change and works as one.
 `\directlua` runs its chunk, in PUC-Lua 5.3 — the version LuaTeX embeds — and
 what the chunk prints is read back as input, so `\count10=20
 a\directlua{tex.print(tex.count[10]+5)}b` typesets `a25b`. The `tex` table
-reaches the real registers, `token` reaches the input the chunk stands in front
-of, and a chunk that fails stops the run with its Lua error as a TeX error. What
-there is a `node` library over the engine's own node list, and what it carries
-is the half that does not need the document: a chunk builds a list and
-`node.hpack` measures it with §649's arithmetic, agreeing with luatex on the
-width, the badness, the glue ratio and both orders. `tex.skip` and the `\muskip`
-family hand over the `glue_spec` node the manual describes. What is absent is
-the other half, and not for want of a data structure: texrs builds a page's
-boxes from already-broken strings rather than from a node list, so there is no
-CURRENT node list — `tex.getbox`, `node.write`
-and every callback that would pass Lua the list TeX is building refuse by name,
-and a document that walks the document's own list is refused rather than quietly
-wrong. `callback.register` keeps LuaTeX's registry, slot for slot, but nothing in
-the engine calls a registered function yet. Of LuaTeX's other libraries,
-`font`, `lang`, `pdf`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and `socket`
-are not there, the shell is disabled (`os.execute`, `io.popen` and
+reaches the real registers and parameters, `token` reaches the input the chunk
+stands in front of, and a chunk that fails stops the run with its Lua error as a
+TeX error. The node lists TeX builds are the stomach's and exist while the
+program runs, after the chunks have run while it was lowered: so a chunk cannot
+reach `tex.box[n]`, `tex.getlist` or the current list (`node.write`,
+`node.last_node`), and those refuse by name; a callback registered from a chunk
+is how Lua reaches the stomach's lists, and of the stomach's hook points only
+`hpack_filter` is called yet. `node.ligaturing`, `node.kerning`,
+`node.hyphenating` and `node.mlist_to_hlist` are not ported. Of LuaTeX's other
+libraries, `lang`, `pdf`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and
+`socket` are not there, and a font defined from Lua is not yet one the stomach
+sets type in. The shell is disabled (`os.execute`, `io.popen` and
 `kpse.check_permission` answer as `luatex -no-shell-escape` does), and an error
 a Rust library function raises is a userdata that prints, concatenates and
 matches like the string luatex's C would raise, but is not `type` string. See

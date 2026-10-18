@@ -1,111 +1,58 @@
-//! The `node` library: LuaTeX's node interface, over texrs's own node list.
+//! The `node` library: LuaTeX's node interface, both its faces.
 //!
-//! ## The honest verdict, first
+//! A port of luatexdir/lua/lnodelib.c. LuaTeX's nodes live in its node
+//! memory; Lua sees them either as userdata (`node.*`) or as the bare memory
+//! index (`node.direct.*`, "direct nodes"), and the two faces are the same
+//! operations over the same nodes, `node.direct.todirect` and `tonode`
+//! converting between them. Here the memory is an [`Arena`] of cells, one per
+//! node, indexed from 1, and a direct node IS that index.
 //!
-//! LuaTeX's `node` library is two things wearing one name, and only one of
-//! them can be put over `crate::node`.
+//! ## The vocabulary is LuaTeX's, whole
 //!
-//! The first is a **vocabulary**: a numbered set of node types, a field name
-//! per type, a subtype numbering, and the packagers `node.hpack` and
-//! `node.vpack`. That is a documented contract (LuaTeX manual 1.24.0, "Nodes"),
-//! and `crate::node` carries the same information for the types TeX82 has, so
-//! the vocabulary CAN be spoken here — and every number it answers with is one
-//! `crate::pack`'s port of §649-§667 computed, not one this module invented.
+//! Every node type luatex 1.24.0 has -- the TeX82 list items, LuaTeX's
+//! `local_par`, `dir`, `boundary` and `margin_kern`, the math noads, the
+//! whatsits by subtype, attribute lists, `glue_spec` -- with its fields at
+//! luatex's own indices (`node.fields`), its subtype names (`node.subtypes`),
+//! and the values a fresh one starts with, all read off luatex 1.24.0 rather
+//! than written down from the manual. A cell keeps every field a node of its
+//! type has, so a chunk can build, edit and walk any list luatex can.
 //!
-//! The second is a **handle on the document**: `tex.box[0].head`,
-//! `node.write`, `tex.getlist('page_head')`, and the callbacks
-//! (`pre_linebreak_filter`, `hpack_filter`, `mlist_to_hlist`, …) that hand Lua
-//! the list TeX is building. That one CANNOT be spoken here, and the reason is
-//! not the shape of `crate::node` — it is that **there is no such list**.
-//! `src/typeset.rs` sets a page from runs of strings; the only `hpack` on the
-//! path a run takes is `set_footline`'s, which builds a list, measures it and
-//! throws it away. `crate::postline` and `crate::page` are a library beside
-//! that path rather than the path itself. So there is nothing to hand Lua, and
-//! every entry point that would hand it something REFUSES, by name, with a
-//! message saying which of the two engines' worlds the chunk has walked into.
+//! ## Where the nodes meet the engine's
 //!
-//! That split is deliberate and it is the whole design. A document that walks
-//! the document's node list is still refused rather than quietly wrong, because
-//! it cannot obtain the list in the first place. A chunk that BUILDS a list and
-//! measures it gets TeX's own arithmetic.
+//! texrs's stomach builds `crate::node::Node` lists, and the callbacks that
+//! hand Lua a list (`crate::node::hooks`) give it one of those. [`from_engine`]
+//! makes cells of a list and [`to_engine`] makes a list of cells, for the
+//! callbacks and for `node.hpack`, `node.vpack` and `node.dimensions`, which
+//! are `crate::pack`'s port of §649-§679. A field `crate::node` has no room
+//! for -- an attribute list, a disc's penalty, a glyph's offsets -- survives
+//! for as long as the list stays in Lua, and does not survive the trip back;
+//! BUGS.md keeps the list.
 //!
-//! ## What is refused, and why each one
+//! ## Two divergences, measured
 //!
-//! - **The document's list.** `node.write`, `node.last_node`, `node.usedlist`,
-//!   `tex.box`/`tex.getbox`/`tex.getlist` (in the parent module). No current
-//!   list exists to append to, pop from, or read.
-//! - **Fonts.** `glyph` nodes are creatable, but `.font` accepts only `0`.
-//!   texrs has no `font` library and no font table for Lua to index, so `0` —
-//!   LuaTeX's "no font" — is the only id a chunk here could ever hold. Measured:
-//!   in luatex 1.24.0 a glyph with `font = 0` has `width = 0` whatever `char`
-//!   is, and a write to `.width` is accepted and ignored because the width is
-//!   derived from the font. This module does exactly that, so a glyph agrees
-//!   with luatex in the only configuration reachable from here rather than
-//!   answering a stored number luatex would not answer.
-//! - **`node.ligaturing`, `node.kerning`, `node.hyphenating`.** Each needs the
-//!   font's ligature/kern program or Liang's patterns applied to a node list;
-//!   the lig/kern program is not on texrs's path at all (see BUGS.md).
-//! - **`node.mlist_to_hlist`.** `crate::math` has the mlist machinery, but the
-//!   noad types (LuaTeX ids 16-27) have no `crate::node::Node` variant, so
-//!   there is no node for Lua to build an mlist out of.
-//! - **Attributes on nodes.** `attr`, `node.set_attribute` and friends: an
-//!   attribute list is a node in LuaTeX and texrs's `Node` has no field for one.
-//!   (`tex.attribute` in the parent module is storage a chunk can use, which is
-//!   a different thing and does not reach a node.)
-//! - **`ins`, `mark`, `whatsit`, `unset`, `boundary`, `local_par`, `dir`,
-//!   `margin_kern`, the noads, `glue_spec`.** Either `crate::node` has no
-//!   variant for them, or its variant does not carry LuaTeX's fields: texrs's
-//!   `InsNode.split_top_skip` is a `Glue` where LuaTeX's `spec` is a
-//!   `glue_spec` NODE, and `Node::Mark` is already-expanded text where LuaTeX's
-//!   `mark` is a token list. `node.id`, `node.type` and `node.types` still
-//!   answer for every one of them, because those numbers are the documented
-//!   contract; it is `node.new` that refuses.
-//! - **Fields texrs's node has no room for.** `dir` on a box, `expansion_factor`
-//!   on a kern, `replace` on a disc (texrs holds tex.web's `replace_count`, an
-//!   integer, where LuaTeX holds a list), the mathskip fields on a math node.
-//!   Reading one is an ERROR rather than `nil`: `nil` is what LuaTeX answers for
-//!   a name that is not a field at all, so answering `nil` for a field LuaTeX
-//!   DOES have would be the quiet wrongness this module exists to avoid.
-//!
-//! ## Two divergences that are not refusals, measured
-//!
-//! - **Glue orders are LuaTeX's, not tex.web's.** LuaTeX has a fourth, finer
-//!   infinity called `fi` and numbers from it, so its `fil` is 2 where TeX82's
-//!   is 1. Measured at the NODE level, not assumed: `\hbox to 20pt{\hskip 0pt
-//!   plus 1fil}` gives `glue.stretch_order == 2` and `box.glue_order == 2` in
-//!   luatex 1.24.0, and `1fill` gives 3. `super::to_luatex_order` and
-//!   `super::from_luatex_order` are the same translation the register interface
-//!   uses, and `fi` is refused here as it is there.
-//! - **`glue_set` is wider here.** LuaTeX builds with `glue_ratio = float`, so
-//!   a box stretched by 8/3 reports `2.6666667461395`; `crate::node::BoxNode`
-//!   holds an `f64` and reports `2.6666666666666665`. texrs's is the more exact
-//!   of the two and it is not this module's number to change, so a chunk that
-//!   prints a fractional `glue_set` disagrees with luatex in the low digits.
-//!   Integral ratios agree exactly.
+//! - **`glue_set` is wider here.** LuaTeX builds with `glue_ratio = float`,
+//!   so a box stretched by 8/3 reports `2.6666667461395`; texrs's box holds an
+//!   `f64` and reports `2.6666666666666665`. Integral ratios agree exactly.
+//! - **Freed cells are never reused**, where luatex reuses node memory and
+//!   warns that equality "can only be trusted under very limited conditions".
+//!   An index that was freed stays freed, which makes `==` mean what a chunk
+//!   expects and turns a use after free into an error rather than a wrong node.
 
-use super::{from_luatex_order, to_luatex_order};
+use super::{ctx, from_luatex_order, to_luatex_order};
 use crate::glue::Glue;
 use crate::node::{BoxNode, CharNode, DiscNode, GlueNode, GlueSign, GlueSource, LeaderKind};
-use crate::node::{Node as ENode, RuleNode, Scaled};
+use crate::node::{InsNode, Node as ENode, RuleNode};
 use mlua::{Lua, MetaMethod, Table, UserData, UserDataMethods, Value, Variadic};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-/// How many nodes a walk will follow before it decides the list is a cycle.
-///
-/// `n.next = n` is one Lua assignment away, and luatex hangs on it. Hanging is
-/// not an option for an engine a test suite drives, so a walk that goes this
-/// far stops with an error naming the node it started from.
+/// How many nodes a walk follows before it decides the list is a cycle:
+/// `n.next = n` is one Lua assignment away, and luatex hangs on it.
 const WALK_LIMIT: usize = 1 << 20;
 
-// ── the type table ───────────────────────────────────────────────────────
+// ── the types ────────────────────────────────────────────────────────────
 
-/// LuaTeX's node ids, read out of `node.types()` in luatex 1.24.0.
-///
-/// The whole list, including the types `node.new` refuses: `node.id('glyph')`
-/// answering 29 is a documented constant a chunk may compare against long
-/// before it tries to make one.
+/// `node.types()` in luatex 1.24.0.
 const TYPES: &[(u8, &str)] = &[
     (0, "hlist"),
     (1, "vlist"),
@@ -159,210 +106,526 @@ const TYPES: &[(u8, &str)] = &[
     (49, "shape"),
 ];
 
+/// `node.whatsits()` in luatex 1.24.0.
+const WHATSITS: &[(i64, &str)] = &[
+    (0, "open"),
+    (1, "write"),
+    (2, "close"),
+    (3, "special"),
+    (4, "late_special"),
+    (7, "save_pos"),
+    (8, "late_lua"),
+    (9, "user_defined"),
+    (16, "pdf_literal"),
+    (17, "pdf_late_literal"),
+    (18, "pdf_refobj"),
+    (19, "pdf_annot"),
+    (20, "pdf_start_link"),
+    (21, "pdf_end_link"),
+    (22, "pdf_dest"),
+    (23, "pdf_action"),
+    (24, "pdf_thread"),
+    (25, "pdf_start_thread"),
+    (26, "pdf_end_thread"),
+    (27, "pdf_thread_data"),
+    (28, "pdf_link_data"),
+    (29, "pdf_colorstack"),
+    (30, "pdf_setmatrix"),
+    (31, "pdf_save"),
+    (32, "pdf_restore"),
+    (33, "pdf_link_state"),
+];
+
 const HLIST: u8 = 0;
 const VLIST: u8 = 1;
 const RULE: u8 = 2;
+const INS: u8 = 3;
+const MARK: u8 = 4;
 const ADJUST: u8 = 5;
 const DISC: u8 = 7;
+const WHATSIT: u8 = 8;
+const DIR: u8 = 10;
 const MATH: u8 = 11;
 const GLUE: u8 = 12;
 const KERN: u8 = 13;
 const PENALTY: u8 = 14;
 const GLYPH: u8 = 29;
+const ATTRIBUTE: u8 = 38;
 const GLUE_SPEC: u8 = 39;
+const ATTRIBUTE_LIST: u8 = 40;
 
-/// The name for an id, or `None` if LuaTeX has no such id.
+/// LuaTeX's `UNUSED_ATTRIBUTE`: the value of an attribute that is not set.
+pub(super) const UNUSED_ATTRIBUTE: i64 = -0x7FFF_FFFF;
+
 fn type_name(id: u8) -> Option<&'static str> {
     TYPES.iter().find(|(n, _)| *n == id).map(|(_, s)| *s)
 }
 
-/// The id for a name.
 fn type_id(name: &str) -> Option<u8> {
     TYPES.iter().find(|(_, s)| *s == name).map(|(n, _)| *n)
 }
 
-/// The id a Lua value names: a number is one, a string is looked up.
+fn whatsit_id(name: &str) -> Option<i64> {
+    WHATSITS.iter().find(|(_, s)| *s == name).map(|(n, _)| *n)
+}
+
+/// The id a Lua value names: a number, or a type name.
 fn want_id(v: &Value) -> mlua::Result<u8> {
     if let Some(n) = v.as_integer() {
         return u8::try_from(n)
             .ok()
             .filter(|id| type_name(*id).is_some())
-            .ok_or_else(|| mlua::Error::runtime(format!("there is no node type {n}")));
+            .ok_or_else(|| {
+                mlua::Error::runtime(format!("invalid node id for creating a node: {n}"))
+            });
     }
     if let Value::String(s) = v {
         let name = s.to_str()?;
-        return type_id(&name)
-            .ok_or_else(|| mlua::Error::runtime(format!("there is no node type '{name}'")));
+        return type_id(&name).ok_or_else(|| {
+            mlua::Error::runtime(format!("invalid node id for creating a node: {}", &*name))
+        });
     }
-    Err(mlua::Error::runtime("expected a node type id or name"))
-}
-
-/// Why `node.new` will not make one of these.
-///
-/// Every type LuaTeX has that `crate::node::Node` cannot carry faithfully, with
-/// the reason stated per type rather than as one blanket sentence: a chunk's
-/// author is owed the specific thing that is missing.
-fn why_not_new(id: u8) -> &'static str {
-    match id {
-        3 => {
-            "an `ins` node's `spec` is a glue_spec NODE in LuaTeX, where \
-              texrs's InsNode carries a plain Glue"
-        }
-        4 => {
-            "a `mark` node's `mark` is a token list in LuaTeX, where texrs's \
-              Node::Mark carries already-expanded text"
-        }
-        8 => {
-            "a `whatsit` is differentiated by subtype alone and texrs's \
-              Node::Whatsit carries one string, not LuaTeX's zoo of subtypes"
-        }
-        6 | 9 | 10 | 15 | 28 => {
-            "texrs's node list is TeX82's (tex.web \
-              §133-§161) and has no variant for this LuaTeX addition"
-        }
-        16..=27 => {
-            "this is a math noad, and texrs's mlists (crate::math) are \
-              not made of crate::node::Node"
-        }
-        38 | 40 => "texrs's nodes carry no attribute list",
-        _ => {
-            "this is one of LuaTeX's internal types, which are not part of a \
-              document's node list"
-        }
-    }
+    Err(mlua::Error::runtime("invalid node id for creating a node"))
 }
 
 // ── fields ───────────────────────────────────────────────────────────────
 
-/// What a field holds.
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    /// An integer: a dimension, a penalty, a character code.
-    Num,
-    /// The head of a nested list, or `nil`.
-    List,
-    /// `glue_set`, the one float in the structure (tex.web §109).
-    Ratio,
-    /// A glyph's `width`/`height`/`depth`. Read as 0 and written to no effect,
-    /// which is what luatex 1.24.0 does for a glyph whose font is 0 — measured:
-    /// `g.width = 12345` returns without error and `g.width` reads back `0`,
-    /// because the dimension comes from the font rather than from the node.
+/// What a field holds, and what a new node starts with in it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum K {
+    /// An integer, starting at the value given.
+    I(i64),
+    /// A node pointer -- a single node or a list's head -- starting nil.
+    N,
+    /// `glue_set`, the one float (tex.web §109).
+    F,
+    /// A string, starting as given.
+    S(&'static str),
+    /// Any Lua value, starting nil.
+    V,
+    /// A token list, which luatex hands out as a table; starts empty.
+    Tok,
+    /// A direction, starting as given (a string) or nil.
+    Dir(Option<&'static str>),
+    /// A glyph's `width`, `height` or `depth`: read from the font, and a
+    /// write is accepted and has no effect, as in luatex.
     Derived,
 }
 
-/// One field of one node type: LuaTeX's own index for it, its name, its kind.
-struct Field {
-    index: i64,
-    name: &'static str,
-    kind: Kind,
-}
-
-const fn f(index: i64, name: &'static str, kind: Kind) -> Field {
-    Field { index, name, kind }
-}
-
-/// The fields texrs carries for a node type, at LuaTeX's own indices.
-///
-/// Read out of `node.fields(id)` in luatex 1.24.0 and then cut down to what
-/// `crate::node` holds; [`absent_field`] names what was cut and why.
-fn fields_of(id: u8) -> &'static [Field] {
-    const BOX: &[Field] = &[
-        f(4, "width", Kind::Num),
-        f(5, "depth", Kind::Num),
-        f(6, "height", Kind::Num),
-        f(8, "shift", Kind::Num),
-        f(9, "glue_order", Kind::Num),
-        f(10, "glue_sign", Kind::Num),
-        f(11, "glue_set", Kind::Ratio),
-        f(12, "head", Kind::List),
+/// The field names of a type, in luatex's index order: `node.fields(id)`
+/// numbers them from -1 when `prev` is there and from 0 when it is not.
+fn names(id: u8, sub: Option<i64>) -> &'static [&'static str] {
+    const BOX: &[&str] = &[
+        "prev",
+        "next",
+        "id",
+        "subtype",
+        "attr",
+        "width",
+        "depth",
+        "height",
+        "dir",
+        "shift",
+        "glue_order",
+        "glue_sign",
+        "glue_set",
+        "head",
     ];
-    const RULE_F: &[Field] = &[
-        f(4, "width", Kind::Num),
-        f(5, "depth", Kind::Num),
-        f(6, "height", Kind::Num),
-    ];
-    const ADJUST_F: &[Field] = &[f(4, "head", Kind::List)];
-    const DISC_F: &[Field] = &[f(4, "pre", Kind::List), f(5, "post", Kind::List)];
-    const MATH_F: &[Field] = &[f(4, "surround", Kind::Num)];
-    const GLUE_F: &[Field] = &[
-        f(4, "leader", Kind::List),
-        f(5, "width", Kind::Num),
-        f(6, "stretch", Kind::Num),
-        f(7, "shrink", Kind::Num),
-        f(8, "stretch_order", Kind::Num),
-        f(9, "shrink_order", Kind::Num),
-    ];
-    const KERN_F: &[Field] = &[f(4, "kern", Kind::Num)];
-    const PENALTY_F: &[Field] = &[f(4, "penalty", Kind::Num)];
-    // Measured: `node.fields(39)` in luatex 1.24.0 is `0:next 1:id 2:width
-    // 3:stretch 4:shrink 5:stretch_order 6:shrink_order` -- no `prev`, no
-    // `subtype`, and `node.has_field(spec,'subtype')` is false.
-    const SPEC_F: &[Field] = &[
-        f(2, "width", Kind::Num),
-        f(3, "stretch", Kind::Num),
-        f(4, "shrink", Kind::Num),
-        f(5, "stretch_order", Kind::Num),
-        f(6, "shrink_order", Kind::Num),
-    ];
-    const GLYPH_F: &[Field] = &[
-        f(4, "char", Kind::Num),
-        f(5, "font", Kind::Num),
-        f(13, "width", Kind::Derived),
-        f(14, "height", Kind::Derived),
-        f(15, "depth", Kind::Derived),
-    ];
+    const BARE: &[&str] = &["prev", "next", "id", "subtype"];
     match id {
         HLIST | VLIST => BOX,
-        RULE => RULE_F,
-        ADJUST => ADJUST_F,
-        DISC => DISC_F,
-        MATH => MATH_F,
-        GLUE => GLUE_F,
-        KERN => KERN_F,
-        PENALTY => PENALTY_F,
-        GLYPH => GLYPH_F,
-        GLUE_SPEC => SPEC_F,
-        _ => &[],
+        RULE => &[
+            "prev", "next", "id", "subtype", "attr", "width", "depth", "height", "dir", "index",
+            "left", "right",
+        ],
+        INS => &[
+            "prev", "next", "id", "subtype", "attr", "cost", "depth", "height", "spec", "head",
+        ],
+        MARK => &["prev", "next", "id", "subtype", "attr", "class", "mark"],
+        ADJUST => &["prev", "next", "id", "subtype", "attr", "head"],
+        6 => &["prev", "next", "id", "subtype", "attr", "value"],
+        DISC => &[
+            "prev", "next", "id", "subtype", "attr", "pre", "post", "replace", "penalty",
+        ],
+        WHATSIT => match sub {
+            Some(0) => &[
+                "prev", "next", "id", "subtype", "attr", "stream", "name", "area", "ext",
+            ],
+            Some(1) => &["prev", "next", "id", "subtype", "attr", "stream", "data"],
+            Some(2) => &["prev", "next", "id", "subtype", "attr", "stream"],
+            Some(3) | Some(4) | Some(30) => &["prev", "next", "id", "subtype", "attr", "data"],
+            Some(8) => &[
+                "prev", "next", "id", "subtype", "attr", "reg", "data", "name", "string",
+            ],
+            Some(9) => &[
+                "prev", "next", "id", "subtype", "attr", "user_id", "type", "value",
+            ],
+            Some(16) | Some(17) => &["prev", "next", "id", "subtype", "attr", "mode", "data"],
+            Some(18) => &["prev", "next", "id", "subtype", "attr", "objnum"],
+            Some(19) => &[
+                "prev", "next", "id", "subtype", "attr", "width", "depth", "height", "objnum",
+                "data",
+            ],
+            Some(20) => &[
+                "prev",
+                "next",
+                "id",
+                "subtype",
+                "attr",
+                "width",
+                "depth",
+                "height",
+                "objnum",
+                "link_attr",
+                "action",
+            ],
+            Some(22) => &[
+                "prev",
+                "next",
+                "id",
+                "subtype",
+                "attr",
+                "width",
+                "depth",
+                "height",
+                "named_id",
+                "dest_id",
+                "dest_type",
+                "xyz_zoom",
+                "objnum",
+            ],
+            Some(23) => &[
+                "prev",
+                "next",
+                "id",
+                "subtype",
+                "action_type",
+                "named_id",
+                "action_id",
+                "file",
+                "new_window",
+                "data",
+                "struct_id",
+            ],
+            Some(24) | Some(25) => &[
+                "prev",
+                "next",
+                "id",
+                "subtype",
+                "attr",
+                "width",
+                "depth",
+                "height",
+                "named_id",
+                "thread_id",
+                "thread_attr",
+            ],
+            Some(27) | Some(28) => BARE,
+            Some(29) => &[
+                "prev", "next", "id", "subtype", "attr", "stack", "cmd", "data",
+            ],
+            Some(33) => &["prev", "next", "id", "subtype", "attr", "value"],
+            _ => &["prev", "next", "id", "subtype", "attr"],
+        },
+        9 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "pen_inter",
+            "pen_broken",
+            "dir",
+            "box_left",
+            "box_left_width",
+            "box_right",
+            "box_right_width",
+        ],
+        DIR => &["prev", "next", "id", "subtype", "attr", "dir", "level"],
+        MATH => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "surround",
+            "width",
+            "stretch",
+            "shrink",
+            "stretch_order",
+            "shrink_order",
+        ],
+        GLUE => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "leader",
+            "width",
+            "stretch",
+            "shrink",
+            "stretch_order",
+            "shrink_order",
+        ],
+        KERN => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "kern",
+            "expansion_factor",
+        ],
+        PENALTY => &["prev", "next", "id", "subtype", "attr", "penalty"],
+        15 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "width",
+            "depth",
+            "height",
+            "dir",
+            "shrink",
+            "glue_order",
+            "glue_sign",
+            "stretch",
+            "span",
+            "head",
+        ],
+        16 => &["prev", "next", "id", "subtype", "attr", "style"],
+        17 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "display",
+            "text",
+            "script",
+            "scriptscript",
+        ],
+        18 => &[
+            "prev", "next", "id", "subtype", "attr", "nucleus", "sub", "sup",
+        ],
+        19 => &[
+            "prev", "next", "id", "subtype", "attr", "nucleus", "sub", "sup", "left", "degree",
+            "width", "options",
+        ],
+        20 => &[
+            "prev", "next", "id", "subtype", "attr", "width", "num", "denom", "left", "right",
+            "middle", "fam", "options",
+        ],
+        21 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "nucleus",
+            "sub",
+            "sup",
+            "accent",
+            "bot_accent",
+            "top_accent",
+            "overlay_accent",
+            "fraction",
+        ],
+        22 => &[
+            "prev", "next", "id", "subtype", "attr", "delim", "italic", "height", "depth",
+            "options", "class",
+        ],
+        23 | 26 => &["prev", "next", "id", "subtype", "attr", "fam", "char"],
+        24 | 25 => &["prev", "next", "id", "subtype", "attr", "head"],
+        27 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "small_fam",
+            "small_char",
+            "large_fam",
+            "large_char",
+        ],
+        28 => &["prev", "next", "id", "subtype", "attr", "width", "glyph"],
+        GLYPH => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "attr",
+            "char",
+            "font",
+            "lang",
+            "left",
+            "right",
+            "uchyph",
+            "components",
+            "xoffset",
+            "yoffset",
+            "width",
+            "height",
+            "depth",
+            "expansion_factor",
+            "data",
+        ],
+        33 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "height",
+            "last_ins_ptr",
+            "best_ins_ptr",
+            "width",
+            "stretch",
+            "shrink",
+            "stretch_order",
+            "shrink_order",
+        ],
+        34 => &[
+            "prev",
+            "next",
+            "id",
+            "subtype",
+            "height",
+            "last_ins_ptr",
+            "best_ins_ptr",
+            "broken_ptr",
+            "broken_ins",
+        ],
+        ATTRIBUTE => &["next", "id", "number", "value"],
+        GLUE_SPEC => &[
+            "next",
+            "id",
+            "width",
+            "stretch",
+            "shrink",
+            "stretch_order",
+            "shrink_order",
+        ],
+        ATTRIBUTE_LIST => &["next", "id"],
+        _ => BARE,
     }
 }
 
-/// A field LuaTeX has on this node type that texrs has no room for, with the
-/// reason. Reading or writing one is an error rather than `nil`: `nil` is what
-/// LuaTeX itself answers for a name that is not a field, so `nil` here would
-/// say "LuaTeX has no such field" when the truth is "texrs has not got it".
-fn absent_field(id: u8, name: &str) -> Option<&'static str> {
-    let reason = match (id, name) {
-        (_, "attr") => "texrs's nodes carry no attribute list",
-        (HLIST | VLIST | RULE, "dir") => {
-            "direction is a LuaTeX addition; texrs's boxes are TeX82's, left to right"
-        }
-        (RULE, "index" | "left" | "right") => {
-            "these are LuaTeX's rule extensions; texrs's RuleNode is tex.web §138's three dimensions"
-        }
-        (DISC, "replace") => {
-            "texrs's DiscNode holds tex.web's `replace_count`, an integer, where LuaTeX holds a list"
-        }
-        (DISC, "penalty") => {
-            "tex.web charges \\hyphenpenalty at the break rather than storing it on the node"
-        }
-        (MATH, "width" | "stretch" | "shrink" | "stretch_order" | "shrink_order") => {
-            "these are LuaTeX's \\mathskip extension; tex.web §147's math node is one surround"
-        }
-        (KERN, "expansion_factor") => "font expansion is a pdfTeX/LuaTeX addition texrs has not got",
-        (GLYPH, "lang" | "left" | "right" | "uchyph") => {
-            "hyphenation state is not carried on texrs's char node"
-        }
-        (GLYPH, "components") => "texrs's Node::Ligature carries no component list",
-        (GLYPH, "xoffset" | "yoffset" | "expansion_factor" | "data") => {
-            "these are LuaTeX glyph extensions texrs has not got"
-        }
-        _ => return None,
-    };
-    Some(reason)
+/// What field `name` of a node of type `id` holds, and starts as; `None` when
+/// the type has no such field. The starting values are luatex 1.24.0's for a
+/// node fresh from `node.new`.
+fn kind(id: u8, sub: Option<i64>, name: &str) -> Option<K> {
+    if !names(id, sub).contains(&name) {
+        return None;
+    }
+    Some(match (id, name) {
+        (_, "attr") => K::N,
+        (HLIST | VLIST, "dir") => K::Dir(None),
+        (RULE, "dir") => K::Dir(None),
+        (9, "dir") | (15, "dir") => K::Dir(Some("TLT")),
+        (DIR, "dir") => K::Dir(Some("+TLT")),
+        (HLIST | VLIST, "glue_set") => K::F,
+        (RULE, "width" | "depth" | "height") => K::I(crate::node::NULL_FLAG),
+        (RULE, "left" | "right") => K::I(0),
+        (15, "width") => K::I(crate::node::NULL_FLAG),
+        (GLYPH, "width" | "height" | "depth") => K::Derived,
+        (GLYPH, "left" | "right") => K::I(1),
+        (20, "fam") => K::I(-1),
+        (16, "style") => K::S("display"),
+        (MARK, "mark") => K::Tok,
+        (
+            _,
+            "head" | "spec" | "pre" | "post" | "replace" | "leader" | "components" | "span"
+            | "nucleus" | "sub" | "sup" | "left" | "right" | "middle" | "num" | "denom" | "degree"
+            | "accent" | "bot_accent" | "top_accent" | "overlay_accent" | "delim" | "display"
+            | "text" | "script" | "scriptscript" | "glyph" | "box_left" | "box_right",
+        ) => K::N,
+        (WHATSIT, "name" | "area" | "ext" | "file" | "link_attr" | "thread_attr") => K::S(""),
+        (WHATSIT, "data") => match sub {
+            Some(16) | Some(17) => K::S("data"),
+            _ => K::S(""),
+        },
+        (WHATSIT, "string") => K::S(""),
+        (WHATSIT, "value") => match sub {
+            Some(9) => K::I(0),
+            _ => K::V,
+        },
+        (WHATSIT, "reg" | "action" | "struct_id" | "cmd") => K::V,
+        (33 | 34, _) if !matches!(name, "prev" | "next" | "id" | "subtype") => K::V,
+        _ => K::I(0),
+    })
 }
 
-/// `head` and `list` name the same field on a box (`node.has_field(h,'list')`
-/// is true in luatex 1.24.0), and `next`/`prev` are spelled either way.
+/// A field value as a cell holds it.
+#[derive(Clone, Debug)]
+enum FV {
+    I(i64),
+    F(f64),
+    N(usize),
+    V(Value),
+}
+
+// ── the arena ────────────────────────────────────────────────────────────
+
+/// One node.
+#[derive(Clone, Debug)]
+struct Cell {
+    id: u8,
+    /// `None` for the types luatex gives no subtype (`local_par`, the
+    /// internal ones), which read as nil.
+    subtype: Option<i64>,
+    prev: Option<usize>,
+    next: Option<usize>,
+    /// The fields, by name, set ones only; an absent one has its default.
+    vals: Vec<(&'static str, FV)>,
+    /// A glyph's dimensions as the stomach measured it, when the list came
+    /// from the engine: the font then is the stomach's and not reachable
+    /// while it is building a list.
+    measured: Option<(i64, i64, i64)>,
+}
+
+impl Cell {
+    fn get(&self, name: &str) -> Option<&FV> {
+        self.vals.iter().find(|(n, _)| *n == name).map(|(_, v)| v)
+    }
+
+    fn set(&mut self, name: &'static str, v: Option<FV>) {
+        self.vals.retain(|(n, _)| *n != name);
+        if let Some(v) = v {
+            self.vals.push((name, v));
+        }
+    }
+
+    fn int(&self, name: &str) -> i64 {
+        match self.get(name) {
+            Some(FV::I(n)) => *n,
+            Some(FV::F(f)) => *f as i64,
+            _ => match kind(self.id, self.subtype, name) {
+                Some(K::I(d)) => d,
+                _ => 0,
+            },
+        }
+    }
+
+    fn node(&self, name: &str) -> Option<usize> {
+        match self.get(name) {
+            Some(FV::N(n)) => Some(*n),
+            _ => None,
+        }
+    }
+}
+
+/// The nodes one document's Lua state holds, and the properties table.
+#[derive(Default)]
+pub(super) struct Arena {
+    cells: Vec<Option<Cell>>,
+    properties: Option<mlua::RegistryKey>,
+    /// `set_properties_mode(true, ...)`: copying a node copies its property.
+    copy_properties: bool,
+}
+
+/// The `field` and `static` names `canonical` folds onto the stored ones.
 fn canonical(name: &str) -> &str {
     match name {
         "list" => "head",
@@ -370,81 +633,73 @@ fn canonical(name: &str) -> &str {
     }
 }
 
-// ── the arena ────────────────────────────────────────────────────────────
-
-/// One node, as the arena holds it.
-#[derive(Clone, Default)]
-struct Cell {
-    id: u8,
-    subtype: u16,
-    prev: Option<usize>,
-    next: Option<usize>,
-    /// The integer fields, by name. Absent means zero, as `node.new` leaves
-    /// every field ("All its fields are initialized to either zero or nil").
-    nums: HashMap<&'static str, i64>,
-    /// The list-valued fields, by name. Absent means `nil`.
-    lists: HashMap<&'static str, usize>,
-    glue_set: f64,
-}
-
-/// The nodes one document's Lua state has made.
-///
-/// Freed cells are left as `None` and their indices are never reused. LuaTeX
-/// warns that "equality tests can only be trusted under very limited
-/// conditions […] in that case, there will be false positives" precisely
-/// because it DOES reuse node memory; not reusing costs nothing here and makes
-/// `==` mean what a chunk expects.
-#[derive(Default)]
-pub(super) struct Arena {
-    cells: Vec<Option<Cell>>,
-}
-
 impl Arena {
-    fn make(&mut self, id: u8, subtype: u16) -> usize {
+    fn make(&mut self, id: u8, subtype: Option<i64>) -> usize {
         self.cells.push(Some(Cell {
             id,
             subtype,
-            ..Cell::default()
+            prev: None,
+            next: None,
+            vals: Vec::new(),
+            measured: None,
         }));
-        self.cells.len() // 1-based, so index 0 is never a node
+        self.cells.len()
     }
 
-    fn get(&self, at: usize) -> mlua::Result<&Cell> {
+    fn cell(&self, at: usize) -> mlua::Result<&Cell> {
         self.cells
             .get(at.wrapping_sub(1))
             .and_then(|c| c.as_ref())
             .ok_or_else(|| mlua::Error::runtime("this node has been freed"))
     }
 
-    fn get_mut(&mut self, at: usize) -> mlua::Result<&mut Cell> {
+    fn cell_mut(&mut self, at: usize) -> mlua::Result<&mut Cell> {
         self.cells
             .get_mut(at.wrapping_sub(1))
             .and_then(|c| c.as_mut())
             .ok_or_else(|| mlua::Error::runtime("this node has been freed"))
     }
 
-    fn free(&mut self, at: usize) -> mlua::Result<Option<usize>> {
-        let next = self.get(at)?.next;
-        // Unlink, so a neighbour still held by a chunk does not point at a
-        // hole: LuaTeX leaves that to the caller, but a dangling index here
-        // would be an error message rather than the wrong number, and the
-        // cheap version is simply not to leave one.
-        if let Some(p) = self.get(at)?.prev {
-            if let Ok(c) = self.get_mut(p) {
-                c.next = next;
-            }
-        }
-        if let Some(n) = next {
-            let p = self.get(at)?.prev;
-            if let Ok(c) = self.get_mut(n) {
-                c.prev = p;
-            }
-        }
-        self.cells[at - 1] = None;
-        Ok(next)
+    fn alive(&self, at: usize) -> bool {
+        self.cells
+            .get(at.wrapping_sub(1))
+            .is_some_and(|c| c.is_some())
     }
 
-    /// The nodes of a list, head first, with the cycle guard.
+    fn id(&self, at: usize) -> mlua::Result<u8> {
+        Ok(self.cell(at)?.id)
+    }
+
+    fn next(&self, at: usize) -> mlua::Result<Option<usize>> {
+        Ok(self.cell(at)?.next)
+    }
+
+    fn prev(&self, at: usize) -> mlua::Result<Option<usize>> {
+        Ok(self.cell(at)?.prev)
+    }
+
+    fn set_next(&mut self, at: usize, to: Option<usize>) -> mlua::Result<()> {
+        self.cell_mut(at)?.next = to;
+        Ok(())
+    }
+
+    fn set_prev(&mut self, at: usize, to: Option<usize>) -> mlua::Result<()> {
+        self.cell_mut(at)?.prev = to;
+        Ok(())
+    }
+
+    /// `a.next = b; b.prev = a`, either side may be absent.
+    fn link(&mut self, a: Option<usize>, b: Option<usize>) -> mlua::Result<()> {
+        if let Some(a) = a {
+            self.set_next(a, b)?;
+        }
+        if let Some(b) = b {
+            self.set_prev(b, a)?;
+        }
+        Ok(())
+    }
+
+    /// The nodes of a list from `head` up to (not including) `stop`.
     fn chain(&self, head: usize, stop: Option<usize>) -> mlua::Result<Vec<usize>> {
         let mut out = Vec::new();
         let mut at = Some(head);
@@ -459,32 +714,38 @@ impl Arena {
                 ));
             }
             out.push(i);
-            at = self.get(i)?.next;
+            at = self.cell(i)?.next;
         }
         Ok(out)
     }
 
-    /// A deep copy of one node: nested lists included, `next` not (the manual:
-    /// "Only the `next` field is not copied").
+    fn tail(&self, head: usize) -> mlua::Result<usize> {
+        Ok(*self.chain(head, None)?.last().unwrap_or(&head))
+    }
+
+    /// `copy_node`: a deep copy, nested lists included, `next`/`prev` not.
     fn copy(&mut self, at: usize) -> mlua::Result<usize> {
-        let mut cell = self.get(at)?.clone();
+        let mut cell = self.cell(at)?.clone();
         cell.next = None;
         cell.prev = None;
-        let lists: Vec<(&'static str, usize)> = cell.lists.iter().map(|(k, v)| (*k, *v)).collect();
-        for (name, head) in lists {
-            match self.copy_list(head, None)? {
-                Some(copied) => cell.lists.insert(name, copied),
-                None => cell.lists.remove(name),
-            };
+        let nodes: Vec<(&'static str, usize)> = cell
+            .vals
+            .iter()
+            .filter_map(|(n, v)| match v {
+                FV::N(i) if *n != "attr" => Some((*n, *i)),
+                _ => None,
+            })
+            .collect();
+        for (name, head) in nodes {
+            // A single-node field (`leader`, `spec`, the noad slots) is a list
+            // of one; copy_list copies the whole of whatever hangs there.
+            let copied = self.copy_list(head, None)?;
+            cell.set(name, copied.map(FV::N));
         }
         self.cells.push(Some(cell));
         Ok(self.cells.len())
     }
 
-    /// A deep copy of a whole list, stopping before `stop`.
-    ///
-    /// `None` when there is nothing to copy: measured, `node.copy_list(a, a)`
-    /// answers nil in luatex 1.24.0 rather than an empty something.
     fn copy_list(&mut self, head: usize, stop: Option<usize>) -> mlua::Result<Option<usize>> {
         let chain = self.chain(head, stop)?;
         let mut made: Vec<usize> = Vec::with_capacity(chain.len());
@@ -492,177 +753,350 @@ impl Arena {
             made.push(self.copy(at)?);
         }
         for w in made.windows(2) {
-            self.get_mut(w[0])?.next = Some(w[1]);
-            self.get_mut(w[1])?.prev = Some(w[0]);
+            self.link(Some(w[0]), Some(w[1]))?;
         }
         Ok(made.first().copied())
     }
-}
 
-// ── the userdata ─────────────────────────────────────────────────────────
-
-/// A Lua handle on one arena cell. `node.is_node` answers the index, which is
-/// what luatex answers ("returns a number (the internal index of the node)").
-#[derive(Clone)]
-struct NodeRef {
-    arena: Rc<RefCell<Arena>>,
-    at: usize,
-}
-
-impl NodeRef {
-    fn read(&self, lua: &Lua, name: &str) -> mlua::Result<Value> {
-        let name = canonical(name);
-        let arena = self.arena.borrow();
-        let cell = arena.get(self.at)?;
-        // A glue_spec is not a list item: luatex gives it `next` and `id` and
-        // nothing else, and answers nil for `subtype` and `prev`.
-        if cell.id == GLUE_SPEC && matches!(name, "subtype" | "prev") {
-            return Ok(Value::Nil);
-        }
-        match name {
-            "id" => return Ok(Value::Integer(cell.id as i64)),
-            "subtype" => return Ok(Value::Integer(cell.subtype as i64)),
-            "next" | "prev" => {
-                let to = match name {
-                    "next" => cell.next,
-                    _ => cell.prev,
-                };
-                drop(arena);
-                return match to {
-                    Some(at) => self.sibling(lua, at),
-                    None => Ok(Value::Nil),
-                };
+    /// `flush_node`: the node and what hangs from it; the caller unlinks.
+    fn flush(&mut self, at: usize) -> mlua::Result<()> {
+        let nodes: Vec<usize> = self
+            .cell(at)?
+            .vals
+            .iter()
+            .filter_map(|(n, v)| match v {
+                FV::N(i) if *n != "attr" => Some(*i),
+                _ => None,
+            })
+            .collect();
+        for head in nodes {
+            if self.alive(head) {
+                self.flush_list(head)?;
             }
-            _ => {}
         }
-        let Some(field) = fields_of(cell.id).iter().find(|f| f.name == name) else {
-            // A field LuaTeX has and texrs has not is an error; a name that is
-            // not a field in either engine is `nil`, as luatex answers.
-            return match absent_field(cell.id, name) {
-                Some(why) => Err(mlua::Error::runtime(format!(
-                    "`{name}` on a {} node: {why}",
-                    type_name(cell.id).unwrap_or("?")
-                ))),
-                None => Ok(Value::Nil),
-            };
-        };
-        match field.kind {
-            Kind::Num => Ok(Value::Integer(cell.nums.get(name).copied().unwrap_or(0))),
-            Kind::Ratio => Ok(Value::Number(cell.glue_set)),
-            Kind::Derived => Ok(Value::Integer(0)),
-            Kind::List => match cell.lists.get(name).copied() {
-                Some(at) => {
-                    drop(arena);
-                    self.sibling(lua, at)
-                }
-                None => Ok(Value::Nil),
-            },
-        }
+        self.cells[at - 1] = None;
+        Ok(())
     }
 
-    fn write(&self, name: &str, value: Value) -> mlua::Result<()> {
-        let name = canonical(name);
-        let id = self.arena.borrow().get(self.at)?.id;
-        match name {
-            "id" => {
-                return Err(mlua::Error::runtime(
-                    "a node's `id` is its type and is fixed at node.new; luatex \
-                     lets you overwrite it and texrs does not, because the \
-                     fields already stored would then belong to no type",
-                ))
-            }
-            "subtype" => {
-                let n = want_int(&value)?;
-                let subtype = u16::try_from(n).map_err(|_| bad_subtype(n))?;
-                self.arena.borrow_mut().get_mut(self.at)?.subtype = subtype;
-                return Ok(());
-            }
-            "next" | "prev" => {
-                let to = as_node_opt(&value)?;
-                let mut arena = self.arena.borrow_mut();
-                // Both directions, because LuaTeX's own list operations keep
-                // `prev` in step and a chunk that sets only `next` and then
-                // calls `node.tail` would otherwise get a broken answer.
-                let cell = arena.get_mut(self.at)?;
-                match name {
-                    "next" => cell.next = to,
-                    _ => cell.prev = to,
-                }
-                if let Some(other) = to {
-                    let back = arena.get_mut(other)?;
-                    match name {
-                        "next" => back.prev = Some(self.at),
-                        _ => back.next = Some(self.at),
-                    }
-                }
-                return Ok(());
-            }
-            _ => {}
-        }
-        let Some(field) = fields_of(id).iter().find(|f| f.name == name) else {
-            return Err(match absent_field(id, name) {
-                Some(why) => mlua::Error::runtime(format!(
-                    "`{name}` on a {} node: {why}",
-                    type_name(id).unwrap_or("?")
-                )),
-                // luatex's own wording, verbatim: "You cannot set field width
-                // in a node of type penalty".
-                None => mlua::Error::runtime(format!(
-                    "You cannot set field {name} in a node of type {}",
-                    type_name(id).unwrap_or("?")
-                )),
-            });
-        };
-        match field.kind {
-            Kind::Num => {
-                let n = want_int(&value)?;
-                // A glue order is LuaTeX's numbering; `fi` has no unit here and
-                // is refused by the same translation the registers use.
-                if name == "stretch_order" || name == "shrink_order" {
-                    from_luatex_order(n)?;
-                }
-                self.arena
-                    .borrow_mut()
-                    .get_mut(self.at)?
-                    .nums
-                    .insert(field.name, n);
-            }
-            Kind::Ratio => {
-                let r = value
-                    .as_number()
-                    .ok_or_else(|| mlua::Error::runtime("glue_set wants a number"))?;
-                self.arena.borrow_mut().get_mut(self.at)?.glue_set = r;
-            }
-            // Accepted and dropped, which is luatex's own behaviour: a glyph's
-            // dimensions come from the font, so the assignment has no effect
-            // there either.
-            Kind::Derived => {}
-            Kind::List => {
-                let to = as_node_opt(&value)?;
-                let mut arena = self.arena.borrow_mut();
-                let cell = arena.get_mut(self.at)?;
-                match to {
-                    Some(at) => cell.lists.insert(field.name, at),
-                    None => cell.lists.remove(field.name),
-                };
-            }
+    fn flush_list(&mut self, head: usize) -> mlua::Result<()> {
+        for at in self.chain(head, None)? {
+            self.flush(at)?;
         }
         Ok(())
     }
 
-    /// Another node of the same arena, as Lua sees it.
-    fn sibling(&self, lua: &Lua, at: usize) -> mlua::Result<Value> {
-        Ok(Value::UserData(lua.create_userdata(NodeRef {
-            arena: Rc::clone(&self.arena),
-            at,
-        })?))
+    /// Unlink `at` from its neighbours, which are joined.
+    fn unlink(&mut self, at: usize) -> mlua::Result<()> {
+        let (p, n) = {
+            let c = self.cell(at)?;
+            (c.prev, c.next)
+        };
+        if let Some(p) = p {
+            if self.alive(p) && self.next(p)? == Some(at) {
+                self.set_next(p, n)?;
+            }
+        }
+        if let Some(n) = n {
+            if self.alive(n) && self.prev(n)? == Some(at) {
+                self.set_prev(n, p)?;
+            }
+        }
+        let c = self.cell_mut(at)?;
+        c.prev = None;
+        c.next = None;
+        Ok(())
     }
 
-    /// luatex's own `tostring`, whose shape a chunk may well be printing:
-    /// `<node    241 <    248 >    nil : kern 0>`.
+    // ── attributes ───────────────────────────────────────────────────────
+
+    /// The (number, value) pairs of a node's attribute list, sorted.
+    fn attributes(&self, at: usize) -> mlua::Result<Vec<(i64, i64)>> {
+        let Some(list) = self.cell(at)?.node("attr") else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        let mut p = self.next(list)?;
+        while let Some(a) = p {
+            let c = self.cell(a)?;
+            out.push((c.int("number"), c.int("value")));
+            p = c.next;
+        }
+        Ok(out)
+    }
+
+    /// A fresh attribute list holding `pairs`: an `attribute_list` node and an
+    /// `attribute` node per pair, in number order.
+    fn make_attributes(&mut self, pairs: &[(i64, i64)]) -> mlua::Result<usize> {
+        let head = self.make(ATTRIBUTE_LIST, None);
+        let mut last = head;
+        for &(number, value) in pairs {
+            let a = self.make(ATTRIBUTE, None);
+            let c = self.cell_mut(a)?;
+            c.set("number", Some(FV::I(number)));
+            c.set("value", Some(FV::I(value)));
+            self.set_next(last, Some(a))?;
+            last = a;
+        }
+        Ok(head)
+    }
+
+    /// Give `at` an attribute list of its own with `pairs` in it. luatex's
+    /// lists are shared and reference counted; a change copies (`attr_list_cow`),
+    /// which is what building a new one is.
+    fn set_attributes(&mut self, at: usize, pairs: &[(i64, i64)]) -> mlua::Result<()> {
+        let list = match pairs.is_empty() {
+            true => None,
+            false => Some(self.make_attributes(pairs)?),
+        };
+        self.cell_mut(at)?.set("attr", list.map(FV::N));
+        Ok(())
+    }
+}
+
+// ── the two faces ────────────────────────────────────────────────────────
+
+/// A Lua handle on one cell: LuaTeX's node userdata.
+#[derive(Clone)]
+pub(super) struct NodeRef {
+    arena: Rc<RefCell<Arena>>,
+    at: usize,
+}
+
+/// Which face a function belongs to.
+#[derive(Clone, Copy, PartialEq)]
+enum Face {
+    User,
+    Direct,
+}
+
+/// The arena and the face a library function hands nodes out in.
+#[derive(Clone)]
+struct Lib {
+    arena: Rc<RefCell<Arena>>,
+    face: Face,
+}
+
+impl Lib {
+    /// The index a Lua value stands for: a userdata node or a direct node
+    /// (an integer). Either is accepted by both faces.
+    fn opt(&self, v: &Value) -> mlua::Result<Option<usize>> {
+        match v {
+            Value::Nil | Value::Boolean(false) => Ok(None),
+            Value::Integer(n) if *n > 0 => Ok(Some(*n as usize)),
+            Value::Integer(_) => Ok(None),
+            Value::Number(f) if *f >= 1.0 => Ok(Some(*f as usize)),
+            Value::UserData(u) => Ok(Some(u.borrow::<NodeRef>()?.at)),
+            _ => Err(mlua::Error::runtime(format!(
+                "expected a node, not an object with type {}",
+                v.type_name()
+            ))),
+        }
+    }
+
+    fn want(&self, v: Option<&Value>) -> mlua::Result<usize> {
+        self.opt(v.unwrap_or(&Value::Nil))?
+            .ok_or_else(|| mlua::Error::runtime("expected a node"))
+    }
+
+    /// A node as this face hands it out.
+    fn give(&self, lua: &Lua, at: Option<usize>) -> mlua::Result<Value> {
+        Ok(match at {
+            None => Value::Nil,
+            Some(at) => match self.face {
+                Face::Direct => Value::Integer(at as i64),
+                Face::User => Value::UserData(lua.create_userdata(NodeRef {
+                    arena: Rc::clone(&self.arena),
+                    at,
+                })?),
+            },
+        })
+    }
+
+    fn user(&self) -> Lib {
+        Lib {
+            arena: Rc::clone(&self.arena),
+            face: Face::User,
+        }
+    }
+}
+
+// ── fields, read and written ─────────────────────────────────────────────
+
+/// A glyph's width, height and depth: from the Lua font it names, or what the
+/// stomach measured when the list came from it, or from `\font`'s table while
+/// a chunk runs; zero for font 0, as in luatex.
+fn glyph_whd(cell: &Cell) -> (i64, i64, i64) {
+    let font = cell.int("font");
+    let ch = cell.int("char");
+    if let Some(f) = super::font::get(font as usize) {
+        if let Some(c) = f.characters.get(&ch) {
+            return (c.width, c.height, c.depth);
+        }
+        return (0, 0, 0);
+    }
+    if let Some(m) = cell.measured {
+        return m;
+    }
+    if font > 0 {
+        let looked = ctx::with("glyph", |eng, _| {
+            let f = eng.fonts.get(font as u16);
+            Ok(char::from_u32(ch as u32)
+                .and_then(|c| f.metrics(c))
+                .map(|m| (m.width, m.height, m.depth)))
+        });
+        if let Ok(Some(m)) = looked {
+            return m;
+        }
+    }
+    (0, 0, 0)
+}
+
+/// The Lua value of field `name`, through `lib`'s face; `nil` for a name the
+/// type has not got, which is luatex's answer.
+fn read(lib: &Lib, lua: &Lua, at: usize, name: &str) -> mlua::Result<Value> {
+    let name = canonical(name);
+    let (value, node) = {
+        let a = lib.arena.borrow();
+        let cell = a.cell(at)?;
+        match name {
+            "id" => return Ok(Value::Integer(cell.id as i64)),
+            "subtype" => {
+                return Ok(match (cell.id, cell.subtype) {
+                    (ATTRIBUTE | GLUE_SPEC | ATTRIBUTE_LIST, _) => Value::Nil,
+                    (_, Some(s)) => Value::Integer(s),
+                    (_, None) => Value::Nil,
+                })
+            }
+            "next" => (None, cell.next),
+            "prev" => match names(cell.id, cell.subtype).contains(&"prev") {
+                true => (None, cell.prev),
+                false => return Ok(Value::Nil),
+            },
+            _ => match kind(cell.id, cell.subtype, name) {
+                None => return Ok(Value::Nil),
+                Some(K::Derived) => {
+                    let (w, h, d) = glyph_whd(cell);
+                    let v = match name {
+                        "width" => w,
+                        "height" => h,
+                        _ => d,
+                    };
+                    return Ok(Value::Integer(v));
+                }
+                Some(k) => match (cell.get(name), k) {
+                    (Some(FV::I(n)), _) => return Ok(Value::Integer(*n)),
+                    (Some(FV::F(f)), _) => return Ok(Value::Number(*f)),
+                    (Some(FV::N(n)), _) => (None, Some(*n)),
+                    (Some(FV::V(v)), _) => (Some(v.clone()), None),
+                    (None, K::I(d)) => return Ok(Value::Integer(d)),
+                    (None, K::F) => return Ok(Value::Number(0.0)),
+                    (None, K::S(s)) => (Some(Value::String(lua.create_string(s)?)), None),
+                    (None, K::Dir(d)) => match d {
+                        Some(s) => (Some(Value::String(lua.create_string(s)?)), None),
+                        None => return Ok(Value::Nil),
+                    },
+                    (None, K::Tok) => (Some(Value::Table(lua.create_table()?)), None),
+                    (None, _) => return Ok(Value::Nil),
+                },
+            },
+        }
+    };
+    match (value, node) {
+        (Some(v), _) => Ok(v),
+        (None, n) => lib.give(lua, n),
+    }
+}
+
+/// Set field `name`. luatex's own wording for a field the type has not got.
+fn write(lib: &Lib, at: usize, name: &str, value: Value) -> mlua::Result<()> {
+    let name = canonical(name);
+    let (id, sub) = {
+        let a = lib.arena.borrow();
+        let c = a.cell(at)?;
+        (c.id, c.subtype)
+    };
+    match name {
+        "id" => {
+            return Err(mlua::Error::runtime(
+                "a node's `id` is its type and is fixed at node.new; texrs does not let \
+                 it change, because the fields already stored would then belong to no type",
+            ))
+        }
+        "subtype" => {
+            let n = want_int(&value)?;
+            lib.arena.borrow_mut().cell_mut(at)?.subtype = Some(n);
+            return Ok(());
+        }
+        "next" | "prev" => {
+            let to = lib.opt(&value)?;
+            let mut a = lib.arena.borrow_mut();
+            match name {
+                "next" => a.set_next(at, to)?,
+                _ => a.set_prev(at, to)?,
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+    let Some(k) = kind(id, sub, name) else {
+        return Err(mlua::Error::runtime(format!(
+            "You cannot set field {name} in a node of type {}",
+            type_name(id).unwrap_or("?")
+        )));
+    };
+    let stored: &'static str = names(id, sub)
+        .iter()
+        .copied()
+        .find(|n| *n == name)
+        .expect("named");
+    let v = match k {
+        K::Derived => return Ok(()),
+        K::I(_) => match &value {
+            Value::Nil => None,
+            Value::Boolean(b) => Some(FV::I(i64::from(*b))),
+            _ => Some(FV::I(want_int(&value)?)),
+        },
+        K::F => Some(FV::F(
+            value
+                .as_number()
+                .or_else(|| value.as_integer().map(|n| n as f64))
+                .unwrap_or(0.0),
+        )),
+        K::N => lib.opt(&value)?.map(FV::N),
+        K::S(_) | K::V | K::Tok | K::Dir(_) => match value {
+            Value::Nil => None,
+            other => Some(FV::V(other)),
+        },
+    };
+    if stored == "stretch_order" || stored == "shrink_order" || stored == "glue_order" {
+        if let Some(FV::I(n)) = &v {
+            if !(0..=4).contains(n) {
+                return Err(mlua::Error::runtime(format!("bad glue order {n}")));
+            }
+        }
+    }
+    lib.arena.borrow_mut().cell_mut(at)?.set(stored, v);
+    Ok(())
+}
+
+fn want_int(v: &Value) -> mlua::Result<i64> {
+    v.as_integer()
+        .or_else(|| v.as_number().map(|n| n.round() as i64))
+        .ok_or_else(|| mlua::Error::runtime("a node field wants a number"))
+}
+
+impl NodeRef {
+    fn lib(&self) -> Lib {
+        Lib {
+            arena: Rc::clone(&self.arena),
+            face: Face::User,
+        }
+    }
+
+    /// luatex's `tostring`: `<node    prev <    this >    next : type subtype>`.
     fn show(&self) -> mlua::Result<String> {
-        let arena = self.arena.borrow();
-        let cell = arena.get(self.at)?;
+        let a = self.arena.borrow();
+        let cell = a.cell(self.at)?;
         let at = |i: Option<usize>| match i {
             Some(n) => n.to_string(),
             None => "nil".to_string(),
@@ -673,7 +1107,7 @@ impl NodeRef {
             self.at,
             at(cell.next),
             type_name(cell.id).unwrap_or("?"),
-            cell.subtype
+            cell.subtype.unwrap_or(0)
         ))
     }
 }
@@ -681,7 +1115,7 @@ impl NodeRef {
 impl UserData for NodeRef {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: Value| match &key {
-            Value::String(s) => this.read(lua, &s.to_str()?),
+            Value::String(s) => read(&this.lib(), lua, this.at, &s.to_str()?),
             _ => Ok(Value::Nil),
         });
         methods.add_meta_method(
@@ -690,7 +1124,7 @@ impl UserData for NodeRef {
                 let Value::String(s) = &key else {
                     return Err(mlua::Error::runtime("a node field is named by a string"));
                 };
-                this.write(&s.to_str()?, value)
+                write(&this.lib(), this.at, &s.to_str()?, value)
             },
         );
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| this.show());
@@ -704,55 +1138,59 @@ impl UserData for NodeRef {
     }
 }
 
-fn bad_subtype(n: i64) -> mlua::Error {
-    mlua::Error::runtime(format!("{n} is not a subtype"))
-}
+// ── to and from the engine's node list ───────────────────────────────────
 
-fn want_int(v: &Value) -> mlua::Result<i64> {
-    v.as_integer()
-        .or_else(|| v.as_number().map(|n| n.round() as i64))
-        .ok_or_else(|| mlua::Error::runtime("a node field wants a number"))
-}
+/// LuaTeX's glue subtypes (`node.subtypes("glue")`) and texrs's glue
+/// sources, one for one: 1-15 the §224 parameters in their order, 16 a math
+/// skip (texrs has none and reads it as ordinary glue), 17-19 the three mu
+/// parameters, 98 `\nonscript`, 99 an `\mskip`.
+const SOURCES: [(i64, GlueSource); 20] = [
+    (0, GlueSource::Normal),
+    (1, GlueSource::LineSkip),
+    (2, GlueSource::BaselineSkip),
+    (3, GlueSource::ParSkip),
+    (4, GlueSource::AboveDisplaySkip),
+    (5, GlueSource::BelowDisplaySkip),
+    (6, GlueSource::AboveDisplayShortSkip),
+    (7, GlueSource::BelowDisplayShortSkip),
+    (8, GlueSource::LeftSkip),
+    (9, GlueSource::RightSkip),
+    (10, GlueSource::TopSkip),
+    (11, GlueSource::SplitTopSkip),
+    (12, GlueSource::TabSkip),
+    (13, GlueSource::SpaceSkip),
+    (14, GlueSource::XSpaceSkip),
+    (15, GlueSource::ParFillSkip),
+    (17, GlueSource::ThinMuSkip),
+    (18, GlueSource::MedMuSkip),
+    (19, GlueSource::ThickMuSkip),
+    (98, GlueSource::CondMath),
+];
 
-/// The arena index a Lua value stands for, or `None` for `nil`.
-fn as_node_opt(v: &Value) -> mlua::Result<Option<usize>> {
-    match v {
-        Value::Nil => Ok(None),
-        Value::UserData(u) => Ok(Some(u.borrow::<NodeRef>()?.at)),
-        _ => Err(mlua::Error::runtime("expected a node or nil")),
+fn glue_source(subtype: i64) -> GlueSource {
+    match subtype {
+        99 => GlueSource::MuGlue,
+        s => SOURCES
+            .iter()
+            .find(|(n, _)| *n == s)
+            .map(|(_, g)| *g)
+            .unwrap_or(GlueSource::Normal),
     }
 }
 
-/// The arena index a Lua value stands for.
-fn as_node(v: &Value) -> mlua::Result<usize> {
-    as_node_opt(v)?.ok_or_else(|| mlua::Error::runtime("expected a node"))
-}
-
-// ── to texrs's own node list ─────────────────────────────────────────────
-
-/// A subtype as `crate::node`'s glue source (tex.web §149's subtype).
-///
-/// The LuaTeX subtypes texrs has no name for map to `Normal`, which loses
-/// nothing a chunk can see: the source is carried "because the page builder and
-/// `\showlists` both name it, not because the arithmetic reads it"
-/// (`crate::node`), the arena keeps the real subtype, and this conversion feeds
-/// `hpack` alone.
-fn glue_source(subtype: u16) -> GlueSource {
-    match subtype {
-        1 => GlueSource::LineSkip,
-        2 => GlueSource::BaselineSkip,
-        3 => GlueSource::ParSkip,
-        8 => GlueSource::LeftSkip,
-        9 => GlueSource::RightSkip,
-        10 => GlueSource::TopSkip,
-        11 => GlueSource::SplitTopSkip,
-        15 => GlueSource::ParFillSkip,
-        _ => GlueSource::Normal,
+fn source_subtype(s: GlueSource) -> i64 {
+    match s {
+        GlueSource::MuGlue => 99,
+        s => SOURCES
+            .iter()
+            .find(|(_, g)| *g == s)
+            .map(|(n, _)| *n)
+            .unwrap_or(0),
     }
 }
 
 /// LuaTeX's leader subtypes: 100 `\leaders`, 101 `\cleaders`, 102 `\xleaders`.
-fn leader_kind(subtype: u16) -> LeaderKind {
+fn leader_kind(subtype: i64) -> LeaderKind {
     match subtype {
         100 => LeaderKind::Aligned,
         101 => LeaderKind::Centred,
@@ -777,1006 +1215,1726 @@ fn glue_sign_number(s: GlueSign) -> i64 {
     }
 }
 
-impl Cell {
-    fn num(&self, name: &str) -> Scaled {
-        self.nums.get(name).copied().unwrap_or(0)
-    }
-}
-
-/// One arena node as the node `crate::pack` packages.
-fn to_engine(arena: &Arena, at: usize) -> mlua::Result<ENode> {
-    let cell = arena.get(at)?;
+/// One cell as the node `crate::pack` and the stomach take.
+fn to_engine(arena: &Arena, at: usize) -> mlua::Result<Vec<ENode>> {
+    let cell = arena.cell(at)?;
     let list = |name: &str| -> mlua::Result<Vec<ENode>> {
-        match cell.lists.get(name).copied() {
+        match cell.node(name) {
             Some(head) => list_to_engine(arena, head),
             None => Ok(Vec::new()),
         }
     };
-    Ok(match cell.id {
+    let glue = |c: &Cell| -> mlua::Result<Glue> {
+        Ok(Glue {
+            natural: c.int("width"),
+            stretch: c.int("stretch"),
+            stretch_order: from_luatex_order(c.int("stretch_order"))?,
+            shrink: c.int("shrink"),
+            shrink_order: from_luatex_order(c.int("shrink_order"))?,
+        })
+    };
+    let sub = cell.subtype.unwrap_or(0);
+    Ok(vec![match cell.id {
         HLIST | VLIST => ENode::Box(BoxNode {
-            width: cell.num("width"),
-            depth: cell.num("depth"),
-            height: cell.num("height"),
-            shift_amount: cell.num("shift"),
+            width: cell.int("width"),
+            depth: cell.int("depth"),
+            height: cell.int("height"),
+            shift_amount: cell.int("shift"),
             list: list("head")?,
-            glue_set: cell.glue_set,
-            glue_sign: glue_sign(cell.num("glue_sign")),
-            glue_order: from_luatex_order(cell.num("glue_order"))?,
+            glue_set: match cell.get("glue_set") {
+                Some(FV::F(f)) => *f,
+                _ => 0.0,
+            },
+            glue_sign: glue_sign(cell.int("glue_sign")),
+            glue_order: from_luatex_order(cell.int("glue_order"))?,
             vertical: cell.id == VLIST,
         }),
         RULE => ENode::Rule(RuleNode {
-            width: cell.num("width"),
-            depth: cell.num("depth"),
-            height: cell.num("height"),
+            width: cell.int("width"),
+            depth: cell.int("depth"),
+            height: cell.int("height"),
+        }),
+        INS => ENode::Ins(InsNode {
+            number: sub.clamp(0, 255) as u8,
+            height: cell.int("height"),
+            depth: cell.int("depth"),
+            float_cost: cell.int("cost"),
+            split_top_skip: match cell.node("spec") {
+                Some(s) => glue(arena.cell(s)?)?,
+                None => Glue::default(),
+            },
+            list: list("head")?,
+        }),
+        MARK => ENode::Mark(match cell.get("mark") {
+            Some(FV::V(Value::String(s))) => s.to_str()?.to_string(),
+            _ => String::new(),
         }),
         ADJUST => ENode::Adjust(list("head")?),
-        DISC => ENode::Disc(DiscNode {
-            pre_break: list("pre")?,
-            post_break: list("post")?,
-            replace_count: 0,
+        // A LuaTeX disc holds its replacement as a list; tex.web's holds the
+        // count of the nodes after it that it replaces, so the replacement is
+        // put back in the list behind it.
+        DISC => {
+            let replace = list("replace")?;
+            let mut out = vec![ENode::Disc(DiscNode {
+                pre_break: list("pre")?,
+                post_break: list("post")?,
+                replace_count: replace.len(),
+            })];
+            out.extend(replace);
+            return Ok(out);
+        }
+        WHATSIT => ENode::Whatsit(match cell.get("data") {
+            Some(FV::V(Value::String(s))) => s.to_str()?.to_string(),
+            _ => String::new(),
         }),
-        MATH => ENode::Math(cell.num("surround")),
+        MATH => ENode::Math(cell.int("surround")),
         GLUE => ENode::Glue(GlueNode {
-            spec: Glue {
-                natural: cell.num("width"),
-                stretch: cell.num("stretch"),
-                stretch_order: from_luatex_order(cell.num("stretch_order"))?,
-                shrink: cell.num("shrink"),
-                shrink_order: from_luatex_order(cell.num("shrink_order"))?,
-            },
-            kind: leader_kind(cell.subtype),
-            source: glue_source(cell.subtype),
-            leader: match cell.lists.get("leader").copied() {
-                Some(at) => Some(Box::new(to_engine(arena, at)?)),
+            spec: glue(cell)?,
+            kind: leader_kind(sub),
+            source: glue_source(sub),
+            leader: match cell.node("leader") {
+                Some(at) => to_engine(arena, at)?.into_iter().next().map(Box::new),
                 None => None,
             },
         }),
-        // tex.web §155: subtype `explicit` is 1, and an explicit kern is a
-        // legal breakpoint where a font kern is not.
+        // tex.web §155: subtype `explicit` is 1.
         KERN => ENode::Kern {
-            width: cell.num("kern"),
-            explicit: cell.subtype == 1,
+            width: cell.int("kern"),
+            explicit: sub == 1,
         },
-        PENALTY => ENode::Penalty(cell.num("penalty")),
+        PENALTY => ENode::Penalty(cell.int("penalty")),
         GLYPH => {
-            // Dimensions zero: the only font id reachable here is 0, and a
-            // glyph with font 0 measures zero in luatex too.
+            let (width, height, depth) = glyph_whd(cell);
             let ch = CharNode {
-                font: 0,
-                character: char::from_u32(cell.num("char") as u32).unwrap_or('\0'),
-                width: 0,
-                height: 0,
-                depth: 0,
+                font: cell.int("font").max(0) as usize,
+                character: char::from_u32(cell.int("char") as u32).unwrap_or('\0'),
+                width,
+                height,
+                depth,
             };
-            match cell.subtype {
-                2 => ENode::Ligature(ch, Default::default()),
-                _ => ENode::Char(ch),
+            // A ligature (subtype bit 2) keeps its components.
+            match sub & 2 != 0 {
+                true => {
+                    let mut lig = crate::node::Ligature::default();
+                    if let Some(c) = cell.node("components") {
+                        for at in arena.chain(c, None)? {
+                            let comp = arena.cell(at)?;
+                            if let Some(ch) = char::from_u32(comp.int("char") as u32) {
+                                lig.components.push(ch);
+                            }
+                        }
+                    }
+                    ENode::Ligature(ch, lig)
+                }
+                false => ENode::Char(ch),
             }
         }
-        GLUE_SPEC => {
-            return Err(mlua::Error::runtime(
-                "a glue_spec is a register's value, not an item of a list: put \
-                 its numbers on a glue node instead",
-            ))
+        // The types the stomach has no item for leave no node behind: a
+        // `dir`, a `local_par`, a `boundary`, a margin kern.
+        _ => return Ok(Vec::new()),
+    }])
+}
+
+/// A list of cells, as the stomach's list.
+pub(super) fn list_to_engine(arena: &Arena, head: usize) -> mlua::Result<Vec<ENode>> {
+    let mut out = Vec::new();
+    for at in arena.chain(head, None)? {
+        out.extend(to_engine(arena, at)?);
+    }
+    Ok(out)
+}
+
+/// A stomach list as cells, the head of them, `None` for an empty list.
+pub(super) fn from_engine(arena: &mut Arena, list: &[ENode]) -> mlua::Result<Option<usize>> {
+    let mut made: Vec<usize> = Vec::with_capacity(list.len());
+    let mut i = 0;
+    while i < list.len() {
+        let at = match &list[i] {
+            ENode::Disc(d) => {
+                // The `replace_count` nodes after a tex.web disc are LuaTeX's
+                // `replace` list.
+                let at = arena.make(DISC, Some(0));
+                let pre = from_engine(arena, &d.pre_break)?;
+                let post = from_engine(arena, &d.post_break)?;
+                let end = (i + 1 + d.replace_count).min(list.len());
+                let replace = from_engine(arena, &list[i + 1..end])?;
+                let c = arena.cell_mut(at)?;
+                c.set("pre", pre.map(FV::N));
+                c.set("post", post.map(FV::N));
+                c.set("replace", replace.map(FV::N));
+                i = end;
+                made.push(at);
+                continue;
+            }
+            other => one_from_engine(arena, other)?,
+        };
+        made.push(at);
+        i += 1;
+    }
+    for w in made.windows(2) {
+        arena.link(Some(w[0]), Some(w[1]))?;
+    }
+    Ok(made.first().copied())
+}
+
+fn one_from_engine(arena: &mut Arena, n: &ENode) -> mlua::Result<usize> {
+    Ok(match n {
+        ENode::Box(b) => {
+            let at = arena.make(if b.vertical { VLIST } else { HLIST }, Some(0));
+            let head = from_engine(arena, &b.list)?;
+            let c = arena.cell_mut(at)?;
+            c.set("width", Some(FV::I(b.width)));
+            c.set("depth", Some(FV::I(b.depth)));
+            c.set("height", Some(FV::I(b.height)));
+            c.set("shift", Some(FV::I(b.shift_amount)));
+            c.set("glue_set", Some(FV::F(b.glue_set)));
+            c.set("glue_sign", Some(FV::I(glue_sign_number(b.glue_sign))));
+            c.set("glue_order", Some(FV::I(to_luatex_order(b.glue_order))));
+            c.set("head", head.map(FV::N));
+            at
         }
-        other => {
-            return Err(mlua::Error::runtime(format!(
-                "a {} node cannot be packaged here: {}",
-                type_name(other).unwrap_or("?"),
-                why_not_new(other)
-            )))
+        ENode::Rule(r) => {
+            let at = arena.make(RULE, Some(0));
+            let c = arena.cell_mut(at)?;
+            c.set("width", Some(FV::I(r.width)));
+            c.set("depth", Some(FV::I(r.depth)));
+            c.set("height", Some(FV::I(r.height)));
+            at
         }
+        ENode::Ins(ins) => {
+            let at = arena.make(INS, Some(i64::from(ins.number)));
+            let head = from_engine(arena, &ins.list)?;
+            let spec = arena.make(GLUE_SPEC, None);
+            set_glue(arena.cell_mut(spec)?, &ins.split_top_skip);
+            let c = arena.cell_mut(at)?;
+            c.set("height", Some(FV::I(ins.height)));
+            c.set("depth", Some(FV::I(ins.depth)));
+            c.set("cost", Some(FV::I(ins.float_cost)));
+            c.set("spec", Some(FV::N(spec)));
+            c.set("head", head.map(FV::N));
+            at
+        }
+        ENode::Mark(text) => {
+            let at = arena.make(MARK, Some(0));
+            // The text stands for the token list; a Lua value of its own.
+            let lua_text = super::with_lua(|lua| lua.create_string(text).map(Value::String));
+            if let Some(Ok(v)) = lua_text {
+                arena.cell_mut(at)?.set("mark", Some(FV::V(v)));
+            }
+            at
+        }
+        ENode::Adjust(list) => {
+            let at = arena.make(ADJUST, Some(0));
+            let head = from_engine(arena, list)?;
+            arena.cell_mut(at)?.set("head", head.map(FV::N));
+            at
+        }
+        ENode::Whatsit(text) => {
+            let at = arena.make(WHATSIT, Some(3));
+            let lua_text = super::with_lua(|lua| lua.create_string(text).map(Value::String));
+            if let Some(Ok(v)) = lua_text {
+                arena.cell_mut(at)?.set("data", Some(FV::V(v)));
+            }
+            at
+        }
+        ENode::Math(s) => {
+            let at = arena.make(MATH, Some(0));
+            arena.cell_mut(at)?.set("surround", Some(FV::I(*s)));
+            at
+        }
+        ENode::Glue(g) => {
+            let sub = match g.kind {
+                LeaderKind::Aligned => 100,
+                LeaderKind::Centred => 101,
+                LeaderKind::Expanded => 102,
+                LeaderKind::Normal => source_subtype(g.source),
+            };
+            let at = arena.make(GLUE, Some(sub));
+            let leader = match &g.leader {
+                Some(l) => Some(one_from_engine(arena, l)?),
+                None => None,
+            };
+            let c = arena.cell_mut(at)?;
+            set_glue(c, &g.spec);
+            c.set("leader", leader.map(FV::N));
+            at
+        }
+        ENode::Kern { width, explicit } => {
+            let at = arena.make(KERN, Some(i64::from(*explicit)));
+            arena.cell_mut(at)?.set("kern", Some(FV::I(*width)));
+            at
+        }
+        ENode::Penalty(p) => {
+            let at = arena.make(PENALTY, Some(0));
+            arena.cell_mut(at)?.set("penalty", Some(FV::I(*p)));
+            at
+        }
+        ENode::Char(ch) => glyph_from_engine(arena, ch, 1)?,
+        ENode::Ligature(ch, lig) => {
+            let at = glyph_from_engine(arena, ch, 2)?;
+            let mut comps = Vec::new();
+            for c in &lig.components {
+                let g = arena.make(GLYPH, Some(1));
+                let cell = arena.cell_mut(g)?;
+                cell.set("char", Some(FV::I(*c as i64)));
+                cell.set("font", Some(FV::I(ch.font as i64)));
+                comps.push(g);
+            }
+            for w in comps.windows(2) {
+                arena.link(Some(w[0]), Some(w[1]))?;
+            }
+            arena
+                .cell_mut(at)?
+                .set("components", comps.first().copied().map(FV::N));
+            at
+        }
+        ENode::Disc(_) => unreachable!("a disc is made with its replacement by from_engine"),
     })
 }
 
-fn list_to_engine(arena: &Arena, head: usize) -> mlua::Result<Vec<ENode>> {
-    arena
-        .chain(head, None)?
-        .into_iter()
-        .map(|at| to_engine(arena, at))
-        .collect()
+fn set_glue(c: &mut Cell, g: &Glue) {
+    c.set("width", Some(FV::I(g.natural)));
+    c.set("stretch", Some(FV::I(g.stretch)));
+    c.set("shrink", Some(FV::I(g.shrink)));
+    c.set(
+        "stretch_order",
+        Some(FV::I(to_luatex_order(g.stretch_order))),
+    );
+    c.set("shrink_order", Some(FV::I(to_luatex_order(g.shrink_order))));
+}
+
+fn glyph_from_engine(arena: &mut Arena, ch: &CharNode, subtype: i64) -> mlua::Result<usize> {
+    let at = arena.make(GLYPH, Some(subtype));
+    let c = arena.cell_mut(at)?;
+    c.set("char", Some(FV::I(ch.character as i64)));
+    c.set("font", Some(FV::I(ch.font as i64)));
+    c.measured = Some((ch.width, ch.height, ch.depth));
+    Ok(at)
 }
 
 // ── the library ──────────────────────────────────────────────────────────
 
-/// Build the `node` table.
-pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table> {
-    let node = lua.create_table()?;
-    let hold = |a: &Rc<RefCell<Arena>>| Rc::clone(a);
+/// A library function: it gets the face it was registered under.
+type Fun = fn(&Lib, &Lua, Variadic<Value>) -> mlua::Result<Variadic<Value>>;
 
-    // — the type vocabulary, answered for every LuaTeX id whether or not
-    //   `node.new` will make one —
-    node.set(
-        "id",
-        lua.create_function(|_, v: Value| Ok(want_id(&v)? as i64))?,
-    )?;
-    node.set(
-        "type",
-        lua.create_function(|_, v: Value| {
-            if let Value::UserData(u) = &v {
-                let r = u.borrow::<NodeRef>()?;
-                let id = r.arena.borrow().get(r.at)?.id;
-                return Ok(type_name(id).map(str::to_string));
-            }
-            // "returns nil if the argument is not a node type".
-            Ok(want_id(&v).ok().and_then(type_name).map(str::to_string))
-        })?,
-    )?;
-    node.set(
-        "types",
-        lua.create_function(|lua, ()| {
-            let t = lua.create_table()?;
-            for (id, name) in TYPES {
-                t.set(*id as i64, *name)?;
-            }
-            Ok(t)
-        })?,
-    )?;
-    node.set(
-        "subtypes",
-        lua.create_function(|lua, v: Value| {
-            let t = lua.create_table()?;
-            for (n, name) in subtypes_of(want_id(&v)?) {
-                t.set(*n, *name)?;
-            }
-            Ok(t)
-        })?,
-    )?;
-    node.set(
-        "fields",
-        lua.create_function(|lua, v: Value| {
-            let id = want_id(&v)?;
-            let t = lua.create_table()?;
-            if id != GLUE_SPEC {
-                t.set(-1, "prev")?;
-                t.set(2, "subtype")?;
-            }
-            t.set(0, "next")?;
-            t.set(1, "id")?;
-            for field in fields_of(id) {
-                t.set(field.index, field.name)?;
-            }
-            Ok(t)
-        })?,
-    )?;
-
-    // — making and unmaking —
-    let a = hold(arena);
-    node.set(
-        "new",
-        lua.create_function(move |lua, args: Variadic<Value>| {
-            let id = want_id(args.first().unwrap_or(&Value::Nil))?;
-            if fields_of(id).is_empty() {
-                return Err(mlua::Error::runtime(format!(
-                    "node.new('{}'): {}",
-                    type_name(id).unwrap_or("?"),
-                    why_not_new(id)
-                )));
-            }
-            let subtype = match args.get(1) {
-                Some(v) if !v.is_nil() => {
-                    let n = want_int(v)?;
-                    u16::try_from(n).map_err(|_| bad_subtype(n))?
-                }
-                _ => 0,
-            };
-            let at = a.borrow_mut().make(id, subtype);
-            lua.create_userdata(NodeRef {
-                arena: Rc::clone(&a),
-                at,
-            })
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "free",
-        lua.create_function(move |lua, v: Value| {
-            let at = as_node(&v)?;
-            let next = a.borrow_mut().free(at)?;
-            match next {
-                Some(n) => Ok(Value::UserData(lua.create_userdata(NodeRef {
-                    arena: Rc::clone(&a),
-                    at: n,
-                })?)),
-                None => Ok(Value::Nil),
-            }
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "flush_node",
-        lua.create_function(move |_, v: Value| {
-            a.borrow_mut().free(as_node(&v)?)?;
-            Ok(())
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "flush_list",
-        lua.create_function(move |_, v: Value| {
-            let head = as_node(&v)?;
-            let mut arena = a.borrow_mut();
-            for at in arena.chain(head, None)? {
-                arena.free(at)?;
-            }
-            Ok(())
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "copy",
-        lua.create_function(move |lua, v: Value| {
-            let at = a.borrow_mut().copy(as_node(&v)?)?;
-            lua.create_userdata(NodeRef {
-                arena: Rc::clone(&a),
-                at,
-            })
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "copy_list",
-        lua.create_function(move |lua, args: Variadic<Value>| {
-            let head = as_node(args.first().unwrap_or(&Value::Nil))?;
-            let stop = match args.get(1) {
-                Some(v) => as_node_opt(v)?,
-                None => None,
-            };
-            let at = a.borrow_mut().copy_list(head, stop)?;
-            Ok(match at {
-                Some(at) => Value::UserData(lua.create_userdata(NodeRef {
-                    arena: Rc::clone(&a),
-                    at,
-                })?),
-                None => Value::Nil,
-            })
-        })?,
-    )?;
-
-    // — walking —
-    for (name, forward) in [
-        ("next", true),
-        ("prev", false),
-        ("getnext", true),
-        ("getprev", false),
-    ] {
-        let a = hold(arena);
-        node.set(
-            name,
-            lua.create_function(move |lua, v: Value| {
-                let at = as_node(&v)?;
-                let to = {
-                    let arena = a.borrow();
-                    let cell = arena.get(at)?;
-                    match forward {
-                        true => cell.next,
-                        false => cell.prev,
-                    }
-                };
-                Ok(match to {
-                    Some(at) => Value::UserData(lua.create_userdata(NodeRef {
-                        arena: Rc::clone(&a),
-                        at,
-                    })?),
-                    None => Value::Nil,
-                })
-            })?,
-        )?;
-    }
-    let a = hold(arena);
-    node.set(
-        "getboth",
-        lua.create_function(move |lua, v: Value| {
-            let at = as_node(&v)?;
-            let (p, n) = {
-                let arena = a.borrow();
-                let cell = arena.get(at)?;
-                (cell.prev, cell.next)
-            };
-            let hand = |i: Option<usize>| -> mlua::Result<Value> {
-                Ok(match i {
-                    Some(at) => Value::UserData(lua.create_userdata(NodeRef {
-                        arena: Rc::clone(&a),
-                        at,
-                    })?),
-                    None => Value::Nil,
-                })
-            };
-            Ok(Variadic::from_iter([hand(p)?, hand(n)?]))
-        })?,
-    )?;
-    for name in ["tail", "slide"] {
-        let a = hold(arena);
-        node.set(
-            name,
-            lua.create_function(move |lua, v: Value| {
-                let head = as_node(&v)?;
-                let last = *a.borrow().chain(head, None)?.last().unwrap_or(&head);
-                lua.create_userdata(NodeRef {
-                    arena: Rc::clone(&a),
-                    at: last,
-                })
-            })?,
-        )?;
-    }
-    let a = hold(arena);
-    node.set(
-        "length",
-        lua.create_function(move |_, args: Variadic<Value>| {
-            let head = as_node(args.first().unwrap_or(&Value::Nil))?;
-            let stop = match args.get(1) {
-                Some(v) => as_node_opt(v)?,
-                None => None,
-            };
-            Ok(a.borrow().chain(head, stop)?.len() as i64)
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "count",
-        lua.create_function(move |_, args: Variadic<Value>| {
-            let id = want_id(args.first().unwrap_or(&Value::Nil))?;
-            let head = as_node(args.get(1).unwrap_or(&Value::Nil))?;
-            let stop = match args.get(2) {
-                Some(v) => as_node_opt(v)?,
-                None => None,
-            };
-            let arena = a.borrow();
-            let mut n = 0;
-            for at in arena.chain(head, stop)? {
-                if arena.get(at)?.id == id {
-                    n += 1;
-                }
-            }
-            Ok(n)
-        })?,
-    )?;
-
-    // "for n, id, subtype in node.traverse(head) do" — three values per step,
-    // measured in luatex 1.24.0.
-    for (name, filter) in [
-        ("traverse", Filter::All),
-        ("traverse_id", Filter::Id),
-        ("traverse_list", Filter::Lists),
-        ("traverse_char", Filter::Chars),
-        ("traverse_glyph", Filter::Glyphs),
-    ] {
-        let a = hold(arena);
-        node.set(
-            name,
-            lua.create_function(move |lua, args: Variadic<Value>| {
-                traverse(lua, &a, filter, &args)
-            })?,
-        )?;
-    }
-
-    // — editing —
-    let a = hold(arena);
-    node.set(
-        "insert_after",
-        lua.create_function(move |lua, args: Variadic<Value>| insert(lua, &a, &args, true))?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "insert_before",
-        lua.create_function(move |lua, args: Variadic<Value>| insert(lua, &a, &args, false))?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "remove",
-        lua.create_function(move |lua, args: Variadic<Value>| {
-            let head = as_node(args.first().unwrap_or(&Value::Nil))?;
-            let cur = as_node(args.get(1).unwrap_or(&Value::Nil))?;
-            let (prev, next) = {
-                let arena = a.borrow();
-                let cell = arena.get(cur)?;
-                (cell.prev, cell.next)
-            };
-            {
-                let mut arena = a.borrow_mut();
-                if let Some(p) = prev {
-                    arena.get_mut(p)?.next = next;
-                }
-                if let Some(n) = next {
-                    arena.get_mut(n)?.prev = prev;
-                }
-                let cell = arena.get_mut(cur)?;
-                cell.prev = None;
-                cell.next = None;
-            }
-            // "returns the new head and current" — and when the removed node
-            // was the head, the new head is what followed it. Measured: with
-            // the tail removed, `current` comes back nil.
-            let new_head = match cur == head {
-                true => next,
-                false => Some(head),
-            };
-            let hand = |i: Option<usize>| -> mlua::Result<Value> {
-                Ok(match i {
-                    Some(at) => Value::UserData(lua.create_userdata(NodeRef {
-                        arena: Rc::clone(&a),
-                        at,
-                    })?),
-                    None => Value::Nil,
-                })
-            };
-            Ok(Variadic::from_iter([hand(new_head)?, hand(next)?]))
-        })?,
-    )?;
-
-    // — the getters and setters that name a field —
-    let a = hold(arena);
-    node.set(
-        "getfield",
-        lua.create_function(move |lua, (v, name): (Value, String)| {
-            let at = as_node(&v)?;
-            NodeRef {
-                arena: Rc::clone(&a),
-                at,
-            }
-            .read(lua, &name)
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "setfield",
-        lua.create_function(move |_, (v, name, value): (Value, String, Value)| {
-            let at = as_node(&v)?;
-            NodeRef {
-                arena: Rc::clone(&a),
-                at,
-            }
-            .write(&name, value)
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "has_field",
-        lua.create_function(move |_, (v, name): (Value, String)| {
-            let at = as_node(&v)?;
-            let id = a.borrow().get(at)?.id;
-            let name = canonical(&name);
-            let structural = match id {
-                GLUE_SPEC => ["id", "next"].contains(&name),
-                _ => ["id", "subtype", "next", "prev"].contains(&name),
-            };
-            Ok(structural || fields_of(id).iter().any(|f| f.name == name))
-        })?,
-    )?;
-    for (name, field) in [
-        ("getid", "id"),
-        ("getsubtype", "subtype"),
-        ("getchar", "char"),
-        ("getfont", "font"),
-        ("getlist", "head"),
-        ("getleader", "leader"),
-    ] {
-        let a = hold(arena);
-        node.set(
-            name,
-            lua.create_function(move |lua, v: Value| {
-                let at = as_node(&v)?;
-                NodeRef {
-                    arena: Rc::clone(&a),
-                    at,
-                }
-                .read(lua, field)
-            })?,
-        )?;
-    }
-    let a = hold(arena);
-    node.set(
-        "getwhd",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            let arena = a.borrow();
-            let cell = arena.get(at)?;
-            // A glyph's are the font's, and the only font here is 0.
-            let whd = match cell.id {
-                GLYPH => (0, 0, 0),
-                _ => (cell.num("width"), cell.num("height"), cell.num("depth")),
-            };
-            Ok(Variadic::from_iter(
-                [whd.0, whd.1, whd.2].map(Value::Integer),
-            ))
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "is_node",
-        lua.create_function(move |_, v: Value| match as_node_opt(&v) {
-            Ok(Some(at)) if a.borrow().get(at).is_ok() => Ok(Value::Integer(at as i64)),
-            _ => Ok(Value::Boolean(false)),
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "is_char",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            let arena = a.borrow();
-            let cell = arena.get(at)?;
-            // Measured: for a non-glyph luatex answers nil, not false.
-            Ok(match cell.id == GLYPH {
-                true => Value::Integer(cell.num("char")),
-                false => Value::Nil,
-            })
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "is_glyph",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            let arena = a.borrow();
-            let cell = arena.get(at)?;
-            // Measured: `false, <id>` for a non-glyph.
-            Ok(match cell.id == GLYPH {
-                true => Variadic::from_iter([Value::Integer(cell.num("char")), Value::Integer(0)]),
-                false => {
-                    Variadic::from_iter([Value::Boolean(false), Value::Integer(cell.id as i64)])
-                }
-            })
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "tostring",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            NodeRef {
-                arena: Rc::clone(&a),
-                at,
-            }
-            .show()
-        })?,
-    )?;
-
-    // — glue —
-    let a = hold(arena);
-    node.set(
-        "getglue",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            let arena = a.borrow();
-            let cell = arena.get(at)?;
-            want_glue(cell)?;
-            Ok(Variadic::from_iter(
-                [
-                    cell.num("width"),
-                    cell.num("stretch"),
-                    cell.num("shrink"),
-                    cell.num("stretch_order"),
-                    cell.num("shrink_order"),
-                ]
-                .map(Value::Integer),
-            ))
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "setglue",
-        lua.create_function(move |_, args: Variadic<Value>| {
-            let at = as_node(args.first().unwrap_or(&Value::Nil))?;
-            let mut arena = a.borrow_mut();
-            want_glue(arena.get(at)?)?;
-            // "If you pass no values or if a value is not a number the
-            // corresponding property will become a zero."
-            let n = |i: usize| args.get(i).and_then(|v| v.as_integer()).unwrap_or(0);
-            for (i, name) in [
-                "width",
-                "stretch",
-                "shrink",
-                "stretch_order",
-                "shrink_order",
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let v = n(i + 1);
-                if name.ends_with("order") {
-                    from_luatex_order(v)?;
-                }
-                arena.get_mut(at)?.nums.insert(
-                    fields_of(GLUE)
-                        .iter()
-                        .find(|f| f.name == name)
-                        .expect("glue field")
-                        .name,
-                    v,
-                );
-            }
-            Ok(())
-        })?,
-    )?;
-    let a = hold(arena);
-    node.set(
-        "is_zero_glue",
-        lua.create_function(move |_, v: Value| {
-            let at = as_node(&v)?;
-            let arena = a.borrow();
-            let cell = arena.get(at)?;
-            want_glue(cell)?;
-            Ok(["width", "stretch", "shrink"]
-                .into_iter()
-                .all(|f| cell.num(f) == 0))
-        })?,
-    )?;
-    // "the effective width of the glue in the parent box": what §625's setter
-    // gives this glue node, which is texrs's own exact arithmetic — cur_glue
-    // and cur_g carried from one glue node to the next, so a box of glue comes
-    // out exactly as wide as it was asked to be. luatex answers a float
-    // (`3.0000000596046` for a glue that should be exactly 3sp), because it
-    // multiplies by a single-precision glue ratio and does not carry the
-    // rounding; the integer here is the width the engine would really set.
-    let a = hold(arena);
-    node.set(
-        "effective_glue",
-        lua.create_function(move |_, (g, parent): (Value, Value)| {
-            let at = as_node(&g)?;
-            let boxed = as_node(&parent)?;
-            let arena = a.borrow();
-            want_glue(arena.get(at)?)?;
-            let ENode::Box(b) = to_engine(&arena, boxed)? else {
-                return Err(mlua::Error::runtime(
-                    "node.effective_glue wants the box the glue is in",
-                ));
-            };
-            let mut setter = crate::pack::Setter::new(&b);
-            let head = arena.get(boxed)?.lists.get("head").copied();
-            let Some(head) = head else {
-                return Err(mlua::Error::runtime("that box is empty"));
-            };
-            for i in arena.chain(head, None)? {
-                let cell = arena.get(i)?;
-                if cell.id != GLUE {
-                    continue;
-                }
-                let ENode::Glue(gn) = to_engine(&arena, i)? else {
-                    unreachable!("a glue cell converts to a glue node")
-                };
-                let w = setter.glue(&gn.spec);
-                if i == at {
-                    return Ok(w);
-                }
-            }
-            Err(mlua::Error::runtime("that glue is not in that box"))
-        })?,
-    )?;
-
-    // — packaging: the one place a chunk reaches tex.web's own arithmetic —
-    for (name, vertical) in [("hpack", false), ("vpack", true)] {
-        let a = hold(arena);
-        node.set(
-            name,
-            lua.create_function(move |lua, args: Variadic<Value>| pack(lua, &a, &args, vertical))?,
-        )?;
-    }
-    let a = hold(arena);
-    node.set(
-        "dimensions",
-        lua.create_function(move |_, args: Variadic<Value>| dimensions(&a, &args))?,
-    )?;
-
-    // — everything that would reach the document, or a font, or an attribute —
-    for (name, why) in REFUSED {
-        node.set(
-            *name,
-            lua.create_function(move |_, _: Variadic<Value>| {
-                Err::<(), _>(mlua::Error::runtime(format!("node.{name}: {why}")))
-            })?,
-        )?;
-    }
-    // `node.direct` is the same library over bare integers instead of userdata.
-    // Every one of its entries would have to refuse or answer, and a table that
-    // refuses as a whole says the same thing in one place.
-    let direct = lua.create_table()?;
-    let mt = lua.create_table()?;
-    let refuse = lua.create_function(|_, _: Variadic<Value>| {
-        Err::<(), _>(mlua::Error::runtime(
-            "node.direct is LuaTeX's unchecked view of node memory as bare \
-             integers; texrs's nodes are arena handles and there is no address \
-             to hand out. Use the node library itself.",
-        ))
-    })?;
-    mt.set("__index", refuse.clone())?;
-    mt.set("__newindex", refuse)?;
-    direct.set_metatable(Some(mt))?;
-    node.set("direct", direct)?;
-
-    Ok(node)
+fn one(v: Value) -> mlua::Result<Variadic<Value>> {
+    Ok(Variadic::from_iter([v]))
 }
 
-/// What each refused entry point is, and why it is refused.
-///
-/// Named one by one rather than left absent: "attempt to call a nil value"
-/// would not tell a document's author which of the two engines' worlds it had
-/// walked into.
-const REFUSED: &[(&str, &str)] = &[
-    (
-        "write",
-        "there is no current node list to append to. texrs sets a page from \
-         runs of strings (src/typeset.rs); crate::postline and crate::page are \
-         a library beside that path rather than the path itself",
-    ),
-    (
-        "last_node",
-        "there is no current node list to take the last node off",
-    ),
-    (
-        "usedlist",
-        "texrs's nodes live in a per-document arena rather than in one node \
-         memory it can enumerate",
-    ),
-    ("current_attr", "texrs's nodes carry no attribute list"),
-    ("has_attribute", "texrs's nodes carry no attribute list"),
-    ("get_attribute", "texrs's nodes carry no attribute list"),
-    ("set_attribute", "texrs's nodes carry no attribute list"),
-    ("unset_attribute", "texrs's nodes carry no attribute list"),
-    ("find_attribute", "texrs's nodes carry no attribute list"),
-    (
-        "ligaturing",
-        "this applies the font's ligature program to a list, and texrs does not \
-         run a .tfm's lig/kern program at all (see BUGS.md)",
-    ),
-    (
-        "kerning",
-        "this applies the font's kern program to a list, and texrs does not run \
-         a .tfm's lig/kern program at all (see BUGS.md)",
-    ),
-    (
-        "hyphenating",
-        "this needs Liang's patterns applied to a node list; texrs hyphenates \
-         inside the line breaker, over text rather than over nodes",
-    ),
-    (
-        "mlist_to_hlist",
-        "the noad types (LuaTeX ids 16-27) have no crate::node::Node variant, \
-         so there is no node list to make an mlist out of",
-    ),
-    (
-        "first_glyph",
-        "a glyph here can only carry font 0, so there is no glyph with a font \
-         to find",
-    ),
-    ("has_glyph", "a glyph here can only carry font 0"),
-    ("uses_font", "texrs has no font table for Lua to index"),
-    ("family_font", "texrs has no math font families"),
-    (
-        "make_extensible",
-        "texrs has no extensible recipes on the Lua side",
-    ),
-    ("protect_glyph", "texrs's glyphs have no protection flag"),
-    ("protect_glyphs", "texrs's glyphs have no protection flag"),
-    ("unprotect_glyph", "texrs's glyphs have no protection flag"),
-    ("unprotect_glyphs", "texrs's glyphs have no protection flag"),
-    (
-        "getdisc",
-        "texrs's DiscNode holds tex.web's replace_count, an integer, where \
-         LuaTeX's third value is a list",
-    ),
-    (
-        "check_discretionaries",
-        "texrs's DiscNode holds tex.web's replace_count rather than a replace list",
-    ),
-    (
-        "flatten_discretionaries",
-        "flattening writes the result back into the document's list, and there \
-         is none",
-    ),
-    (
-        "fix_node_lists",
-        "this repairs prev pointers in TeX's own memory; the arena keeps prev \
-         in step on every assignment already",
-    ),
-    (
-        "prepend_prevdepth",
-        "\\prevdepth belongs to the page builder, which is not on the path a \
-         run takes",
-    ),
-    (
-        "end_of_math",
-        "texrs's math node is tex.web §147's surround and carries no begin/end \
-         subtype pair",
-    ),
-    (
-        "protrusion_skippable",
-        "protrusion is a pdfTeX/LuaTeX addition texrs has not got",
-    ),
-    (
-        "rangedimensions",
-        "this measures a range inside a parent box's set list, which needs the \
-         parent to be a box TeX itself packaged",
-    ),
-    ("getproperty", "texrs keeps no per-node properties table"),
-    ("setproperty", "texrs keeps no per-node properties table"),
-    (
-        "get_properties_table",
-        "texrs keeps no per-node properties table",
-    ),
-    (
-        "flush_properties_table",
-        "texrs keeps no per-node properties table",
-    ),
-    (
-        "set_properties_mode",
-        "texrs keeps no per-node properties table",
-    ),
-    (
-        "whatsits",
-        "texrs's Node::Whatsit carries one string rather than LuaTeX's zoo of \
-         whatsit subtypes",
-    ),
-    (
-        "values",
-        "this enumerates LuaTeX's internal value tables, which texrs has not got",
-    ),
-];
-
-/// Which nodes a `traverse` variant yields.
-#[derive(Clone, Copy, PartialEq)]
-enum Filter {
-    All,
-    Id,
-    Lists,
-    Chars,
-    Glyphs,
+fn none() -> mlua::Result<Variadic<Value>> {
+    Ok(Variadic::new())
 }
 
-/// A `traverse` iterator: a Lua closure over the list, snapshotted at the call.
-///
-/// LuaTeX's traversers are safe against the current node being freed or
-/// relinked mid-loop ("you can remove the current node safely"), which a live
-/// `next` walk is not. Taking the chain up front gives the same guarantee.
-fn traverse(
-    lua: &Lua,
-    arena: &Rc<RefCell<Arena>>,
-    filter: Filter,
-    args: &[Value],
-) -> mlua::Result<mlua::Function> {
-    let (id, head_at) = match filter {
-        Filter::Id => (
-            Some(want_id(args.first().unwrap_or(&Value::Nil))?),
-            args.get(1).cloned().unwrap_or(Value::Nil),
+fn int(n: i64) -> Value {
+    Value::Integer(n)
+}
+
+fn arg(args: &Variadic<Value>, i: usize) -> &Value {
+    args.get(i).unwrap_or(&Value::Nil)
+}
+
+/// `node.new(id [, subtype])`, a whatsit's subtype by number or name.
+fn f_new(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let id = want_id(arg(&args, 0))?;
+    let sub = match (id, arg(&args, 1)) {
+        (WHATSIT, Value::String(s)) => Some(
+            whatsit_id(&s.to_str()?)
+                .ok_or_else(|| mlua::Error::runtime("invalid whatsit type id"))?,
         ),
-        _ => (None, args.first().cloned().unwrap_or(Value::Nil)),
+        (WHATSIT, Value::Nil) => {
+            return Err(mlua::Error::runtime(
+                "Creating a whatsit requires the subtype number as a second argument",
+            ))
+        }
+        (_, Value::Nil) => Some(0),
+        (_, v) => Some(want_int(v)?),
     };
-    let chain = match as_node_opt(&head_at)? {
-        Some(head) => arena.borrow().chain(head, None)?,
-        None => Vec::new(),
+    if id == WHATSIT && !WHATSITS.iter().any(|(n, _)| Some(*n) == sub) {
+        return Err(mlua::Error::runtime("invalid whatsit type id"));
+    }
+    let sub = match id {
+        9 | 30..=32 | 35..=37 | 41..=49 => None,
+        ATTRIBUTE | GLUE_SPEC | ATTRIBUTE_LIST => None,
+        _ => sub,
     };
-    let kept: Vec<usize> = {
-        let a = arena.borrow();
-        chain
-            .into_iter()
-            .filter(|at| {
-                let Ok(cell) = a.get(*at) else { return false };
-                match filter {
-                    Filter::All => true,
-                    Filter::Id => Some(cell.id) == id,
-                    Filter::Lists => matches!(cell.id, HLIST | VLIST),
-                    Filter::Chars | Filter::Glyphs => cell.id == GLYPH,
-                }
-            })
+    let at = lib.arena.borrow_mut().make(id, sub);
+    // A new node carries the attributes in force, as luatex's `new_node` gives
+    // it the current attribute list.
+    if names(id, sub).contains(&"attr") {
+        let pairs = super::current_attributes();
+        if !pairs.is_empty() {
+            lib.arena.borrow_mut().set_attributes(at, &pairs)?;
+        }
+    }
+    one(lib.give(lua, Some(at))?)
+}
+
+fn f_free(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let mut a = lib.arena.borrow_mut();
+    let next = a.next(at)?;
+    a.unlink(at)?;
+    a.flush(at)?;
+    drop(a);
+    one(lib.give(lua, next)?)
+}
+
+fn f_flush_node(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    if let Some(at) = lib.opt(arg(&args, 0))? {
+        let mut a = lib.arena.borrow_mut();
+        a.unlink(at)?;
+        a.flush(at)?;
+    }
+    none()
+}
+
+fn f_flush_list(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    if let Some(at) = lib.opt(arg(&args, 0))? {
+        lib.arena.borrow_mut().flush_list(at)?;
+    }
+    none()
+}
+
+fn f_copy(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let made = lib.arena.borrow_mut().copy(at)?;
+    copy_property(lib, lua, at, made)?;
+    one(lib.give(lua, Some(made))?)
+}
+
+fn f_copy_list(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let stop = lib.opt(arg(&args, 1))?;
+    let made = lib.arena.borrow_mut().copy_list(at, stop)?;
+    one(lib.give(lua, made)?)
+}
+
+fn f_next(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let n = lib.arena.borrow().next(at)?;
+    one(lib.give(lua, n)?)
+}
+
+fn f_prev(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let p = lib.arena.borrow().prev(at)?;
+    one(lib.give(lua, p)?)
+}
+
+fn f_getboth(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return Ok(Variadic::from_iter([Value::Nil, Value::Nil]));
+    };
+    let (p, n) = {
+        let a = lib.arena.borrow();
+        (a.prev(at)?, a.next(at)?)
+    };
+    Ok(Variadic::from_iter([lib.give(lua, p)?, lib.give(lua, n)?]))
+}
+
+fn f_setnext(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let to = lib.opt(arg(&args, 1))?;
+    lib.arena.borrow_mut().set_next(at, to)?;
+    none()
+}
+
+fn f_setprev(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let to = lib.opt(arg(&args, 1))?;
+    lib.arena.borrow_mut().set_prev(at, to)?;
+    none()
+}
+
+fn f_setboth(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let (p, n) = (lib.opt(arg(&args, 1))?, lib.opt(arg(&args, 2))?);
+    let mut a = lib.arena.borrow_mut();
+    a.set_prev(at, p)?;
+    a.set_next(at, n)?;
+    none()
+}
+
+/// `setlink(a, b, ...)`: each node's `next` the one after it, nils skipped;
+/// the first non-nil argument is answered.
+fn f_setlink(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let mut nodes = Vec::new();
+    for v in args.iter() {
+        if let Some(at) = lib.opt(v)? {
+            nodes.push(at);
+        }
+    }
+    let mut a = lib.arena.borrow_mut();
+    for w in nodes.windows(2) {
+        a.link(Some(w[0]), Some(w[1]))?;
+    }
+    drop(a);
+    one(lib.give(lua, nodes.first().copied())?)
+}
+
+/// `setsplit(a, b)`: cut the list between them.
+fn f_setsplit(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let (a_at, b_at) = (lib.opt(arg(&args, 0))?, lib.opt(arg(&args, 1))?);
+    let mut a = lib.arena.borrow_mut();
+    if let Some(x) = a_at {
+        a.set_next(x, None)?;
+    }
+    if let Some(y) = b_at {
+        a.set_prev(y, None)?;
+    }
+    none()
+}
+
+fn f_id(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let _ = lib;
+    one(int(want_id(arg(&args, 0))? as i64))
+}
+
+fn f_type(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let v = arg(&args, 0);
+    let id = match v {
+        Value::UserData(_) => lib.arena.borrow().id(lib.want(Some(v))?)? as i64,
+        Value::Integer(n) => *n,
+        _ => return one(Value::Nil),
+    };
+    match u8::try_from(id).ok().and_then(type_name) {
+        Some(name) => one(Value::String(lua.create_string(name)?)),
+        None => one(Value::Nil),
+    }
+}
+
+fn f_getid(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match lib.opt(arg(&args, 0))? {
+        Some(at) => one(int(lib.arena.borrow().id(at)? as i64)),
+        None => one(Value::Nil),
+    }
+}
+
+fn f_getsubtype(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match lib.opt(arg(&args, 0))? {
+        Some(at) => one(read(lib, lua, at, "subtype")?),
+        None => one(Value::Nil),
+    }
+}
+
+fn f_setsubtype(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    write(lib, at, "subtype", arg(&args, 1).clone())?;
+    none()
+}
+
+fn f_getfield(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    match arg(&args, 1) {
+        Value::String(s) => one(read(lib, lua, at, &s.to_str()?)?),
+        _ => one(Value::Nil),
+    }
+}
+
+fn f_setfield(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let Value::String(s) = arg(&args, 1) else {
+        return Err(mlua::Error::runtime("a node field is named by a string"));
+    };
+    write(lib, at, &s.to_str()?, arg(&args, 2).clone())?;
+    none()
+}
+
+fn f_has_field(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let Value::String(s) = arg(&args, 1) else {
+        return one(Value::Boolean(false));
+    };
+    let name = s.to_str()?.to_string();
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    one(Value::Boolean(
+        names(c.id, c.subtype).contains(&canonical(&name)),
+    ))
+}
+
+/// A getter and setter pair for one named field, as the direct face spells
+/// them (`getwidth`, `setwidth`, ...).
+macro_rules! field_pair {
+    ($get:ident, $set:ident, $name:literal) => {
+        fn $get(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+            match lib.opt(arg(&args, 0))? {
+                Some(at) => one(read(lib, lua, at, $name)?),
+                None => one(Value::Nil),
+            }
+        }
+        fn $set(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+            let at = lib.want(args.first())?;
+            write(lib, at, $name, arg(&args, 1).clone())?;
+            none()
+        }
+    };
+}
+
+field_pair!(f_getchar, f_setchar, "char");
+field_pair!(f_getfont, f_setfont, "font");
+field_pair!(f_getlang, f_setlang, "lang");
+field_pair!(f_getwidth, f_setwidth, "width");
+field_pair!(f_getheight, f_setheight, "height");
+field_pair!(f_getdepth, f_setdepth, "depth");
+field_pair!(f_getshift, f_setshift, "shift");
+field_pair!(f_getpenalty, f_setpenalty, "penalty");
+field_pair!(f_getfam, f_setfam, "fam");
+field_pair!(f_getdata, f_setdata, "data");
+field_pair!(f_getleader, f_setleader, "leader");
+field_pair!(f_getcomponents, f_setcomponents, "components");
+field_pair!(f_getnucleus, f_setnucleus, "nucleus");
+field_pair!(f_getsub, f_setsub, "sub");
+field_pair!(f_getsup, f_setsup, "sup");
+field_pair!(f_getdir, f_setdir, "dir");
+field_pair!(f_getexpansion, f_setexpansion, "expansion_factor");
+
+/// `getkern` and `setkern` read a kern's `kern` and a margin kern's `width`.
+fn f_getkern(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    // lnodelib.c pushes a kern's width as a lua_Number (it can carry a
+    // font expansion), a margin kern's and a math node's as integers.
+    let (field, float) = match lib.arena.borrow().id(at)? {
+        KERN => ("kern", true),
+        28 => ("width", false),
+        MATH => ("surround", false),
+        _ => return one(Value::Nil),
+    };
+    let v = read(lib, lua, at, field)?;
+    match (float, v.as_integer()) {
+        (true, Some(n)) => one(Value::Number(n as f64)),
+        _ => one(v),
+    }
+}
+
+fn f_setkern(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let field = match lib.arena.borrow().id(at)? {
+        KERN => "kern",
+        _ => "width",
+    };
+    write(lib, at, field, arg(&args, 1).clone())?;
+    if let Value::Integer(_) | Value::Number(_) = arg(&args, 2) {
+        write(lib, at, "subtype", arg(&args, 2).clone())?;
+    }
+    none()
+}
+
+/// `getlist`/`setlist`: the list a box, an adjust, an insert or a sub-box holds.
+fn f_getlist(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match lib.opt(arg(&args, 0))? {
+        Some(at) => one(read(lib, lua, at, "head")?),
+        None => one(Value::Nil),
+    }
+}
+
+fn f_setlist(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    write(lib, at, "head", arg(&args, 1).clone())?;
+    none()
+}
+
+/// `getwhd(n [, withexpansion])`: width, height, depth; a glyph's from its
+/// font.
+fn f_getwhd(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return none();
+    };
+    let id = lib.arena.borrow().id(at)?;
+    match id {
+        HLIST | VLIST | RULE | 15 | GLYPH => Ok(Variadic::from_iter([
+            read(lib, lua, at, "width")?,
+            read(lib, lua, at, "height")?,
+            read(lib, lua, at, "depth")?,
+        ])),
+        _ => none(),
+    }
+}
+
+fn f_setwhd(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    for (i, f) in ["width", "height", "depth"].iter().enumerate() {
+        if let v @ (Value::Integer(_) | Value::Number(_)) = arg(&args, i + 1) {
+            write(lib, at, f, v.clone())?;
+        }
+    }
+    none()
+}
+
+/// `getdisc(n [, tails])`: pre, post, replace -- and with `true`, their tails
+/// after each (luatex: "pre, post, replace, pre tail, post tail, replace
+/// tail").
+fn f_getdisc(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return none();
+    };
+    let heads: Vec<Option<usize>> = {
+        let a = lib.arena.borrow();
+        let c = a.cell(at)?;
+        if c.id != DISC {
+            return none();
+        }
+        ["pre", "post", "replace"]
+            .iter()
+            .map(|f| c.node(f))
             .collect()
     };
-    let arena = Rc::clone(arena);
-    let mut i = 0usize;
-    lua.create_function_mut(move |lua, ()| {
-        while let Some(&at) = kept.get(i) {
-            i += 1;
-            let Ok((id, subtype)) = arena.borrow().get(at).map(|c| (c.id, c.subtype)) else {
-                // Freed inside the loop: skip it, as LuaTeX's own traverser
-                // survives a `node.remove` of the node it just handed out.
-                continue;
-            };
-            return Ok(Variadic::from_iter([
-                Value::UserData(lua.create_userdata(NodeRef {
-                    arena: Rc::clone(&arena),
-                    at,
-                })?),
-                Value::Integer(id as i64),
-                Value::Integer(subtype as i64),
-            ]));
+    let mut out: Vec<Value> = heads
+        .iter()
+        .map(|h| lib.give(lua, *h))
+        .collect::<mlua::Result<_>>()?;
+    if matches!(arg(&args, 1), Value::Boolean(true)) {
+        let a = lib.arena.borrow();
+        let tails: Vec<Option<usize>> = heads
+            .iter()
+            .map(|h| h.map(|h| a.tail(h)).transpose())
+            .collect::<mlua::Result<_>>()?;
+        drop(a);
+        for t in tails {
+            out.push(lib.give(lua, t)?);
         }
-        Ok(Variadic::from_iter([Value::Nil]))
-    })
+    }
+    Ok(Variadic::from_iter(out))
 }
 
-/// `insert_after(head, current, new)` and its mirror. Both answer `head, new`.
-fn insert(
-    lua: &Lua,
-    arena: &Rc<RefCell<Arena>>,
-    args: &[Value],
-    after: bool,
-) -> mlua::Result<Variadic<Value>> {
-    let head = as_node(args.first().unwrap_or(&Value::Nil))?;
-    let cur = as_node(args.get(1).unwrap_or(&Value::Nil))?;
-    let new = as_node(args.get(2).unwrap_or(&Value::Nil))?;
-    let mut a = arena.borrow_mut();
-    let new_head = match after {
-        true => {
-            let next = a.get(cur)?.next;
-            a.get_mut(cur)?.next = Some(new);
-            let cell = a.get_mut(new)?;
-            cell.prev = Some(cur);
-            cell.next = next;
-            if let Some(n) = next {
-                a.get_mut(n)?.prev = Some(new);
-            }
-            head
-        }
-        false => {
-            let prev = a.get(cur)?.prev;
-            a.get_mut(cur)?.prev = Some(new);
-            let cell = a.get_mut(new)?;
-            cell.next = Some(cur);
-            cell.prev = prev;
-            if let Some(p) = prev {
-                a.get_mut(p)?.next = Some(new);
-            }
-            match cur == head {
-                true => new,
-                false => head,
-            }
-        }
-    };
-    drop(a);
-    let hand = |at: usize| -> mlua::Result<Value> {
-        Ok(Value::UserData(lua.create_userdata(NodeRef {
-            arena: Rc::clone(arena),
-            at,
-        })?))
-    };
-    Ok(Variadic::from_iter([hand(new_head)?, hand(new)?]))
+/// `setdisc(n, pre, post, replace [, subtype [, penalty]])`.
+fn f_setdisc(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    for (i, f) in ["pre", "post", "replace"].iter().enumerate() {
+        write(lib, at, f, arg(&args, i + 1).clone())?;
+    }
+    if !arg(&args, 4).is_nil() {
+        write(lib, at, "subtype", arg(&args, 4).clone())?;
+    }
+    if !arg(&args, 5).is_nil() {
+        write(lib, at, "penalty", arg(&args, 5).clone())?;
+    }
+    none()
 }
 
-/// `node.hpack(n[,w,info])` and `node.vpack`, over `crate::pack`'s port of
-/// §649-§667 and §668-§679.
-///
-/// The tolerances are INITEX's, which is not a choice: they decide only what
-/// TeX would COMPLAIN about (`crate::pack::Report`), and that report is
-/// discarded here because LuaTeX's `node.hpack` does not report either. The
-/// numbers a chunk gets back — width, height, depth, glue_set, glue_sign,
-/// glue_order and the badness — do not depend on them at all.
-fn pack(
-    lua: &Lua,
-    arena: &Rc<RefCell<Arena>>,
-    args: &[Value],
-    vertical: bool,
-) -> mlua::Result<Variadic<Value>> {
-    let head = as_node(args.first().unwrap_or(&Value::Nil))?;
-    let w = match args.get(1) {
-        Some(v) if !v.is_nil() => want_int(v)?,
+/// `getglue(n)`: width, stretch, shrink, stretch_order, shrink_order of a
+/// glue, a glue_spec or a math node.
+fn f_getglue(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return none();
+    };
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    if !matches!(c.id, GLUE | GLUE_SPEC | MATH) {
+        return none();
+    }
+    Ok(Variadic::from_iter(
+        [
+            "width",
+            "stretch",
+            "shrink",
+            "stretch_order",
+            "shrink_order",
+        ]
+        .map(|f| int(c.int(f))),
+    ))
+}
+
+/// `setglue(n, width, stretch, shrink, sto, sho)`: a missing value is zero.
+fn f_setglue(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    for (i, f) in [
+        "width",
+        "stretch",
+        "shrink",
+        "stretch_order",
+        "shrink_order",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let v = match arg(&args, i + 1) {
+            v @ (Value::Integer(_) | Value::Number(_)) => v.clone(),
+            _ => int(0),
+        };
+        write(lib, at, f, v)?;
+    }
+    none()
+}
+
+fn f_is_zero_glue(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    one(Value::Boolean(
+        ["width", "stretch", "shrink"].iter().all(|f| c.int(f) == 0),
+    ))
+}
+
+/// `getoffsets`/`setoffsets`: a glyph's `xoffset` and `yoffset`.
+fn f_getoffsets(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return none();
+    };
+    if lib.arena.borrow().id(at)? != GLYPH {
+        return none();
+    }
+    Ok(Variadic::from_iter([
+        read(lib, lua, at, "xoffset")?,
+        read(lib, lua, at, "yoffset")?,
+    ]))
+}
+
+fn f_setoffsets(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    for (i, f) in ["xoffset", "yoffset"].iter().enumerate() {
+        if let v @ (Value::Integer(_) | Value::Number(_)) = arg(&args, i + 1) {
+            write(lib, at, f, v.clone())?;
+        }
+    }
+    none()
+}
+
+fn f_getdirection(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    // The numeric spelling of `dir`: 0 for TLT, the only direction texrs sets.
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let d = read(lib, lua, at, "dir")?;
+    let n = match &d {
+        Value::String(s) => match s.to_str()?.trim_start_matches(['+', '-']) {
+            "TRT" => 1,
+            "LTL" => 2,
+            "RTT" => 3,
+            _ => 0,
+        },
         _ => 0,
     };
-    let spec = match args.get(2) {
-        Some(Value::String(s)) => match &*s.to_str()? {
+    one(int(n))
+}
+
+fn f_setdirection(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let name = match want_int(arg(&args, 1)).unwrap_or(0) {
+        1 => "TRT",
+        2 => "LTL",
+        3 => "RTT",
+        _ => "TLT",
+    };
+    write(lib, at, "dir", Value::String(lua.create_string(name)?))?;
+    none()
+}
+
+// ── list operations ──────────────────────────────────────────────────────
+
+fn f_tail(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let t = lib.arena.borrow().tail(at)?;
+    one(lib.give(lua, Some(t))?)
+}
+
+/// `slide(head)`: the tail, with every `prev` made to agree with `next`.
+fn f_slide(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let mut a = lib.arena.borrow_mut();
+    let chain = a.chain(at, None)?;
+    for w in chain.windows(2) {
+        a.set_prev(w[1], Some(w[0]))?;
+    }
+    let t = *chain.last().unwrap_or(&at);
+    drop(a);
+    one(lib.give(lua, Some(t))?)
+}
+
+fn f_length(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(int(0));
+    };
+    let stop = lib.opt(arg(&args, 1))?;
+    one(int(lib.arena.borrow().chain(at, stop)?.len() as i64))
+}
+
+/// `count(id, head [, stop])`.
+fn f_count(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let id = want_id(arg(&args, 0))?;
+    let Some(head) = lib.opt(arg(&args, 1))? else {
+        return one(int(0));
+    };
+    let stop = lib.opt(arg(&args, 2))?;
+    let a = lib.arena.borrow();
+    let n = a
+        .chain(head, stop)?
+        .into_iter()
+        .filter(|at| a.id(*at).is_ok_and(|i| i == id))
+        .count();
+    one(int(n as i64))
+}
+
+/// lnodelib.c's `set_t_to_prev`: the node before `current`, found by walking
+/// from `head` -- repairing every `prev` on the way, as the C does -- when
+/// `current`'s own `prev` does not lead back to it.
+fn prev_of(a: &mut Arena, head: usize, current: usize) -> mlua::Result<Option<usize>> {
+    if let Some(t) = a.prev(current)? {
+        if a.alive(t) && a.next(t)? == Some(current) {
+            return Ok(Some(t));
+        }
+    }
+    let mut t = Some(head);
+    let mut steps = 0;
+    while let Some(x) = t {
+        let next = a.next(x)?;
+        if next == Some(current) {
+            return Ok(Some(x));
+        }
+        if let Some(n) = next {
+            a.set_prev(n, Some(x))?;
+        }
+        t = next;
+        steps += 1;
+        if steps > WALK_LIMIT {
+            return Err(mlua::Error::runtime("this node list has no end"));
+        }
+    }
+    Ok(None)
+}
+
+/// `insert_before(head, current, new)`: `new` alone goes in front of
+/// `current` (the tail when `current` is nil); the head changes when `current`
+/// was the head. Answers head and `new`. A nil head makes `new` the list.
+fn f_insert_before(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    if args.len() < 3 {
+        return Err(mlua::Error::runtime(
+            "Not enough arguments for node.insert_before()",
+        ));
+    }
+    let Some(n) = lib.opt(arg(&args, 2))? else {
+        return Ok(Variadic::from_iter([
+            arg(&args, 0).clone(),
+            arg(&args, 1).clone(),
+        ]));
+    };
+    let mut a = lib.arena.borrow_mut();
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        a.set_next(n, None)?;
+        a.set_prev(n, None)?;
+        drop(a);
+        let v = lib.give(lua, Some(n))?;
+        return Ok(Variadic::from_iter([v.clone(), v]));
+    };
+    let current = match lib.opt(arg(&args, 1))? {
+        Some(c) => c,
+        None => a.tail(head)?,
+    };
+    if head != current {
+        let Some(t) = prev_of(&mut a, head, current)? else {
+            return Err(mlua::Error::runtime(
+                "Attempt to node.insert_before() a non-existing node",
+            ));
+        };
+        a.link(Some(t), Some(n))?;
+    }
+    a.link(Some(n), Some(current))?;
+    drop(a);
+    let first = if head == current { n } else { head };
+    Ok(Variadic::from_iter([
+        lib.give(lua, Some(first))?,
+        lib.give(lua, Some(n))?,
+    ]))
+}
+
+/// `insert_after(head, current, new)`: `new` alone goes after `current` (the
+/// tail when `current` is nil). Answers head and `new`.
+fn f_insert_after(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    if args.len() < 3 {
+        return Err(mlua::Error::runtime(
+            "Not enough arguments for node.insert_after()",
+        ));
+    }
+    let Some(n) = lib.opt(arg(&args, 2))? else {
+        return Ok(Variadic::from_iter([
+            arg(&args, 0).clone(),
+            arg(&args, 1).clone(),
+        ]));
+    };
+    let mut a = lib.arena.borrow_mut();
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        a.set_next(n, None)?;
+        a.set_prev(n, None)?;
+        drop(a);
+        let v = lib.give(lua, Some(n))?;
+        return Ok(Variadic::from_iter([v.clone(), v]));
+    };
+    let current = match lib.opt(arg(&args, 1))? {
+        Some(c) => c,
+        None => a.tail(head)?,
+    };
+    // try_couple_nodes(n, vlink(current)); couple_nodes(current, n)
+    let after = a.next(current)?;
+    match after {
+        Some(x) => a.link(Some(n), Some(x))?,
+        None => a.set_next(n, None)?,
+    }
+    a.link(Some(current), Some(n))?;
+    drop(a);
+    Ok(Variadic::from_iter([
+        lib.give(lua, Some(head))?,
+        lib.give(lua, Some(n))?,
+    ]))
+}
+
+/// `remove(head, current)`: answers the new head and the node that followed
+/// `current`. As in lnodelib.c, the removed node keeps its own `next` and
+/// `prev`; only its neighbours are relinked.
+fn f_remove(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    if args.len() < 2 {
+        return Err(mlua::Error::runtime(
+            "Not enough arguments for node.remove()",
+        ));
+    }
+    let Some(cur) = lib.opt(arg(&args, 1))? else {
+        return Ok(Variadic::from_iter([arg(&args, 0).clone(), Value::Nil]));
+    };
+    let head = lib.want(args.first())?;
+    let mut a = lib.arena.borrow_mut();
+    let next = a.next(cur)?;
+    let new_head = if head == cur {
+        if let Some(p) = a.prev(cur)? {
+            a.set_next(p, next)?;
+        }
+        if let Some(n) = next {
+            let p = a.prev(cur)?;
+            a.set_prev(n, p)?;
+        }
+        next
+    } else {
+        let Some(t) = prev_of(&mut a, head, cur)? else {
+            return Err(mlua::Error::runtime(
+                "Attempt to node.remove() a non-existing node",
+            ));
+        };
+        a.set_next(t, next)?;
+        if let Some(n) = next {
+            a.set_prev(n, Some(t))?;
+        }
+        Some(head)
+    };
+    drop(a);
+    Ok(Variadic::from_iter([
+        lib.give(lua, new_head)?,
+        lib.give(lua, next)?,
+    ]))
+}
+
+// ── traversal ────────────────────────────────────────────────────────────
+
+/// Which nodes a traverser hands out, and what it hands out with each.
+#[derive(Clone, Copy)]
+enum Walk {
+    /// `traverse`: node, id, subtype.
+    All,
+    /// `traverse_id(id, head)`: node, subtype.
+    Id(u8),
+    /// `traverse_char`: glyphs that are characters (subtype below 256), with
+    /// char and font.
+    Chars,
+    /// `traverse_glyph`: every glyph, with char and font.
+    Glyphs,
+    /// `traverse_list`: hlists and vlists, with id, subtype and list.
+    Lists,
+}
+
+/// The iterator a `traverse*` call returns. Like luatex's, it reads `next` of
+/// the node it last handed out at each step, so a body that removes the node
+/// it was given and keeps a reference to what follows walks on correctly.
+fn traverse(
+    lib: &Lib,
+    lua: &Lua,
+    walk: Walk,
+    head: Option<usize>,
+) -> mlua::Result<Variadic<Value>> {
+    let lib2 = lib.clone();
+    let mut cursor: Option<usize> = None;
+    let mut started = false;
+    let mut steps = 0usize;
+    let f = lua.create_function_mut(move |lua, _: Variadic<Value>| loop {
+        let at = match started {
+            false => {
+                started = true;
+                head
+            }
+            true => match cursor {
+                Some(c) if lib2.arena.borrow().alive(c) => lib2.arena.borrow().next(c)?,
+                _ => None,
+            },
+        };
+        cursor = at;
+        steps += 1;
+        if steps > WALK_LIMIT {
+            return Err(mlua::Error::runtime("this node list has no end"));
+        }
+        let Some(at) = at else {
+            return Ok(Variadic::from_iter([Value::Nil]));
+        };
+        let (id, sub, ch, font, list) = {
+            let a = lib2.arena.borrow();
+            let c = a.cell(at)?;
+            (
+                c.id,
+                c.subtype.unwrap_or(0),
+                c.int("char"),
+                c.int("font"),
+                c.node("head"),
+            )
+        };
+        let me = lib2.give(lua, Some(at))?;
+        match walk {
+            Walk::All => return Ok(Variadic::from_iter([me, int(id as i64), int(sub)])),
+            Walk::Id(want) if id == want => return Ok(Variadic::from_iter([me, int(sub)])),
+            Walk::Chars if id == GLYPH && sub & 0xFF00 == 0 => {
+                return Ok(Variadic::from_iter([me, int(ch), int(font)]))
+            }
+            Walk::Glyphs if id == GLYPH => {
+                return Ok(Variadic::from_iter([me, int(ch), int(font)]))
+            }
+            Walk::Lists if matches!(id, HLIST | VLIST) => {
+                return Ok(Variadic::from_iter([
+                    me,
+                    int(id as i64),
+                    int(sub),
+                    lib2.give(lua, list)?,
+                ]))
+            }
+            _ => continue,
+        }
+    })?;
+    Ok(Variadic::from_iter([
+        Value::Function(f),
+        Value::Nil,
+        Value::Nil,
+    ]))
+}
+
+fn f_traverse(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    traverse(lib, lua, Walk::All, lib.opt(arg(&args, 0))?)
+}
+
+fn f_traverse_id(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let id = want_id(arg(&args, 0))?;
+    traverse(lib, lua, Walk::Id(id), lib.opt(arg(&args, 1))?)
+}
+
+fn f_traverse_char(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    traverse(lib, lua, Walk::Chars, lib.opt(arg(&args, 0))?)
+}
+
+fn f_traverse_glyph(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    traverse(lib, lua, Walk::Glyphs, lib.opt(arg(&args, 0))?)
+}
+
+fn f_traverse_list(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    traverse(lib, lua, Walk::Lists, lib.opt(arg(&args, 0))?)
+}
+
+// ── glyphs ───────────────────────────────────────────────────────────────
+
+/// `is_char(n [, font])`: the character, when `n` is a glyph that is a
+/// character (subtype below 256) in `font` (any font when none is given);
+/// `false` for a glyph that is not; `nil` for a node that is not a glyph.
+/// With a font given and a glyph of another font, the answer is `false`
+/// and the glyph's font.
+fn f_is_char(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    if c.id != GLYPH {
+        return Ok(Variadic::from_iter([Value::Nil, int(c.id as i64)]));
+    }
+    if protected(c) {
+        return one(Value::Boolean(false));
+    }
+    match arg(&args, 1) {
+        Value::Integer(_) | Value::Number(_) => {
+            let f = want_int(arg(&args, 1))?;
+            match f != 0 && f == c.int("font") {
+                true => one(int(c.int("char"))),
+                false => one(Value::Boolean(false)),
+            }
+        }
+        _ => one(int(c.int("char"))),
+    }
+}
+
+/// `is_glyph(n)`: char and font of a glyph, `false` otherwise.
+fn f_is_glyph(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Boolean(false));
+    };
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    match c.id == GLYPH {
+        true => Ok(Variadic::from_iter([
+            int(c.int("char")),
+            int(c.int("font")),
+        ])),
+        false => Ok(Variadic::from_iter([
+            Value::Boolean(false),
+            int(c.id as i64),
+        ])),
+    }
+}
+
+fn f_uses_font(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Boolean(false));
+    };
+    let font = want_int(arg(&args, 1))?;
+    let a = lib.arena.borrow();
+    for at in a.chain(head, None)? {
+        let c = a.cell(at)?;
+        if c.id == GLYPH && c.int("font") == font {
+            return one(Value::Boolean(true));
+        }
+        if c.id == DISC {
+            for f in ["pre", "post", "replace"] {
+                if let Some(h) = c.node(f) {
+                    for g in a.chain(h, None)? {
+                        let gc = a.cell(g)?;
+                        if gc.id == GLYPH && gc.int("font") == font {
+                            return one(Value::Boolean(true));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    one(Value::Boolean(false))
+}
+
+/// texnodes.h's `is_protected_glyph_node`: a glyph whose subtype has its high
+/// byte set is done, and the font processing passes over it.
+fn protected(c: &Cell) -> bool {
+    c.subtype.unwrap_or(0) & 0xFF00 != 0
+}
+
+/// texnodes.h's `is_simple_character`: a character, not a ligature or ghost.
+fn simple_character(c: &Cell) -> bool {
+    let s = c.subtype.unwrap_or(0);
+    s & 1 != 0 && s & 2 == 0 && s & 4 == 0
+}
+
+/// `protect_node_indeed`: a glyph's subtype gets its high byte set (`| 0xFF00`)
+/// or cleared (`& 0x00FF`); a disc has every glyph of its three lists done.
+fn protect_one(a: &mut Arena, at: usize, on: bool) -> mlua::Result<()> {
+    let c = a.cell_mut(at)?;
+    match c.id {
+        GLYPH => {
+            let s = c.subtype.unwrap_or(0);
+            c.subtype = Some(match on {
+                true => s | 0xFF00,
+                false => s & 0x00FF,
+            });
+        }
+        DISC => {
+            let lists: Vec<usize> = ["replace", "pre", "post"]
+                .iter()
+                .filter_map(|f| c.node(f))
+                .collect();
+            for h in lists {
+                for g in a.chain(h, None)? {
+                    if a.id(g)? == GLYPH {
+                        protect_one(a, g, on)?;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// `protect_glyph(n)` / `protect_glyphs(head [, tail])`, the tail included,
+/// and their `unprotect_` mirrors.
+fn protect(lib: &Lib, args: &Variadic<Value>, all: bool, on: bool) -> mlua::Result<()> {
+    let Some(head) = lib.opt(arg(args, 0))? else {
+        return Ok(());
+    };
+    let tail = if all { lib.opt(arg(args, 1))? } else { None };
+    let mut a = lib.arena.borrow_mut();
+    let nodes = match all {
+        true => {
+            let mut out = Vec::new();
+            for at in a.chain(head, None)? {
+                out.push(at);
+                if Some(at) == tail {
+                    break;
+                }
+            }
+            out
+        }
+        false => vec![head],
+    };
+    for at in nodes {
+        protect_one(&mut a, at, on)?;
+    }
+    Ok(())
+}
+
+fn f_protect_glyph(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    protect(lib, &args, false, true)?;
+    none()
+}
+
+fn f_protect_glyphs(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    protect(lib, &args, true, true)?;
+    none()
+}
+
+fn f_unprotect_glyph(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    protect(lib, &args, false, false)?;
+    none()
+}
+
+fn f_unprotect_glyphs(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    protect(lib, &args, true, false)?;
+    none()
+}
+
+/// `first_glyph(head [, stop])`: the first character glyph.
+fn f_first_glyph(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let stop = lib.opt(arg(&args, 1))?;
+    let found = {
+        let a = lib.arena.borrow();
+        a.chain(head, stop)?.into_iter().find(|at| {
+            a.cell(*at)
+                .is_ok_and(|c| c.id == GLYPH && simple_character(c))
+        })
+    };
+    one(lib.give(lua, found)?)
+}
+
+/// `has_glyph(head)`: the first glyph or glyph-like node (a glyph or a disc).
+fn f_has_glyph(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let found = {
+        let a = lib.arena.borrow();
+        a.chain(head, None)?
+            .into_iter()
+            .find(|at| a.cell(*at).is_ok_and(|c| matches!(c.id, GLYPH | DISC)))
+    };
+    one(lib.give(lua, found)?)
+}
+
+/// `end_of_math(n)`: the next math node that ends a formula.
+fn f_end_of_math(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let found = {
+        let a = lib.arena.borrow();
+        let start = match a.cell(head)?.id == MATH && a.cell(head)?.subtype == Some(1) {
+            true => return one(lib.give(lua, Some(head))?),
+            false => a.next(head)?,
+        };
+        match start {
+            Some(s) => a.chain(s, None)?.into_iter().find(|at| {
+                a.cell(*at)
+                    .is_ok_and(|c| c.id == MATH && c.subtype == Some(1))
+            }),
+            None => None,
+        }
+    };
+    one(lib.give(lua, found)?)
+}
+
+/// `protrusion_skippable(n)`: whether a node is passed over when looking for
+/// a protruding character (§1078-style: everything that is not a glyph,
+/// a disc, a box or a rule is).
+fn f_protrusion_skippable(
+    lib: &Lib,
+    _: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let a = lib.arena.borrow();
+    let c = a.cell(at)?;
+    let skippable = match c.id {
+        GLYPH | DISC | HLIST | VLIST | RULE => false,
+        KERN => c.subtype != Some(0),
+        _ => true,
+    };
+    one(Value::Boolean(skippable))
+}
+
+// ── discretionaries ──────────────────────────────────────────────────────
+
+/// `check_discretionary(n)`: make every `prev` in a disc's three lists agree.
+fn check_disc(a: &mut Arena, at: usize) -> mlua::Result<()> {
+    if a.cell(at)?.id != DISC {
+        return Ok(());
+    }
+    for f in ["pre", "post", "replace"] {
+        if let Some(h) = a.cell(at)?.node(f) {
+            let chain = a.chain(h, None)?;
+            a.set_prev(h, None)?;
+            for w in chain.windows(2) {
+                a.set_prev(w[1], Some(w[0]))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn f_check_discretionary(
+    lib: &Lib,
+    _: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    check_disc(&mut lib.arena.borrow_mut(), at)?;
+    none()
+}
+
+fn f_check_discretionaries(
+    lib: &Lib,
+    _: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    if let Some(head) = lib.opt(arg(&args, 0))? {
+        let mut a = lib.arena.borrow_mut();
+        for at in a.chain(head, None)? {
+            check_disc(&mut a, at)?;
+        }
+    }
+    none()
+}
+
+/// `flatten_discretionaries(head)`: each disc replaced by its `replace`
+/// list; answers the new head and how many were flattened.
+fn f_flatten_discretionaries(
+    lib: &Lib,
+    lua: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    let Some(mut head) = lib.opt(arg(&args, 0))? else {
+        return Ok(Variadic::from_iter([Value::Nil, int(0)]));
+    };
+    let mut count = 0;
+    let mut a = lib.arena.borrow_mut();
+    for at in a.chain(head, None)? {
+        if a.cell(at)?.id != DISC {
+            continue;
+        }
+        count += 1;
+        let (prev, next) = (a.prev(at)?, a.next(at)?);
+        let replace = a.cell(at)?.node("replace");
+        a.cell_mut(at)?.set("replace", None);
+        let (first, last) = match replace {
+            Some(r) => (Some(r), Some(a.tail(r)?)),
+            None => (None, None),
+        };
+        match (first, last) {
+            (Some(f), Some(l)) => {
+                a.link(prev, Some(f))?;
+                if prev.is_none() {
+                    a.set_prev(f, None)?;
+                }
+                a.link(Some(l), next)?;
+                if next.is_none() {
+                    a.set_next(l, None)?;
+                }
+                if head == at {
+                    head = f;
+                }
+            }
+            _ => {
+                a.link(prev, next)?;
+                if let (None, Some(n)) = (prev, next) {
+                    a.set_prev(n, None)?;
+                }
+                if let (Some(p), None) = (prev, next) {
+                    a.set_next(p, None)?;
+                }
+                if head == at {
+                    match next {
+                        Some(n) => head = n,
+                        None => {
+                            a.flush(at)?;
+                            drop(a);
+                            return Ok(Variadic::from_iter([Value::Nil, int(count)]));
+                        }
+                    }
+                }
+            }
+        }
+        a.cell_mut(at)?.prev = None;
+        a.cell_mut(at)?.next = None;
+        a.flush(at)?;
+    }
+    drop(a);
+    Ok(Variadic::from_iter([
+        lib.give(lua, Some(head))?,
+        int(count),
+    ]))
+}
+
+// ── attributes ───────────────────────────────────────────────────────────
+
+fn f_has_attribute(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let number = want_int(arg(&args, 1))?;
+    let want = arg(&args, 2).as_integer();
+    let pairs = lib.arena.borrow().attributes(at)?;
+    match pairs.iter().find(|(n, _)| *n == number) {
+        Some((_, v)) if want.is_none_or(|w| w == *v) => one(int(*v)),
+        _ => one(Value::Nil),
+    }
+}
+
+fn f_get_attribute(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let number = want_int(arg(&args, 1))?;
+    let pairs = lib.arena.borrow().attributes(at)?;
+    match pairs.iter().find(|(n, _)| *n == number) {
+        Some((_, v)) => one(int(*v)),
+        None => one(Value::Nil),
+    }
+}
+
+/// `find_attribute(head, number)`: the value and the first node of the list
+/// that has the attribute.
+fn f_find_attribute(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(head) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    let number = want_int(arg(&args, 1))?;
+    let found = {
+        let a = lib.arena.borrow();
+        let mut found = None;
+        for at in a.chain(head, None)? {
+            if let Some((_, v)) = a.attributes(at)?.into_iter().find(|(n, _)| *n == number) {
+                found = Some((v, at));
+                break;
+            }
+        }
+        found
+    };
+    match found {
+        Some((v, at)) => Ok(Variadic::from_iter([int(v), lib.give(lua, Some(at))?])),
+        None => one(Value::Nil),
+    }
+}
+
+fn f_set_attribute(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let number = want_int(arg(&args, 1))?;
+    let value = want_int(arg(&args, 2))?;
+    let mut a = lib.arena.borrow_mut();
+    let mut pairs = a.attributes(at)?;
+    match pairs.iter_mut().find(|(n, _)| *n == number) {
+        Some(p) => p.1 = value,
+        None => {
+            pairs.push((number, value));
+            pairs.sort_by_key(|p| p.0);
+        }
+    }
+    a.set_attributes(at, &pairs)?;
+    none()
+}
+
+/// `unset_attribute(n, number [, value])`: the old value when it was removed.
+fn f_unset_attribute(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let number = want_int(arg(&args, 1))?;
+    let want = arg(&args, 2).as_integer();
+    let mut a = lib.arena.borrow_mut();
+    let mut pairs = a.attributes(at)?;
+    let Some(i) = pairs
+        .iter()
+        .position(|(n, v)| *n == number && want.is_none_or(|w| w == *v))
+    else {
+        return one(Value::Nil);
+    };
+    let (_, old) = pairs.remove(i);
+    a.set_attributes(at, &pairs)?;
+    one(int(old))
+}
+
+/// `current_attr()`: the attribute list TeX would give a node made now --
+/// every attribute register that is set.
+fn f_current_attr(lib: &Lib, lua: &Lua, _: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let pairs = super::current_attributes();
+    if pairs.is_empty() {
+        return one(Value::Nil);
+    }
+    let head = lib.arena.borrow_mut().make_attributes(&pairs)?;
+    one(lib.give(lua, Some(head))?)
+}
+
+fn f_getattributelist(
+    lib: &Lib,
+    lua: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    match lib.opt(arg(&args, 0))? {
+        Some(at) => one(read(lib, lua, at, "attr")?),
+        None => one(Value::Nil),
+    }
+}
+
+/// `setattributelist(n, list)`: a copy of `list`, which may be another node
+/// whose list is taken, an attribute list, or `true` for the current one.
+fn f_setattributelist(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let pairs = match arg(&args, 1) {
+        Value::Boolean(true) => super::current_attributes(),
+        v => match lib.opt(v)? {
+            None => Vec::new(),
+            Some(src) => {
+                let a = lib.arena.borrow();
+                match a.id(src)? {
+                    ATTRIBUTE_LIST => {
+                        let mut out = Vec::new();
+                        let mut p = a.next(src)?;
+                        while let Some(x) = p {
+                            let c = a.cell(x)?;
+                            out.push((c.int("number"), c.int("value")));
+                            p = c.next;
+                        }
+                        out
+                    }
+                    _ => a.attributes(src)?,
+                }
+            }
+        },
+    };
+    lib.arena.borrow_mut().set_attributes(at, &pairs)?;
+    none()
+}
+
+// ── properties ───────────────────────────────────────────────────────────
+
+fn properties(lib: &Lib, lua: &Lua) -> mlua::Result<Table> {
+    let mut a = lib.arena.borrow_mut();
+    if let Some(k) = &a.properties {
+        return lua.registry_value(k);
+    }
+    let t = lua.create_table()?;
+    a.properties = Some(lua.create_registry_value(t.clone())?);
+    Ok(t)
+}
+
+fn copy_property(lib: &Lib, lua: &Lua, from: usize, to: usize) -> mlua::Result<()> {
+    if !lib.arena.borrow().copy_properties {
+        return Ok(());
+    }
+    let t = properties(lib, lua)?;
+    let v: Value = t.raw_get(from as i64)?;
+    if !v.is_nil() {
+        t.raw_set(to as i64, v)?;
+    }
+    Ok(())
+}
+
+fn f_get_properties_table(
+    lib: &Lib,
+    lua: &Lua,
+    _: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    one(Value::Table(properties(lib, lua)?))
+}
+
+fn f_getproperty(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Some(at) = lib.opt(arg(&args, 0))? else {
+        return one(Value::Nil);
+    };
+    one(properties(lib, lua)?.raw_get(at as i64)?)
+}
+
+fn f_setproperty(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    properties(lib, lua)?.raw_set(at as i64, arg(&args, 1).clone())?;
+    none()
+}
+
+fn f_flush_properties_table(
+    lib: &Lib,
+    lua: &Lua,
+    _: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    let t = lua.create_table()?;
+    lib.arena.borrow_mut().properties = Some(lua.create_registry_value(t)?);
+    none()
+}
+
+/// `set_properties_mode(enabled, copy)`: the table is always there; the
+/// second flag says whether `copy` copies a node's property.
+fn f_set_properties_mode(
+    lib: &Lib,
+    _: &Lua,
+    args: Variadic<Value>,
+) -> mlua::Result<Variadic<Value>> {
+    if let Value::Boolean(c) = arg(&args, 1) {
+        lib.arena.borrow_mut().copy_properties = *c;
+    }
+    none()
+}
+
+// ── packaging ────────────────────────────────────────────────────────────
+
+/// `hpack(head [, w, info, dir])` and `vpack`, over `crate::pack`'s port of
+/// §649-§667 and §668-§679, answering the box and its badness. The
+/// tolerances are INITEX's: they decide only what TeX would complain about,
+/// and `node.hpack` reports nothing either. The box's head IS the list handed
+/// in.
+fn pack(
+    lib: &Lib,
+    lua: &Lua,
+    args: &Variadic<Value>,
+    vertical: bool,
+) -> mlua::Result<Variadic<Value>> {
+    let head = lib.opt(arg(args, 0))?;
+    let w = match arg(args, 1) {
+        Value::Nil => 0,
+        v => want_int(v)?,
+    };
+    let spec = match arg(args, 2) {
+        Value::String(s) => match &*s.to_str()? {
             "exactly" => crate::pack::Spec::Exactly(w),
             "additional" => crate::pack::Spec::Additional(w),
             other => {
                 return Err(mlua::Error::runtime(format!(
-                    "node.{}pack's third argument is 'additional' or 'exactly', not '{other}'",
-                    match vertical {
-                        true => "v",
-                        false => "h",
-                    }
+                    "wrong mode in {}pack: '{other}'",
+                    if vertical { "v" } else { "h" }
                 )))
             }
         },
-        _ => crate::pack::NATURAL,
+        _ => crate::pack::Spec::Additional(w),
     };
-    if let Some(v) = args.get(3) {
-        if !v.is_nil() {
-            return Err(mlua::Error::runtime(
-                "node.hpack's direction argument is a LuaTeX addition; texrs's \
-                 boxes are TeX82's, left to right",
-            ));
-        }
-    }
-    let list = {
-        let a = arena.borrow();
-        list_to_engine(&a, head)?
+    let list = match head {
+        Some(h) => list_to_engine(&lib.arena.borrow(), h)?,
+        None => Vec::new(),
     };
     let tol = crate::pack::Tolerances::default();
     let packed = match vertical {
@@ -1785,72 +2943,66 @@ fn pack(
     };
     let b = &packed.node;
     let at = {
-        let mut a = arena.borrow_mut();
-        let at = a.make(
-            match vertical {
-                true => VLIST,
-                false => HLIST,
-            },
-            0,
-        );
-        let cell = a.get_mut(at)?;
-        cell.nums.insert("width", b.width);
-        cell.nums.insert("height", b.height);
-        cell.nums.insert("depth", b.depth);
-        cell.nums.insert("glue_sign", glue_sign_number(b.glue_sign));
-        cell.nums
-            .insert("glue_order", to_luatex_order(b.glue_order));
-        cell.glue_set = b.glue_set;
-        // "h is the original node list n": the box's head IS the list handed
-        // in, not a copy of it.
-        cell.lists.insert("head", head);
+        let mut a = lib.arena.borrow_mut();
+        let at = a.make(if vertical { VLIST } else { HLIST }, Some(0));
+        let cell = a.cell_mut(at)?;
+        cell.set("width", Some(FV::I(b.width)));
+        cell.set("height", Some(FV::I(b.height)));
+        cell.set("depth", Some(FV::I(b.depth)));
+        cell.set("glue_sign", Some(FV::I(glue_sign_number(b.glue_sign))));
+        cell.set("glue_order", Some(FV::I(to_luatex_order(b.glue_order))));
+        cell.set("glue_set", Some(FV::F(b.glue_set)));
+        cell.set("head", head.map(FV::N));
         at
     };
     Ok(Variadic::from_iter([
-        Value::UserData(lua.create_userdata(NodeRef {
-            arena: Rc::clone(arena),
-            at,
-        })?),
-        Value::Integer(packed.badness),
+        lib.give(lua, Some(at))?,
+        int(packed.badness),
     ]))
 }
 
-/// `node.dimensions`: the natural size of a list, or the size it takes at a
-/// given glue setting.
-///
-/// Both forms the manual gives, and the four-argument one is the reason this is
-/// not just `hpack(...).width`: it asks what a list measures when its glue is
-/// already set, which is §625's arithmetic rather than §649's.
-fn dimensions(arena: &Rc<RefCell<Arena>>, args: &[Value]) -> mlua::Result<Variadic<Value>> {
-    let setting = matches!(args.first(), Some(v) if v.as_number().is_some());
+fn f_hpack(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    pack(lib, lua, &args, false)
+}
+
+fn f_vpack(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    pack(lib, lua, &args, true)
+}
+
+/// `dimensions([glue_set, glue_sign, glue_order,] head [, stop])`: what a list
+/// measures, natural or with its glue set as a parent box set it (§625's
+/// arithmetic rather than §649's).
+fn f_dimensions(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let setting = matches!(
+        args.first(),
+        Some(Value::Number(_)) | Some(Value::Integer(_))
+    ) && matches!(lib.face, Face::User)
+        || (matches!(lib.face, Face::Direct) && args.len() >= 4);
     let (head, stop, set) = match setting {
         true => (
-            as_node(args.get(3).unwrap_or(&Value::Nil))?,
-            match args.get(4) {
-                Some(v) => as_node_opt(v)?,
-                None => None,
-            },
+            lib.opt(arg(&args, 3))?,
+            lib.opt(arg(&args, 4))?,
             Some((
-                args[0].as_number().unwrap_or(0.0),
-                want_int(args.get(1).unwrap_or(&Value::Nil))?,
-                want_int(args.get(2).unwrap_or(&Value::Nil))?,
+                arg(&args, 0)
+                    .as_number()
+                    .or_else(|| arg(&args, 0).as_integer().map(|n| n as f64))
+                    .unwrap_or(0.0),
+                want_int(arg(&args, 1)).unwrap_or(0),
+                want_int(arg(&args, 2)).unwrap_or(0),
             )),
         ),
-        false => (
-            as_node(args.first().unwrap_or(&Value::Nil))?,
-            match args.get(1) {
-                Some(v) => as_node_opt(v)?,
-                None => None,
-            },
-            None,
-        ),
+        false => (lib.opt(arg(&args, 0))?, lib.opt(arg(&args, 1))?, None),
+    };
+    let Some(head) = head else {
+        return Ok(Variadic::from_iter([int(0), int(0), int(0)]));
     };
     let list = {
-        let a = arena.borrow();
-        a.chain(head, stop)?
-            .into_iter()
-            .map(|at| to_engine(&a, at))
-            .collect::<mlua::Result<Vec<_>>>()?
+        let a = lib.arena.borrow();
+        let mut out = Vec::new();
+        for at in a.chain(head, stop)? {
+            out.extend(to_engine(&a, at)?);
+        }
+        out
     };
     let packed = crate::pack::hpack(
         list,
@@ -1860,8 +3012,6 @@ fn dimensions(arena: &Rc<RefCell<Arena>>, args: &[Value]) -> mlua::Result<Variad
     );
     let (mut w, h, d) = (packed.node.width, packed.node.height, packed.node.depth);
     if let Some((ratio, sign, order)) = set {
-        // The list, re-measured with the glue set the way the caller says the
-        // parent box set it: §625's setter over the same nodes.
         let framing = BoxNode {
             glue_set: ratio,
             glue_sign: glue_sign(sign),
@@ -1884,15 +3034,186 @@ fn dimensions(arena: &Rc<RefCell<Arena>>, args: &[Value]) -> mlua::Result<Variad
             })
             .sum();
     }
-    Ok(Variadic::from_iter([w, h, d].map(Value::Integer)))
+    Ok(Variadic::from_iter([w, h, d].map(int)))
 }
 
-/// The subtype names LuaTeX gives a type, read out of `node.subtypes` in
-/// luatex 1.24.0. Only the types `node.new` will make: for anything else the
-/// answer would be a list of names for a node that cannot exist here.
-fn subtypes_of(id: u8) -> &'static [(i64, &'static str)] {
-    match id {
-        GLUE => &[
+/// `rangedimensions(parent, first [, last])`: `dimensions` over part of a box
+/// with the box's own glue setting.
+fn f_rangedimensions(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let parent = lib.want(args.first())?;
+    let (gs, sign, order) = {
+        let a = lib.arena.borrow();
+        let c = a.cell(parent)?;
+        if !matches!(c.id, HLIST | VLIST) {
+            return Err(mlua::Error::runtime(
+                "rangedimensions wants a parent box first",
+            ));
+        }
+        let gs = match c.get("glue_set") {
+            Some(FV::F(f)) => *f,
+            _ => 0.0,
+        };
+        (gs, c.int("glue_sign"), c.int("glue_order"))
+    };
+    let mut call: Vec<Value> = vec![Value::Number(gs), int(sign), int(order)];
+    call.push(arg(&args, 1).clone());
+    call.push(arg(&args, 2).clone());
+    let user = Lib {
+        arena: Rc::clone(&lib.arena),
+        face: Face::User,
+    };
+    f_dimensions(&user, lua, Variadic::from_iter(call))
+}
+
+/// `effective_glue(glue, parent)`: the width a glue takes in its packed box.
+fn f_effective_glue(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let g = lib.want(args.first())?;
+    let parent = lib.want(args.get(1))?;
+    let a = lib.arena.borrow();
+    let gc = a.cell(g)?;
+    if gc.id != GLUE {
+        return one(int(0));
+    }
+    let pc = a.cell(parent)?;
+    let framing = BoxNode {
+        glue_set: match pc.get("glue_set") {
+            Some(FV::F(f)) => *f,
+            _ => 0.0,
+        },
+        glue_sign: glue_sign(pc.int("glue_sign")),
+        glue_order: from_luatex_order(pc.int("glue_order"))?,
+        ..BoxNode::null()
+    };
+    let spec = Glue {
+        natural: gc.int("width"),
+        stretch: gc.int("stretch"),
+        stretch_order: from_luatex_order(gc.int("stretch_order"))?,
+        shrink: gc.int("shrink"),
+        shrink_order: from_luatex_order(gc.int("shrink_order"))?,
+    };
+    let mut setter = crate::pack::Setter::new(&framing);
+    // A lua_Number in lnodelib.c, the glue being set as a float.
+    one(Value::Number(setter.glue(&spec) as f64))
+}
+
+// ── the vocabulary ───────────────────────────────────────────────────────
+
+fn f_types(_: &Lib, lua: &Lua, _: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let t = lua.create_table()?;
+    for (id, name) in TYPES {
+        t.raw_set(*id as i64, *name)?;
+    }
+    one(Value::Table(t))
+}
+
+fn f_whatsits(_: &Lib, lua: &Lua, _: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let t = lua.create_table()?;
+    for (id, name) in WHATSITS {
+        t.raw_set(*id, *name)?;
+    }
+    one(Value::Table(t))
+}
+
+/// `node.subtype(name)`: a whatsit's subtype number, by name.
+fn f_subtype(_: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match arg(&args, 0) {
+        Value::String(s) => one(whatsit_id(&s.to_str()?).map(int).unwrap_or(Value::Nil)),
+        _ => one(Value::Nil),
+    }
+}
+
+/// `node.fields(id [, subtype])`: field names by luatex's index.
+fn f_fields(_: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let id = want_id(arg(&args, 0))?;
+    let sub = match (id, arg(&args, 1)) {
+        (WHATSIT, Value::String(s)) => whatsit_id(&s.to_str()?),
+        (WHATSIT, v) => v.as_integer(),
+        _ => None,
+    };
+    if id == WHATSIT && !WHATSITS.iter().any(|(n, _)| Some(*n) == sub) {
+        return Err(mlua::Error::runtime("invalid whatsit type id"));
+    }
+    let list = names(id, sub);
+    let base = match list.first() {
+        Some(&"prev") => -1,
+        _ => 0,
+    };
+    let t = lua.create_table()?;
+    for (i, n) in list.iter().enumerate() {
+        t.raw_set(base + i as i64, *n)?;
+    }
+    one(Value::Table(t))
+}
+
+/// `node.subtypes(id or name)`: subtype number to name, luatex 1.24.0's.
+fn subtypes_of(name: &str) -> Option<&'static [(i64, &'static str)]> {
+    const BOX: &[(i64, &str)] = &[
+        (0, "unknown"),
+        (1, "line"),
+        (2, "box"),
+        (3, "indent"),
+        (4, "alignment"),
+        (5, "cell"),
+        (6, "equation"),
+        (7, "equationnumber"),
+        (8, "math"),
+        (9, "mathchar"),
+        (10, "hextensible"),
+        (11, "vextensible"),
+        (12, "hdelimiter"),
+        (13, "vdelimiter"),
+        (14, "overdelimiter"),
+        (15, "underdelimiter"),
+        (16, "numerator"),
+        (17, "denominator"),
+        (18, "limits"),
+        (19, "fraction"),
+        (20, "nucleus"),
+        (21, "sup"),
+        (22, "sub"),
+        (23, "degree"),
+        (24, "scripts"),
+        (25, "over"),
+        (26, "under"),
+        (27, "accent"),
+        (28, "radical"),
+    ];
+    const STYLE: &[(i64, &str)] = &[
+        (0, "origin"),
+        (1, "page"),
+        (2, "always"),
+        (3, "raw"),
+        (4, "text"),
+        (5, "font"),
+        (6, "special"),
+    ];
+    Some(match name {
+        "hlist" | "vlist" => BOX,
+        "rule" => &[
+            (0, "normal"),
+            (1, "box"),
+            (2, "image"),
+            (3, "empty"),
+            (4, "user"),
+            (5, "over"),
+            (6, "under"),
+            (7, "fraction"),
+            (8, "radical"),
+            (9, "outline"),
+        ],
+        "adjust" => &[(0, "normal"), (1, "pre")],
+        "boundary" => &[(0, "cancel"), (1, "user"), (2, "protrusion"), (3, "word")],
+        "disc" => &[
+            (0, "discretionary"),
+            (1, "explicit"),
+            (2, "automatic"),
+            (3, "regular"),
+            (4, "first"),
+            (5, "second"),
+        ],
+        "dir" => &[(0, "normal"), (1, "cancel")],
+        "math" => &[(0, "beginmath"), (1, "endmath")],
+        "glue" => &[
             (0, "userskip"),
             (1, "lineskip"),
             (2, "baselineskip"),
@@ -1920,21 +3241,13 @@ fn subtypes_of(id: u8) -> &'static [(i64, &'static str)] {
             (102, "xleaders"),
             (103, "gleaders"),
         ],
-        KERN => &[
+        "kern" => &[
             (0, "fontkern"),
             (1, "userkern"),
             (2, "accentkern"),
             (3, "italiccorrection"),
         ],
-        GLYPH => &[
-            (0, "unset"),
-            (1, "character"),
-            (2, "ligature"),
-            (4, "ghost"),
-            (8, "left"),
-            (16, "right"),
-        ],
-        PENALTY => &[
+        "penalty" => &[
             (0, "userpenalty"),
             (1, "linebreakpenalty"),
             (2, "linepenalty"),
@@ -1945,56 +3258,399 @@ fn subtypes_of(id: u8) -> &'static [(i64, &'static str)] {
             (7, "afterdisplaypenalty"),
             (8, "equationnumberpenalty"),
         ],
-        RULE => &[
+        "style" | "choice" => STYLE,
+        "noad" => &[
+            (0, "ord"),
+            (1, "opdisplaylimits"),
+            (2, "oplimits"),
+            (3, "opnolimits"),
+            (4, "bin"),
+            (5, "rel"),
+            (6, "open"),
+            (7, "close"),
+            (8, "punct"),
+            (9, "inner"),
+            (10, "under"),
+            (11, "over"),
+            (12, "vcenter"),
+        ],
+        "radical" => &[
+            (0, "radical"),
+            (1, "uradical"),
+            (2, "uroot"),
+            (3, "uunderdelimiter"),
+            (4, "uoverdelimiter"),
+            (5, "udelimiterunder"),
+            (6, "udelimiterover"),
+        ],
+        "accent" => &[
+            (0, "bothflexible"),
+            (1, "fixedtop"),
+            (2, "fixedbottom"),
+            (3, "fixedboth"),
+        ],
+        "fence" => &[
+            (0, "unset"),
+            (1, "left"),
+            (2, "middle"),
+            (3, "right"),
+            (4, "no"),
+        ],
+        "margin_kern" => &[(0, "left"), (1, "right")],
+        "glyph" => &[
+            (0, "unset"),
+            (1, "character"),
+            (2, "ligature"),
+            (4, "ghost"),
+            (8, "left"),
+            (16, "right"),
+        ],
+        "glue_spec" | "fill" => &[
             (0, "normal"),
-            (1, "box"),
-            (2, "image"),
-            (3, "empty"),
-            (4, "user"),
-            (5, "over"),
-            (6, "under"),
-            (7, "fraction"),
-            (8, "radical"),
-            (9, "outline"),
+            (1, "fi"),
+            (2, "fil"),
+            (3, "fill"),
+            (4, "filll"),
         ],
-        MATH => &[(0, "beginmath"), (1, "endmath")],
-        DISC => &[
-            (0, "discretionary"),
-            (1, "explicit"),
-            (2, "automatic"),
-            (3, "regular"),
-            (4, "first"),
-            (5, "second"),
+        "leader" => &[
+            (100, "leaders"),
+            (101, "cleaders"),
+            (102, "xleaders"),
+            (103, "gleaders"),
         ],
-        _ => &[],
+        _ => return None,
+    })
+}
+
+fn f_subtypes(_: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let name = match arg(&args, 0) {
+        Value::String(s) => s.to_str()?.to_string(),
+        v => match v
+            .as_integer()
+            .and_then(|n| u8::try_from(n).ok())
+            .and_then(type_name)
+        {
+            Some(n) => n.to_string(),
+            None => return one(Value::Nil),
+        },
+    };
+    let Some(list) = subtypes_of(&name) else {
+        return one(Value::Nil);
+    };
+    let t = lua.create_table()?;
+    for (n, s) in list {
+        t.raw_set(*n, *s)?;
+    }
+    one(Value::Table(t))
+}
+
+/// `node.values(name)`, luatex 1.24.0's tables.
+fn f_values(_: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let Value::String(s) = arg(&args, 0) else {
+        return one(Value::Nil);
+    };
+    let list: &[&str] = match &*s.to_str()? {
+        "dir" | "direction" => &["TLT", "TRT", "LTL", "RTT"],
+        "glue" => &["normal", "fi", "fil", "fill", "filll"],
+        "pdf_literal" => &["origin", "page", "always", "raw", "text", "font", "special"],
+        "pdf_action" => &["page", "goto", "thread", "user"],
+        "pdf_window" => &["unset", "new", "nonew"],
+        "color_stack" => &["set", "push", "pop", "current"],
+        "pagestate" => &["empty", "box_there", "inserts_only"],
+        _ => return one(Value::Nil),
+    };
+    let t = lua.create_table()?;
+    for (i, v) in list.iter().enumerate() {
+        t.raw_set(i as i64, *v)?;
+    }
+    one(Value::Table(t))
+}
+
+fn f_is_node(_lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    // "returns a number (the internal index of the node)" or false.
+    match arg(&args, 0) {
+        Value::UserData(u) => match u.borrow::<NodeRef>() {
+            Ok(n) => one(int(n.at as i64)),
+            Err(_) => one(Value::Boolean(false)),
+        },
+        _ => one(Value::Boolean(false)),
     }
 }
 
-/// The glue functions want a glue node and say so rather than reading zeros off
-/// a penalty.
-fn want_glue(cell: &Cell) -> mlua::Result<()> {
-    match cell.id == GLUE {
-        true => Ok(()),
-        false => Err(mlua::Error::runtime(format!(
-            "expected a glue node, got a {}",
-            type_name(cell.id).unwrap_or("?")
-        ))),
+fn f_is_direct(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match arg(&args, 0) {
+        Value::Integer(n) if lib.arena.borrow().alive(*n as usize) => one(int(*n)),
+        _ => one(Value::Boolean(false)),
     }
 }
 
-// ── the glue_spec half of the register interface ─────────────────────────
+fn f_todirect(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    match lib.opt(arg(&args, 0))? {
+        Some(at) => one(int(at as i64)),
+        None => one(Value::Nil),
+    }
+}
 
-/// A `glue_spec` node holding a `\skip` register's five numbers.
-///
-/// The LuaTeX manual: "The skip registers accept and return `glue_spec`
-/// userdata node objects." That is `tex.skip[n]`, `tex.getskip` and
-/// `tex.setskip`, and it is the whole difference between them and
-/// `tex.getglue`, which is the same registers as bare numbers. It refused here
-/// while there was no node interface; a `glue_spec` is a node this arena can
-/// carry faithfully — five integers and nothing else — so it does not any more.
-///
-/// The orders are the caller's: they arrive already in LuaTeX's `fi`-based
-/// numbering from [`super::glue_get`].
+fn f_tonode(lib: &Lib, lua: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.opt(arg(&args, 0))?;
+    one(lib.user().give(lua, at)?)
+}
+
+fn f_tostring(lib: &Lib, _: &Lua, args: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let at = lib.want(args.first())?;
+    let s = NodeRef {
+        arena: Rc::clone(&lib.arena),
+        at,
+    }
+    .show()?;
+    one(Value::String(
+        super::with_lua(|l| l.create_string(s))
+            .transpose()?
+            .ok_or_else(|| mlua::Error::runtime("no Lua state"))?,
+    ))
+}
+
+/// `usedlist()`: every node alive, as one list.
+fn f_usedlist(lib: &Lib, lua: &Lua, _: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    let alive: Vec<usize> = {
+        let a = lib.arena.borrow();
+        (1..=a.cells.len()).filter(|i| a.alive(*i)).collect()
+    };
+    let copies: Vec<usize> = {
+        let mut a = lib.arena.borrow_mut();
+        let mut out = Vec::new();
+        for at in alive {
+            let id = a.id(at)?;
+            out.push(a.make(id, Some(0)));
+        }
+        for w in out.windows(2) {
+            a.link(Some(w[0]), Some(w[1]))?;
+        }
+        out
+    };
+    one(lib.give(lua, copies.first().copied())?)
+}
+
+fn f_family_font(_: &Lib, _: &Lua, _: Variadic<Value>) -> mlua::Result<Variadic<Value>> {
+    // `\textfont n` and its siblings: texrs's maths fonts are crate::math's,
+    // not numbered font identifiers.
+    Err(mlua::Error::runtime(
+        "node.family_font reads \\textfont and its siblings, which texrs's maths does not keep as font numbers",
+    ))
+}
+
+/// The functions that reach TeX's own state -- the current list, the
+/// box registers, a font's lig/kern program, the hyphenation patterns, the
+/// math machinery -- and what each one waits on.
+fn refuse(
+    name: &'static str,
+    why: &'static str,
+) -> impl Fn(&Lua, Variadic<Value>) -> mlua::Result<()> {
+    move |_, _| Err(mlua::Error::runtime(format!("node.{name}: {why}")))
+}
+
+const WAITING: &[(&str, &str)] = &[
+    ("write", "appending to the list TeX is building is the stomach's, and it is not reachable while a chunk is lowered"),
+    ("last_node", "taking the last node of the list TeX is building is the stomach's, and it is not reachable while a chunk is lowered"),
+    ("ligaturing", "LuaTeX's handle_ligaturing over a font's ligature tables is not ported yet"),
+    ("kerning", "LuaTeX's handle_kerning over a font's kern tables is not ported yet"),
+    ("hyphenating", "LuaTeX's hyphenate over a list, with Liang's patterns and \\hjcode, is not ported yet"),
+    ("mlist_to_hlist", "crate::math converts mlists of its own, not noad nodes"),
+    ("make_extensible", "building an extensible from a font's parts is crate::math's, not the node library's"),
+    ("prepend_prevdepth", "\\prevdepth belongs to the list TeX is building"),
+    ("fix_node_lists", "repairing a list's back pointers TeX-side has no list here to repair"),
+    ("getbox", "the box registers are the stomach's"),
+    ("setbox", "the box registers are the stomach's"),
+    ("get_synctex_fields", "texrs writes no SyncTeX"),
+    ("set_synctex_fields", "texrs writes no SyncTeX"),
+];
+
+/// Every function of each face, by luatex 1.24.0's key lists.
+const COMMON: &[(&str, Fun)] = &[
+    ("check_discretionaries", f_check_discretionaries),
+    ("check_discretionary", f_check_discretionary),
+    ("copy", f_copy),
+    ("copy_list", f_copy_list),
+    ("count", f_count),
+    ("current_attr", f_current_attr),
+    ("dimensions", f_dimensions),
+    ("effective_glue", f_effective_glue),
+    ("end_of_math", f_end_of_math),
+    ("find_attribute", f_find_attribute),
+    ("first_glyph", f_first_glyph),
+    ("flatten_discretionaries", f_flatten_discretionaries),
+    ("flush_list", f_flush_list),
+    ("flush_node", f_flush_node),
+    ("flush_properties_table", f_flush_properties_table),
+    ("free", f_free),
+    ("get_attribute", f_get_attribute),
+    ("get_properties_table", f_get_properties_table),
+    ("getboth", f_getboth),
+    ("getchar", f_getchar),
+    ("getdisc", f_getdisc),
+    ("getfield", f_getfield),
+    ("getfont", f_getfont),
+    ("getglue", f_getglue),
+    ("getid", f_getid),
+    ("getleader", f_getleader),
+    ("getlist", f_getlist),
+    ("getnext", f_next),
+    ("getprev", f_prev),
+    ("getproperty", f_getproperty),
+    ("getsubtype", f_getsubtype),
+    ("getwhd", f_getwhd),
+    ("has_attribute", f_has_attribute),
+    ("has_field", f_has_field),
+    ("has_glyph", f_has_glyph),
+    ("hpack", f_hpack),
+    ("insert_after", f_insert_after),
+    ("insert_before", f_insert_before),
+    ("is_char", f_is_char),
+    ("is_glyph", f_is_glyph),
+    ("is_node", f_is_node),
+    ("is_zero_glue", f_is_zero_glue),
+    ("length", f_length),
+    ("protect_glyph", f_protect_glyph),
+    ("protect_glyphs", f_protect_glyphs),
+    ("protrusion_skippable", f_protrusion_skippable),
+    ("rangedimensions", f_rangedimensions),
+    ("remove", f_remove),
+    ("set_attribute", f_set_attribute),
+    ("set_properties_mode", f_set_properties_mode),
+    ("setfield", f_setfield),
+    ("setglue", f_setglue),
+    ("setproperty", f_setproperty),
+    ("slide", f_slide),
+    ("tail", f_tail),
+    ("tostring", f_tostring),
+    ("traverse", f_traverse),
+    ("traverse_char", f_traverse_char),
+    ("traverse_glyph", f_traverse_glyph),
+    ("traverse_id", f_traverse_id),
+    ("traverse_list", f_traverse_list),
+    ("unprotect_glyph", f_unprotect_glyph),
+    ("unprotect_glyphs", f_unprotect_glyphs),
+    ("unset_attribute", f_unset_attribute),
+    ("usedlist", f_usedlist),
+    ("uses_font", f_uses_font),
+    ("vpack", f_vpack),
+    ("new", f_new),
+];
+
+/// The userdata face's own: the vocabulary and the field-style spellings.
+const USER_ONLY: &[(&str, Fun)] = &[
+    ("family_font", f_family_font),
+    ("fields", f_fields),
+    ("id", f_id),
+    ("next", f_next),
+    ("prev", f_prev),
+    ("subtype", f_subtype),
+    ("subtypes", f_subtypes),
+    ("type", f_type),
+    ("types", f_types),
+    ("values", f_values),
+    ("whatsits", f_whatsits),
+];
+
+/// The direct face's own accessors.
+const DIRECT_ONLY: &[(&str, Fun)] = &[
+    ("getattributelist", f_getattributelist),
+    ("getcomponents", f_getcomponents),
+    ("getdata", f_getdata),
+    ("getdepth", f_getdepth),
+    ("getdir", f_getdir),
+    ("getdirection", f_getdirection),
+    ("getexpansion", f_getexpansion),
+    ("getfam", f_getfam),
+    ("getheight", f_getheight),
+    ("getkern", f_getkern),
+    ("getlang", f_getlang),
+    ("getnucleus", f_getnucleus),
+    ("getoffsets", f_getoffsets),
+    ("getpenalty", f_getpenalty),
+    ("getshift", f_getshift),
+    ("getsub", f_getsub),
+    ("getsup", f_getsup),
+    ("getwidth", f_getwidth),
+    ("is_direct", f_is_direct),
+    ("setattributelist", f_setattributelist),
+    ("setboth", f_setboth),
+    ("setchar", f_setchar),
+    ("setcomponents", f_setcomponents),
+    ("setdata", f_setdata),
+    ("setdepth", f_setdepth),
+    ("setdir", f_setdir),
+    ("setdirection", f_setdirection),
+    ("setdisc", f_setdisc),
+    ("setexpansion", f_setexpansion),
+    ("setfam", f_setfam),
+    ("setfont", f_setfont),
+    ("setheight", f_setheight),
+    ("setkern", f_setkern),
+    ("setlang", f_setlang),
+    ("setleader", f_setleader),
+    ("setlink", f_setlink),
+    ("setlist", f_setlist),
+    ("setnext", f_setnext),
+    ("setnucleus", f_setnucleus),
+    ("setoffsets", f_setoffsets),
+    ("setpenalty", f_setpenalty),
+    ("setprev", f_setprev),
+    ("setshift", f_setshift),
+    ("setsplit", f_setsplit),
+    ("setsub", f_setsub),
+    ("setsubtype", f_setsubtype),
+    ("setsup", f_setsup),
+    ("setwhd", f_setwhd),
+    ("setwidth", f_setwidth),
+    ("todirect", f_todirect),
+    ("tonode", f_tonode),
+];
+
+/// Build the `node` table, with `node.direct` inside it.
+pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<Arena>>) -> mlua::Result<Table> {
+    let node = lua.create_table()?;
+    let direct = lua.create_table()?;
+    let register = |t: &Table, face: Face, list: &[(&'static str, Fun)]| -> mlua::Result<()> {
+        for (name, f) in list {
+            let lib = Lib {
+                arena: Rc::clone(arena),
+                face,
+            };
+            let f = *f;
+            t.set(
+                *name,
+                lua.create_function(move |lua, args: Variadic<Value>| f(&lib, lua, args))?,
+            )?;
+        }
+        Ok(())
+    };
+    register(&node, Face::User, COMMON)?;
+    register(&node, Face::User, USER_ONLY)?;
+    register(&direct, Face::Direct, COMMON)?;
+    register(&direct, Face::Direct, DIRECT_ONLY)?;
+    // `todirect`/`tonode` exist on the userdata face as well? No: luatex has
+    // them on `node.direct` only. The direct face has the userdata face's
+    // conversion helpers for nil-safe use, and nothing else of it.
+    for (name, why) in WAITING {
+        let f = lua.create_function(refuse(name, why))?;
+        match *name {
+            "getbox" | "setbox" | "get_synctex_fields" | "set_synctex_fields" => {
+                direct.set(*name, f)?
+            }
+            "mlist_to_hlist" | "make_extensible" | "fix_node_lists" => node.set(*name, f)?,
+            _ => {
+                node.set(*name, f.clone())?;
+                direct.set(*name, f)?;
+            }
+        }
+    }
+    node.set("direct", direct)?;
+    Ok(node)
+}
+
+/// A `glue_spec` node holding a register's five numbers, the orders already
+/// in LuaTeX's numbering: `tex.skip[n]`, `tex.getskip`, `token.scan_glue`.
 pub(super) fn spec_node(
     lua: &Lua,
     arena: &Rc<RefCell<Arena>>,
@@ -2002,8 +3658,8 @@ pub(super) fn spec_node(
 ) -> mlua::Result<Value> {
     let at = {
         let mut a = arena.borrow_mut();
-        let at = a.make(GLUE_SPEC, 0);
-        let cell = a.get_mut(at)?;
+        let at = a.make(GLUE_SPEC, None);
+        let cell = a.cell_mut(at)?;
         for (name, v) in [
             ("width", glue.0),
             ("stretch", glue.1),
@@ -2011,14 +3667,7 @@ pub(super) fn spec_node(
             ("stretch_order", glue.3),
             ("shrink_order", glue.4),
         ] {
-            cell.nums.insert(
-                fields_of(GLUE_SPEC)
-                    .iter()
-                    .find(|f| f.name == name)
-                    .expect("glue_spec field")
-                    .name,
-                v,
-            );
+            cell.set(name, Some(FV::I(v)));
         }
         at
     };
@@ -2028,26 +3677,112 @@ pub(super) fn spec_node(
     })?))
 }
 
-/// The five numbers a `glue_spec` (or a `glue` node, which carries the same
-/// five) holds, for a register write.
+/// The five numbers a `glue_spec` (or a glue node) holds, for a register write.
 pub(super) fn spec_values(
     arena: &Rc<RefCell<Arena>>,
     v: &Value,
 ) -> mlua::Result<(i64, i64, i64, i64, i64)> {
-    let at = as_node(v)?;
+    let lib = Lib {
+        arena: Rc::clone(arena),
+        face: Face::User,
+    };
+    let at = lib.want(Some(v))?;
     let a = arena.borrow();
-    let cell = a.get(at)?;
+    let cell = a.cell(at)?;
     if cell.id != GLUE_SPEC && cell.id != GLUE {
-        return Err(mlua::Error::runtime(format!(
-            "a \\skip register is set from a glue_spec node, not from a {}",
-            type_name(cell.id).unwrap_or("?")
-        )));
+        return Err(mlua::Error::runtime("glue_spec expected"));
     }
     Ok((
-        cell.num("width"),
-        cell.num("stretch"),
-        cell.num("shrink"),
-        cell.num("stretch_order"),
-        cell.num("shrink_order"),
+        cell.int("width"),
+        cell.int("stretch"),
+        cell.int("shrink"),
+        cell.int("stretch_order"),
+        cell.int("shrink_order"),
     ))
+}
+
+/// The last node of the list at `head`.
+pub(super) fn tail_of(arena: &Arena, head: usize) -> mlua::Result<usize> {
+    arena.tail(head)
+}
+
+/// The first node of the list `at` is in, following `prev`.
+pub(super) fn first_of(arena: &Arena, at: usize) -> mlua::Result<usize> {
+    let mut first = at;
+    let mut steps = 0;
+    while let Some(p) = arena.prev(first)? {
+        first = p;
+        steps += 1;
+        if steps > WALK_LIMIT {
+            return Err(mlua::Error::runtime("this node list has no beginning"));
+        }
+    }
+    Ok(first)
+}
+
+/// A node handed to Lua as userdata, for a callback's argument.
+pub(super) fn handle(
+    lua: &Lua,
+    arena: &Rc<RefCell<Arena>>,
+    at: Option<usize>,
+) -> mlua::Result<Value> {
+    Lib {
+        arena: Rc::clone(arena),
+        face: Face::User,
+    }
+    .give(lua, at)
+}
+
+/// The index a callback's answer stands for.
+pub(super) fn index_of(arena: &Rc<RefCell<Arena>>, v: &Value) -> mlua::Result<Option<usize>> {
+    Lib {
+        arena: Rc::clone(arena),
+        face: Face::User,
+    }
+    .opt(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_field_tables_are_luatexs() {
+        // node.fields(29) in luatex 1.24.0, from index -1.
+        let g = names(GLYPH, Some(0));
+        assert_eq!(g[0], "prev");
+        assert_eq!(g.iter().position(|n| *n == "char"), Some(5)); // index 4
+        assert_eq!(kind(GLYPH, Some(0), "left"), Some(K::I(1)));
+        assert_eq!(
+            kind(RULE, Some(0), "width"),
+            Some(K::I(crate::node::NULL_FLAG))
+        );
+        assert_eq!(kind(GLUE_SPEC, None, "attr"), None);
+        assert_eq!(
+            names(WHATSIT, Some(16)),
+            &["prev", "next", "id", "subtype", "attr", "mode", "data"]
+        );
+    }
+
+    #[test]
+    fn a_disc_crosses_to_the_engine_with_its_replacement_after_it() {
+        let mut a = Arena::default();
+        let list = vec![
+            ENode::Disc(DiscNode {
+                pre_break: vec![ENode::Penalty(1)],
+                post_break: vec![],
+                replace_count: 2,
+            }),
+            ENode::Penalty(2),
+            ENode::Penalty(3),
+            ENode::Penalty(4),
+        ];
+        let head = from_engine(&mut a, &list).unwrap().unwrap();
+        // The disc and the penalty after its replacement: two nodes at top.
+        assert_eq!(a.chain(head, None).unwrap().len(), 2);
+        let back = list_to_engine(&a, head).unwrap();
+        assert_eq!(back.len(), 4);
+        assert!(matches!(&back[0], ENode::Disc(d) if d.replace_count == 2));
+        assert!(matches!(back[3], ENode::Penalty(4)));
+    }
 }

@@ -350,12 +350,23 @@ is `tex`, which has no `\directlua` to compare against.
 The state `src/lua` builds is compared against `luatex` 1.24.0 by running the
 same chunk in both (`tests/lua.rs`). Where they still differ:
 
-- **No engine hook calls a callback.** `callback.register`, `callback.find`
-  and `callback.list` keep LuaTeX's registry and answer its slot numbers, but
-  no file is opened through `find_read_file`/`open_read_file`, no line passes
-  through `process_input_buffer`, no font through `define_font`, and the list
-  callbacks wait on a stomach that builds the list they are handed.
-- **Missing libraries:** `font`, `lang`, `pdf`, `vf`, `img`, `mplib`, `pdfe`,
+- **Callbacks the engine calls.** `callback.register` fills the stomach's
+  hook points (`crate::node::hooks`) for the list callbacks, and of those the
+  stomach calls `hpack_filter` so far. No file is opened through
+  `find_read_file`/`open_read_file`, no line passes through
+  `process_input_buffer`, and no `\font` goes through `define_font`.
+- **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
+  an attribute list, a disc's `penalty`, a glyph's offsets, `lang` and
+  `expansion_factor`, and the LuaTeX-only nodes (`dir`, `local_par`,
+  `boundary`, `margin_kern`, the noads) are there while the list is in Lua
+  and dropped on the way back.
+- **Fonts defined from Lua** are kept by `font.define` and read by
+  `font.getfont`, numbered after the fonts `\font` had defined; the stomach
+  does not set type in one yet, and `font.read_vf` refuses.
+- **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
+  `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,
+  `token.scan_list`, `token.scan_toks(true)`.
+- **Missing libraries:** `lang`, `pdf`, `vf`, `img`, `mplib`, `pdfe`,
   `pdfscanner`, `fio`, `sio`, `ffi`, `socket`/`mime`, `zip`. lualibs and the
   luaotfload font loader test for `fio` and `sio` and use their own Lua readers
   without them.
@@ -377,8 +388,16 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `luatex_engine` `luatex`) with texrs's own `banner`, `ini_version` false, no
   `filename`, and none of luatex's memory statistics.
 - **Token userdata:** `mode` of a macro and of a primitive, `id`, and `tok` of
-  a control sequence are luatex memory addresses and are not reproduced;
-  `token.expand`, `token.scan_list` and `token.scan_toks(true)` refuse.
+  a control sequence are luatex memory addresses and are not reproduced.
+- **Internal parameters texrs does not hold** -- `tex.prevdepth`,
+  `tex.pagegoal`, e-TeX's and LuaTeX's integer parameters such as
+  `tex.lastlinefit` -- refuse where luatex answers.
+- **`\catcode` from Lua past code 255** is set straight into the table and
+  not saved for the enclosing group: the engine's `\catcode` reads a code of
+  0..255. `tex.setmathcode` refuses a family past 15 or a character past 255
+  (`\Umathcode`).
+- **`node.direct` and `node` accept each other's nodes**, where luatex
+  wants a userdata on the one and an integer on the other.
 
 ## A section's number carried a chapter a class has not got -- fixed
 

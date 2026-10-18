@@ -53,41 +53,29 @@
 //! way; `\toks` is a token list rather than a slot, and comes from
 //! `Engine::toks`.
 //!
-//! ## The node library, and where it stops
+//! ## The node library, and the lists the stomach builds
 //!
-//! `node` is here, over `crate::node`, and `crate::lua::node` states the whole
-//! case for what it can and cannot carry. In one sentence: LuaTeX's node
-//! library is a VOCABULARY (numbered types, named fields, `node.hpack`) and a
-//! HANDLE ON THE DOCUMENT (`tex.box[0].head`, `node.write`, the callbacks that
-//! pass Lua the list TeX is building), and only the first can be spoken here —
-//! not because `crate::node` is the wrong shape, but because texrs sets a page
-//! from runs of strings and there IS no current node list to hand over.
-//!
-//! So a chunk that builds a list and measures it gets `crate::pack`'s port of
-//! tex.web §649-§667, pinned against luatex in `tests/lua.rs`, and a chunk that
-//! asks for the document's own list is refused by name at the boundary.
+//! `node` (`crate::lua::node`) is LuaTeX's, both faces of it: every type, every
+//! field at luatex's index, the direct face as bare integers, attribute lists,
+//! the properties table, and `node.hpack`/`node.vpack`/`node.dimensions` over
+//! `crate::pack`'s port of tex.web §649-§679. The lists TeX builds are the
+//! stomach's (`crate::stomach`), and they reach Lua through the callbacks: a
+//! `callback.register` of a list callback fills the matching
+//! `crate::node::hooks` point, so the stomach hands its list over while the
+//! program runs and packs what comes back.
 //!
 //! ## What is NOT here, and why it is absent rather than stubbed
 //!
-//! - **Box registers.** `tex.box`, `tex.getbox`, `tex.setbox`, `tex.getlist`,
-//!   `tex.getnest`: each holds a node list, and there is none. These say so
-//!   rather than being absent, because "attempt to call a nil value" would not
-//!   tell a document's author which of the two engines' worlds it had walked
-//!   into. The same goes for `node.write` and the rest of the list in
-//!   `crate::lua::node`'s `REFUSED`.
-//! - **The internal parameters** — `tex.hsize`, `tex.parindent`,
-//!   `tex.baselineskip` and the rest of the manual's "Internal parameter
-//!   values" list. A document can assign and read most of them, but none is
-//!   in the registers a chunk is handed: the page geometry is
-//!   `crate::typeset::Layout`, decided from the class and geometry options
-//!   rather than read from the document's assignments, and the breaker's
-//!   are read as `crate::linebreak::Params`. They REFUSE, naming which of the two it
-//!   is; they answered `nil` until that was seen for what it is, which is a
-//!   claim that LuaTeX has no such parameter.
-//! - **Callbacks fired by the engine.** `callback` (`crate::lua::callback`)
-//!   keeps LuaTeX's registry; the hook points that would call into it are not
-//!   wired yet, and the list callbacks wait on a stomach that builds the list
-//!   they are handed.
+//! - **The box registers and the current list from a chunk.** `tex.box`,
+//!   `tex.getbox`, `tex.setbox`, `tex.getlist`, `tex.getnest`, `node.write`:
+//!   the stomach holds them while the program runs, and a chunk runs while
+//!   the program is lowered, before any of them exists. These say so rather
+//!   than being absent, because "attempt to call a nil value" would not tell a
+//!   document's author which of the two engines' worlds it had walked into.
+//! - **The internal parameters texrs does not hold** -- `tex.prevdepth`,
+//!   `tex.pagegoal`, LuaTeX's and e-TeX's additions to §236 -- refuse, naming
+//!   where the value would live. The ones it does hold, `crate::intpar` and
+//!   `crate::params`, are read and assigned (`crate::lua::tex`).
 //!
 //! ## The rest of LuaTeX's state
 //!
@@ -101,12 +89,6 @@
 //! length of each call into Lua (`crate::lua::ctx`), so a function a package
 //! keeps from one chunk works in the next, as a C function over TeX's globals
 //! does in LuaTeX.
-//!
-//! What came OFF the list above when the node library landed: `tex.skip`,
-//! `tex.getskip`, `tex.setskip` and the whole `\muskip` family. Those refused
-//! for want of a `glue_spec` userdata, and a `glue_spec` is a node the arena
-//! carries faithfully — five integers, no subtype and no `prev`, exactly as
-//! `node.fields(39)` reports in luatex 1.24.0.
 
 use crate::catcode::Cat;
 use crate::expand::{Engine, Meaning, TexError};
@@ -120,12 +102,15 @@ use std::rc::Rc;
 
 pub mod callback;
 mod ctx;
+pub mod font;
 mod kpse;
 mod libs;
 mod lualib;
 mod node;
+mod tex;
 mod token;
 
+pub use font::{LuaChar, LuaFont};
 pub use kpse::set_progname;
 
 type R<T> = Result<T, TexError>;
@@ -280,14 +265,56 @@ fn take_fallbacks() -> Option<Vec<String>> {
 /// A warning from inside a library function, which goes where `texio.write_nl`
 /// goes: the run's terminal output.
 fn warn(text: &str) {
-    RUNTIME.with(|slot| {
-        if let Some(rt) = slot.borrow().as_ref() {
-            rt.bridge.borrow_mut().messages.push(Message {
+    let bridge = RUNTIME.with(|slot| slot.borrow().as_ref().map(|rt| Rc::clone(&rt.bridge)));
+    if let Some(b) = bridge {
+        say(
+            &b,
+            Message {
                 text: text.to_string(),
                 nl: true,
-            });
-        }
-    });
+            },
+        );
+    }
+}
+
+/// Terminal output from Lua. Inside a chunk it is kept with the chunk's other
+/// effects and written where the chunk stands in the program; from a callback
+/// the program calls while it runs, it goes straight into the run's terminal
+/// stream.
+fn say(bridge: &Rc<RefCell<Bridge>>, m: Message) {
+    if ctx::depth() > 0 {
+        bridge.borrow_mut().messages.push(m);
+        return;
+    }
+    // The run's stream keeps no column, so both are a message of their own,
+    // which the stream separates from the next by the space `\message` puts.
+    crate::runtime::tell(vec![crate::stomach::Said::Terminal(m.text)], false);
+}
+
+/// Run `f` with the document's Lua state, when there is one.
+fn with_lua<T>(f: impl FnOnce(&Lua) -> T) -> Option<T> {
+    let lua = RUNTIME.with(|slot| slot.borrow().as_ref().map(|rt| rt.lua.clone()))?;
+    Some(f(&lua))
+}
+
+/// The attribute registers that are set, as (number, value) in number order:
+/// the list `node.current_attr()` answers and a new node is given.
+fn current_attributes() -> Vec<(i64, i64)> {
+    RUNTIME.with(|slot| {
+        let slot = slot.borrow();
+        let Some(rt) = slot.as_ref() else {
+            return Vec::new();
+        };
+        let b = rt.bridge.borrow();
+        let mut out: Vec<(i64, i64)> = b
+            .counts
+            .iter()
+            .filter(|(k, v)| **k >= ATTRIBUTE_BASE && **v != node::UNUSED_ATTRIBUTE)
+            .map(|(k, v)| (*k - ATTRIBUTE_BASE, *v))
+            .collect();
+        out.sort();
+        out
+    })
 }
 
 /// Throw away the Lua state. For a caller that knows a document has ended.
@@ -918,9 +945,10 @@ fn build(owner: usize) -> mlua::Result<Runtime> {
     register("node", node::table(&lua, &arena)?)?;
     register("texio", texio_table(&lua, &bridge)?)?;
     register("kpse", kpse::table(&lua)?)?;
-    register("callback", callback::table(&lua)?)?;
+    register("callback", callback::table(&lua, &arena)?)?;
     register("lua", lualib::table(&lua)?)?;
     register("status", status_table(&lua)?)?;
+    register("font", font::table(&lua)?)?;
     globals.set("texconfig", lua.create_table()?)?;
     kpse::install_searcher(&lua)?;
     libs::core(&lua)?;
@@ -1126,7 +1154,7 @@ fn tex_table(
             lua.create_function(move |_, key: Value| {
                 let b = b.borrow();
                 let reg = resolve(&b, kind, &key)?;
-                Ok(b.counts.get(&reg).copied().unwrap_or(0))
+                Ok(register_value(&b, kind, reg))
             })?,
         )?;
     }
@@ -1326,9 +1354,9 @@ fn tex_table(
     )?;
     muskip.set_metatable(Some(mt))?;
     tex.set("muskip", muskip)?;
-    // A box register holds a NODE LIST, and there is nothing here that could
-    // stand in for one: `\box0` is a `crate::box_` built by the packer, not a
-    // number and not a string. These say so instead of being absent, because
+    // A box register holds a NODE LIST, and the lists are the stomach's: they
+    // exist while the program runs, and a chunk runs while it is lowered, before
+    // any box has been built. These say so instead of being absent, because
     // "attempt to call a nil value" would not tell a document's author which of
     // the two engines' worlds it had walked into.
     for name in [
@@ -1338,7 +1366,7 @@ fn tex_table(
             name,
             lua.create_function(move |_, _: Variadic<Value>| {
                 Err::<(), _>(mlua::Error::runtime(format!(
-                    "tex.{name} works on node lists, which texrs has no node interface for"
+                    "tex.{name} works on the stomach's node lists, which exist while the program runs and not while a chunk is lowered"
                 )))
             })?,
         )?;
@@ -1496,61 +1524,9 @@ fn tex_table(
         lua.create_function(|lua, _: Variadic<Value>| lua.create_table())?,
     )?;
 
-    // The manual's "Internal parameter values": `tex.hsize`, `tex.parindent`,
-    // `tex.baselineskip` and the hundred names beside them, reachable both as
-    // `tex.<name>` and through `tex.get`/`tex.set`.
-    //
-    // Not one of them is a register in texrs. They answered `nil` -- Lua's
-    // answer for a key a table has not got -- and `nil` is exactly the wrong
-    // answer: it says "LuaTeX has no such parameter" where the truth is "texrs
-    // has not got it", and a chunk guarding with `tex.hsize or 0` would set its
-    // page to a measure the engine never used. They refuse now, and the message
-    // says where the value actually lives.
-    //
-    // A metatable rather than entries, because the manual is explicit that
-    // `tex.foo = 123` is valid on this table: a name that is not a parameter has
-    // to keep behaving like an ordinary Lua field, so only the listed names are
-    // intercepted and everything else falls through to the raw table.
-    let mt = lua.create_table()?;
-    mt.set(
-        "__index",
-        lua.create_function(
-            |_, (_, key): (Table, Value)| match parameter_reason(&key)? {
-                Some(why) => Err(mlua::Error::runtime(why)),
-                None => Ok(Value::Nil),
-            },
-        )?,
-    )?;
-    mt.set(
-        "__newindex",
-        lua.create_function(
-            |lua, (t, key, value): (Table, Value, Value)| match parameter_reason(&key)? {
-                Some(why) => Err(mlua::Error::runtime(why)),
-                None => {
-                    lua.load("local t, k, v = ... rawset(t, k, v)")
-                        .call::<()>((t, key, value))?;
-                    Ok(())
-                }
-            },
-        )?,
-    )?;
-    tex.set_metatable(Some(mt))?;
-    for name in ["get", "set"] {
-        tex.set(
-            name,
-            lua.create_function(move |_, args: Variadic<Value>| {
-                let args = drop_global(&args);
-                let key = args.first().cloned().unwrap_or(Value::Nil);
-                Err::<(), _>(match parameter_reason(&key)? {
-                    Some(why) => mlua::Error::runtime(why),
-                    None => mlua::Error::runtime(format!(
-                        "tex.{name} names one of the manual's internal parameters, \
-                         and that is not one of them"
-                    )),
-                })
-            })?,
-        )?;
-    }
+    // The manual's "Internal parameter values" (`tex.tolerance`, `tex.get`,
+    // `tex.set`), the character-code tables and the hash: `crate::lua::tex`.
+    tex::install(lua, &tex, bridge, arena)?;
     Ok(tex)
 }
 
@@ -1565,7 +1541,12 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
     let Value::String(s) = key else {
         return Ok(None);
     };
-    let name = s.to_str()?.to_string();
+    Ok(parameter_reason_text(&s.to_str()?))
+}
+
+/// [`parameter_reason`], by name.
+fn parameter_reason_text(name: &str) -> Option<String> {
+    let name = name.to_string();
     // The page geometry. `\hsize` is a register a document can assign
     // (`crate::params`), but `crate::typeset::Layout` holds the measure, the leading, the
     // indent and the paragraph spacing, decided from the class options and
@@ -1732,49 +1713,37 @@ fn parameter_reason(key: &Value) -> mlua::Result<Option<String>> {
         "year",
     ];
     let name = name.as_str();
-    // A §236 integer parameter IS held -- `crate::intpar`, where `\the`,
-    // `\number` and an assignment reach it -- and so is a §247 dimension, §224
-    // glue or §230 token parameter (`crate::params`), but none of them in the
-    // registers a chunk is handed, so the answer says both halves.
-    let is_param = crate::intpar::index(name).is_some()
+    // A §236 integer parameter, a §247 dimension, §224 glue or §230 token
+    // parameter IS held (`crate::intpar`, `crate::params`) and `crate::lua::tex`
+    // answers it; what is refused here is the rest of the manual's list.
+    if crate::intpar::index(name).is_some()
         || crate::params::register_slot(name).is_some()
-        || crate::params::toks_register(name).is_some();
-    let held = match is_param {
-        true => format!(
-            "; texrs holds \\{name} for \\the, \\number and assignment, \
-             but not where a chunk can reach it"
-        ),
-        false => String::new(),
-    };
+        || crate::params::toks_register(name).is_some()
+    {
+        return None;
+    }
     if GEOMETRY.contains(&name) {
-        return Ok(Some(format!(
+        return Some(format!(
             "tex.{name} is one of LuaTeX's internal parameters, and the page \
              geometry lives in crate::typeset::Layout, decided from the class and \
              geometry options rather than read from what the document assigned, \
-             and it is not decided yet where a chunk stands{held}"
-        )));
+             and it is not decided yet where a chunk stands"
+        ));
     }
     if BREAKER.contains(&name) {
-        return Ok(Some(format!(
+        return Some(format!(
             "tex.{name} is one of LuaTeX's internal parameters, and the line \
-             breaker uses a constant in crate::linebreak rather than reading it{held}"
-        )));
-    }
-    if REST.contains(&name) && !held.is_empty() {
-        return Ok(Some(format!(
-            "tex.{name} is one of LuaTeX's internal parameters{held}; what reads \
-             it belongs to the stomach, the output routine or the maths, none of \
-             which is on the path a run takes"
-        )));
+             breaker uses a constant in crate::linebreak rather than reading it"
+        ));
     }
     if REST.contains(&name) {
-        return Ok(Some(format!(
+        return Some(format!(
             "tex.{name} is one of LuaTeX's internal parameters, and texrs does not \
              hold it at all: it belongs to the stomach, the output routine or the \
              maths, none of which is on the path a run takes"
-        )));
+        ));
     }
-    Ok(None)
+    None
 }
 
 /// Which register file a name or number is an index into.
@@ -1806,6 +1775,17 @@ impl Kind {
             Kind::Attribute => "attribute",
         }
     }
+}
+
+/// A count, dimension or attribute register's value. An attribute that was
+/// never set is LuaTeX's `UNUSED_ATTRIBUTE`, -0x7FFFFFFF, which
+/// `tex.attribute[0]` answers in luatex 1.24.0 before anything sets it.
+fn register_value(b: &Bridge, kind: Kind, reg: i64) -> i64 {
+    let unset = match kind {
+        Kind::Attribute => node::UNUSED_ATTRIBUTE,
+        _ => 0,
+    };
+    b.counts.get(&reg).copied().unwrap_or(unset)
 }
 
 /// Attribute registers, kept clear of the count and dimension slots.
@@ -2064,7 +2044,7 @@ fn register_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>, kind: Kind) -> mlua::
                 // WIDTH: `\skip0=1pt plus 2fil minus 3pt` then `tex.glue[0]` is
                 // `65536`. The other four are `tex.getglue`'s.
                 Kind::Glue | Kind::MuGlue => Ok(Value::Integer(glue_get(&b, reg).0)),
-                _ => Ok(Value::Integer(b.counts.get(&reg).copied().unwrap_or(0))),
+                _ => Ok(Value::Integer(register_value(&b, kind, reg))),
             }
         })?,
     )?;
@@ -2156,7 +2136,7 @@ fn texio_table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
                     text.push_str(&lua_tostring(lua, v)?);
                 }
                 if to_terminal {
-                    b.borrow_mut().messages.push(Message { text, nl });
+                    say(&b, Message { text, nl });
                 }
                 Ok(())
             })?,
