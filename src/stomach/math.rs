@@ -797,6 +797,7 @@ impl Stomach {
         let mut l = ListState::new(Mode::Horizontal, Opened::Page);
         l.space_factor = 1000;
         l.mode_line = self.line;
+        l.prev_graf = self.language_data();
         self.nest.push(l);
         if self.nest.len() == 2 {
             self.want_build_page("after_display");

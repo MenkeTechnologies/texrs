@@ -139,6 +139,8 @@ pub enum MsgOp {
     /// §1296's `show_box` of box register `n`, as the program holds it:
     /// `void`, or the box displayed as §198 displays one.
     ShowBox(u16),
+    /// §1293's `show_activities`: the semantic nest as the program holds it.
+    ShowLists,
 }
 
 #[derive(Clone, Debug)]
@@ -452,6 +454,7 @@ fn render_msg(ops: &[MsgOp], depth: usize, out: &mut String) {
             MsgOp::MuGlue(parts) => out.push_str(&format!("{pad}MuGlue {}\n", num_text(&parts[0]))),
             MsgOp::Discard(n) => out.push_str(&format!("{pad}Discard {}\n", num_text(n))),
             MsgOp::ShowBox(n) => out.push_str(&format!("{pad}ShowBox \\box{n}\n")),
+            MsgOp::ShowLists => out.push_str(&format!("{pad}ShowLists\n")),
             MsgOp::If {
                 left,
                 rel,

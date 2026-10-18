@@ -196,6 +196,14 @@ pub fn b_list_showbox(vm: &mut VM, _argc: u8) -> Value {
     Value::Int(0)
 }
 
+/// `ops::LIST_SHOWLISTS`: append §218's `show_activities` to the message
+/// being built.
+pub fn b_list_showlists(_vm: &mut VM, _argc: u8) -> Value {
+    let text = STOMACH.with(|s| s.borrow().show_activities());
+    crate::runtime::append_to_message(&text.replace('\n', ""));
+    Value::Int(0)
+}
+
 impl Stomach {
     /// Carry out one list action.
     pub fn apply(&mut self, op: ListOp<i64>, e: &dyn Eqtb) {
@@ -437,6 +445,8 @@ impl Stomach {
             ListOp::FinRow => self.fin_row(tol),
             ListOp::FinAlign(o) => self.fin_align(o, tol),
             ListOp::FinishDisplayAlignment => self.finish_display_alignment(e),
+            ListOp::AlterInteger { which, value } => self.alter_integer(which, value),
+            ListOp::AlterPageSoFar { which, value } => self.alter_page_so_far(which, value),
             ListOp::ParShape { global, dims } => {
                 let shape = dims.chunks(2).map(|p| (p[0], p.get(1).copied().unwrap_or(0))).collect();
                 self.set_par_shape(shape, global);

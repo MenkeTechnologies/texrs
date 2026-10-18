@@ -21,6 +21,7 @@
 //! would write `3.33333pt plus 1.66666pt`.
 
 use super::{BoxNode, GlueSign, GlueSource, LeaderKind, Node, Scaled};
+use crate::math::noad::{Class, Delimiter, Field, Limits, MathChar, Noad, Style};
 use crate::dimen::{print_scaled, UNITY};
 
 /// The names a display needs from the font table: §267's `font_id_text`,
@@ -393,6 +394,206 @@ impl Display<'_> {
             }
             i += 1;
         }
+    }
+}
+
+/// The display of mlists, `tex.web` §690-§697: what `\showlists` writes for a
+/// formula being built.
+impl Display<'_> {
+    /// §182's `show_node_list` over an mlist, with the recursion history
+    /// starting where `history` stands.
+    pub fn show_mlist_from(&self, out: &mut String, list: &[Noad], history: &mut String) {
+        let breadth = match self.breadth <= 0 {
+            true => 5,
+            false => self.breadth,
+        };
+        self.show_noad_list(out, list, history, breadth);
+    }
+
+    fn show_noad_list(&self, out: &mut String, list: &[Noad], history: &mut String, breadth: i64) {
+        if history.len() as i64 > self.depth {
+            if !list.is_empty() {
+                out.push_str(" []");
+            }
+            return;
+        }
+        for (n, q) in list.iter().enumerate() {
+            out.push('\n');
+            out.push_str(history);
+            if n as i64 >= breadth {
+                out.push_str("etc.");
+                return;
+            }
+            self.display_noad(out, q, history, breadth);
+        }
+    }
+
+    /// §691's `print_fam_and_char`.
+    fn fam_and_char(&self, out: &mut String, c: &MathChar) {
+        self.esc(out, "fam");
+        out.push_str(&c.fam.to_string());
+        out.push(' ');
+        print_ascii(out, char::from(c.character));
+    }
+
+    /// §691's `print_delimiter`: the 24-bit code in hex.
+    fn delimiter(&self, out: &mut String, d: &Delimiter) {
+        let a = ((d.small_fam * 256 + usize::from(d.small_char)) * 0x1000)
+            + d.large_fam * 256
+            + usize::from(d.large_char);
+        out.push_str(&format!("\"{a:X}"));
+    }
+
+    /// §692's `print_subsidiary_data`.
+    fn subsidiary(&self, out: &mut String, f: &Field, c: char, history: &mut String, breadth: i64) {
+        if history.len() as i64 >= self.depth {
+            if !f.is_empty() {
+                out.push_str(" []");
+            }
+            return;
+        }
+        history.push(c);
+        match f {
+            Field::Char(m) => {
+                out.push('\n');
+                out.push_str(history);
+                self.fam_and_char(out, m);
+            }
+            Field::Box(b) => {
+                self.show_node_list(out, std::slice::from_ref(&Node::Box(b.as_ref().clone())), history, breadth);
+            }
+            Field::List(l) if l.is_empty() => {
+                out.push('\n');
+                out.push_str(history);
+                out.push_str("{}");
+            }
+            Field::List(l) => self.show_noad_list(out, l, history, breadth),
+            Field::Literal(ch) => {
+                out.push('\n');
+                out.push_str(history);
+                print_ascii(out, *ch);
+            }
+            Field::Empty => {}
+        }
+        history.pop();
+    }
+
+    /// §694's `print_style`.
+    fn style(&self, out: &mut String, s: Style) {
+        match s / 2 {
+            0 => self.esc(out, "displaystyle"),
+            1 => self.esc(out, "textstyle"),
+            2 => self.esc(out, "scriptstyle"),
+            3 => self.esc(out, "scriptscriptstyle"),
+            _ => out.push_str("Unknown style!"),
+        }
+    }
+
+    /// §690, §695-§697.
+    fn display_noad(&self, out: &mut String, q: &Noad, history: &mut String, breadth: i64) {
+        let atom = match q {
+            Noad::Style(s) => return self.style(out, *s),
+            Noad::Choice(c) => {
+                self.esc(out, "mathchoice");
+                for (ch, l) in [('D', &c.display), ('T', &c.text), ('S', &c.script), ('s', &c.script_script)] {
+                    history.push(ch);
+                    self.show_noad_list(out, l, history, breadth);
+                    history.pop();
+                }
+                return;
+            }
+            Noad::Fraction(f) => {
+                self.esc(out, "fraction, thickness ");
+                match f.thickness {
+                    None => out.push_str("= default"),
+                    Some(t) => out.push_str(&print_scaled(t)),
+                }
+                if !f.left_delimiter.is_null() {
+                    out.push_str(", left-delimiter ");
+                    self.delimiter(out, &f.left_delimiter);
+                }
+                if !f.right_delimiter.is_null() {
+                    out.push_str(", right-delimiter ");
+                    self.delimiter(out, &f.right_delimiter);
+                }
+                self.subsidiary(out, &Field::List(f.numerator.clone()), '\\', history, breadth);
+                self.subsidiary(out, &Field::List(f.denominator.clone()), '/', history, breadth);
+                return;
+            }
+            Noad::Left(d) | Noad::Right(d) => {
+                let name = match q {
+                    Noad::Left(_) => "left",
+                    _ => "right",
+                };
+                self.esc(out, name);
+                self.delimiter(out, d);
+                return;
+            }
+            Noad::Node(n) => return self.display_node(out, n, history, breadth),
+            Noad::Glue(w) | Noad::Kern(w) => {
+                self.esc(out, "kern");
+                out.push_str(&print_scaled(*w));
+                return;
+            }
+            Noad::MuKern(w) => {
+                self.esc(out, "mkern");
+                out.push_str(&print_scaled(*w));
+                out.push_str("mu");
+                return;
+            }
+            Noad::MuGlue(g) => {
+                self.esc(out, "glue(");
+                self.esc(out, "mskip");
+                out.push_str(") ");
+                out.push_str(&print_scaled(g.natural));
+                out.push_str("mu");
+                return;
+            }
+            Noad::Atom(a) => {
+                let name = match a.class() {
+                    Class::Ord => "mathord",
+                    Class::Op => "mathop",
+                    Class::Bin => "mathbin",
+                    Class::Rel => "mathrel",
+                    Class::Open => "mathopen",
+                    Class::Close => "mathclose",
+                    Class::Punct => "mathpunct",
+                    Class::Inner => "mathinner",
+                };
+                self.esc(out, name);
+                a
+            }
+            Noad::Over(a) => {
+                self.esc(out, "overline");
+                a
+            }
+            Noad::Under(a) => {
+                self.esc(out, "underline");
+                a
+            }
+            Noad::VCenter(a) => {
+                self.esc(out, "vcenter");
+                a
+            }
+            Noad::Radical(r) => {
+                self.esc(out, "radical");
+                self.delimiter(out, &r.left_delimiter);
+                &r.nucleus
+            }
+            Noad::Accent(acc) => {
+                self.esc(out, "accent");
+                self.fam_and_char(out, &acc.accent);
+                &acc.atom
+            }
+        };
+        match atom.limits {
+            Limits::Normal => {}
+            Limits::Above => self.esc(out, "limits"),
+            Limits::Beside => self.esc(out, "nolimits"),
+        }
+        self.subsidiary(out, &atom.nucleus, '.', history, breadth);
+        self.subsidiary(out, &atom.supscr, '^', history, breadth);
+        self.subsidiary(out, &atom.subscr, '_', history, breadth);
     }
 }
 

@@ -1,0 +1,16 @@
+% \showlists (tex.web 218-219, 986, 690-697): the semantic nest innermost
+% first -- a formula's noads, a \vbox's list, a display and its equation
+% number, a paragraph's language data -- down to the current page with its
+% totals, goal and insertions and the recent contributions.
+% The output routine discards every page, so no page is shipped.
+\output={\setbox0\box255 \deadcycles=0 }
+\tracingonline1 \showboxdepth=10 \showboxbreadth=100
+\vsize=200pt
+First paragraph of text to put something on the current page.\par
+\hbox{a box}\penalty100
+\insert100{\hbox{an insertion}}
+$a^2+{b\over c}\left(x\right)\mathop{\rm lim}\limits_x \sqrt y\showlists$
+\setbox0\vbox{\hbox{x}\showlists}
+\noindent$$x\eqno(1)\showlists$$
+{\language3 \lefthyphenmin1 \indent\showlists}
+\end

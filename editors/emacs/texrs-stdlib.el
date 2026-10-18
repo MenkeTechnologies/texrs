@@ -129,6 +129,17 @@
     "\\botmark"
     "\\splitfirstmark"
     "\\splitbotmark"
+    "\\showlists"
+    "\\deadcycles"
+    "\\insertpenalties"
+    "\\pagegoal"
+    "\\pagetotal"
+    "\\pagestretch"
+    "\\pagefilstretch"
+    "\\pagefillstretch"
+    "\\pagefilllstretch"
+    "\\pageshrink"
+    "\\pagedepth"
     "\\halign"
     "\\valign"
     "\\cr"
@@ -478,6 +489,17 @@
     (puthash "\\botmark" "\\botmark  —  The last mark on the page the output routine is working on (§1014). [Boxes]" table)
     (puthash "\\splitfirstmark" "\\splitfirstmark  —  The first mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
     (puthash "\\splitbotmark" "\\splitbotmark  —  The last mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
+    (puthash "\\showlists" "\\showlists  —  Show what is being built at every level of the semantic nest, innermost first (§218-§219): each list with the mode it is in and the line it began on, a formula's noads (§690-§697), `\\prevdepth`, `\\spacefactor` or the fraction waiting for its denominator, and at the bottom the current page with its total and goal heights and the insertions on it (§986), then the recent contributions. [Boxes]" table)
+    (puthash "\\deadcycles" "\\deadcycles  —  How many times the output routine has run since a page was last shipped (§592): past `\\maxdeadcycles` the page builder ships the page itself. [Boxes]" table)
+    (puthash "\\insertpenalties" "\\insertpenalties  —  The sum of the penalties of the insertions held over to the next page (§982), and in the output routine the number of insertions held over (§1018). [Boxes]" table)
+    (puthash "\\pagegoal" "\\pagegoal  —  The height the current page is being filled to (§982): `\\vsize` less what the insertions on it take, `\\maxdimen` before the page has a box. [Boxes]" table)
+    (puthash "\\pagetotal" "\\pagetotal  —  The natural height of the current page so far (§982). [Boxes]" table)
+    (puthash "\\pagestretch" "\\pagestretch  —  The finite stretch of the glue on the current page (§982); `\\pagefilstretch`, `\\pagefillstretch` and `\\pagefilllstretch` are the infinite orders. [Boxes]" table)
+    (puthash "\\pagefilstretch" "\\pagefilstretch  —  The `fil` stretch on the current page (§982), as `\\pagestretch` is the finite one. [Boxes]" table)
+    (puthash "\\pagefillstretch" "\\pagefillstretch  —  The `fill` stretch on the current page (§982). [Boxes]" table)
+    (puthash "\\pagefilllstretch" "\\pagefilllstretch  —  The `filll` stretch on the current page (§982). [Boxes]" table)
+    (puthash "\\pageshrink" "\\pageshrink  —  The shrink of the glue on the current page (§982). [Boxes]" table)
+    (puthash "\\pagedepth" "\\pagedepth  —  The depth of the last box on the current page (§982). [Boxes]" table)
     (puthash "\\halign" "\\halign  —  A table of rows (§768-§812): a preamble of templates, `u#v` per column between `&`s and ended by `\\cr`, then rows whose entries are read inside their column's templates. [Boxes]" table)
     (puthash "\\valign" "\\valign  —  `\\halign` turned on its side (§768): columns of entries set in vertical mode, whose heights are aligned across the columns. [Boxes]" table)
     (puthash "\\cr" "\\cr  —  End a row of an alignment, or its preamble (§780, §791): the last entry's v template is read, the entry and the row are finished, and `\\everycr` is inserted. [Boxes]" table)

@@ -159,6 +159,7 @@ impl Stomach {
         };
         let mut l = ListState::new(mode, Opened::Align);
         l.space_factor = 0;
+        l.mode_line = self.line;
         l.prev_depth = 0;
         self.nest.push(l);
         self.tail_append(Node::Glue(GlueNode::param(first, GlueSource::TabSkip)));
@@ -179,6 +180,7 @@ impl Stomach {
             false => Mode::InternalVertical,
         };
         let mut l = ListState::new(mode, Opened::Align);
+        l.mode_line = self.line;
         match a.halign {
             true => l.space_factor = 1000,
             false => l.prev_depth = crate::node::IGNORE_DEPTH,

@@ -80,6 +80,8 @@ pub mod ops {
     /// Append §1296's display of a box register to the message being built:
     /// one argument, the register number.
     pub const LIST_SHOWBOX: u16 = 4101;
+    /// Append §218's `show_activities` to the message being built.
+    pub const LIST_SHOWLISTS: u16 = 4102;
     /// `\openout`: the stream, then the file name (`crate::write`).
     ///
     /// Numbered from 4200, clear of the numbers after 4018 that other builtins
@@ -523,6 +525,10 @@ impl Compiler {
                 MsgOp::ShowBox(n) => {
                     self.b.emit(Op::LoadInt(i64::from(*n)), self.line);
                     self.b.emit(Op::CallBuiltin(ops::LIST_SHOWBOX, 1), self.line);
+                    self.b.emit(Op::Pop, self.line);
+                }
+                MsgOp::ShowLists => {
+                    self.b.emit(Op::CallBuiltin(ops::LIST_SHOWLISTS, 0), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::Discard(n) => {

@@ -529,6 +529,10 @@ pub enum Said {
     /// Printed on the terminal on a line of its own, hard against what came
     /// before (§62's `print_nl`): an `Overfull \hbox` warning (§663).
     Report(String),
+    /// The same, for a report that leaves the terminal on its line: an
+    /// `Underfull \vbox` warning (§675) goes straight to its diagnostic,
+    /// with no `print_ln` after it.
+    ReportOpen(String),
     /// Printed on the terminal as a message of its own: the `[1]` §638
     /// writes as each page ships.
     Terminal(String),

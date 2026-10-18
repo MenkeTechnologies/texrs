@@ -557,6 +557,58 @@ impl PageBuilder {
         b
     }
 
+    /// §986's "Show the status of the current page", for `\showlists`:
+    /// empty when the page is. `show` displays a list as `show_box` does.
+    pub fn status(&self, show: &dyn Fn(&[Node]) -> String, esc: &str) -> String {
+        if self.page.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("\n### current page:");
+        if self.output_active {
+            out.push_str(" (held over for next output)");
+        }
+        out.push_str(show(&self.page).trim_end_matches('\n'));
+        if self.contents != Contents::Empty {
+            // §985's `print_totals`.
+            out.push_str("\ntotal height ");
+            out.push_str(&crate::dimen::print_scaled(self.totals.height));
+            for (o, unit) in ["", "fil", "fill", "filll"].iter().enumerate() {
+                if self.totals.stretch[o] != 0 {
+                    out.push_str(" plus ");
+                    out.push_str(&crate::dimen::print_scaled(self.totals.stretch[o]));
+                    out.push_str(unit);
+                }
+            }
+            if self.totals.shrink != 0 {
+                out.push_str(" minus ");
+                out.push_str(&crate::dimen::print_scaled(self.totals.shrink));
+            }
+            out.push_str("\n goal height ");
+            out.push_str(&crate::dimen::print_scaled(self.page_goal));
+            for r in &self.page_ins {
+                let t = i64::from(r.number);
+                let count = self.params.inserts.get(&r.number).map_or(1000, |c| c.count);
+                let adds = match count {
+                    1000 => r.height,
+                    _ => crate::pack::x_over_n(r.height, 1000) * count,
+                };
+                out.push_str(&format!(
+                    "\n{esc}insert{t} adds {}",
+                    crate::dimen::print_scaled(adds)
+                ));
+                if r.split_up {
+                    let upto = r.broken_ins.unwrap_or(0);
+                    let n = self.page[..=upto.min(self.page.len().saturating_sub(1))]
+                        .iter()
+                        .filter(|q| matches!(q, Node::Ins(i) if i.number == r.number))
+                        .count();
+                    out.push_str(&format!(", #{n} might split"));
+                }
+            }
+        }
+        out
+    }
+
     /// `\pagegoal` (§982). Zero until the page has its first box, because the
     /// specifications are not frozen before then.
     pub fn page_goal(&self) -> Scaled {
@@ -1154,6 +1206,15 @@ impl PageBuilder {
     /// dead-cycle counter goes back to zero (§1025's `dead_cycles:=0`).
     pub fn shipped(&mut self) {
         self.dead_cycles = 0;
+    }
+
+    /// `\deadcycles=` and `\insertpenalties=` (§1246's `alter_integer`).
+    pub fn set_dead_cycles(&mut self, v: i64) {
+        self.dead_cycles = v;
+    }
+
+    pub fn set_insert_penalties(&mut self, v: i64) {
+        self.insert_penalties = v;
     }
 }
 

@@ -241,6 +241,10 @@ pub enum ListOp<N = Num> {
     FinAlign(N),
     /// §1206: a display alignment placed, after its closing `$$`.
     FinishDisplayAlignment,
+    /// §1246: `\deadcycles=` (0) or `\insertpenalties=` (1).
+    AlterInteger { which: u8, value: N },
+    /// §1245: `\pagegoal=` .. `\pagedepth=`, in `page_so_far` order.
+    AlterPageSoFar { which: u8, value: N },
     /// `\parshape` (§1248): the (indent, width) pairs, flattened.
     ParShape { global: bool, dims: Vec<N> },
     /// `make_accent` (§1123): character `accent` of font `f`, over character
@@ -372,6 +376,8 @@ impl<N> ListOp<N> {
             ListOp::Accent { .. } => 60,
             ListOp::ParShape { .. } => 61,
             ListOp::InitAlign { .. } => 62,
+            ListOp::AlterInteger { .. } => 72,
+            ListOp::AlterPageSoFar { .. } => 73,
             ListOp::AlignTabskip(_) => 63,
             ListOp::AlignRecord(_) => 64,
             ListOp::AlignEntries => 65,
@@ -503,6 +509,10 @@ impl<N> ListOp<N> {
                 }
             }
             ListOp::AlignRecord(b) => f(Arg::Int(i64::from(*b))),
+            ListOp::AlterInteger { which, value } | ListOp::AlterPageSoFar { which, value } => {
+                f(Arg::Int(i64::from(*which)));
+                f(Arg::Num(value));
+            }
             ListOp::FinCol(k) => f(Arg::Int(i64::from(*k))),
             ListOp::FinAlign(n) => f(Arg::Num(n)),
             ListOp::AlignEntries
@@ -906,6 +916,14 @@ impl ListOp<i64> {
             69 => ListOp::FinRow,
             70 => ListOp::FinAlign(r.int()),
             71 => ListOp::FinishDisplayAlignment,
+            72 => ListOp::AlterInteger {
+                which: u8::try_from(r.int()).unwrap_or(0),
+                value: r.int(),
+            },
+            73 => ListOp::AlterPageSoFar {
+                which: u8::try_from(r.int()).unwrap_or(0),
+                value: r.int(),
+            },
             61 => {
                 let global = r.int() == 1;
                 let mut dims = Vec::new();

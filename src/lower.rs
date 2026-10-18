@@ -4359,7 +4359,7 @@ impl Lowerer {
         for part in parts {
             match part {
                 MsgOp::Text(t) => out.push_str(t),
-                MsgOp::Report(_) | MsgOp::Discard(_) | MsgOp::ShowBox(_) => {}
+                MsgOp::Report(_) | MsgOp::Discard(_) | MsgOp::ShowBox(_) | MsgOp::ShowLists => {}
                 MsgOp::Number(n) => out.push_str(&value(n).to_string()),
                 MsgOp::Dimen(n) => {
                     out.push_str(&crate::dimen::print_scaled(value(n)));

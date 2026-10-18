@@ -680,6 +680,33 @@ impl Lowerer {
                 self.st_after_assignment(lx);
             }
             "showbox" => self.st_show_box(lx, out)?,
+            // §1245-§1246: the page builder's quantities, assigned in place.
+            "deadcycles" | "insertpenalties" if managed => {
+                let _ = self.eng.take_global_prefix();
+                self.eng.skip_equals_file(lx)?;
+                let value = self.number(lx)?;
+                let which = u8::from(name.name() == "insertpenalties");
+                self.st_emit(out, ListOp::AlterInteger { which, value })?;
+                self.st_after_assignment(lx);
+            }
+            "pagegoal" | "pagetotal" | "pagestretch" | "pagefilstretch" | "pagefillstretch" | "pagefilllstretch" | "pageshrink" | "pagedepth" if managed => {
+                let _ = self.eng.take_global_prefix();
+                self.eng.skip_equals_file(lx)?;
+                let value = self.dimen_number(lx, false)?;
+                let which = match name.name() {
+                    "pagegoal" => 0,
+                    "pagetotal" => 1,
+                    "pagestretch" => 2,
+                    "pagefilstretch" => 3,
+                    "pagefillstretch" => 4,
+                    "pagefilllstretch" => 5,
+                    "pageshrink" => 6,
+                    _ => 7,
+                };
+                self.st_emit(out, ListOp::AlterPageSoFar { which, value })?;
+                self.st_after_assignment(lx);
+            }
+            "showlists" if managed && mode != CMode::Unmanaged => self.st_show_lists(lx, out)?,
             // §1248's `set_shape`.
             "parshape" => {
                 let global = self.eng.take_global_prefix();
@@ -1412,6 +1439,22 @@ impl Lowerer {
                 leaders: Some(kind),
             },
         )?;
+        Ok(())
+    }
+
+    /// §1293's `\showlists` (and §1298's ending): the nest as the program
+    /// holds it where the command stands.
+    fn st_show_lists(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        self.eng.note_mouth(lx);
+        self.st_sync(out)?;
+        let context = self.eng.error_context(lx).replace('\n', "");
+        let online = self.eng.intpars.get(crate::intpar::TRACING_ONLINE) > 0;
+        let ops = match online {
+            true => vec![MsgOp::ShowLists, MsgOp::Report(format!("! OK.{context}"))],
+            false => vec![MsgOp::Report(format!("! OK (see the transcript file).{context}"))],
+        };
+        self.queue_report(ops);
+        self.flush_reports(out);
         Ok(())
     }
 

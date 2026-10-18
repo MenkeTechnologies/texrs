@@ -24,10 +24,9 @@ impl Stomach {
         let mut l = ListState::new(Mode::Horizontal, Opened::Page);
         l.space_factor = 1000;
         l.mode_line = self.line;
-        // §1091 stores `\lefthyphenmin`, `\righthyphenmin` and the language
-        // in `prev_graf` for §816 to read back; the hyphenation pass is not on
-        // this path yet, so only the encoding's shape is kept.
-        l.prev_graf = 0;
+        // §1091: `\lefthyphenmin`, `\righthyphenmin` and the language in
+        // `prev_graf`, which `\showlists` shows (§218).
+        l.prev_graf = self.language_data();
         if indented {
             l.list.push(Node::Box(BoxNode {
                 width: dimen_par(e, "parindent"),
@@ -181,5 +180,21 @@ impl Stomach {
         cur.list.append(&mut out.list);
         cur.prev_graf = breaks.best_line - 1;
         self.pack_begin_line = 0;
+    }
+}
+
+impl Stomach {
+    /// §1091's `prev_graf:=(norm_min(left_hyphen_min)*@'100+
+    /// norm_min(right_hyphen_min))*@'200000+cur_lang`, with §934's `norm_min`
+    /// and §1091's `set_cur_lang`.
+    pub fn language_data(&self) -> i64 {
+        let norm_min = |h: i64| h.clamp(1, 63);
+        let lang = match self.int_par("language") {
+            l if (1..=255).contains(&l) => l,
+            _ => 0,
+        };
+        (norm_min(self.int_par("lefthyphenmin")) * 0o100 + norm_min(self.int_par("righthyphenmin")))
+            * 0o200000
+            + lang
     }
 }

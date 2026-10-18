@@ -7,7 +7,7 @@
 //! would buy nothing -- §640's `hlist_out` reads nothing but the box and the
 //! fonts -- and keeping it lets `--dvi` and `--pdf` draw the same pages.
 
-use super::{Said, SlotSink, Stomach};
+use super::{Kind, Mode, Said, SlotSink, Stomach};
 use crate::glue::Glue;
 use crate::node::{BoxNode, Scaled, MAX_DIMEN};
 
@@ -133,7 +133,11 @@ impl Stomach {
         if !tracing {
             self.say(Said::Terminal(note));
         }
+        // §640: `dead_cycles:=0`, which is the page builder's to count.
         self.output.dead_cycles = 0;
+        if let Some(b) = self.pages.builder.as_mut() {
+            b.shipped();
+        }
     }
 
     /// `show_box` (§198) of `list` with `\showboxdepth` and
@@ -442,5 +446,129 @@ impl Stomach {
         out.max_v = self.output.max_v as i32;
         out.max_h = self.output.max_h as i32;
         Some(out.finish())
+    }
+}
+
+impl Stomach {
+    /// `show_activities` (§218-§219): every level of the semantic nest,
+    /// innermost first, with the page's status at the bottom (§986), as
+    /// `\showlists` displays it.
+    pub fn show_activities(&self) -> String {
+        let esc = self.esc_text();
+        let d = crate::node::show::Display {
+            depth: self.int_par("showboxdepth"),
+            breadth: self.int_par("showboxbreadth"),
+            esc: &esc,
+            fonts: self,
+        };
+        let mut out = String::from("\n");
+        for (p, l) in self.nest.iter().enumerate().rev() {
+            let mode = match l.mode {
+                Mode::Vertical => "vertical",
+                Mode::Horizontal => "horizontal",
+                Mode::DisplayMath => "display math",
+                Mode::InternalVertical => "internal vertical",
+                Mode::RestrictedHorizontal => "restricted horizontal",
+                Mode::Math => "math",
+            };
+            out.push_str(&format!(
+                "\n### {mode} mode entered at line {}",
+                l.mode_line.abs()
+            ));
+            // §218: the language and hyphen minima a paragraph began with,
+            // when they are not INITEX's.
+            if l.mode == Mode::Horizontal && l.prev_graf != 0o40600000 {
+                out.push_str(&format!(
+                    " (language{}:hyphenmin{},{})",
+                    l.prev_graf % 0o200000,
+                    l.prev_graf / 0o20000000,
+                    (l.prev_graf / 0o200000) % 0o100
+                ));
+            }
+            if l.mode_line < 0 {
+                out.push_str(&format!(" ({esc}output routine)"));
+            }
+            if p == 0 {
+                if let Some(b) = self.pages.builder.as_ref() {
+                    out.push_str(&b.status(&|list| d.show_box(list), &esc));
+                }
+                if !l.list.is_empty() {
+                    out.push_str("\n### recent contributions:");
+                }
+            }
+            match l.mode.kind() {
+                Kind::M => {
+                    let mut text = String::new();
+                    let mut history = String::new();
+                    d.show_mlist_from(&mut text, &l.mlist, &mut history);
+                    out.push_str(&text);
+                }
+                _ => out.push_str(d.show_box(&l.list).trim_end_matches('\n')),
+            }
+            // §219.
+            match l.mode.kind() {
+                Kind::V => {
+                    out.push_str("\nprevdepth ");
+                    match l.prev_depth <= crate::node::IGNORE_DEPTH {
+                        true => out.push_str("ignored"),
+                        false => out.push_str(&crate::dimen::print_scaled(l.prev_depth)),
+                    }
+                    if l.prev_graf != 0 {
+                        out.push_str(&format!(", prevgraf {} line", l.prev_graf));
+                        if l.prev_graf != 1 {
+                            out.push('s');
+                        }
+                    }
+                }
+                Kind::H => {
+                    out.push_str(&format!("\nspacefactor {}", l.space_factor));
+                    // `clang`, which §1091 stores with the hyphen minima.
+                    let lang = l.prev_graf % 0o200000;
+                    if l.mode.outer() && lang > 0 {
+                        out.push_str(&format!(", current language {lang}"));
+                    }
+                }
+                Kind::M => {
+                    if let Some(f) = &l.incompleat {
+                        out.push_str("this will begin denominator of:");
+                        let mut history = String::new();
+                        let frac = [crate::math::noad::Noad::Fraction(f.clone())];
+                        d.show_mlist_from(&mut out, &frac, &mut history);
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+impl Stomach {
+    /// §1246's `alter_integer`: `\deadcycles=` (0) and `\insertpenalties=`
+    /// (1), which the page builder holds.
+    pub fn alter_integer(&mut self, which: u8, v: i64) {
+        let b = self.builder();
+        match which {
+            0 => b.set_dead_cycles(v),
+            _ => b.set_insert_penalties(v),
+        }
+        if which == 0 {
+            self.output.dead_cycles = v;
+        }
+        self.mirror_page();
+    }
+
+    /// §1245's `alter_page_so_far`: `\pagegoal=` and its seven siblings, in
+    /// `page_so_far` order (goal, total, the four stretches, shrink, depth).
+    pub fn alter_page_so_far(&mut self, which: u8, v: Scaled) {
+        use crate::page::PageDimen;
+        let d = match which {
+            0 => PageDimen::Goal,
+            1 => PageDimen::Total,
+            2..=5 => PageDimen::Stretch(usize::from(which - 2)),
+            6 => PageDimen::Shrink,
+            _ => PageDimen::Depth,
+        };
+        self.builder().set_page_so_far(d, v);
+        self.mirror_page();
     }
 }
