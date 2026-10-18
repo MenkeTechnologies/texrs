@@ -238,7 +238,8 @@ pub struct RawObject {
     pub attr: Option<String>,
     pub file: bool,
     pub uncompressed: bool,
-    pub data: String,
+    /// The object's bytes, or the name of the file holding them.
+    pub data: Vec<u8>,
 }
 
 /// One outline entry (`obj_outline_*`).
@@ -314,6 +315,8 @@ pub struct Backend {
     pub last_box: u32,
     /// What luatex printed as a warning, in order, for the run to print.
     pub warnings: Vec<String>,
+    /// Whether the object-stream warning has been printed.
+    objstm_warned: bool,
     /// `obj_type` of the objects a document made, by number.
     kinds: BTreeMap<u32, &'static str>,
     /// lpdflib's `pdf.data` strings (`pdf.setcatalog`, `pdf.setinfo`,
@@ -348,13 +351,20 @@ impl Backend {
                 .and_then(|i| eng.intpars.assigned(i))
                 .unwrap_or_else(|| format_default(key))
         };
+        let major = int("majorversion").max(1) as u32;
+        let minor = int("minorversion").max(0) as u32;
+        // `init_pdf_outputparameters`: object streams need PDF 1.5.
+        let objcompress = match major > 1 || minor >= 5 {
+            true => int("objcompresslevel").clamp(0, 3) as u32,
+            false => 0,
+        };
         crate::pdfdoc::Variables {
             compress_level: int("compresslevel").clamp(0, 9) as u32,
-            objcompress_level: int("objcompresslevel").clamp(0, 3) as u32,
+            objcompress_level: objcompress,
             decimal_digits: int("decimaldigits").clamp(0, 4) as u32,
             gen_tounicode: int("gentounicode") > 0,
-            major_version: int("majorversion").max(1) as u32,
-            minor_version: int("minorversion").max(0) as u32,
+            major_version: major,
+            minor_version: minor,
         }
     }
 
@@ -381,7 +391,43 @@ impl Backend {
     /// `annot`, `page`, `dest`, `outline` -- or `None` for one the backend made
     /// for itself or never made.
     pub fn object_kind(&self, n: u32) -> Option<&'static str> {
+        if self.writer.as_ref().is_some_and(|w| w.is_objstm(n)) {
+            return Some("objstm");
+        }
         self.kinds.get(&n).copied()
+    }
+
+    /// `pdf.getnofobjects`: how many of the numbers handed out are written,
+    /// and how many are not (`is_obj_written` over `1..obj_ptr`).
+    pub fn written_and_dropped(&self) -> (u32, u32) {
+        match &self.writer {
+            Some(w) => {
+                let written = w.written();
+                (written, w.count() - written)
+            }
+            None => (0, self.pending_numbers),
+        }
+    }
+
+    /// `pdf.newcolorstack(init, mode, page)`, which is `\pdffeedback
+    /// colorstackinit`: a new colour stack, its number back. Stack 0, the
+    /// default one, is made first if nothing has made it.
+    pub fn new_color_stack(
+        eng: &mut Engine,
+        mode: crate::pdfpage::LiteralMode,
+        page_start: bool,
+        init: String,
+    ) -> usize {
+        let stacks = &mut eng.backend.color_stacks;
+        if stacks.is_empty() {
+            stacks.push(default_color_stack());
+        }
+        stacks.push(ColorStack {
+            mode,
+            page_start,
+            stack: vec![init],
+        });
+        stacks.len() - 1
     }
 
     /// How many numbers have been handed out so far.
@@ -420,6 +466,23 @@ impl Backend {
             }
         }
         k
+    }
+
+    /// The variables the file is about to be begun with, and luatex's
+    /// warning when object streams were asked for below PDF 1.5
+    /// (`init_pdf_outputparameters`), printed when the file is begun.
+    fn file_variables(eng: &mut Engine) -> crate::pdfdoc::Variables {
+        let vars = Self::variables(eng);
+        if eng.backend.writer.is_none() && !eng.backend.objstm_warned {
+            let asked = crate::intpar::index(&parameter("objcompresslevel"))
+                .and_then(|i| eng.intpars.assigned(i))
+                .unwrap_or_else(|| format_default("objcompresslevel"));
+            if asked > 0 && vars.objcompress_level == 0 {
+                eng.backend.objstm_warned = true;
+                warn(eng, "objcompresslevel > 0 requires minorversion > 4");
+            }
+        }
+        vars
     }
 
     /// The file, begun now if it is not yet: `ensure_output_state(pdf,
@@ -766,16 +829,7 @@ pub fn feedback(eng: &mut Engine, lx: &mut Lexer) -> R<()> {
             let page_start = keyword(eng, lx, "page")?;
             let mode = literal_mode(eng, lx)?;
             let init = expanded_string(eng, lx)?;
-            let stacks = &mut eng.backend.color_stacks;
-            if stacks.is_empty() {
-                stacks.push(default_color_stack());
-            }
-            stacks.push(ColorStack {
-                mode,
-                page_start,
-                stack: vec![init],
-            });
-            (stacks.len() - 1).to_string()
+            Backend::new_color_stack(eng, mode, page_start, init).to_string()
         }
         "version" => "140".to_string(),
         _ => {
@@ -1056,12 +1110,12 @@ pub fn extension(eng: &mut Engine, lx: &mut Lexer, immediate: bool) -> R<Option<
                     return Err(TexError("duplicate of openaction".into()));
                 }
                 let a = action(eng, lx)?;
-                let dd = Backend::variables(eng).decimal_digits;
+                let dd = Backend::file_variables(eng).decimal_digits;
                 // Numbered before the action is written, which numbers the
                 // destination it names.
                 let k = eng.backend.create();
                 let body = action_text(&mut eng.backend, &a, dd);
-                let vars = Backend::variables(eng);
+                let vars = Backend::file_variables(eng);
                 eng.backend.writer(vars).object(k, 1, body.as_bytes());
                 eng.backend.open_action = Some(k);
             }
@@ -1124,7 +1178,7 @@ fn obj(eng: &mut Engine, lx: &mut Lexer, immediate: bool) -> R<()> {
         false => None,
     };
     let file = keyword(eng, lx, "file")?;
-    let data = expanded_string(eng, lx)?;
+    let data = expanded_string(eng, lx)?.into_bytes();
     eng.backend.last_obj = k;
     let raw = RawObject {
         stream,
@@ -1145,13 +1199,16 @@ fn obj(eng: &mut Engine, lx: &mut Lexer, immediate: bool) -> R<()> {
 /// `pdf_write_obj`.
 fn write_raw(eng: &mut Engine, k: u32, raw: &RawObject) {
     let data = match raw.file {
-        true => crate::kpse::locate(&raw.data)
-            .or_else(|| Some(std::path::PathBuf::from(&raw.data)))
-            .and_then(|p| std::fs::read(p).ok())
-            .unwrap_or_default(),
-        false => raw.data.clone().into_bytes(),
+        true => {
+            let name = String::from_utf8_lossy(&raw.data).into_owned();
+            crate::kpse::locate(&name)
+                .or_else(|| Some(std::path::PathBuf::from(&name)))
+                .and_then(|p| std::fs::read(p).ok())
+                .unwrap_or_default()
+        }
+        false => raw.data.clone(),
     };
-    let vars = Backend::variables(eng);
+    let vars = Backend::file_variables(eng);
     let w = eng.backend.writer(vars);
     w.vars = vars;
     match raw.stream {
@@ -1285,7 +1342,7 @@ fn outline(eng: &mut Engine, lx: &mut Lexer) -> R<()> {
         false => 0,
     };
     let title = expanded_string(eng, lx)?;
-    let dd = Backend::variables(eng).decimal_digits;
+    let dd = Backend::file_variables(eng).decimal_digits;
     if j == 0 {
         // Numbered before the action is written, which numbers the
         // destination it names (`scan_pdfoutline`).
@@ -1294,13 +1351,13 @@ fn outline(eng: &mut Engine, lx: &mut Lexer) -> R<()> {
             .as_ref()
             .map(|a| action_text(&mut eng.backend, a, dd))
             .unwrap_or_default();
-        let vars = Backend::variables(eng);
+        let vars = Backend::file_variables(eng);
         eng.backend.writer(vars).object(j, 1, body.as_bytes());
     }
     let k = eng.backend.create_as("outline");
     let l = eng.backend.create();
     let title_body = format!("{}\n", pdf_string(&title));
-    let vars = Backend::variables(eng);
+    let vars = Backend::file_variables(eng);
     eng.backend.writer(vars).object(l, 1, title_body.as_bytes());
     let b = &mut eng.backend;
     let mut entry = Outline {
@@ -1481,6 +1538,37 @@ mod tests {
         assert_eq!(pdf_string("<FEFF0041>"), "<FEFF0041>");
         assert_eq!(pdf_string("<FEFF004>"), "(<FEFF004>)");
         assert_eq!(pdf_string("<xy>"), "(<xy>)");
+    }
+
+    /// An object stream is `objstm` to `pdf.getobjtype`, and the counts of
+    /// written and unwritten numbers follow what the file holds.
+    #[test]
+    fn the_object_table_answers_kinds_and_counts() {
+        let mut eng = Engine::new();
+        let k = Backend::reserve(&mut eng);
+        assert_eq!((k, eng.backend.object_kind(k)), (1, Some("obj")));
+        assert_eq!(eng.backend.written_and_dropped(), (0, 1));
+        let raw = RawObject {
+            stream: false,
+            attr: None,
+            file: false,
+            uncompressed: false,
+            data: b"<< /A 1 >>".to_vec(),
+        };
+        let j = Backend::lua_obj(&mut eng, None, raw, true);
+        // The immediate object opened an object stream, numbered after it.
+        assert_eq!(j, 2);
+        assert_eq!(eng.backend.object_kind(3), Some("objstm"));
+        assert_eq!(eng.backend.written_and_dropped(), (1, 2));
+        assert_eq!(
+            Backend::new_color_stack(
+                &mut eng,
+                crate::pdfpage::LiteralMode::DirectPage,
+                true,
+                "0 g".into()
+            ),
+            1
+        );
     }
 
     /// The parameter names a key expands to are the ones the tables hold.

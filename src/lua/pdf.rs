@@ -207,7 +207,7 @@ impl Contents {
             attr: self.attr.map(text),
             file: self.file,
             uncompressed: self.uncompressed,
-            data: text(self.data),
+            data: self.data,
         }
     }
 }

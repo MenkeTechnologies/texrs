@@ -285,6 +285,11 @@ impl IntPars {
         self.written[i / 128] |= 1u128 << (i % 128);
     }
 
+    /// Record that parameter `i` was assigned without changing its value.
+    pub fn mark_assigned(&mut self, i: usize) {
+        self.written[i / 128] |= 1u128 << (i % 128);
+    }
+
     /// The value of parameter `i` if anything has assigned it, else `None`.
     pub fn assigned(&self, i: usize) -> Option<i64> {
         (self.written[i / 128] & (1u128 << (i % 128)) != 0).then(|| self.values[i])

@@ -1417,6 +1417,10 @@ impl Engine {
             if trace {
                 self.trace_intpar("reassigning", i);
             }
+            // Not saved, but the document did assign it: a reader that takes
+            // a value the document set over a default of its own (the PDF
+            // backend's variables) has to see `\pdfvariable minorversion=0`.
+            self.intpars.mark_assigned(i);
             return;
         }
         if trace {

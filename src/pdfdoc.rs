@@ -167,6 +167,8 @@ pub struct Writer {
     objstm: Option<ObjStm>,
     /// `pdf.settrailerid`'s `/ID`, written in place of `print_ID`'s.
     pub trailer_id: Option<String>,
+    /// The numbers object streams were given (`obj_type_objstm`).
+    objstms: BTreeSet<u32>,
 }
 
 /// `pdf_dict_add_streaminfo`'s `/Length`: LuaTeX reserves room, writes the
@@ -190,12 +192,27 @@ impl Writer {
             places: vec![Place::Fresh],
             objstm: None,
             trailer_id: None,
+            objstms: BTreeSet::new(),
         }
     }
 
     /// How many numbers have been handed out.
     pub fn count(&self) -> u32 {
         (self.places.len() - 1) as u32
+    }
+
+    /// How many of them are written (`is_obj_written`).
+    pub fn written(&self) -> u32 {
+        self.places
+            .iter()
+            .skip(1)
+            .filter(|p| !matches!(p, Place::Fresh))
+            .count() as u32
+    }
+
+    /// Whether `n` is an object stream this file opened.
+    pub fn is_objstm(&self, n: u32) -> bool {
+        self.objstms.contains(&n)
     }
 
     /// `pdf_create_obj`: the next number.
@@ -221,6 +238,7 @@ impl Writer {
     fn pack(&mut self, number: u32, body: &[u8]) {
         if self.objstm.is_none() {
             let stream = self.create();
+            self.objstms.insert(stream);
             self.objstm = Some(ObjStm {
                 number: stream,
                 body: Vec::new(),

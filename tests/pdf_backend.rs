@@ -166,3 +166,24 @@ fn every_backend_object_agrees_with_luatex_when_it_is_installed() {
     // font's own objects are part of the comparison too.
     assert_eq!(backend_objects(&a), backend_objects(&b));
 }
+
+/// Below PDF 1.5 there are no object streams (`init_pdf_outputparameters`):
+/// asking for them is luatex's warning, and two immediate objects are 1 and
+/// 2, with no stream between them to take a number -- even when the minor
+/// version is set to the INITEX zero it already had.
+#[test]
+fn object_streams_need_pdf_1_5() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = r"\catcode`\{=1 \catcode`\}=2
+\pdfvariable minorversion=0 \pdfvariable objcompresslevel=2
+\immediate\pdfextension obj{1}\message{[\pdffeedback lastobj]}
+\immediate\pdfextension obj{2}\message{[\pdffeedback lastobj]}
+\end
+";
+    let (shown, _) = run(env!("CARGO_BIN_EXE_texrs"), &[], dir.path(), src);
+    assert!(
+        shown.contains("warning  (pdf backend): objcompresslevel > 0 requires minorversion > 4"),
+        "{shown}"
+    );
+    assert!(shown.contains("[1] [2]"), "{shown}");
+}
