@@ -129,6 +129,10 @@ const REGISTRY_KEY: &str = "texrs.callbacks";
 /// Forget every registration, for a fresh Lua state.
 pub(super) fn reset() {
     SET.with(|s| s.borrow_mut().iter_mut().for_each(|v| *v = State::Unset));
+    // The engine's input hook points too: a new state has none registered.
+    crate::input_hooks::set_find_read_file(None);
+    crate::input_hooks::set_open_read_file(None);
+    crate::input_hooks::set_process_input_buffer(None);
 }
 
 /// `callback_defined(i)`, by name: what the engine asks before it does
@@ -245,6 +249,9 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>) -> mlua:
 /// node-filter protocol (`lua_node_filter`): `true` keeps the list, `false`
 /// throws it away, a node is the new head.
 fn hook(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>, name: &'static str, on: bool) {
+    if input_hook(lua, name, on) {
+        return;
+    }
     use crate::node::hooks::{Context, Hooks, ListFilter, Notice};
     type Slot = fn(&mut Hooks) -> &mut Option<ListFilter>;
     let list_slot: Option<Slot> = match name {
@@ -290,6 +297,91 @@ fn hook(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>, name: &'static str, 
         });
         crate::node::hooks::set(|h| *slot(h) = notice);
     }
+}
+
+/// The input callbacks (`crate::input_hooks`): `find_read_file(id, name)`
+/// answers the file to open, or nothing for none; `open_read_file(name)`
+/// answers a table whose `reader(table)` gives the file a line at a time and
+/// whose `close(table)`, if any, is called at its end; `process_input_buffer(
+/// line)` answers the line to read instead. Whether `name` is one of them.
+fn input_hook(lua: &Lua, name: &'static str, on: bool) -> bool {
+    use crate::input_hooks as ih;
+    let report = move |e: mlua::Error| {
+        super::warn(&format!("callback {name}: {}", super::lua_error_text(&e)))
+    };
+    match name {
+        "find_read_file" => {
+            let lua = lua.clone();
+            ih::set_find_read_file(on.then(|| {
+                Box::new(move |id: i64, asked: &str| {
+                    let f = function(&lua, name)?;
+                    match f.call::<Option<mlua::LuaString>>((id, asked)) {
+                        Ok(found) => found.map(|s| s.to_string_lossy()),
+                        Err(e) => {
+                            report(e);
+                            None
+                        }
+                    }
+                }) as ih::FindReadFile
+            }));
+        }
+        "open_read_file" => {
+            let lua = lua.clone();
+            ih::set_open_read_file(on.then(|| {
+                Box::new(move |file: &str| {
+                    let f = function(&lua, name)?;
+                    let env = match f.call::<Option<Table>>(file) {
+                        Ok(env) => env?,
+                        Err(e) => {
+                            report(e);
+                            return None;
+                        }
+                    };
+                    let reader: Function = env.get("reader").ok()?;
+                    let mut done = false;
+                    Some(Box::new(move || {
+                        if done {
+                            return None;
+                        }
+                        let line = match reader.call::<Option<mlua::LuaString>>(env.clone()) {
+                            Ok(line) => line.map(|s| s.to_string_lossy()),
+                            Err(e) => {
+                                report(e);
+                                None
+                            }
+                        };
+                        if line.is_none() {
+                            done = true;
+                            if let Ok(close) = env.get::<Function>("close") {
+                                if let Err(e) = close.call::<()>(env.clone()) {
+                                    report(e);
+                                }
+                            }
+                        }
+                        line
+                    }) as Box<dyn FnMut() -> Option<String>>)
+                }) as ih::OpenReadFile
+            }));
+        }
+        "process_input_buffer" => {
+            let lua = lua.clone();
+            ih::set_process_input_buffer(on.then(|| {
+                Box::new(move |line: &str| {
+                    let f = function(&lua, name)?;
+                    match f.call::<Value>(line) {
+                        Ok(Value::String(s)) => Some(s.to_string_lossy()),
+                        Ok(_) => None,
+                        Err(e) => {
+                            report(e);
+                            None
+                        }
+                    }
+                }) as ih::ProcessInputBuffer
+            }));
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// One call of a list callback: the list made into nodes, the function called

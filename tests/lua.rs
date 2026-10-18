@@ -1850,3 +1850,54 @@ fn files_from_lua_go_through_kpathseas_openin_and_openout_checks() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn the_input_callbacks_choose_read_and_rewrite_the_files_tex_reads() {
+    // `find_read_file` names the file `\input` opens, `open_read_file`'s
+    // reader stands in for it a line at a time, and `process_input_buffer`
+    // rewrites every line the mouth reads from a file -- luatex 1.24.0
+    // prints `[one] [two] [abc]` for this.
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("cb.lua"),
+        "callback.register('find_read_file', function(id, name) \
+           if name:find('virtual') then return 'real.tex' end return name end)\n\
+         callback.register('open_read_file', function(name) \
+           local lines = {'\\\\message{[one]}', '\\\\message{[two]}'} local i = 0 \
+           return { reader = function(env) i = i + 1 return lines[i] end } end)\n\
+         callback.register('process_input_buffer', function(l) \
+           if l:find('XYZ') then return (l:gsub('XYZ', 'abc')) end end)\n",
+    )
+    .expect("write");
+    std::fs::write(dir.path().join("real.tex"), "\\message{[not read]}\n").expect("write");
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\directlua{dofile('cb.lua')}\n\
+               \\input virtual\n\\message{[XYZ]}\n\\end\n";
+    std::fs::write(dir.path().join("case.tex"), src).expect("write");
+    let run = |cmd: &str, args: &[&str]| {
+        let out = Command::new(cmd)
+            .args(args)
+            .env("max_print_line", "8000")
+            .current_dir(dir.path())
+            .output()
+            .expect("run");
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let mut said = Vec::new();
+        for part in text.split('[').skip(1) {
+            if let Some(end) = part.find(']') {
+                said.push(part[..end].to_string());
+            }
+        }
+        said
+    };
+    let want = ["one", "two", "abc"];
+    assert_eq!(run(env!("CARGO_BIN_EXE_texrs"), &["case.tex"]), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    assert_eq!(
+        run(&lua, &["-ini", "-interaction=nonstopmode", "case.tex"]),
+        want,
+        "the oracle"
+    );
+}

@@ -395,9 +395,12 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `post_linebreak_filter` and `buildpage_filter` (a paragraph handed over
   from a `local_par` node, as luatex hands it); `vpack_filter`,
   `pre_output_filter`, `linebreak_filter`, `hyphenate`, `ligaturing`,
-  `kerning` and `contribute_filter` are not called yet. No file is opened through
-  `find_read_file`/`open_read_file`, no line passes through
-  `process_input_buffer`, and the stomach's `\font` calls the `define_font`
+  `kerning` and `contribute_filter` are not called yet. `find_read_file`,
+  `open_read_file` and `process_input_buffer` are called where luatex calls
+  them (`crate::input_hooks`), but one that returns nothing from
+  `open_read_file` reads the file as it is, where luatex fails to open it, and
+  what they print with `texio` while the document is lowered is not shown.
+  `token_filter` is not called. The stomach's `\font` calls the `define_font`
   hook point, which a registered Lua definer does not fill yet.
 - **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
   an attribute list, a disc's `penalty`, a glyph's offsets, `lang` and
