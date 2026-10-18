@@ -33,24 +33,6 @@ pub struct Lowerer {
     /// to put the value NOW, and a register is the only run-time store there is;
     /// TeX reserves the high registers for exactly this kind of scratch use.
     next_scratch: i64,
-    /// Every register the program has ASSIGNED so far, in any way.
-    ///
-    /// `tex.web` §366 expands an `\edef` body while READING it, so a
-    /// conditional in the body is decided at DEFINITION time and `\the`
-    /// freezes to characters. An interpreter can do that because it holds the
-    /// registers; a compiler cannot, because they are VM slots -- except for
-    /// one case it can prove outright, and that case is the common one. A
-    /// register nothing has written is at INITEX's zero, which is exactly what
-    /// `Compiler::compile` writes into every slot before the first command
-    /// runs. So this records what has been written, and an `\edef` whose body
-    /// reads only registers ABSENT from it is frozen the way tex freezes it.
-    ///
-    /// Conservative in the one direction that matters: a register is entered
-    /// on the first assignment of any kind, whether or not that assignment is
-    /// reached at run time. An `\edef` over a register some branch might have
-    /// written therefore falls back to carrying the conditional, which is
-    /// wrong in the way BUGS.md records rather than wrong in a new way.
-    assigned: std::collections::HashSet<i64>,
     /// Every register a `\global` assignment has written, in the order they
     /// were lowered.
     ///
@@ -309,7 +291,6 @@ fn stack_address() -> usize {
 impl Lowerer {
     pub fn new() -> Self {
         Self {
-            assigned: std::collections::HashSet::new(),
             input_depth: 0,
             eng: Engine::new(),
             ended: false,
@@ -1989,68 +1970,14 @@ impl Lowerer {
         }
     }
 
-    /// Whether every register `body` READS is one nothing has assigned, so its
-    /// value is provably INITEX's zero.
+    /// `\edef`, §1218 with §366's expansion of the body as it is read.
     ///
-    /// The scan is over the body AFTER macro expansion, so a register a macro
-    /// reads is visible here as `\count<n>`. Anything it cannot prove -- a
-    /// register number that is not a constant, a name it cannot resolve, a
-    /// scan that fails -- answers NO, which costs only the older behaviour.
-    fn reads_only_untouched_registers(&mut self, body: &[Token]) -> bool {
-        let mut work = Lexer::new("");
-        work.push_back(body);
-        while let Some(t) = work.pending.pop() {
-            let Token::Cs(n) = &t else { continue };
-            let n = *n;
-            // A name `\countdef` and friends gave a register IS that register.
-            if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(n) {
-                if self.assigned.contains(&r) {
-                    return false;
-                }
-                continue;
-            }
-            let file = match n.name() {
-                "count" => 0,
-                "dimen" => crate::compiler::DIMEN_BASE,
-                "skip" => crate::compiler::SKIP_BASE,
-                "muskip" => crate::compiler::MUSKIP_BASE,
-                _ => continue,
-            };
-            let stride = match n.name() {
-                "skip" | "muskip" => crate::compiler::SKIP_STRIDE,
-                _ => 1,
-            };
-            // Only a CONSTANT register number can be proved: `\count\count0`
-            // names a register the run picks.
-            let next = work.pending.iter().rev().find(|t| !t.is_space());
-            if !matches!(next, Some(Token::Char(c, _)) if c.is_ascii_digit()) {
-                return false;
-            }
-            let Ok(reg) = self.eng.scan_number_pending(&mut work) else {
-                return false;
-            };
-            let base = file + reg * stride;
-            if (0..stride).any(|i| self.assigned.contains(&(base + i))) {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// `\edef\x{...\the\count<n>...}` freezes the register's CURRENT value.
-    ///
-    /// The value lives in a VM slot, so "now" is run time. The snapshot is
-    /// written to a scratch register at this point in the program and the macro
-    /// is defined to read THAT, which is what makes a later use see the frozen
-    /// value rather than the live one.
-    ///
-    /// The snapshot is the FALLBACK. What §478's `\the` reads out of a table
-    /// this side holds -- a catcode, one of the five code tables, a `\chardef`
-    /// constant, a token register -- is frozen whole by `expand_edef_body`
-    /// below, and never reaches here. One quantity reaches here and cannot be
-    /// frozen either way: a DIMENSION, whose value is a slot and whose §478
-    /// spelling is `12.0pt` rather than a count of scaled points. That is what
-    /// the refusal names.
+    /// The body is expanded the whole way NOW, over the registers
+    /// `crate::known` has followed, which is what tex does. Only a body that
+    /// reads a register whose value the run alone has (a `\rustcall`'s) falls
+    /// back on a snapshot: the register is copied into a scratch one at this
+    /// point in the program and the macro is defined to read THAT, so a later
+    /// use sees the frozen value rather than the live one.
     fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Vec<Cmd>> {
         let name = self.eng.get_r_token(lx, false)?;
         // The parameter text and body, exactly as `\def` reads them. `\edef`
@@ -2060,39 +1987,27 @@ impl Lowerer {
         // numbering checks are the same ones.
         let (params, raw, hash_brace) = self.eng.read_def_parts(lx, name)?;
         // `\edef` expands its body NOW, which is the whole difference from
-        // `\def`. Only the macro calls: `\the\count<n>` has to reach the walk
-        // below as tokens so it can be snapshotted into a scratch register.
-        // The body is expanded twice below -- once to find what it reads, once to
-        // freeze it -- and a \tracingmacros trace belongs to one expansion.
+        // `\def`. `tex.web` §366 expands it the WHOLE way while reading it, so
+        // a conditional in it is decided now and `\the` becomes §478's
+        // characters. The registers it reads are the ones `crate::known` has
+        // followed, so that is what happens first, as in tex.
         let mark = self.eng.report_mark();
-        let body = self.eng.expand_macros_only(&raw)?;
-        let first_pass = self.eng.drain_diagnostics(mark);
-        // `tex.web` §366 expands the body the WHOLE way while reading it, so a
-        // conditional in it is decided now and `\the` becomes §478's
-        // characters. That needs the registers, and the lowerer has them for
-        // exactly one case: a register nothing has assigned is still at
-        // INITEX's zero. When the body reads only those, freeze it as tex does.
-        //
-        // On any error the older path runs instead, so this can only ever
-        // freeze MORE bodies correctly -- never refuse one that used to work.
-        // The PROOF is read off the macro-expanded body, where a register a
-        // macro reads is visible; the freezing runs on the body as written, so
-        // that `\unexpanded` still stops it.
-        if self.reads_only_untouched_registers(&body) {
-            let mark = self.eng.report_mark();
-            match self.eng.expand_edef_body(&raw) {
-                Ok(mut frozen) => {
-                    frozen.extend(hash_brace);
-                    self.eng
-                        .define_macro_with_params(name, params, frozen, global)?;
-                    return Ok(Vec::new());
-                }
-                Err(_) => {
-                    self.eng.drain_diagnostics(mark);
-                }
+        match self.eng.expand_edef_body(&raw) {
+            Ok(mut frozen) => {
+                frozen.extend(hash_brace);
+                self.eng
+                    .define_macro_with_params(name, params, frozen, global)?;
+                return Ok(Vec::new());
+            }
+            Err(_) => {
+                self.eng.drain_diagnostics(mark);
             }
         }
-        self.eng.restore_diagnostics(first_pass);
+        // The fallback, for a body that reads a register only the run has
+        // (`\rustcall`): expand only the macro calls, so `\the\count<n>`
+        // reaches the walk below as tokens and can be snapshotted into a
+        // scratch register.
+        let body = self.eng.expand_macros_only(&raw)?;
         // Find `\the\count<n>` in the body; anything else stays literal.
         let mut work = Lexer::new("");
         work.push_back(&body);
@@ -2136,7 +2051,6 @@ impl Lowerer {
                     let reg = self.eng.scan_number_pending(&mut work)?;
                     let scratch = self.next_scratch;
                     self.next_scratch -= 1;
-                    self.assigned.insert(file + scratch);
                     snapshots.push(Cmd::SetCount(file + scratch, Num::Count(file + reg)));
                     new_body.push(Token::cs("the"));
                     new_body.push(Token::cs(kind));
@@ -5212,10 +5126,6 @@ impl Lowerer {
     /// wrote inside it, and the only place that can be known is here, where the
     /// prefix and the register number are both in hand.
     fn note_global(&mut self, regs: &[i64]) {
-        // Every register assignment the lowerer makes passes through here,
-        // which is what makes it the one place to record that the register has
-        // left INITEX's zero. See `assigned` for who reads it.
-        self.assigned.extend(regs.iter().copied());
         if !self.eng.take_global_prefix() {
             return;
         }

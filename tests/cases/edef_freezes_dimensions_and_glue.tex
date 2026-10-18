@@ -1,0 +1,9 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\dimendef\pp=1 \pp=1pt \dimen2=10\pp
+\count3=3 \dimen4=\count3\pp
+\skip5=1pt plus 2fil minus 3pt
+\count6=7
+\edef\a{\the\dimen2|\the\dimen4|\the\skip5|\the\pp|\number\count6}
+\count6=8 \dimen2=0pt
+\message{\meaning\a}
+\end

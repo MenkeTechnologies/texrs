@@ -1116,6 +1116,30 @@ impl Engine {
         })
     }
 
+    /// What §465's `\the` writes for the dimension or glue in `slot` (its
+    /// first slot, for a glue): `print_scaled` and `pt`, or `print_spec`.
+    fn slot_text(&self, slot: i64) -> R<String> {
+        if !crate::compiler::is_glue_slot(slot) {
+            let v = self.count_value(slot)?;
+            return Ok(format!("{}pt", crate::dimen::print_scaled(v)));
+        }
+        let unit = match crate::compiler::is_mu_slot(slot) {
+            true => "mu",
+            false => "pt",
+        };
+        // Natural, stretch, shrink, and the two orders packed as the code
+        // generator packs them (`stretch_order * 4 + shrink_order`).
+        let orders = self.count_value(slot + 3)?;
+        Ok(crate::glue::print_glue_in(
+            unit,
+            self.count_value(slot)?,
+            self.count_value(slot + 1)?,
+            orders / 4,
+            self.count_value(slot + 2)?,
+            orders % 4,
+        ))
+    }
+
     fn set_count(&mut self, reg: i64, val: i64) {
         let old = self.known.get(reg);
         self.save(Save::Count(reg, old));
@@ -2304,10 +2328,38 @@ impl Engine {
     /// existed. `scan_dimen_parts` is the same scan for a caller that can carry
     /// the product.
     pub fn scan_dimen(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
-        match self.scan_dimen_parts(lx, pending_only)? {
-            crate::dimen::ScannedDimen::Constant(v) => Ok(v),
-            crate::dimen::ScannedDimen::Scaled { .. }
-            | crate::dimen::ScannedDimen::ByCount { .. } => Err(self.illegal_unit()),
+        let parts = self.scan_dimen_parts(lx, pending_only)?;
+        self.dimen_value(lx, parts)
+    }
+
+    /// §453's product, when the internal quantities in it are registers whose
+    /// values [`crate::known`] has followed: `10\p@` is ten of whatever `\p@`
+    /// holds now. §455's `attach_sign` reports a product out of range as
+    /// `Dimension too large` and goes on with the largest dimension, which is
+    /// what the run's own `b_scale_dimen` does with the same numbers.
+    fn dimen_value(&mut self, lx: &Lexer, parts: crate::dimen::ScannedDimen) -> R<i64> {
+        use crate::dimen::{CountUnit, ScannedDimen};
+        let (int, frac, unit) = match parts {
+            ScannedDimen::Constant(v) => return Ok(v),
+            ScannedDimen::Scaled { int, frac, reg } => (int, frac, self.count_value(reg)?),
+            ScannedDimen::ByCount { factor, sign, unit } => {
+                let unit = match unit {
+                    CountUnit::Register(r) => self.count_value(r)?,
+                    CountUnit::Points(sp) => sp,
+                };
+                let factor = self.count_value(factor)?;
+                (if sign < 0 { -factor } else { factor }, 0, unit)
+            }
+        };
+        // The site was recorded for the lowerer, which carries a product it
+        // cannot form to the run; this one is formed here, so it is spent.
+        self.scaling_sites.pop_back();
+        match crate::dimen::scale_by_factor_checked(int, frac, unit) {
+            Ok(v) => Ok(v),
+            Err(clamped) => {
+                self.report(lx, "Dimension too large");
+                Ok(clamped)
+            }
         }
     }
 
@@ -5410,12 +5462,11 @@ impl Engine {
         if let Some(reg) = self.toks_cs(what) {
             return Ok(self.toks_text(reg));
         }
-        // A DIMENSION, a glue or a mu glue is refused here and not read as an
-        // integer. Its value is a VM slot rather than a table this side holds,
-        // so `scan_number` would answer the zero a missing entry reads as --
-        // and §478 writes a dimension as `0.0pt' anyway, never as `0'. Wrong
-        // characters are worse than no characters: the caller falls back on the
-        // error and keeps what it had.
+        // §465's `dimen_val`, `glue_val` and `mu_val` arms: a dimension is
+        // written by §103's `print_scaled` and `pt`, a glue by §178's
+        // `print_spec` -- `pt` or, for a math glue, `mu`. The values are the
+        // slots [`crate::known`] follows; one only the run knows is refused by
+        // `count_value`, and the caller falls back on the error.
         let is_dimen = match what.name() {
             "dimen" | "skip" | "muskip" => true,
             _ => matches!(
@@ -5424,7 +5475,10 @@ impl Engine {
             ),
         };
         if is_dimen {
-            return Err(TexError(format!("Unsupported \\the\\{}", what.name())));
+            let Some((slot, _)) = self.register_slot(lx, what, pending_only)? else {
+                return Err(TexError(format!("Unsupported \\the\\{}", what.name())));
+            };
+            return self.slot_text(slot);
         }
         // §478's `int_val` arm. The name goes back so `scan_number` reads the
         // whole quantity, `\catcode`\* and `\numexpr...\relax` included.

@@ -1,0 +1,8 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count1=5 \ifnum\count1=5 \def\x{a}\else\def\x{b}\fi
+\advance\count1 by 2
+\ifodd\count1 \let\y=\x \else \def\y{even}\fi
+\dimen3=2pt \multiply\dimen3 by \count1
+\ifdim\dimen3<14pt \def\z{less}\else\def\z{not less}\fi
+\message{\x\y\z}
+\end
