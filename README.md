@@ -285,6 +285,12 @@ than none.
   `scan_general_text` does, expanding up to the brace (`\detokenize\expandafter{\x}`),
   in running text, in an `\edef` body and in a `\message`; `\expanded`'s result is
   expanded again where it lands, so a `\noexpand` in it protects one pass only.
+- `\numexpr` and `\dimexpr` as luatex's `scan_expr` evaluates them -- precedence,
+  parentheses, a multiplication-then-division taken as one rounded scaling,
+  `! Arithmetic overflow` and `Missing ) inserted for expression` -- with
+  register operands read when the program runs, in an assignment, a
+  conditional and a `\message` alike. `\glueexpr` and `\muexpr` over glue
+  written out.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

@@ -54,6 +54,20 @@ pub enum Num {
         name: String,
         args: Vec<Num>,
     },
+    /// One step of e-TeX's `scan_expr` (`\numexpr`, `\dimexpr`): `op` applied
+    /// to the operands under the bound `max`, by `crate::etex_arith::apply`.
+    /// A `Num` because an operand may be a register, whose value is the run's;
+    /// the lowerer folds a step whose operands it knows. An out-of-range step
+    /// is `etex_arith::ERROR`, and so is every step that reads one.
+    Expr {
+        op: crate::etex_arith::Op,
+        max: i64,
+        args: Vec<Num>,
+    },
+    /// The end of an expression: its value, or zero and `report` -- `!
+    /// Arithmetic overflow` with the context where the expression ended,
+    /// taken while lowering -- if a step went out of range.
+    ExprEnd { value: Box<Num>, report: String },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -469,6 +483,11 @@ fn num_text(num: &Num) -> String {
             let args: Vec<String> = args.iter().map(num_text).collect();
             format!("\\rustcall {name} {}", args.join(" "))
         }
+        Num::Expr { op, args, .. } => {
+            let args: Vec<String> = args.iter().map(num_text).collect();
+            format!("{op:?}({})", args.join(", "))
+        }
+        Num::ExprEnd { value, .. } => format!("\\numexpr {}\\relax", num_text(value)),
     }
 }
 

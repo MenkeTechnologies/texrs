@@ -33,6 +33,7 @@ pub mod docs;
 pub mod document;
 pub mod dvi;
 pub mod dvi_parity;
+pub mod etex_arith;
 pub mod expand;
 pub mod fontmap;
 pub mod fontreq;

@@ -9,8 +9,14 @@
 [3.0pt][7.5pt][4.0pt][65536]
 #==# edef_reads_general_text.tex
 [macro:->####] [macro:->\a ##] [##]
+#==# end_closes_the_file.tex
+! Undefined control sequence.l.3 \undefined              \message{b}\endb)(see the transcript file for additional information
 #==# expanded.tex
 [AAA] [macro:->\b ]
+#==# expr_overflow.tex
+! Arithmetic overflow.<recently read> \relax                        l.3 \message{[\the\numexpr 2147483647+1\relax                                             ][\the\numexpr 65536*65536\rela...! Arithmetic overflow.<recently read> \relax                        l.3 ...647+1\relax][\the\numexpr 65536*65536\relax                                                  ][\the\numexpr 1/0\relax]}! Arithmetic overflow.<recently read> \relax                        l.3 ...r 65536*65536\relax][\the\numexpr 1/0\relax                                                  ]}[0][0][0]! Arithmetic overflow.<recently read> \relax                        l.4 \message{[\the\dimexpr 16383pt*2\relax                                          ][\the\numexpr 2147483647*2/4\rela...! Missing ) inserted for expression.<to be read again>                    \relax l.4 ...47483647*2/4\relax][\the\numexpr (1+2\relax                                                  ]}[0.0pt][1073741824][3]! Arithmetic overflow.<recently read> \relax                        l.6 \message{[\the\numexpr\count1+\count1\relax                                               ]}[0])(see the transcript file for additional information
+#==# expr_registers.tex
+[12][-4][10.5pt] [22][3.00009pt][196608] Y N [-70] [16][26][5]
 #==# general_text.tex
 [macro:->\a b|\a b] [macro:->AAA|\a b] [\a ][\a ] [macro:->\b A]
 #==# glueexpr.tex

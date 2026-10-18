@@ -582,13 +582,13 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\numexpr",
         "Registers",
-        "An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so `\\numexpr 7/2` is 4 where `\\divide` gives 3 -- the two are different operations and texrs keeps them apart. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; `tests/etex.rs` holds the comparison.",
+        "An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so `\\numexpr 7/2` is 4 where `\\divide` gives 3 -- the two are different operations and texrs keeps them apart. A multiplication followed by a division is one scaling, `7*11/3` taken without the product overflowing, and a step outside the integer range makes the whole expression zero with `! Arithmetic overflow`. A register operand is read when the program runs, so `\\count2=\\numexpr\\count1*3\\relax` uses the value `\\count1` has then. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; `tests/luatex_cases` holds the comparison.",
         "\\count0=\\numexpr (2+3)*4\\relax   % => 20",
     ),
     (
         "\\dimexpr",
         "Registers",
-        "The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. The arithmetic happens in scaled points, which is the only form a dimension has.",
+        "The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. The arithmetic happens in scaled points, which is the only form a dimension has, and is bounded by the largest dimension rather than the largest integer.",
         "\\dimen0=\\dimexpr 1pt+2pt\\relax   % => 3.0pt",
     ),
     (
@@ -654,7 +654,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\glueexpr",
         "Registers",
-        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. An eTeX primitive. The operands are glue WRITTEN OUT; a register standing where one is wanted is not read yet.",
+        "A glue expression, the same grammar as `\\numexpr` over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while `*` and `/` scale every component. A higher-order stretch or shrink REPLACES the one it meets even when it is being subtracted, as luatex's `scan_expr` does. An eTeX primitive. The operands are glue WRITTEN OUT; a register standing where one is wanted is refused rather than read.",
         "\\skip0=\\glueexpr 1pt plus 2pt+3pt plus 4fil\\relax",
     ),
     (

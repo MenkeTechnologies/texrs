@@ -1,0 +1,7 @@
+% primitives: numexpr dimexpr
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\numexpr 2147483647+1\relax][\the\numexpr 65536*65536\relax][\the\numexpr 1/0\relax]}
+\message{[\the\dimexpr 16383pt*2\relax][\the\numexpr 2147483647*2/4\relax][\the\numexpr (1+2\relax]}
+\count1=2147483647
+\message{[\the\numexpr\count1+\count1\relax]}
+\end

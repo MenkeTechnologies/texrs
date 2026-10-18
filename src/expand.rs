@@ -72,9 +72,6 @@ pub enum Meaning {
     CountDef(i64),
 }
 
-/// eTeX's division: round half AWAY from zero, which is not what `\divide`
-/// does (`tex.web` §1236 truncates). Measured -- 7/2 is 4, 5/2 is 3, -7/2 is
-/// -4, and 6/4 is 2.
 /// An argument as §392 read it, or what it held when a `\par` stopped it.
 enum Arg {
     Read(Vec<Token>),
@@ -111,15 +108,6 @@ fn is_one_group(toks: &[Token]) -> bool {
         }
     }
     false
-}
-
-fn round_div(a: i64, b: i64) -> i64 {
-    let sign = match (a < 0) == (b < 0) {
-        true => 1,
-        false => -1,
-    };
-    let (a, b) = (a.abs(), b.abs());
-    sign * ((a + b / 2) / b)
 }
 
 /// Where the lowerer is in §1211's `prefixed_command`.
@@ -770,6 +758,14 @@ impl Engine {
     /// same reading `crate::parity::messages_of` takes of tex's own output,
     /// which is what makes the two comparable at all.
     #[inline(never)]
+    /// The report [`Self::report`] would make here, for the run to make
+    /// instead if what it evaluates goes wrong: the run has no mouth, so the
+    /// context has to be taken now.
+    pub fn report_text(&mut self, lx: &Lexer, msg: &str) -> String {
+        self.note_mouth(lx);
+        format!("! {msg}.{}", self.error_context(lx).replace('\n', ""))
+    }
+
     pub fn report(&mut self, lx: &Lexer, msg: &str) {
         self.note_mouth(lx);
         let context = self.error_context(lx);
@@ -1367,7 +1363,7 @@ impl Engine {
     /// was refused, which is exactly how a document says "take the other
     /// branch". §494's `pass_text` needs the same resolution to count a nested
     /// conditional it is skipping over.
-    fn primitive_meaning(&self, name: CsId) -> CsId {
+    pub fn primitive_meaning(&self, name: CsId) -> CsId {
         match self.meanings.get(&name) {
             Some(Meaning::Primitive(p)) if *p != name => *p,
             _ => name,
@@ -3253,100 +3249,96 @@ impl Engine {
         }
     }
 
-    /// eTeX's `\numexpr` and `\dimexpr`, evaluated on the spot.
-    ///
-    /// Ordinary precedence, parentheses, and left to right within a level. The
-    /// one rule worth stating is division: it ROUNDS, half away from zero, so
-    /// `7/2` is 4 and `-7/2` is -4 -- which is not what `\divide` does, and is
-    /// why the two cannot share an implementation. Measured against
-    /// LuaTeX 1.24.0.
+    /// e-TeX's `\numexpr` (`dimen` false) or `\dimexpr`, read after the
+    /// primitive, where the expander needs the value now: luatex's
+    /// `scan_expr` (scanning.c), on the values this side knows. The lowerer's
+    /// `Lowerer::expr` is the same procedure for an expression the run
+    /// evaluates; both take their arithmetic from `crate::etex_arith`.
     pub fn scan_expr(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
-        let v = self.expr_sum(lx, pending_only, dimen)?;
-        // An expression is closed by an optional `\relax`, which is absorbed.
-        if let Some(t) = self.take(lx, pending_only) {
-            match &t {
-                Token::Cs(n) if n.name() == "relax" => {}
-                other => lx.push_back(std::slice::from_ref(other)),
+        let e = self.expr_level(lx, pending_only, dimen, false)?;
+        Ok(match e {
+            crate::etex_arith::ERROR => {
+                self.report(lx, "Arithmetic overflow");
+                0
             }
-        }
-        Ok(v)
+            v => v,
+        })
     }
 
-    fn expr_sum(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
-        let mut acc = self.expr_term(lx, pending_only, dimen)?;
-        loop {
-            match self.expr_operator(lx, pending_only, &['+', '-']) {
-                Some('+') => acc += self.expr_term(lx, pending_only, dimen)?,
-                Some('-') => acc -= self.expr_term(lx, pending_only, dimen)?,
-                _ => return Ok(acc),
-            }
-        }
-    }
-
-    fn expr_term(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
-        let mut acc = self.expr_factor(lx, pending_only, dimen)?;
-        loop {
-            match self.expr_operator(lx, pending_only, &['*', '/']) {
-                // A multiplier and a divisor are integers even in a dimension
-                // expression: `1pt*3` is three points, not a square.
-                Some('*') => acc *= self.expr_factor(lx, pending_only, false)?,
-                Some('/') => {
-                    let by = self.expr_factor(lx, pending_only, false)?;
-                    if by == 0 {
-                        return Err(TexError("Arithmetic overflow".into()));
-                    }
-                    acc = round_div(acc, by);
-                }
-                _ => return Ok(acc),
-            }
-        }
-    }
-
-    fn expr_factor(&mut self, lx: &mut Lexer, pending_only: bool, dimen: bool) -> R<i64> {
-        // Skip spaces to see whether a group is opening.
-        loop {
-            let Some(t) = self.take(lx, pending_only) else {
-                return Err(TexError("Missing number, treated as zero".into()));
-            };
-            match &t {
-                t if t.is_space() => continue,
-                Token::Char('(', _) => {
-                    let v = self.expr_sum(lx, pending_only, dimen)?;
-                    match self.take(lx, pending_only) {
-                        Some(Token::Char(')', _)) => return Ok(v),
-                        _ => return Err(TexError("Missing ) inserted".into())),
-                    }
-                }
-                other => {
-                    lx.push_back(std::slice::from_ref(other));
-                    return match dimen {
-                        true => self.scan_dimen(lx, pending_only),
-                        false => self.scan_number(lx, pending_only),
-                    };
-                }
-            }
-        }
-    }
-
-    /// The next operator, if the next non-space token is one of `wanted`.
-    fn expr_operator(
+    /// One level of `scan_expr`, up to the end or, `nested`, to its `)`.
+    fn expr_level(
         &mut self,
         lx: &mut Lexer,
         pending_only: bool,
-        wanted: &[char],
-    ) -> Option<char> {
+        dimen: bool,
+        nested: bool,
+    ) -> R<i64> {
+        use crate::etex_arith::{apply, Op, INFINITY, MAX_DIMEN};
+        let max = if dimen { MAX_DIMEN } else { INFINITY };
+        let (mut r, mut e) = (None::<Op>, 0i64);
+        let (mut s, mut t, mut n) = (None::<Op>, 0i64, 0i64);
         loop {
-            let t = self.take(lx, pending_only)?;
-            if t.is_space() {
-                continue;
-            }
-            if let Token::Char(c, _) = &t {
-                if wanted.contains(c) {
-                    return Some(*c);
+            // A factor after `*` or `/` is an integer, whatever the level.
+            let factor_dimen = dimen && s.is_none();
+            let f = match self.next_x_nonblank(lx, pending_only)? {
+                Some(Token::Char('(', Cat::Other)) => {
+                    self.expr_level(lx, pending_only, factor_dimen, true)?
+                }
+                other => {
+                    if let Some(tok) = other {
+                        lx.back_input(&[tok]);
+                    }
+                    match factor_dimen {
+                        true => self.scan_dimen(lx, pending_only)?,
+                        false => self.scan_number(lx, pending_only)?,
+                    }
+                }
+            };
+            let next = self.next_x_nonblank(lx, pending_only)?;
+            let mut o = match &next {
+                Some(Token::Char('+', Cat::Other)) => Some(Op::Add),
+                Some(Token::Char('-', Cat::Other)) => Some(Op::Sub),
+                Some(Token::Char('*', Cat::Other)) => Some(Op::Mul),
+                Some(Token::Char('/', Cat::Other)) => Some(Op::Div),
+                _ => None,
+            };
+            if o.is_none() {
+                match next {
+                    Some(Token::Char(')', Cat::Other)) if nested => {}
+                    Some(tok) if nested => {
+                        lx.back_input(&[tok]);
+                        self.report(lx, "Missing ) inserted for expression");
+                    }
+                    Some(tok) if !self.means_relax(&tok) => lx.back_input(&[tok]),
+                    _ => {}
                 }
             }
-            lx.push_back(std::slice::from_ref(&t));
-            return None;
+            // Make sure that `f` is in the proper range.
+            let bound = if !dimen || s.is_some() { INFINITY } else { max };
+            let f = apply(Op::Check, bound, &[f]);
+            match s {
+                None => t = f,
+                Some(Op::Mul) if o == Some(Op::Div) => {
+                    n = f;
+                    o = Some(Op::Scale);
+                }
+                Some(Op::Scale) => t = apply(Op::Scale, max, &[t, n, f]),
+                Some(op) => t = apply(op, max, &[t, f]),
+            }
+            match o {
+                Some(Op::Mul | Op::Div | Op::Scale) => s = o,
+                _ => {
+                    s = None;
+                    e = match r {
+                        None => t,
+                        Some(add_or_sub) => apply(add_or_sub, max, &[e, t]),
+                    };
+                    r = o;
+                }
+            }
+            if o.is_none() {
+                return Ok(e);
+            }
         }
     }
 
@@ -3548,79 +3540,149 @@ impl Engine {
         Ok(true)
     }
 
-    /// `\glueexpr ...\relax` — the same expression grammar over glue.
-    ///
-    /// Addition is componentwise with TeX's order rule (an infinite component
-    /// beats a finite one, a higher infinity beats a lower, equal orders add),
-    /// and `*` and `/` scale every component. Division rounds, as it does in
-    /// `\numexpr`.
+    /// e-TeX's `\glueexpr` (or `\muexpr`, under `mu_units`), read after the
+    /// primitive: luatex's `scan_expr` at `glue_val_level`, on the values this
+    /// side knows. Factors are glue; a factor after `*` or `/` is an integer.
     pub fn scan_glue_expr(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
-        let v = self.glue_expr_sum(lx)?;
-        if let Some(t) = self.take(lx, false) {
-            match &t {
-                Token::Cs(n) if n.name() == "relax" => {}
-                other => lx.push_back(std::slice::from_ref(other)),
-            }
+        let mut error = false;
+        let e = self.glue_expr_level(lx, false, &mut error)?;
+        if error {
+            self.report(lx, "Arithmetic overflow");
+            return Ok(crate::etex_arith::glue_error());
         }
-        Ok(v)
+        Ok(e)
     }
 
-    fn glue_expr_sum(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
-        let mut acc = self.glue_expr_term(lx)?;
-        loop {
-            match self.expr_operator(lx, false, &['+', '-']) {
-                Some('+') => acc = acc + self.glue_expr_term(lx)?,
-                Some('-') => acc = acc - self.glue_expr_term(lx)?,
-                _ => return Ok(acc),
-            }
+    /// One level of the glue `scan_expr`, up to the end or, `nested`, to its
+    /// `)`. `error` is `arith_error`: once set, the result is zero.
+    fn glue_expr_level(
+        &mut self,
+        lx: &mut Lexer,
+        nested: bool,
+        error: &mut bool,
+    ) -> R<crate::glue::Glue> {
+        use crate::etex_arith::{self as arith, Op, INFINITY};
+        use crate::glue::Glue;
+        // A factor is a glue at the start of a term and an integer after `*`
+        // or `/`; `Factor` is which it was.
+        enum Factor {
+            Glue(Glue),
+            Int(i64),
         }
-    }
-
-    fn glue_expr_term(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
-        let mut acc = self.glue_expr_factor(lx)?;
+        let (mut r, mut e) = (None::<Op>, Glue::default());
+        let (mut s, mut t, mut n) = (None::<Op>, Glue::default(), 0i64);
         loop {
-            match self.expr_operator(lx, false, &['*', '/']) {
-                // The multiplier and divisor are integers: a glue times a glue
-                // is not a glue.
-                Some('*') => acc = acc.scale(self.scan_number(lx, false)?),
-                Some('/') => {
-                    let by = self.scan_number(lx, false)?;
-                    if by == 0 {
-                        return Err(TexError("Arithmetic overflow".into()));
-                    }
-                    acc = acc.divide(by, round_div);
-                }
-                _ => return Ok(acc),
-            }
-        }
-    }
-
-    fn glue_expr_factor(&mut self, lx: &mut Lexer) -> R<crate::glue::Glue> {
-        loop {
-            let Some(t) = self.take(lx, false) else {
-                return Err(TexError("Missing number, treated as zero".into()));
-            };
-            match &t {
-                t if t.is_space() => continue,
-                Token::Char('(', _) => {
-                    let v = self.glue_expr_sum(lx)?;
-                    match self.take(lx, false) {
-                        Some(Token::Char(')', _)) => return Ok(v),
-                        _ => return Err(TexError("Missing ) inserted".into())),
-                    }
-                }
+            let opened = match self.next_x_nonblank(lx, false)? {
+                Some(Token::Char('(', Cat::Other)) => true,
                 other => {
-                    lx.push_back(std::slice::from_ref(other));
+                    if let Some(tok) = other {
+                        lx.back_input(&[tok]);
+                    }
+                    false
+                }
+            };
+            let f = match (s.is_none(), opened) {
+                (true, true) => Factor::Glue(self.glue_expr_level(lx, true, error)?),
+                (true, false) => {
                     let (natural, stretch, stretch_order, shrink, shrink_order) =
                         self.scan_glue(lx)?;
-                    return Ok(crate::glue::Glue {
+                    Factor::Glue(Glue {
                         natural,
                         stretch,
                         stretch_order,
                         shrink,
                         shrink_order,
-                    });
+                    })
                 }
+                (false, true) => Factor::Int(self.expr_level(lx, false, false, true)?),
+                (false, false) => Factor::Int(self.scan_number(lx, false)?),
+            };
+            let next = self.next_x_nonblank(lx, false)?;
+            let mut o = match &next {
+                Some(Token::Char('+', Cat::Other)) => Some(Op::Add),
+                Some(Token::Char('-', Cat::Other)) => Some(Op::Sub),
+                Some(Token::Char('*', Cat::Other)) => Some(Op::Mul),
+                Some(Token::Char('/', Cat::Other)) => Some(Op::Div),
+                _ => None,
+            };
+            if o.is_none() {
+                match next {
+                    Some(Token::Char(')', Cat::Other)) if nested => {}
+                    Some(tok) if nested => {
+                        lx.back_input(&[tok]);
+                        self.report(lx, "Missing ) inserted for expression");
+                    }
+                    Some(tok) if !self.means_relax(&tok) => lx.back_input(&[tok]),
+                    _ => {}
+                }
+            }
+            // Make sure the factor is in range, and apply it to the term.
+            let mut failed = |ok: bool| {
+                if !ok {
+                    *error = true;
+                }
+            };
+            match (s, f) {
+                (None, Factor::Glue(g)) => {
+                    t = match arith::check_glue(g) {
+                        Some(g) => g,
+                        None => {
+                            failed(false);
+                            arith::glue_error()
+                        }
+                    };
+                    if o.is_some() {
+                        t = arith::normalize_glue(t);
+                    }
+                }
+                (Some(op), Factor::Int(f)) => {
+                    let f = match arith::apply(Op::Check, INFINITY, &[f]) {
+                        arith::ERROR => {
+                            failed(false);
+                            0
+                        }
+                        f => f,
+                    };
+                    let applied = match op {
+                        Op::Mul if o == Some(Op::Div) => {
+                            n = f;
+                            o = Some(Op::Scale);
+                            Some(t)
+                        }
+                        Op::Scale => arith::scale_glue(Op::Scale, t, &[n, f]),
+                        op => arith::scale_glue(op, t, &[f]),
+                    };
+                    t = match applied {
+                        Some(g) => g,
+                        None => {
+                            failed(false);
+                            arith::glue_error()
+                        }
+                    };
+                }
+                _ => unreachable!("a glue opens a term and an integer follows * or /"),
+            }
+            match o {
+                Some(Op::Mul | Op::Div | Op::Scale) => s = o,
+                _ => {
+                    s = None;
+                    e = match r {
+                        None => t,
+                        Some(add_or_sub) => {
+                            match arith::add_glue(e, t, add_or_sub == Op::Sub) {
+                                Some(g) => g,
+                                None => {
+                                    failed(false);
+                                    arith::glue_error()
+                                }
+                            }
+                        }
+                    };
+                    r = o;
+                }
+            }
+            if o.is_none() {
+                return Ok(e);
             }
         }
     }
@@ -5992,6 +6054,41 @@ impl Engine {
     /// one copy rather than two that can drift.
     pub fn take_any(&mut self, lx: &mut Lexer, pending_only: bool) -> Option<Token> {
         self.take(lx, pending_only)
+    }
+
+    /// "Get the next non-blank non-call token" (§406), as `scan_expr` reads
+    /// its parentheses and operators: `get_x_token` until something that is
+    /// neither a space nor expandable. The brace that ends a `\message` body
+    /// is returned as it is, for the caller to put back.
+    pub fn next_x_nonblank(&mut self, lx: &mut Lexer, pending_only: bool) -> R<Option<Token>> {
+        loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Ok(None);
+            };
+            if t.is_space() {
+                continue;
+            }
+            let name = match t {
+                Token::Cs(n) if n.name() == MESSAGE_END => return Ok(Some(t)),
+                Token::Cs(n) => n,
+                Token::Char(c, Cat::Active) => Self::active_cs(c),
+                _ => return Ok(Some(t)),
+            };
+            if !self.try_expand(lx, name, pending_only)? {
+                return Ok(Some(t));
+            }
+        }
+    }
+
+    /// Whether `t` is `relax_cmd` where it is read: `\relax` or a `\let` copy
+    /// of it, or §358's `dont_expand` token, which reads as `\relax`.
+    pub fn means_relax(&self, t: &Token) -> bool {
+        match t {
+            Token::Cs(n) => {
+                n.noexpand_origin().is_some() || self.primitive_meaning(*n).name() == "relax"
+            }
+            _ => false,
+        }
     }
 
     pub fn scan_number_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {

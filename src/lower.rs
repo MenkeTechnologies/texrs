@@ -3479,6 +3479,17 @@ impl Lowerer {
                 eaten.push(t);
                 continue;
             }
+            // e-TeX's expressions are internal integers too (`last_item`):
+            // `\dimexpr` where an integer is wanted is its scaled points.
+            if let Token::Cs(n) = &t {
+                if let Some(level) = expr_level_of(self.eng.primitive_meaning(*n).name()) {
+                    let e = self.expr(lx, pending, level)?;
+                    return Ok(Some(match negative {
+                        true => step(crate::etex_arith::Op::Sub, crate::etex_arith::INFINITY, vec![Num::Literal(0), e]),
+                        false => e,
+                    }));
+                }
+            }
             if let Token::Cs(n) = &t {
                 if let Some((slot, _)) = self.eng.register_slot(lx, *n, pending)? {
                     return Ok(Some(signed(negative, slot)));
@@ -3674,6 +3685,9 @@ impl Lowerer {
                 return Ok(scaled_num(self.eng.scan_dimen_parts(lx, pending)?));
             };
             let n = *n;
+            if self.eng.primitive_meaning(n).name() == "dimexpr" {
+                return self.expr(lx, pending, ExprLevel::Dimen);
+            }
             match n.name() {
                 "dimen" => {
                     let reg = self.eng.scan_register_any(lx, pending)?;
@@ -4186,6 +4200,25 @@ impl Lowerer {
                                 out.push(MsgOp::Dimen(Num::Count(
                                     crate::compiler::DIMEN_BASE + reg,
                                 )));
+                                continue;
+                            }
+                            // e-TeX's `\numexpr` and `\dimexpr`: the value, written
+                            // as an integer or as a dimension.
+                            Some(Token::Cs(w))
+                                if expr_level_of(self.eng.primitive_meaning(w).name()).is_some() =>
+                            {
+                                let level = expr_level_of(self.eng.primitive_meaning(w).name())
+                                    .expect("just matched");
+                                let e = self.expr(work, true, level)?;
+                                match (level, e) {
+                                    (ExprLevel::Int, Num::Literal(v)) => text.push_str(&v.to_string()),
+                                    (ExprLevel::Dimen, Num::Literal(v)) => {
+                                        text.push_str(&crate::dimen::print_scaled(v));
+                                        text.push_str("pt");
+                                    }
+                                    (ExprLevel::Int, e) => out.push(MsgOp::Number(e)),
+                                    (ExprLevel::Dimen, e) => out.push(MsgOp::Dimen(e)),
+                                }
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "count" => {}
@@ -4753,6 +4786,123 @@ impl Lowerer {
     }
 
     /// A number operand inside a message body.
+    /// e-TeX's `\numexpr` (`level` Int) or `\dimexpr` (Dimen), read after the
+    /// primitive: luatex's `scan_expr` (scanning.c), building the expression
+    /// as `Num` steps because an operand may be a register whose value only
+    /// the run knows. A step whose operands are all known is taken now, so an
+    /// expression of constants is a constant, and its overflow is reported
+    /// here as the end of `scan_expr` reports it.
+    fn expr(&mut self, lx: &mut Lexer, pending: bool, level: ExprLevel) -> R<Num> {
+        let e = self.expr_level(lx, pending, level, false)?;
+        Ok(match e {
+            Num::Literal(crate::etex_arith::ERROR) => {
+                self.eng.report(lx, "Arithmetic overflow");
+                Num::Literal(0)
+            }
+            Num::Literal(v) => Num::Literal(v),
+            e => Num::ExprEnd {
+                value: Box::new(e),
+                report: self.eng.report_text(lx, "Arithmetic overflow"),
+            },
+        })
+    }
+
+    /// One level of `scan_expr`: the expression up to the end, or, `nested`,
+    /// up to the `)` that closes it. `r` and `e` are the expression so far and
+    /// the operator waiting to add the term to it, `s` and `t` the term so far
+    /// and the operator waiting to apply the next factor, `n` the numerator of
+    /// a multiplication a division follows.
+    fn expr_level(
+        &mut self,
+        lx: &mut Lexer,
+        pending: bool,
+        level: ExprLevel,
+        nested: bool,
+    ) -> R<Num> {
+        use crate::etex_arith::{Op, INFINITY};
+        let max = level.max();
+        let (mut r, mut e) = (None::<Op>, Num::Literal(0));
+        let (mut s, mut t, mut n) = (None::<Op>, Num::Literal(0), Num::Literal(0));
+        loop {
+            // A factor after `*` or `/` is an integer, whatever the level.
+            let factor_level = match s {
+                None => level,
+                Some(_) => ExprLevel::Int,
+            };
+            let f = match self.eng.next_x_nonblank(lx, pending)? {
+                Some(Token::Char('(', Cat::Other)) => {
+                    self.expr_level(lx, pending, factor_level, true)?
+                }
+                other => {
+                    if let Some(tok) = other {
+                        lx.back_input(&[tok]);
+                    }
+                    match factor_level {
+                        ExprLevel::Int => match pending {
+                            true => self.msg_number(lx)?,
+                            false => self.number(lx)?,
+                        },
+                        ExprLevel::Dimen => self.dimen_number(lx, pending)?,
+                    }
+                }
+            };
+            let next = self.eng.next_x_nonblank(lx, pending)?;
+            let mut o = match &next {
+                Some(Token::Char('+', Cat::Other)) => Some(Op::Add),
+                Some(Token::Char('-', Cat::Other)) => Some(Op::Sub),
+                Some(Token::Char('*', Cat::Other)) => Some(Op::Mul),
+                Some(Token::Char('/', Cat::Other)) => Some(Op::Div),
+                _ => None,
+            };
+            if o.is_none() {
+                match next {
+                    Some(Token::Char(')', Cat::Other)) if nested => {}
+                    Some(tok) if nested => {
+                        // §1381-style `back_error`: the token is read again.
+                        lx.back_input(&[tok]);
+                        self.eng.report(lx, "Missing ) inserted for expression");
+                    }
+                    Some(tok) if !self.eng.means_relax(&tok) => lx.back_input(&[tok]),
+                    _ => {}
+                }
+            }
+            // Make sure that `f` is in the proper range.
+            let bound = match level == ExprLevel::Int || s.is_some() {
+                true => INFINITY,
+                false => max,
+            };
+            let f = step(Op::Check, bound, vec![f]);
+            // The current term.
+            match s {
+                None => t = f,
+                Some(Op::Mul) if o == Some(Op::Div) => {
+                    n = f;
+                    o = Some(Op::Scale);
+                }
+                Some(Op::Mul) => t = step(Op::Mul, max, vec![t, f]),
+                Some(Op::Div) => t = step(Op::Div, max, vec![t, f]),
+                Some(Op::Scale) => {
+                    t = step(Op::Scale, max, vec![t, std::mem::replace(&mut n, Num::Literal(0)), f])
+                }
+                Some(_) => unreachable!("a term waits only on *, / or a scale"),
+            }
+            match o {
+                Some(Op::Mul | Op::Div | Op::Scale) => s = o,
+                _ => {
+                    s = None;
+                    e = match r {
+                        None => t.clone(),
+                        Some(add_or_sub) => step(add_or_sub, max, vec![e, t.clone()]),
+                    };
+                    r = o;
+                }
+            }
+            if o.is_none() {
+                return Ok(e);
+            }
+        }
+    }
+
     fn msg_number(&mut self, work: &mut Lexer) -> R<Num> {
         if let Some(slot) = self.peek_int_register(work, true)? {
             return Ok(slot);
@@ -5487,5 +5637,47 @@ impl Lowerer {
             *size_open -= 1;
             self.push_text(out, &crate::typeset::SIZE_POP.to_string());
         }
+    }
+}
+
+/// What an e-TeX expression computes: `scan_expr`'s `l`, at the two levels the
+/// lowerer reads into a `Num`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ExprLevel {
+    Int,
+    Dimen,
+}
+
+impl ExprLevel {
+    /// The largest magnitude a value at this level may have.
+    fn max(self) -> i64 {
+        match self {
+            ExprLevel::Int => crate::etex_arith::INFINITY,
+            ExprLevel::Dimen => crate::etex_arith::MAX_DIMEN,
+        }
+    }
+}
+
+/// One `scan_expr` step, taken now when every operand is known.
+fn step(op: crate::etex_arith::Op, max: i64, args: Vec<Num>) -> Num {
+    let known: Option<Vec<i64>> = args
+        .iter()
+        .map(|a| match a {
+            Num::Literal(v) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    match known {
+        Some(values) => Num::Literal(crate::etex_arith::apply(op, max, &values)),
+        None => Num::Expr { op, max, args },
+    }
+}
+
+/// The expression a primitive opens, if it is `\numexpr` or `\dimexpr`.
+fn expr_level_of(primitive: &str) -> Option<ExprLevel> {
+    match primitive {
+        "numexpr" => Some(ExprLevel::Int),
+        "dimexpr" => Some(ExprLevel::Dimen),
+        _ => None,
     }
 }

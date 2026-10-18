@@ -87,6 +87,12 @@ pub mod ops {
     pub const OUT_CLOSE: u16 = 4202;
     /// Whether a stream is open: the stream; 1 or 0 back.
     pub const OUT_IS_OPEN: u16 = 4203;
+    /// One step of an e-TeX expression (`crate::ir::Num::Expr`): the operands,
+    /// then the operation's code and the bound, for `etex_arith::apply`.
+    pub const EXPR_STEP: u16 = 4019;
+    /// The end of an expression: its value or the error marker, then the
+    /// report to make for the marker.
+    pub const EXPR_END: u16 = 4020;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -592,6 +598,23 @@ impl Compiler {
                 }
                 self.b.emit(Op::LoadInt(0), self.line);
                 self.b.emit(Op::CallBuiltin(ops::SCALE_DIMEN, 3), self.line);
+            }
+            // The operands, then what to do with them: the builtin pops the two
+            // trailing constants first and the operands after.
+            Num::Expr { op, max, args } => {
+                for a in args {
+                    self.num(a)?;
+                }
+                self.b.emit(Op::LoadInt(op.code()), self.line);
+                self.b.emit(Op::LoadInt(*max), self.line);
+                let argc = u8::try_from(args.len() + 2).unwrap_or(u8::MAX);
+                self.b.emit(Op::CallBuiltin(ops::EXPR_STEP, argc), self.line);
+            }
+            Num::ExprEnd { value, report } => {
+                self.num(value)?;
+                let k = self.str_const(report)?;
+                self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::CallBuiltin(ops::EXPR_END, 2), self.line);
             }
             Num::Rust { name, args } => {
                 // The name first, then the arguments: the builtin pops the

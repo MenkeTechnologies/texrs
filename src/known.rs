@@ -114,6 +114,16 @@ impl Known {
                 crate::dimen::scale_by_factor_checked(factor, 0, unit).ok()
             }
             Num::Rust { .. } => None,
+            // The run's own arithmetic (`b_expr_step`), and an expression
+            // the run would report as overflowing is not followed.
+            Num::Expr { op, max, args } => {
+                let values: Option<Vec<i64>> = args.iter().map(|a| self.num(a)).collect();
+                Some(crate::etex_arith::apply(*op, *max, &values?))
+            }
+            Num::ExprEnd { value, .. } => match self.num(value)? {
+                crate::etex_arith::ERROR => None,
+                v => Some(v),
+            },
         }
     }
 

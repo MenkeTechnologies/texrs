@@ -1,0 +1,11 @@
+% primitives: numexpr dimexpr
+\catcode`\{=1 \catcode`\}=2
+\count1=7 \dimen1=3pt
+\message{[\the\numexpr\count1*(\count1-2)/3\relax][\number\numexpr-\count1/2\relax][\the\dimexpr\dimen1*\count1/2\relax]}
+\count2=\numexpr\count1*3+1\relax \dimen2=\dimexpr\dimen1+\numexpr2*3\relax sp\relax
+\message{[\the\count2][\the\dimen2][\number\dimexpr\dimen1\relax]}
+\ifnum\numexpr\count1+1>7 \message{Y}\else\message{N}\fi
+\ifdim\dimexpr\dimen1*2\relax<6pt \message{Y}\else\message{N}\fi
+\count3=-\numexpr 2*((3+4)*5)\relax \message{[\the\count3]}
+\def\x{4}\message{[\the\numexpr\x*\x\relax][\the\numexpr 7*11/3\relax][\the\numexpr (2+3)\relax]}
+\end

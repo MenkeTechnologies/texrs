@@ -17,6 +17,12 @@ thread_local! {
 thread_local! {
     /// The message currently being assembled.
     static BUILDING: RefCell<String> = const { RefCell::new(String::new()) };
+    /// How much of [`BUILDING`] is reports rather than the message's own
+    /// text: the reports a message opens with. An error the run raises while
+    /// a message is being assembled goes at the end of these, because tex
+    /// expands the whole text -- reporting what goes wrong -- before it prints
+    /// any of it (§1279).
+    static REPORTS_END: RefCell<usize> = const { RefCell::new(0) };
 }
 
 thread_local! {
@@ -103,8 +109,66 @@ fn push_report(text: &str) {
         if b.is_empty() {
             GLUED.with(|g| *g.borrow_mut() = true);
         }
+        REPORTS_END.with(|end| {
+            let mut end = end.borrow_mut();
+            if *end == b.len() {
+                *end += text.len();
+            }
+        });
         b.push_str(text);
     });
+}
+
+/// Put a report in front of the text of the message being built, after the
+/// reports it already opens with (see [`REPORTS_END`]).
+fn report_before_text(text: &str) {
+    REPORTED.with(|r| *r.borrow_mut() = true);
+    BUILDING.with(|b| {
+        let mut b = b.borrow_mut();
+        REPORTS_END.with(|end| {
+            let mut end = end.borrow_mut();
+            let at = (*end).min(b.len());
+            if at == 0 {
+                GLUED.with(|g| *g.borrow_mut() = true);
+            }
+            b.insert_str(at, text);
+            *end = at + text.len();
+        });
+    });
+}
+
+/// The message being built, taken: what it held, and no reports in front.
+fn take_building() -> String {
+    REPORTS_END.with(|end| *end.borrow_mut() = 0);
+    BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()))
+}
+
+/// One step of an e-TeX expression: the operands, the operation's code and
+/// the bound (`crate::etex_arith::apply`).
+fn b_expr_step(vm: &mut VM, argc: u8) -> Value {
+    let max = vm.pop().to_int();
+    let code = vm.pop().to_int();
+    let mut args: Vec<i64> = (2..argc).map(|_| vm.pop().to_int()).collect();
+    args.reverse();
+    match crate::etex_arith::Op::from_code(code) {
+        Some(op) => Value::Int(crate::etex_arith::apply(op, max, &args)),
+        None => Value::Int(crate::etex_arith::ERROR),
+    }
+}
+
+/// The end of an expression (the last lines of luatex's `scan_expr`): a step
+/// that went out of range makes the whole value zero, reported as
+/// `Arithmetic overflow` with the context the lowerer took where the
+/// expression ended. Two arguments: the value, then that report.
+fn b_expr_end(vm: &mut VM, _argc: u8) -> Value {
+    let site = render(&vm.pop());
+    match vm.pop().to_int() {
+        crate::etex_arith::ERROR => {
+            report_before_text(&site);
+            Value::Int(0)
+        }
+        v => Value::Int(v),
+    }
 }
 
 /// A report the mouth or the lowerer made, carried to its place in the run.
@@ -134,7 +198,7 @@ fn b_msg_append(vm: &mut VM, _argc: u8) -> Value {
 
 /// Finish the message and record it.
 fn b_msg_flush(_vm: &mut VM, _argc: u8) -> Value {
-    let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    let done = take_building();
     record(done);
     Value::Undef
 }
@@ -143,7 +207,7 @@ fn b_msg_flush(_vm: &mut VM, _argc: u8) -> Value {
 /// [`GLUE_NEXT`]): §1370's `print_nl` glues it to what came before, and its
 /// `print_ln` glues what comes after to it.
 fn b_write_flush(_vm: &mut VM, _argc: u8) -> Value {
-    let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    let done = take_building();
     GLUED.with(|g| *g.borrow_mut() = true);
     record(done);
     GLUE_NEXT.with(|g| *g.borrow_mut() = true);
@@ -251,7 +315,7 @@ fn b_transcript_notice(vm: &mut VM, _argc: u8) -> Value {
     }
     // What was held is glued (`record`); the notice is not -- tex writes the
     // closing paren after a space.
-    let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    let held = take_building();
     if !held.is_empty() {
         record(held);
     }
@@ -430,6 +494,8 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::SCALE_DIMEN, b_scale_dimen);
     vm.register_builtin(ops::MSG_MUGLUE, b_msg_muglue);
     vm.register_builtin(ops::ERR_SITE, b_err_site);
+    vm.register_builtin(ops::EXPR_STEP, b_expr_step);
+    vm.register_builtin(ops::EXPR_END, b_expr_end);
     vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
@@ -452,7 +518,7 @@ fn run_with(
     on_line: Option<fn(&mut VM, u8) -> Value>,
 ) -> Result<Vec<String>, String> {
     MESSAGES.with(|m| m.borrow_mut().clear());
-    BUILDING.with(|b| b.borrow_mut().clear());
+    take_building();
     GLUED.with(|g| *g.borrow_mut() = false);
     GLUE_NEXT.with(|g| *g.borrow_mut() = false);
     FAULT.with(|f| *f.borrow_mut() = None);
@@ -501,7 +567,7 @@ pub(crate) fn finish_run() -> Result<(), String> {
     // ordinary run the buffer is empty here -- every `\message` flushes its
     // own -- so this only ever carries an error §82 reported after the last
     // one, which tex writes on the terminal as it happens.
-    let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    let held = take_building();
     if !held.is_empty() {
         record(held);
     }
