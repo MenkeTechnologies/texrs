@@ -1179,12 +1179,13 @@ fn read_glyf(f: &mut Stream, fontdata: &mut FontData) {
 
 /// `readdata` (font-otr.lua:2093-2238) for the tables node mode's metrics
 /// read, from the font at `offset` (a collection's face).
-pub fn read(data: &[u8], offset: usize) -> FontData {
+pub fn read(data: &[u8], offset: usize) -> (FontData, super::dsp::Layout) {
     let mut f = Stream::new(data);
     let mut fontdata = FontData {
         filesize: data.len(),
         ..FontData::default()
     };
+    let mut layout = super::dsp::Layout::default();
     load_tables(&mut f, offset, &mut fontdata);
     read_name(&mut f, &mut fontdata);
     read_os2(&mut f, &mut fontdata);
@@ -1193,11 +1194,16 @@ pub fn read(data: &[u8], offset: usize) -> FontData {
     read_hhea(&mut f, &mut fontdata);
     read_hmtx(&mut f, &mut fontdata);
     read_post(&mut f, &mut fontdata);
+    super::dsp::read_gdef(&mut f, &mut fontdata, &mut layout);
     super::cff::read(&mut f, &mut fontdata);
     read_cmap(&mut f, &mut fontdata);
     read_loca(&mut f, &mut fontdata);
     read_glyf(&mut f, &mut fontdata);
-    fontdata
+    super::dsp::read_scripts(&mut f, &mut fontdata, &mut layout, "gsub");
+    super::dsp::read_scripts(&mut f, &mut fontdata, &mut layout, "gpos");
+    super::dsp::read_kern(&mut f, &mut fontdata, &mut layout);
+    super::dsp::read_math(&mut f, &mut fontdata, &mut layout);
+    (fontdata, layout)
 }
 
 /// The faces of a file: one offset, or a collection's (font-otr.lua:2254-2305).

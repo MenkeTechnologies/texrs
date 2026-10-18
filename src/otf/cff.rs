@@ -1580,6 +1580,11 @@ pub fn read(f: &mut Stream, fontdata: &mut FontData) {
                             p.defaultwidthx,
                             None,
                         );
+                        // `parsecharstring` ends `return glyphs[index]` with the
+                        // 1-based index: the autovivifying table gains the
+                        // glyph AFTER this one (font-cff.lua:2364-2366), which is
+                        // how a CID font ends up with one glyph more than it has.
+                        fontdata.glyph(i as u32 + 1);
                     }
                 }
             }

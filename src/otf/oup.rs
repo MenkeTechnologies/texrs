@@ -31,6 +31,9 @@ pub struct Description {
     pub class: Option<String>,
     pub height: Option<f64>,
     pub depth: Option<f64>,
+    /// The MATH table's data for the glyph, its glyph references rekeyed
+    /// like everything else (font-oup.lua:916-938).
+    pub math: Option<super::dsp::MathGlyph>,
 }
 
 impl From<&Glyph> for Description {
@@ -44,6 +47,7 @@ impl From<&Glyph> for Description {
             class: g.class.clone(),
             height: None,
             depth: None,
+            math: None,
         }
     }
 }
@@ -217,12 +221,14 @@ pub fn crappy_name(name: &str) -> bool {
     b.len() >= 2 && b[0] == b'_'
 }
 
-/// `stripredundant` outside ConTeXt (font-oup.lua:1150-1173) with
-/// `keepnames = false`: drop the uninformative names and the `base` class,
-/// which is what an unclassed glyph is anyway.
-pub fn strip_redundant(descriptions: &mut BTreeMap<u32, Description>) {
+/// `stripredundant` outside ConTeXt (font-oup.lua:1150-1173): drop the `base`
+/// class, which is what an unclassed glyph is anyway, and -- unless
+/// `keepnames` is on -- the uninformative names. luaotfload turns
+/// `keepnames` on by default (luaotfload-configuration.lua:235, applied by
+/// luaotfload-init.lua:554-557), so names normally stay.
+pub fn strip_redundant(descriptions: &mut BTreeMap<u32, Description>, keepnames: bool) {
     for d in descriptions.values_mut() {
-        if d.name.as_deref().is_some_and(crappy_name) {
+        if !keepnames && d.name.as_deref().is_some_and(crappy_name) {
             d.name = None;
         }
         if d.class.as_deref() == Some("base") {
@@ -273,39 +279,198 @@ pub fn glyph_list() -> &'static BTreeMap<String, u32> {
     })
 }
 
-/// `overloads` (font-map.lua:193-206): the ligatures whose Unicode
-/// presentation forms a font should not be trusted to mean.
+/// The overloads `addtounicode` consults first (`mappings.overloads`), which
+/// luaotfload replaces with its own table (luaotfload-tounicode.lua): glyph
+/// names whose Unicode the Adobe list gets wrong or does not have -- small
+/// capitals, old-style figures, `dotlessj` -- and, from ConTeXt, the
+/// ligatures, under their names and their presentation-form code points.
 fn overload(key_name: Option<&str>, key_code: Option<u32>) -> Option<Unicode> {
-    let by_name = |n: &str| -> Option<Vec<u32>> {
+    enum O {
+        One(u32),
+        Many(&'static [u32]),
+    }
+    use O::*;
+    let by_name = |n: &str| -> Option<O> {
         Some(match n {
-            "IJ" | "I_J" => vec![0x49, 0x4A],
-            "ij" | "i_j" => vec![0x69, 0x6A],
-            "ff" | "f_f" => vec![0x66, 0x66],
-            "fi" | "f_i" => vec![0x66, 0x69],
-            "fl" | "f_l" => vec![0x66, 0x6C],
-            "ffi" | "f_f_i" => vec![0x66, 0x66, 0x69],
-            "ffl" | "f_f_l" => vec![0x66, 0x66, 0x6C],
-            "fj" | "f_j" => vec![0x66, 0x6A],
-            "fk" | "f_k" => vec![0x66, 0x6B],
+            "longst" => Many(&[0x017F, 0x0074]),
+            "st" => Many(&[0x0073, 0x0074]),
+            "AEsmall" => One(0x00E6),
+            "Aacutesmall" => One(0x00E1),
+            "Acircumflexsmall" => One(0x00E2),
+            "Acute" => One(0x00B4),
+            "Acutesmall" => One(0x00B4),
+            "Adieresissmall" => One(0x00E4),
+            "Agravesmall" => One(0x00E0),
+            "Aringsmall" => One(0x00E5),
+            "Asmall" => One(0x0061),
+            "Atildesmall" => One(0x00E3),
+            "Brevesmall" => One(0x02D8),
+            "Bsmall" => One(0x0062),
+            "Caron" => One(0x02C7),
+            "Caronsmall" => One(0x02C7),
+            "Ccedillasmall" => One(0x00E7),
+            "Cedillasmall" => One(0x00B8),
+            "Circumflexsmall" => One(0x02C6),
+            "Csmall" => One(0x0063),
+            "Dieresis" => One(0x00A8),
+            "DieresisAcute" => One(0xF6CC),
+            "DieresisGrave" => One(0xF6CD),
+            "Dieresissmall" => One(0x00A8),
+            "Dotaccentsmall" => One(0x02D9),
+            "Dsmall" => One(0x0064),
+            "Eacutesmall" => One(0x00E9),
+            "Ecircumflexsmall" => One(0x00EA),
+            "Edieresissmall" => One(0x00EB),
+            "Egravesmall" => One(0x00E8),
+            "Esmall" => One(0x0065),
+            "Ethsmall" => One(0x00F0),
+            "Fsmall" => One(0x0066),
+            "Grave" => One(0x0060),
+            "Gravesmall" => One(0x0060),
+            "Gsmall" => One(0x0067),
+            "Hsmall" => One(0x0068),
+            "Hungarumlaut" => One(0x02DD),
+            "Hungarumlautsmall" => One(0x02DD),
+            "Iacutesmall" => One(0x00ED),
+            "Icircumflexsmall" => One(0x00EE),
+            "Idieresissmall" => One(0x00EF),
+            "Igravesmall" => One(0x00EC),
+            "Ismall" => One(0x0069),
+            "Jsmall" => One(0x006A),
+            "Ksmall" => One(0x006B),
+            "LL" => Many(&[0x004C, 0x004C]),
+            "Lslashsmall" => One(0x0142),
+            "Lsmall" => One(0x006C),
+            "Macron" => One(0x00AF),
+            "Macronsmall" => One(0x00AF),
+            "Msmall" => One(0x006D),
+            "Nsmall" => One(0x006E),
+            "Ntildesmall" => One(0x00F1),
+            "OEsmall" => One(0x0153),
+            "Oacutesmall" => One(0x00F3),
+            "Ocircumflexsmall" => One(0x00F4),
+            "Odieresissmall" => One(0x00F6),
+            "Ogoneksmall" => One(0x02DB),
+            "Ogravesmall" => One(0x00F2),
+            "Oslashsmall" => One(0x00F8),
+            "Osmall" => One(0x006F),
+            "Otildesmall" => One(0x00F5),
+            "Psmall" => One(0x0070),
+            "Qsmall" => One(0x0071),
+            "Ringsmall" => One(0x02DA),
+            "Rsmall" => One(0x0072),
+            "Scaronsmall" => One(0x0161),
+            "Ssmall" => One(0x0073),
+            "Thornsmall" => One(0x00FE),
+            "Tildesmall" => One(0x02DC),
+            "Tsmall" => One(0x0074),
+            "Uacutesmall" => One(0x00FA),
+            "Ucircumflexsmall" => One(0x00FB),
+            "Udieresissmall" => One(0x00FC),
+            "Ugravesmall" => One(0x00F9),
+            "Usmall" => One(0x0075),
+            "Vsmall" => One(0x0076),
+            "Wsmall" => One(0x0077),
+            "Xsmall" => One(0x0078),
+            "Yacutesmall" => One(0x00FD),
+            "Ydieresissmall" => One(0x00FF),
+            "Ysmall" => One(0x0079),
+            "Zcaronsmall" => One(0x017E),
+            "Zsmall" => One(0x007A),
+            "ampersandsmall" => One(0x0026),
+            "asuperior" => One(0x0061),
+            "bsuperior" => One(0x0062),
+            "centinferior" => One(0x00A2),
+            "centoldstyle" => One(0x00A2),
+            "centsuperior" => One(0x00A2),
+            "commainferior" => One(0x002C),
+            "commasuperior" => One(0x002C),
+            "copyrightsans" => One(0x00A9),
+            "copyrightserif" => One(0x00A9),
+            "cyrBreve" => One(0x02D8),
+            "cyrFlex" => Many(&[0x00A0, 0x0311]),
+            "cyrbreve" => One(0x02D8),
+            "cyrflex" => Many(&[0x00A0, 0x0311]),
+            "dblGrave" => Many(&[0x00A0, 0x030F]),
+            "dblgrave" => Many(&[0x00A0, 0x030F]),
+            "dieresisacute" => Many(&[0x00A0, 0x0308, 0x0301]),
+            "dieresisgrave" => Many(&[0x00A0, 0x0308, 0x0300]),
+            "dollarinferior" => One(0x0024),
+            "dollaroldstyle" => One(0x0024),
+            "dollarsuperior" => One(0x0024),
+            "dotlessj" => One(0x0237),
+            "dsuperior" => One(0x0064),
+            "eightoldstyle" => One(0x0038),
+            "esuperior" => One(0x0065),
+            "exclamdownsmall" => One(0x00A1),
+            "exclamsmall" => One(0x0021),
+            "fiveoldstyle" => One(0x0035),
+            "fouroldstyle" => One(0x0034),
+            "hypheninferior" => One(0x002D),
+            "hyphensuperior" => One(0x002D),
+            "isuperior" => One(0x0069),
+            "ll" => Many(&[0x006C, 0x006C]),
+            "lsuperior" => One(0x006C),
+            "msuperior" => One(0x006D),
+            "nineoldstyle" => One(0x0039),
+            "onefitted" => One(0x0031),
+            "oneoldstyle" => One(0x0031),
+            "osuperior" => One(0x006F),
+            "periodinferior" => One(0x002E),
+            "periodsuperior" => One(0x002E),
+            "questiondownsmall" => One(0x00BF),
+            "questionsmall" => One(0x003F),
+            "registersans" => One(0x00AE),
+            "registerserif" => One(0x00AE),
+            "rsuperior" => One(0x0072),
+            "rupiah" => One(0x20A8),
+            "sevenoldstyle" => One(0x0037),
+            "sixoldstyle" => One(0x0036),
+            "ssuperior" => One(0x0073),
+            "threeoldstyle" => One(0x0033),
+            "trademarksans" => One(0x2122),
+            "trademarkserif" => One(0x2122),
+            "tsuperior" => One(0x0074),
+            "twooldstyle" => One(0x0032),
+            "zerooldstyle" => One(0x0030),
+            "FFsmall" => Many(&[0x0066, 0x0066]),
+            "FFIsmall" => Many(&[0x0066, 0x0066, 0x0069]),
+            "FFLsmall" => Many(&[0x0066, 0x0066, 0x006C]),
+            "FIsmall" => Many(&[0x0066, 0x0069]),
+            "FLsmall" => Many(&[0x0066, 0x006C]),
+            "Germandblssmall" => Many(&[0x0073, 0x0073]),
+            "SSsmall" => Many(&[0x0073, 0x0073]),
+            "IJ" | "I_J" => Many(&[0x49, 0x4A]),
+            "ij" | "i_j" => Many(&[0x69, 0x6A]),
+            "ff" | "f_f" => Many(&[0x66, 0x66]),
+            "fi" | "f_i" => Many(&[0x66, 0x69]),
+            "fl" | "f_l" => Many(&[0x66, 0x6C]),
+            "ffi" | "f_f_i" => Many(&[0x66, 0x66, 0x69]),
+            "ffl" | "f_f_l" => Many(&[0x66, 0x66, 0x6C]),
+            "fj" | "f_j" => Many(&[0x66, 0x6A]),
+            "fk" | "f_k" => Many(&[0x66, 0x6B]),
             _ => return None,
         })
     };
-    let by_code = |c: u32| -> Option<Vec<u32>> {
+    let by_code = |c: u32| -> Option<O> {
         Some(match c {
-            0x0132 => vec![0x49, 0x4A],
-            0x0133 => vec![0x69, 0x6A],
-            0xFB00 => vec![0x66, 0x66],
-            0xFB01 => vec![0x66, 0x69],
-            0xFB02 => vec![0x66, 0x6C],
-            0xFB03 => vec![0x66, 0x66, 0x69],
-            0xFB04 => vec![0x66, 0x66, 0x6C],
+            0x0132 => Many(&[0x49, 0x4A]),
+            0x0133 => Many(&[0x69, 0x6A]),
+            0xFB00 => Many(&[0x66, 0x66]),
+            0xFB01 => Many(&[0x66, 0x69]),
+            0xFB02 => Many(&[0x66, 0x6C]),
+            0xFB03 => Many(&[0x66, 0x66, 0x69]),
+            0xFB04 => Many(&[0x66, 0x66, 0x6C]),
             _ => return None,
         })
     };
     key_name
         .and_then(by_name)
         .or_else(|| key_code.and_then(by_code))
-        .map(Unicode::Many)
+        .map(|o| match o {
+            One(u) => Unicode::One(u),
+            Many(l) => Unicode::Many(l.to_vec()),
+        })
 }
 
 /// `lpegmatch(namesplitter, name)` (font-map.lua:170-172): the parts of a
@@ -747,4 +912,638 @@ mod tests {
         assert_eq!(d[&0xA0].index, 1);
         assert_eq!(d[&0xA0].unicode, Some(Unicode::One(0xA0)));
     }
+}
+
+// ---------------------------------------------------------------------------
+// The lookups: compact (before the rehash), unify (rekey by Unicode) and
+// expand (after loading).
+// ---------------------------------------------------------------------------
+
+use super::dsp::{Coverage, Layout, LigTree, Pos, Rule, Sequence, Set};
+
+/// `mergesteps_1` (font-oup.lua:2488-2521): a key the first step lacks is
+/// taken from the later steps, first come first served. `strict` refuses
+/// steps of different formats.
+fn mergesteps_1(lookup: &mut Sequence, strict: bool) -> usize {
+    let nofsteps = lookup.steps.len();
+    if strict {
+        let f = lookup.steps[0].format;
+        if lookup.steps.iter().skip(1).any(|s| s.format != f) {
+            return 0;
+        }
+    }
+    let rest: Vec<Coverage> = lookup.steps.drain(1..).map(|s| s.coverage).collect();
+    let target = &mut lookup.steps[0].coverage;
+    for c in rest {
+        match (target as &mut Coverage, c) {
+            (Coverage::Single(t), Coverage::Single(c)) => {
+                for (k, v) in c {
+                    t.entry(k).or_insert(v);
+                }
+            }
+            (Coverage::Sequence(t), Coverage::Sequence(c)) => {
+                for (k, v) in c {
+                    t.entry(k).or_insert(v);
+                }
+            }
+            (Coverage::Single1(t), Coverage::Single1(c)) => {
+                // `if not target[k]`: a false value is replaced too
+                for (k, v) in c {
+                    match t.get(&k) {
+                        Some(Some(_)) => {}
+                        _ => {
+                            t.insert(k, v);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    lookup.merged = true;
+    nofsteps - 1
+}
+
+/// `mergesteps_2` (font-oup.lua:2523-2566): pairs, per first glyph.
+fn mergesteps_2(lookup: &mut Sequence) -> usize {
+    let nofsteps = lookup.steps.len();
+    let rest: Vec<Coverage> = lookup.steps.drain(1..).map(|s| s.coverage).collect();
+    if let Coverage::Pair(t) = &mut lookup.steps[0].coverage {
+        for c in rest {
+            if let Coverage::Pair(c) = c {
+                for (k, v) in c {
+                    match t.get_mut(&k) {
+                        Some(tk) => {
+                            for (kk, vv) in v {
+                                tk.entry(kk).or_insert(vv);
+                            }
+                        }
+                        None => {
+                            t.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    lookup.merged = true;
+    nofsteps - 1
+}
+
+/// `mergesteps_3` (font-oup.lua:2571-2614): marks, refused when two steps
+/// cover one mark; the classes are renumbered `10*step + class`.
+fn mergesteps_3(lookup: &mut Sequence) -> usize {
+    let nofsteps = lookup.steps.len();
+    let mut seen = BTreeSet::new();
+    for s in &lookup.steps {
+        if let Coverage::Mark(c) = &s.coverage {
+            for k in c.keys() {
+                if !seen.insert(*k) {
+                    return 0;
+                }
+            }
+        }
+    }
+    let mut coverage = BTreeMap::new();
+    let mut baseclasses = BTreeMap::new();
+    for (i, step) in lookup.steps.iter().enumerate() {
+        let offset = (i + 1) * 10;
+        if let Some(b) = &step.baseclasses {
+            for (k, v) in b {
+                baseclasses.insert(offset + k, v.clone());
+            }
+        }
+        if let Coverage::Mark(c) = &step.coverage {
+            for (k, v) in c {
+                let mut v = v.clone();
+                v.class += offset;
+                coverage.insert(*k, v);
+            }
+        }
+    }
+    lookup.steps.truncate(1);
+    lookup.steps[0].coverage = Coverage::Mark(coverage);
+    lookup.steps[0].baseclasses = Some(baseclasses);
+    lookup.merged = true;
+    nofsteps - 1
+}
+
+/// `nested` (font-oup.lua:2616-2631): merge an old ligature tree into new.
+fn nested(old: LigTree, new: &mut LigTree) {
+    if new.ligature.is_none() {
+        new.ligature = old.ligature;
+    }
+    for (k, v) in old.next {
+        match new.next.get_mut(&k) {
+            Some(n) => nested(v, n),
+            None => {
+                new.next.insert(k, v);
+            }
+        }
+    }
+}
+
+/// `mergesteps_4` (font-oup.lua:2633-2657): ligatures. (This one leaves
+/// `merged` unset; `compact` sets it from the step count.)
+fn mergesteps_4(lookup: &mut Sequence) -> usize {
+    let nofsteps = lookup.steps.len();
+    let rest: Vec<Coverage> = lookup.steps.drain(1..).map(|s| s.coverage).collect();
+    if let Coverage::Ligature(t) = &mut lookup.steps[0].coverage {
+        for c in rest {
+            if let Coverage::Ligature(c) = c {
+                for (k, v) in c {
+                    match t.get_mut(&k) {
+                        Some(tk) => nested(v, tk),
+                        None => {
+                            t.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    nofsteps - 1
+}
+
+/// `mergesteps_5` (font-oup.lua:2663-2699): cursive entries and exits.
+fn mergesteps_5(lookup: &mut Sequence) -> usize {
+    let nofsteps = lookup.steps.len();
+    let rest: Vec<Coverage> = lookup.steps.drain(1..).map(|s| s.coverage).collect();
+    if let Coverage::Cursive(t) = &mut lookup.steps[0].coverage {
+        for c in rest {
+            if let Coverage::Cursive(c) = c {
+                for (k, v) in c {
+                    match t.get_mut(&k) {
+                        Some(tk) => {
+                            if tk.entry.is_none() {
+                                tk.entry = v.entry;
+                            }
+                            if tk.exit.is_none() {
+                                tk.exit = v.exit;
+                            }
+                        }
+                        None => {
+                            t.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    lookup.merged = true;
+    nofsteps - 1
+}
+
+/// `checkkerns` (font-oup.lua:2701-2737) would turn a single adjustment that
+/// only moves the advance into a `move` table, but it tests
+/// `step.format == "pair"` on a gpos_single lookup, whose steps are formatted
+/// "single" (font-dsp.lua:1466), so it never changes anything.
+fn checkkerns(_lookup: &mut Sequence) {}
+
+/// `checkpairs` (font-oup.lua:2781-2833): a pair table that only moves the
+/// first glyph's advance becomes a `move` table of those advances.
+fn checkpairs(lookup: &mut Sequence) {
+    for step in lookup.steps.iter_mut() {
+        if step.format != Some("pair") {
+            continue;
+        }
+        let Coverage::Pair(c) = &step.coverage else {
+            continue;
+        };
+        let only = c.values().all(|d1| {
+            d1.values().all(|d2| {
+                if d2.second.is_some() {
+                    return false;
+                }
+                match &d2.first {
+                    Some(Pos::V(v)) => v[0] == 0.0 && v[1] == 0.0 && v[3] == 0.0,
+                    _ => true,
+                }
+            })
+        });
+        if !only {
+            continue;
+        }
+        let mut moved = BTreeMap::new();
+        for (g1, d1) in c {
+            let mut d = BTreeMap::new();
+            for (g2, d2) in d1 {
+                if let Some(Pos::V(v)) = &d2.first {
+                    d.insert(*g2, v[2]);
+                }
+            }
+            moved.insert(*g1, d);
+        }
+        step.coverage = Coverage::Move2(moved);
+        step.format = Some("move");
+    }
+}
+
+/// `strippairs` (font-oup.lua:2835-2867): a pair whose first record is all
+/// zero and has no second record does nothing and goes.
+fn strippairs(lookup: &mut Sequence) {
+    for step in lookup.steps.iter_mut() {
+        if step.format != Some("pair") {
+            continue;
+        }
+        if let Coverage::Pair(c) = &mut step.coverage {
+            for d1 in c.values_mut() {
+                d1.retain(|_, d2| !(d2.second.is_none() && d2.first == Some(Pos::Zero)));
+            }
+        }
+    }
+}
+
+/// `readers.compact` (font-oup.lua:2869-2969).
+pub fn compact(layout: &mut Layout) {
+    for list in [&mut layout.sequences, &mut layout.sublookups] {
+        for lookup in list.iter_mut() {
+            let nofsteps = lookup.steps.len();
+            if nofsteps > 1 {
+                let merged = match lookup.typ {
+                    "gsub_single" | "gsub_alternate" | "gsub_multiple" => {
+                        mergesteps_1(lookup, false)
+                    }
+                    "gsub_ligature" => mergesteps_4(lookup),
+                    "gpos_single" => {
+                        let m = mergesteps_1(lookup, true);
+                        checkkerns(lookup);
+                        m
+                    }
+                    "gpos_pair" => {
+                        strippairs(lookup);
+                        let m = mergesteps_2(lookup);
+                        checkpairs(lookup);
+                        m
+                    }
+                    "gpos_cursive" => mergesteps_5(lookup),
+                    "gpos_mark2mark" | "gpos_mark2base" | "gpos_mark2ligature" => {
+                        mergesteps_3(lookup)
+                    }
+                    _ => 0,
+                };
+                if merged > 0 {
+                    lookup.merged = true;
+                }
+            } else if nofsteps == 1 {
+                match lookup.typ {
+                    "gpos_single" => checkkerns(lookup),
+                    "gpos_pair" => checkpairs(lookup),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// `unifyresources` (font-oup.lua:74-452): every glyph index in the lookups
+/// becomes the Unicode (or private slot) its description is keyed by, with a
+/// duplicate code point getting the same substitutions and adjustments as
+/// its primary for the lookup types the Lua extends (single, alternate,
+/// multiple, single positioning, cursive).
+pub fn unify_resources(
+    layout: &mut Layout,
+    indices: &[u32],
+    duplicates: &BTreeMap<u32, BTreeSet<u32>>,
+) {
+    let ix = |g: u32| -> Option<u32> { indices.get(g as usize).copied() };
+    layout.marks = layout.marks.iter().filter_map(|&g| ix(g)).collect();
+    for set in layout.markclasses.values_mut() {
+        *set = set.iter().filter_map(|&g| ix(g)).collect();
+    }
+    let dups = |u: u32| -> Vec<u32> {
+        duplicates
+            .get(&u)
+            .map(|d| d.iter().copied().collect())
+            .unwrap_or_default()
+    };
+    let reset = |s: &Set| -> Set { s.iter().filter_map(|&g| ix(g)).collect() };
+    fn retree(t: LigTree, ix: &dyn Fn(u32) -> Option<u32>) -> LigTree {
+        LigTree {
+            ligature: t.ligature.and_then(ix),
+            next: t
+                .next
+                .into_iter()
+                .filter_map(|(g, d)| Some((ix(g)?, retree(d, ix))))
+                .collect(),
+        }
+    }
+    for list in [&mut layout.sequences, &mut layout.sublookups] {
+        for seq in list.iter_mut() {
+            let kind = seq.typ;
+            for step in seq.steps.iter_mut() {
+                let cov = std::mem::replace(&mut step.coverage, Coverage::None);
+                step.coverage = match (kind, cov) {
+                    ("gsub_single", Coverage::Single(c)) => {
+                        let mut t = BTreeMap::new();
+                        for (g1, d1) in c {
+                            let (Some(ug1), Some(ud1)) = (ix(g1), ix(d1)) else {
+                                continue;
+                            };
+                            t.insert(ug1, ud1);
+                            for u in dups(ug1) {
+                                t.insert(u, ud1);
+                            }
+                        }
+                        Coverage::Single(t)
+                    }
+                    ("gpos_pair", Coverage::Pair(c)) => Coverage::Pair(
+                        c.into_iter()
+                            .filter_map(|(g1, d1)| {
+                                Some((
+                                    ix(g1)?,
+                                    d1.into_iter()
+                                        .filter_map(|(g2, v)| Some((ix(g2)?, v)))
+                                        .collect(),
+                                ))
+                            })
+                            .collect(),
+                    ),
+                    ("gpos_pair", Coverage::Move2(c)) => Coverage::Move2(
+                        c.into_iter()
+                            .filter_map(|(g1, d1)| {
+                                Some((
+                                    ix(g1)?,
+                                    d1.into_iter()
+                                        .filter_map(|(g2, v)| Some((ix(g2)?, v)))
+                                        .collect(),
+                                ))
+                            })
+                            .collect(),
+                    ),
+                    ("gpos_pair", Coverage::Kern(c)) => Coverage::Kern(
+                        c.into_iter()
+                            .filter_map(|(g1, d1)| {
+                                Some((
+                                    ix(g1)?,
+                                    d1.into_iter()
+                                        .filter_map(|(g2, v)| Some((ix(g2)?, v)))
+                                        .collect(),
+                                ))
+                            })
+                            .collect(),
+                    ),
+                    ("gsub_ligature", Coverage::Ligature(c)) => Coverage::Ligature(
+                        c.into_iter()
+                            .filter_map(|(g, d)| Some((ix(g)?, retree(d, &ix))))
+                            .collect(),
+                    ),
+                    ("gsub_alternate" | "gsub_multiple", Coverage::Sequence(c)) => {
+                        let mut t = BTreeMap::new();
+                        for (g1, d1) in c {
+                            let d1: Vec<u32> = d1.iter().map(|&g| ix(g).unwrap_or(g)).collect();
+                            let Some(ug1) = ix(g1) else {
+                                continue;
+                            };
+                            t.insert(ug1, d1.clone());
+                            for u in dups(ug1) {
+                                t.insert(u, d1.clone());
+                            }
+                        }
+                        Coverage::Sequence(t)
+                    }
+                    ("gpos_single", Coverage::Single1(c)) => {
+                        let mut t = BTreeMap::new();
+                        for (g1, d1) in c {
+                            let Some(ug1) = ix(g1) else {
+                                continue;
+                            };
+                            t.insert(ug1, d1.clone());
+                            for u in dups(ug1) {
+                                t.insert(u, d1.clone());
+                            }
+                        }
+                        Coverage::Single1(t)
+                    }
+                    ("gpos_single", Coverage::Move1(c)) => {
+                        let mut t = BTreeMap::new();
+                        for (g1, d1) in c {
+                            let Some(ug1) = ix(g1) else {
+                                continue;
+                            };
+                            t.insert(ug1, d1);
+                            for u in dups(ug1) {
+                                t.insert(u, d1);
+                            }
+                        }
+                        Coverage::Move1(t)
+                    }
+                    (
+                        "gpos_mark2base" | "gpos_mark2mark" | "gpos_mark2ligature",
+                        Coverage::Mark(c),
+                    ) => {
+                        if let Some(b) = step.baseclasses.as_mut() {
+                            for d1 in b.values_mut() {
+                                *d1 = std::mem::take(d1)
+                                    .into_iter()
+                                    .filter_map(|(g, a)| Some((ix(g)?, a)))
+                                    .collect();
+                            }
+                        }
+                        Coverage::Mark(
+                            c.into_iter()
+                                .filter_map(|(g, d)| Some((ix(g)?, d)))
+                                .collect(),
+                        )
+                    }
+                    ("gpos_cursive", Coverage::Cursive(c)) => {
+                        let mut t = BTreeMap::new();
+                        for (g1, d1) in c {
+                            let Some(ug1) = ix(g1) else {
+                                continue;
+                            };
+                            t.insert(ug1, d1.clone());
+                            for u in dups(ug1) {
+                                t.insert(u, d1.clone());
+                            }
+                        }
+                        Coverage::Cursive(t)
+                    }
+                    (_, other) => other,
+                };
+                if let Some(rules) = step.rules.as_mut() {
+                    for rule in rules.iter_mut() {
+                        if let Some(b) = rule.before.as_mut() {
+                            for s in b.iter_mut() {
+                                *s = reset(s);
+                            }
+                        }
+                        if let Some(a) = rule.after.as_mut() {
+                            for s in a.iter_mut() {
+                                *s = reset(s);
+                            }
+                        }
+                        for s in rule.current.iter_mut() {
+                            *s = reset(s);
+                        }
+                        if let Some(r) = rule.replacements.as_mut() {
+                            *r = std::mem::take(r)
+                                .into_iter()
+                                .filter_map(|(k, v)| Some((ix(k)?, ix(v)?)))
+                                .collect();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A contextual rule as `expandlookups` stores it (font-oup.lua:3268-3277).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuleData {
+    /// the rule's number within its step, 1-based
+    pub rule: usize,
+    pub lookuptype: &'static str,
+    /// before (reversed) ++ current ++ after
+    pub sequence: Vec<Set>,
+    /// 1-based positions of the first and last current set
+    pub start: usize,
+    pub stop: usize,
+    /// per current position: sublookup numbers (1-based)
+    pub lookups: Option<Vec<Option<Vec<usize>>>>,
+    pub replacements: Option<BTreeMap<u32, u32>>,
+    /// the type of the first lookup a position names
+    pub subtype: Option<&'static str>,
+}
+
+/// A step's contextual rules after expansion (the `rulehash` of
+/// font-oup.lua:3211); the step's coverage maps a first glyph to indices
+/// into it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Expanded {
+    /// per sequence, per step
+    pub rules: Vec<Vec<Vec<RuleData>>>,
+    pub subrules: Vec<Vec<Vec<RuleData>>>,
+    /// per sequence: the resolved mark filtering set
+    pub markclass: Vec<Option<Set>>,
+    pub submarkclass: Vec<Option<Set>>,
+}
+
+fn expand_list(
+    list: &mut [Sequence],
+    sublookups: &[Sequence],
+    fallback: Option<&[Sequence]>,
+    markclasses: &BTreeMap<usize, Set>,
+) -> (Vec<Vec<Vec<RuleData>>>, Vec<Option<Set>>) {
+    let mut allrules = Vec::new();
+    let mut marks = Vec::new();
+    for seq in list.iter_mut() {
+        marks.push(
+            seq.markclass
+                .map(|m| markclasses.get(&m).cloned().unwrap_or_default()),
+        );
+        let lookuptype = seq.typ;
+        let mut perstep = Vec::new();
+        for step in seq.steps.iter_mut() {
+            let Some(rules) = step.rules.as_ref() else {
+                perstep.push(Vec::new());
+                continue;
+            };
+            let mut hash: Vec<RuleData> = Vec::new();
+            let mut coverage: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+            for (k, rule) in rules.iter().enumerate() {
+                let Rule {
+                    before,
+                    current,
+                    after,
+                    lookups,
+                    replacements,
+                } = rule;
+                let mut sequence: Vec<Set> = Vec::new();
+                if let Some(b) = before {
+                    sequence.extend(b.iter().cloned());
+                }
+                let start = sequence.len() + 1;
+                sequence.extend(current.iter().cloned());
+                let stop = sequence.len();
+                if let Some(a) = after {
+                    sequence.extend(a.iter().cloned());
+                }
+                let mut subtype = None;
+                if let Some(l) = lookups {
+                    for v in l.iter().flatten().flatten() {
+                        let found = sublookups
+                            .get(v - 1)
+                            .or_else(|| fallback.and_then(|f| f.get(v - 1)));
+                        if let Some(found) = found {
+                            if subtype.is_none() {
+                                subtype = Some(found.typ);
+                            }
+                        }
+                    }
+                }
+                if sequence.is_empty() {
+                    continue;
+                }
+                hash.push(RuleData {
+                    rule: k + 1,
+                    lookuptype,
+                    sequence: sequence.clone(),
+                    start,
+                    stop,
+                    lookups: lookups.clone(),
+                    replacements: replacements.clone(),
+                    subtype,
+                });
+                let at = hash.len() - 1;
+                if let Some(first) = sequence.get(start - 1) {
+                    for &u in first {
+                        coverage.entry(u).or_default().push(at);
+                    }
+                }
+            }
+            step.coverage = Coverage::Rules(coverage);
+            perstep.push(hash);
+        }
+        allrules.push(perstep);
+    }
+    (allrules, marks)
+}
+
+/// `expandlookups` (font-oup.lua:3175-3335) for the sequences, then the
+/// sublookups (which may fall back on a sequence).
+pub fn expand_lookups(layout: &mut Layout) -> Expanded {
+    let subs = layout.sublookups.clone();
+    let (rules, markclass) = expand_list(&mut layout.sequences, &subs, None, &layout.markclasses);
+    let seqs = layout.sequences.clone();
+    let (subrules, submarkclass) = expand_list(
+        &mut layout.sublookups,
+        &subs,
+        Some(&seqs),
+        &layout.markclasses,
+    );
+    Expanded {
+        rules,
+        subrules,
+        markclass,
+        submarkclass,
+    }
+}
+
+/// The GSUB lookups `checklookups` and `getcomponents` read, out of the
+/// unified sequences and sublookups.
+pub fn lookups_of(layout: &Layout) -> Lookups {
+    let mut out = Lookups::default();
+    fn convert(t: &LigTree) -> LigatureTree {
+        LigatureTree {
+            ligature: t.ligature,
+            next: t.next.iter().map(|(k, v)| (*k, convert(v))).collect(),
+        }
+    }
+    for list in [&layout.sequences, &layout.sublookups] {
+        for seq in list {
+            for step in &seq.steps {
+                match (seq.typ, &step.coverage) {
+                    ("gsub_single", Coverage::Single(c)) => out.singles.push(c.clone()),
+                    ("gsub_alternate", Coverage::Sequence(c)) => out.alternates.push(c.clone()),
+                    ("gsub_ligature", Coverage::Ligature(c)) => out
+                        .ligatures
+                        .push(c.iter().map(|(k, v)| (*k, convert(v))).collect()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
 }
