@@ -184,6 +184,9 @@ fn get_item(lua: &Lua, name: &str) -> mlua::Result<Option<Value>> {
         "currentgrouplevel" => Value::Integer(ctx::with("tex.currentgrouplevel", |eng, _| {
             Ok(eng.group_level() as i64)
         })?),
+        "catcodetable" => {
+            Value::Integer(ctx::with("tex.catcodetable", |eng, _| Ok(eng.cat_table))?)
+        }
         _ => return Ok(None),
     }))
 }
@@ -251,6 +254,9 @@ pub(super) fn install(
             let global = n == 3
                 && matches!(&args[0], Value::String(s) if s.to_str().is_ok_and(|s| &*s == "global"));
             let name = name.to_str()?.to_string();
+            if name == "catcodetable" {
+                return set_catcodetable(global, &args[n - 1]);
+            }
             match param(&name) {
                 Some(p) => set_param(&b, &a, &p, global, &args[n - 1..]),
                 None => refused(&name),
@@ -290,6 +296,9 @@ pub(super) fn install(
                 let name = s.to_str()?.to_string();
                 if let Some(p) = param(&name) {
                     return set_param(&b, &a, &p, false, &[value]);
+                }
+                if name == "catcodetable" {
+                    return set_catcodetable(false, &value);
                 }
                 if parameter_reason(&key)?.is_some() {
                     return refused(&name);
@@ -530,6 +539,19 @@ fn badness(t: i64, s: i64) -> i64 {
     } else {
         (r * r * r + 0x20000) / 0x40000
     }
+}
+
+/// `tex.catcodetable = n`: the engine's own `\catcodetable=n`, which switches
+/// to a table that exists and reports `Invalid \catcode table` otherwise.
+fn set_catcodetable(global: bool, value: &Value) -> mlua::Result<()> {
+    let n = value
+        .as_integer()
+        .ok_or_else(|| mlua::Error::runtime("tex.catcodetable wants a number"))?;
+    ctx::with("tex.catcodetable", |eng, _| {
+        assign(eng, global, &format!("={n} "), |eng, lx| {
+            eng.compile_time_catcodetable(lx)
+        })
+    })
 }
 
 /// A name that is one of the manual's parameters texrs does not hold, refused

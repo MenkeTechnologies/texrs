@@ -1614,3 +1614,24 @@ fn the_pdf_variables_are_pdfvariables_entries() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn tex_catcodetable_switches_the_table_the_mouth_reads_with() {
+    // `tex.catcodetable` reads and assigns LuaTeX's current catcode table
+    // through the engine's own `\catcodetable`, so a switch made from Lua in
+    // a group is undone at its end like one made in TeX.
+    let body = "\\savecatcodetable 5 \
+        \\directlua{local a = tex.catcodetable tex.catcodetable = 5 local b = tex.get('catcodetable') \
+        tex.set('catcodetable', 0) tex.sprint(string.char(92) .. 'message{[' .. a .. ' ' .. b .. ' ' \
+        .. tex.catcodetable .. ']}')}\
+        {\\directlua{tex.catcodetable = 5}\\message{[\\the\\catcodetable]}}\\message{[\\the\\catcodetable]}";
+    let want = "[0 5 0] [5] [0]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}
