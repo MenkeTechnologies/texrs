@@ -286,6 +286,14 @@ pub struct Engine {
     high_names: FxHashMap<i64, (crate::compiler::RegFile, i64)>,
     /// How many slots of each pool are taken, in `RegFile` order.
     high_used: [i64; 4],
+    /// Commands the gullet made where the lowerer was not looking -- a
+    /// `\directlua` expanded inside a `\csname` writes registers -- for the
+    /// lowerer to put into the program at the next token (`take_deferred`).
+    deferred: Vec<crate::ir::Cmd>,
+    /// `\everyeof` as the mouth reads it when a file ends (etex.ch §362):
+    /// shared with every file's lexer, and kept equal to the token
+    /// parameter by `sync_everyeof`.
+    everyeof: Rc<std::cell::RefCell<Vec<Token>>>,
     /// LuaTeX's attribute registers (`\attribute n`), each unset --
     /// [`UNUSED_ATTRIBUTE`] -- until assigned. Frontend state like the integer
     /// parameters: what the stomach attaches to a node is the value in force
@@ -585,6 +593,8 @@ impl Engine {
             high_names: FxHashMap::default(),
             high_used: [0; 4],
             attributes: FxHashMap::default(),
+            everyeof: Rc::default(),
+            deferred: Vec::new(),
             messages: Vec::new(),
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
@@ -778,6 +788,7 @@ impl Engine {
                         Some(v) => self.toks.insert(reg, v),
                         None => self.toks.remove(&reg),
                     };
+                    self.sync_everyeof(reg);
                 }
                 Save::CharCode(t, c, v) => {
                     let _ = self.charcodes.set(t, c, v);
@@ -1576,6 +1587,25 @@ impl Engine {
         out
     }
 
+    /// What the gullet made for the program since the lowerer last asked.
+    pub fn take_deferred(&mut self) -> Vec<crate::ir::Cmd> {
+        std::mem::take(&mut self.deferred)
+    }
+
+    /// Keep the mouth's view of `\everyeof` equal to the parameter, after
+    /// token register `reg` changed.
+    fn sync_everyeof(&mut self, reg: i64) {
+        if Some(reg) == crate::params::toks_register("everyeof") {
+            *self.everyeof.borrow_mut() = self.toks.get(&reg).cloned().unwrap_or_default();
+        }
+    }
+
+    /// The `\everyeof` a file's lexer inserts at the file's end; see
+    /// `Lexer::insert_everyeof`.
+    pub fn everyeof_handle(&self) -> Rc<std::cell::RefCell<Vec<Token>>> {
+        Rc::clone(&self.everyeof)
+    }
+
     /// LuaTeX attribute register `n` (the LuaTeX manual, "Attributes"): unset
     /// until assigned, and `\the` of an unset one is `-2147483647`, measured.
     pub fn attribute_value(&self, n: i64) -> i64 {
@@ -1799,6 +1829,20 @@ impl Engine {
         }
         let original = name;
         let name = self.primitive_meaning(name);
+        // LuaTeX's expandable Lua primitives are `convert` commands: they
+        // expand wherever the gullet reads -- inside `\csname`, an `\edef`, a
+        // number -- and not only where the lowerer meets them at the top. What
+        // a chunk assigns to a register reaches the program through `deferred`.
+        if matches!(
+            name.name(),
+            "directlua" | "luadirect" | "luaescapestring" | "luafunction" | "luabytecode"
+        ) {
+            let mut cmds = Vec::new();
+            let mut families = crate::typeset::Families::default();
+            crate::lua::lower(self, lx, name.name(), &mut cmds, &mut families)?;
+            self.deferred.extend(cmds);
+            return Ok(true);
+        }
         match name.name() {
             // The advice markers: they carry the "inside advice" depth through
             // the token stream, and expand to nothing.
@@ -3879,6 +3923,7 @@ impl Engine {
         }
         self.save(Save::Toks(reg, self.toks.get(&reg).cloned()));
         self.toks.insert(reg, value);
+        self.sync_everyeof(reg);
         if trace {
             self.trace_toks("into", reg);
         }
@@ -5949,6 +5994,12 @@ impl Engine {
         if defined && self.try_expand(lx, n, pending_only)? {
             return Ok(true);
         }
+        self.the_or_number_expands(lx, n, pending_only)
+    }
+
+    /// `\the` or `\number` read by `get_x_token`: the characters §465 and
+    /// §470 make of the operand go back to be read. Whether `n` was one.
+    fn the_or_number_expands(&mut self, lx: &mut Lexer, n: CsId, pending_only: bool) -> R<bool> {
         let prim = self.primitive_meaning(n);
         if matches!(prim.name(), "the" | "number") && !self.is_macro(n) {
             let text = self.read_the(lx, prim.name() == "number", pending_only)?;
@@ -6465,6 +6516,9 @@ impl Engine {
                 (Token::Cs(n), _) if n.name() == "endcsname" => return Ok(name),
                 (Token::Char(c, cat), _) if *cat != Cat::Active => name.push(*c),
                 (_, Some(id)) if self.try_expand(lx, id, pending_only)? => {}
+                // §372 reads with `get_x_token`, so `\the` and `\number` give
+                // their characters here too: `\csname x@\the\language\endcsname`.
+                (_, Some(id)) if self.the_or_number_expands(lx, id, pending_only)? => {}
                 _ => {
                     lx.back_input(&[t]);
                     self.report(lx, "Missing \\endcsname inserted");
@@ -7189,11 +7243,19 @@ impl Engine {
     /// `\read<number> to <cs>` (§1225): the next line or lines of the stream,
     /// as tokens, become the macro's body.
     pub fn compile_time_read(&mut self, lx: &mut Lexer) -> R<()> {
-        let out = self.do_read(lx);
+        let out = self.do_read(lx, false);
         self.spend_prefixes(out)
     }
 
-    fn do_read(&mut self, lx: &mut Lexer) -> R<()> {
+    /// e-TeX's `\readline<number> to <cs>` (etex.ch §1445): one line, every
+    /// character of it -- the `\endlinechar` too -- an other character, and
+    /// the space a space.
+    pub fn compile_time_readline(&mut self, lx: &mut Lexer) -> R<()> {
+        let out = self.do_read(lx, true);
+        self.spend_prefixes(out)
+    }
+
+    fn do_read(&mut self, lx: &mut Lexer, line_only: bool) -> R<()> {
         let global = self.global;
         let n = self.scan_number(lx, false)?;
         if !self.scan_keyword(lx, "to", false)? {
@@ -7202,8 +7264,40 @@ impl Engine {
         // §1215's `get_r_token`: the next non-blank token, which must be a
         // control sequence.
         let name = self.get_r_token(lx, false)?;
-        let body = self.read_toks(lx, n)?;
+        let body = match line_only {
+            true => self.read_line_toks(lx, n)?,
+            false => self.read_toks(lx, n)?,
+        };
         self.define_macro_with_params(name, Vec::new(), body, global)
+    }
+
+    /// etex.ch §1445's `j=1` arm of `read_toks`: the line's characters as
+    /// they are, other except the space. LuaTeX leaves the `\endlinechar`
+    /// off (`\meaning` of the line shows none, measured), where etex.ch
+    /// keeps it.
+    fn read_line_toks(&mut self, _lx: &Lexer, n: i64) -> R<Vec<Token>> {
+        let m = usize::try_from(n).ok().filter(|m| *m < 16);
+        let Some(stream) = m.and_then(|m| self.read_streams[m].as_mut()) else {
+            return Err(TexError(
+                "*** (cannot \\read from terminal in nonstop modes)".into(),
+            ));
+        };
+        let line = match stream.lines.pop_front() {
+            Some(line) => line,
+            None => {
+                self.read_streams[m.expect("an open stream")] = None;
+                String::new()
+            }
+        };
+        let line = line.trim_end_matches([' ', '\t', '\r']);
+        let toks: Vec<Token> = line
+            .chars()
+            .map(|c| match c {
+                ' ' => Token::Char(' ', Cat::Space),
+                c => Token::Char(c, Cat::Other),
+            })
+            .collect();
+        Ok(toks)
     }
 
     /// §482's `read_toks`: a line from stream `n`, read with the category

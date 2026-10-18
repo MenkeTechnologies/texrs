@@ -873,6 +873,9 @@ impl Lowerer {
         // §82: the hundredth error ends the run.
         while let Some(tok) = {
             self.flush_keeps(&mut out);
+            // What the gullet made for the program while it expanded -- a
+            // chunk's register writes -- goes in where the expansion stood.
+            out.extend(self.eng.take_deferred());
             for cmd in &out[followed..] {
                 self.eng.known.apply(cmd);
             }
@@ -1650,6 +1653,7 @@ impl Lowerer {
                     self.eng.close_read_stream(n);
                 }
                 "read" => self.eng.compile_time_read(lx)?,
+                "readline" => self.eng.compile_time_readline(lx)?,
                 // §362: the file ends with the line being read. In the
                 // document itself that leaves no `\end` to find unless it is on
                 // the same line, as in tex.
@@ -5932,6 +5936,8 @@ impl Lowerer {
         if self.reading_document {
             lx.mark_as_file();
         }
+        // e-TeX inserts `\everyeof` at the end of every file `\input` reads.
+        lx.insert_everyeof(self.eng.everyeof_handle());
         self.block(&mut lx, None)
     }
 

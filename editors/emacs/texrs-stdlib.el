@@ -199,6 +199,12 @@
     "\\immediateassignment"
     "\\immediateassigned"
     "\\begincsname"
+    "\\gluestretch"
+    "\\glueshrink"
+    "\\gluestretchorder"
+    "\\glueshrinkorder"
+    "\\eTeXgluestretchorder"
+    "\\eTeXglueshrinkorder"
     "\\glueexpr"
     "\\muexpr"
     "\\input"
@@ -206,6 +212,7 @@
     "\\openin"
     "\\closein"
     "\\read"
+    "\\readline"
     "\\rust"
     "\\rustcall"
     "\\rustcompile"
@@ -491,6 +498,12 @@
     (puthash "\\immediateassignment" "\\immediateassignment  —  Carry out the assignment that follows even while expanding. [Expansion]" table)
     (puthash "\\immediateassigned" "\\immediateassigned  —  The same for every assignment in a braced text; the braces open no group. [Expansion]" table)
     (puthash "\\begincsname" "\\begincsname  —  `\\csname` that does not define what it does not find: an unknown name expands to nothing, where `\\csname` would make it `\\relax` and leave it defined ever after. [Expansion]" table)
+    (puthash "\\gluestretch" "\\gluestretch  —  The stretch of a glue, as a dimension: `\\gluestretch\\skip0` is `2.0pt` for `1pt plus 2fil`, whatever its order. [Registers]" table)
+    (puthash "\\glueshrink" "\\glueshrink  —  The shrink of a glue, as a dimension; see `\\gluestretch`. [Registers]" table)
+    (puthash "\\gluestretchorder" "\\gluestretchorder  —  The order of a glue's stretch as LuaTeX counts it: 0 finite, 1 `fi`, 2 `fil`, 3 `fill`, 4 `filll`. [Registers]" table)
+    (puthash "\\glueshrinkorder" "\\glueshrinkorder  —  The order of a glue's shrink, LuaTeX's numbering; see `\\gluestretchorder`. [Registers]" table)
+    (puthash "\\eTeXgluestretchorder" "\\eTeXgluestretchorder  —  The order of a glue's stretch as e-TeX counts it: 0 finite, 1 `fil`, 2 `fill`, 3 `filll`. [Registers]" table)
+    (puthash "\\eTeXglueshrinkorder" "\\eTeXglueshrinkorder  —  The order of a glue's shrink as e-TeX counts it. [Registers]" table)
     (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
     (puthash "\\muexpr" "\\muexpr  —  The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts — eTeX gives each unit its own primitive so the two cannot be mixed. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
@@ -498,6 +511,7 @@
     (puthash "\\openin" "\\openin  —  Open a `\\read` stream on a file (tex.web §1275): the stream is closed first, then opened on the file the name finds — searched for as `\\input` searches, with `.tex` supplied — and left closed when nothing has it. [Files]" table)
     (puthash "\\closein" "\\closein  —  Close a `\\read` stream (tex.web §1275), so `\\ifeof` is true for it. [Files]" table)
     (puthash "\\read" "\\read  —  Define a macro as the next line of a stream (tex.web §482): the line is read with the category codes in force and ended by `\\endlinechar`, and more lines are read while a brace is open. [Files]" table)
+    (puthash "\\readline" "\\readline  —  e-TeX's `\\read` of one line as it stands: every character an other character and the space a space, so braces need not balance and a `\\` is a backslash. [Files]" table)
     (puthash "\\rust" "\\rust  —  Open a block of Rust compiled and loaded at run time. [Inline Rust]" table)
     (puthash "\\rustcall" "\\rustcall  —  Call a function a `\\rust` block exported. [Inline Rust]" table)
     (puthash "\\rustcompile" "\\rustcompile  —  What a `\\rust{ … }` block becomes: compile and register the block whose base64 body follows, up to `\\endrust`. [Inline Rust]" table)

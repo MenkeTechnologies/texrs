@@ -476,9 +476,13 @@ fn a_glue_register_reaches_lua_as_the_five_numbers_luatex_reports() {
         "[65536 131072 196608 2 0]"
     );
     // "when you pass false as second argument to getglue you only get the width"
+    //
+    // The `\relax` ends the glue. Without it §1228's scan looks for `minus`
+    // with `get_x_token`, which expands the `\directlua` -- the chunk runs
+    // before the assignment is made, and luatex answers 0 (measured).
     assert_eq!(
         out(&format!(
-            "\\skip1=7pt plus 1fill\n{}",
+            "\\skip1=7pt plus 1fill\\relax\n{}",
             lua_message("tex.getglue(1, false)")
         )),
         "[458752]"
@@ -487,7 +491,7 @@ fn a_glue_register_reaches_lua_as_the_five_numbers_luatex_reports() {
     // `tex.glue[n]`.
     assert_eq!(
         out(&format!(
-            "\\skip2=3pt plus 1fil\n{}",
+            "\\skip2=3pt plus 1fil\\relax\n{}",
             lua_message("tex.glue[2]")
         )),
         "[196608]"

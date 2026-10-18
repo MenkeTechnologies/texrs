@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">294</div>
+            <div class="stat-val">295</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -525,6 +525,8 @@
 \closein3</pre></td></tr>
             <tr><td><code>\read</code></td><td>Define a macro as the next line of a stream (tex.web §482): the line is read with the category codes in force and ended by <code>\endlinechar</code>, and more lines are read while a brace is open. A blank line reads as <code>\par</code>, and so does the line a file that has run out did not have — which is when the stream closes. A closed stream would read the terminal, which nonstop mode does not have, so that stops the run.</td><td><pre>\read&lt;number&gt; to &lt;control sequence&gt;
 \openin3=data \read3 to\line \message{\meaning\line}</pre></td></tr>
+            <tr><td><code>\readline</code></td><td>e-TeX's <code>\read</code> of one line as it stands: every character an other character and the space a space, so braces need not balance and a <code>\</code> is a backslash. LuaTeX's leaves the <code>\endlinechar</code> off, and so does texrs.</td><td><pre>\readline&lt;number&gt; to &lt;control sequence&gt;
+\openin3=data \readline3 to\line</pre></td></tr>
           </tbody>
         </table>
       </section>

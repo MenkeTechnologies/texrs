@@ -268,6 +268,11 @@ pub struct Lexer {
     /// `process_input_buffer` callback sees before they are read
     /// (`crate::input_hooks`); a token list or a pseudo file is not one.
     file_lines: bool,
+    /// A FILE's `\everyeof` (etex.ch §362): the engine's current value, read
+    /// when the characters run out rather than when the file opened -- a
+    /// file may set it itself, as etex.src's `\patterns` does to skip to its
+    /// own end -- and inserted once.
+    file_eof: Option<std::rc::Rc<std::cell::RefCell<Vec<Token>>>>,
 }
 
 /// A source a pseudo file suspended, as it stood: everything that says where
@@ -292,6 +297,12 @@ impl Lexer {
     /// `process_input_buffer` callback, when there is one, as it is reached.
     pub fn mark_as_file(&mut self) {
         self.file_lines = true;
+    }
+
+    /// Insert the current `\everyeof` -- `every` is the engine's, read when the
+    /// file ends -- before the file closes (etex.ch §362).
+    pub fn insert_everyeof(&mut self, every: std::rc::Rc<std::cell::RefCell<Vec<Token>>>) {
+        self.file_eof = Some(every);
     }
 
     /// `process_input_buffer` on the line that starts at `pos`, its end left
@@ -338,6 +349,14 @@ impl Lexer {
             }
         }
         let Some(parent) = self.suspended.pop() else {
+            // The file itself has ended: its `\everyeof`, once.
+            if let Some(every) = self.file_eof.take() {
+                let tokens = every.borrow().clone();
+                if !tokens.is_empty() {
+                    self.insert_input(&tokens);
+                    return true;
+                }
+            }
             return false;
         };
         self.ahead = None;
@@ -388,6 +407,7 @@ impl Lexer {
             suspended: Vec::new(),
             eof_tokens: None,
             file_lines: false,
+            file_eof: None,
         }
     }
 
@@ -469,6 +489,7 @@ impl Lexer {
             suspended: Vec::new(),
             eof_tokens: None,
             file_lines: false,
+            file_eof: None,
         }
     }
 

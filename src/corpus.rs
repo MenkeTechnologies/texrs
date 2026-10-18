@@ -1249,6 +1249,12 @@ pub const CORPUS: &[Entry] = &[
         "Define a macro as the next line of a stream (tex.web \u{a7}482): the line is read with the category codes in force and ended by `\\endlinechar`, and more lines are read while a brace is open. A blank line reads as `\\par`, and so does the line a file that has run out did not have \u{2014} which is when the stream closes. A closed stream would read the terminal, which nonstop mode does not have, so that stops the run.",
         "\\read<number> to <control sequence>\n\\openin3=data \\read3 to\\line \\message{\\meaning\\line}",
     ),
+    (
+        "\\readline",
+        "Files",
+        "e-TeX's `\\read` of one line as it stands: every character an other character and the space a space, so braces need not balance and a `\\` is a backslash. LuaTeX's leaves the `\\endlinechar` off, and so does texrs.",
+        "\\readline<number> to <control sequence>\n\\openin3=data \\readline3 to\\line",
+    ),
     // ══ Inline Rust — rust_ffi.rs, fusevm::ffi ════════════════════════════
     (
         "\\rust",
