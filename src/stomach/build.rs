@@ -89,7 +89,7 @@ impl Stomach {
     pub fn append_penalty(&mut self, value: i64) {
         self.tail_append(Node::Penalty(value));
         if self.mode() == Mode::Vertical {
-            self.want_build_page();
+            self.want_build_page("penalty");
         }
     }
 
@@ -155,7 +155,9 @@ impl Stomach {
         if let Some(r) = packed.report {
             self.box_report(&r, kind != BoxKind::H, &packed.node);
         }
-        self.box_end(Some(packed.node), context);
+        let mut b = packed.node;
+        b.subtype = crate::node::BOX_BOX;
+        self.box_end(Some(b), context);
     }
 
     /// `hpack` with LuaTeX's `hpack_filter` callback in front of it (see
@@ -228,7 +230,7 @@ impl Stomach {
                     Kind::V => {
                         self.append_to_vlist(b);
                         if self.mode().outer() {
-                            self.want_build_page();
+                            self.want_build_page("box");
                         }
                     }
                     Kind::H => {
@@ -524,7 +526,7 @@ impl Stomach {
         };
         self.tail_append(node);
         if self.nest.len() == 1 {
-            self.want_build_page();
+            self.want_build_page(if n < 255 { "insert" } else { "adjust" });
         }
     }
 }

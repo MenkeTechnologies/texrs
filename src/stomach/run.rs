@@ -348,7 +348,7 @@ impl Stomach {
             ListOp::NewGraf(indented) => self.new_graf(indented, e),
             ListOp::EndGraf => self.end_graf(e),
             ListOp::Indent => self.indent_in_hmode(e),
-            ListOp::BuildPage => self.want_build_page(),
+            ListOp::BuildPage => self.want_build_page("vmode_par"),
             ListOp::End => self.pages.end_requested = true,
             // Kept by `b_list` before it reaches here.
             ListOp::OutputRoutine(_) => {}

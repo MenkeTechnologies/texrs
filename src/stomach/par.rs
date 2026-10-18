@@ -31,12 +31,13 @@ impl Stomach {
         if indented {
             l.list.push(Node::Box(BoxNode {
                 width: dimen_par(e, "parindent"),
+                subtype: crate::node::BOX_INDENT,
                 ..BoxNode::null()
             }));
         }
         self.nest.push(l);
         if self.nest.len() == 2 {
-            self.want_build_page();
+            self.want_build_page("new_graf");
         }
     }
 
@@ -44,6 +45,7 @@ impl Stomach {
     pub fn indent_in_hmode(&mut self, e: &dyn Eqtb) {
         let b = BoxNode {
             width: dimen_par(e, "parindent"),
+            subtype: crate::node::BOX_INDENT,
             ..BoxNode::null()
         };
         self.cur_mut().space_factor = 1000;
@@ -63,7 +65,7 @@ impl Stomach {
             self.line_break(widow, e);
         }
         if self.mode() == Mode::Vertical {
-            self.want_build_page();
+            self.want_build_page("hmode_par");
         }
     }
 

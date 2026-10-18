@@ -244,6 +244,8 @@ pub struct Stomach {
     pub said: Vec<Said>,
     /// Set by an action after which §994's `build_page` runs.
     build_page_wanted: bool,
+    /// Why, for `buildpage_filter`.
+    pub build_page_reason: &'static str,
     /// The source line of the command being carried out, for §663's
     /// `detected at line`.
     pub line: i64,
@@ -290,6 +292,7 @@ impl Stomach {
             dirty: Vec::new(),
             said: Vec::new(),
             build_page_wanted: false,
+            build_page_reason: "",
             line: 0,
             baselines: crate::pack::Baselines::default(),
             split_top_skip: Glue::default(),
@@ -463,8 +466,11 @@ impl Stomach {
     }
 
     /// Ask for §994's `build_page` once the action is finished.
-    pub fn want_build_page(&mut self) {
+    /// `reason` is what LuaTeX's `buildpage_filter` is told: the
+    /// contribution that called `build_page` (`"new_graf"`, `"box"`, ...).
+    pub fn want_build_page(&mut self, reason: &'static str) {
         self.build_page_wanted = true;
+        self.build_page_reason = reason;
     }
 
     /// Whether an action asked for `build_page`, clearing the request.

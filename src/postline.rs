@@ -316,6 +316,7 @@ pub fn post_line_break(
             Some(&mut adjust),
         );
         let mut just_box = packed.node;
+        just_box.subtype = crate::node::BOX_LINE;
         just_box.shift_amount = indent;
         out.reports.push(packed.report);
         out.badness.push(packed.badness);

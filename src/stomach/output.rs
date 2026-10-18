@@ -230,7 +230,7 @@ impl Stomach {
         if self.output_active() {
             return;
         }
-        crate::node::hooks::buildpage_filter("");
+        crate::node::hooks::buildpage_filter(self.build_page_reason);
         self.refresh_page_params(e);
         let contributions = std::mem::take(&mut self.nest[0].list);
         // The insertion boxes are the document's registers; the builder
@@ -333,6 +333,7 @@ impl Stomach {
         self.output.insert_penalties = 0;
         self.refresh_page_params(e);
         self.lend_insertion_boxes();
+        crate::node::hooks::buildpage_filter("after_output");
         let fired = self.builder().resume_output(l.list);
         self.handle_fired(fired);
     }
@@ -358,6 +359,7 @@ impl Stomach {
             crate::box_::fill::fill(),
         )));
         self.tail_append(crate::node::Node::Penalty(-0o10000000000));
+        self.build_page_reason = "end";
         self.build_page(e);
         false
     }

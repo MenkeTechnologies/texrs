@@ -202,7 +202,18 @@ pub struct BoxNode {
     pub glue_order: Order,
     /// `false` for an `hlist_node`, `true` for a `vlist_node`.
     pub vertical: bool,
+    /// What made the box, as LuaTeX numbers an hlist's subtype
+    /// (`node.subtypes("hlist")`): [`BOX_UNKNOWN`], [`BOX_LINE`], [`BOX_BOX`],
+    /// [`BOX_INDENT`] and the rest. TeX82 records nothing of the kind; it is
+    /// carried for the callbacks of `crate::node::hooks`.
+    pub subtype: u8,
 }
+
+/// LuaTeX's hlist subtypes the stomach makes.
+pub const BOX_UNKNOWN: u8 = 0;
+pub const BOX_LINE: u8 = 1;
+pub const BOX_BOX: u8 = 2;
+pub const BOX_INDENT: u8 = 3;
 
 impl BoxNode {
     /// `new_null_box` (§136): an empty hbox with every dimension zero.

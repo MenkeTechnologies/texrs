@@ -1248,6 +1248,7 @@ fn to_engine(arena: &Arena, at: usize) -> mlua::Result<Vec<ENode>> {
             glue_sign: glue_sign(cell.int("glue_sign")),
             glue_order: from_luatex_order(cell.int("glue_order"))?,
             vertical: cell.id == VLIST,
+            subtype: u8::try_from(sub).unwrap_or(0),
         }),
         RULE => ENode::Rule(RuleNode {
             width: cell.int("width"),
