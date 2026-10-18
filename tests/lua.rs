@@ -1697,3 +1697,29 @@ fn enableprimitives_defines_the_prefixed_names_extraprimitives_lists() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn the_linebreak_callbacks_see_the_paragraph_on_the_list_path() {
+    // On the stomach's list path a paragraph passes through
+    // `pre_linebreak_filter` before it is broken and `post_linebreak_filter`
+    // after, with luatex's arguments; the counts are luatex 1.24.0's for the
+    // same paragraph (four characters, one line), and what the post filter
+    // answers is what the page gets -- a list it emptied leaves no line.
+    if texrs::kpse::locate("cmr10.tfm").is_none() {
+        eprintln!("skipping: kpsewhich cannot find cmr10.tfm");
+        return;
+    }
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\font\\x=cmr10 \\x \\hsize=100pt \\tolerance=10000 \\hbadness=10000\n\
+        \\directlua{callback.register('pre_linebreak_filter', function(h, gc) local n = 0 \
+        for g in node.traverse_id(node.id('glyph'), h) do n = n + 1 end \
+        texio.write_nl('[pre ' .. n .. ' ' .. gc .. ']') return true end) \
+        callback.register('post_linebreak_filter', function(h, gc) local n = 0 \
+        for l in node.traverse_id(node.id('hlist'), h) do n = n + 1 end \
+        texio.write_nl('[post ' .. n .. ']') return true end)}\n\
+        ab cd\\par\n\\end\n";
+    let (msgs, _) = texrs::run_list_path(src).expect("run");
+    assert!(
+        msgs.contains("[pre 4 ]") && msgs.contains("[post 1]"),
+        "{msgs}"
+    );
+}
