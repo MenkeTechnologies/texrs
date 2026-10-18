@@ -1036,11 +1036,23 @@ build at 1 and 8 threads.
 
 **Pictures, images and formulas.** Before the pages are fitted, every TikZ
 picture is parsed again against the document's own face to size its nodes, and
-every `\includegraphics` file is opened to resolve its lengths. Each such line
-depends only on itself, the fonts and the file it names, so once a document has
-eight or more of them the lines are remeasured in parallel and collected in
-document order. Measured 2026-10-17 on synthetic documents under heavy machine
-load, that stage went from about 150 ms to 19 ms with 6,000 pictures, 130 ms to
+every `\includegraphics` line has its lengths resolved against the measure and
+the file it names. Each such line depends only on itself, the fonts and that
+file, so once a document has eight or more of them the lines are remeasured in
+parallel and collected in document order. The files are found and read before
+that, once per distinct path (on the rayon pool when there are eight or more
+image lines and more than one file), and every line naming a path shares the
+one picture read from it, for measuring and for drawing; the PDF writer then
+finds repeated uses to be one XObject by address instead of comparing their
+pixels. Before, each use found and read its file twice and kept its own copy of
+the pixels until the file was written. On a document of 4,000 figures drawn
+from 10 photographs (release build, 18-core aarch64 macOS, load averages 20 to
+27, medians of 9 interleaved PDF runs, 2026-10-17) wall went from 659 to 236 ms
+at one thread and 304 to 159 ms at 8, and peak resident memory from 1.7 GB to
+62 MB; the mixed document of text, pictures, images and formulas was unchanged
+within noise (2324 to 2381 ms at one thread, 767 to 743 ms at 8). Measured
+earlier the same day under heavy machine load, the remeasuring stage went from
+about 150 ms to 19 ms with 6,000 pictures, 130 ms to
 33 ms with 4,000 images, and 185 ms to 33 ms for a mix of both with formulas.
 A picture's marker is also decoded through a lookup table rather than a search
 of the base64 alphabet, which had been about a quarter of a drawing-heavy

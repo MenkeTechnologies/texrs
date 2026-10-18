@@ -950,7 +950,7 @@ pub struct Page {
     /// The content stream: the operators that draw the page.
     pub content: String,
     /// The pictures the content names, as `(name in the content, picture)`.
-    pub images: Vec<(String, crate::image::Image)>,
+    pub images: Vec<(String, std::sync::Arc<crate::image::Image>)>,
     /// The fonts the content names, as `(name in the content, font)` --
     /// `("F1", Helvetica)`.
     pub fonts: Vec<(String, std::sync::Arc<Font>)>,
@@ -1163,8 +1163,16 @@ impl Page {
     /// image in the unit square and the matrix says where that square lands,
     /// which is why the width and the height go into the matrix and the
     /// drawing is one operator.
-    pub fn image(&mut self, image: crate::image::Image, x: f64, y: f64, width: f64, height: f64) {
-        let name = match self.images.iter().find(|(_, used)| used == &image) {
+    pub fn image(
+        &mut self,
+        image: impl Into<std::sync::Arc<crate::image::Image>>,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) {
+        let image = image.into();
+        let name = match self.images.iter().find(|(_, used)| same(&**used, &*image)) {
             Some((existing, _)) => existing.clone(),
             None => {
                 let name = format!("I{}", self.images.len() + 1);
@@ -1245,7 +1253,7 @@ fn picture_classes(pages: &[Page]) -> Vec<Vec<usize>> {
         .flat_map(|(page, classes)| {
             page.images
                 .iter()
-                .map(|(_, image)| image)
+                .map(|(_, image)| &**image)
                 .zip(classes.iter().copied())
         })
         .collect();

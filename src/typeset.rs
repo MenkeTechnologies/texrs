@@ -3157,14 +3157,17 @@ pub fn to_pdf_ahead(
     // natural size is a fact about a file, and the lowerer had neither.
     // Resolved BEFORE the page is fitted, so the room the fitter keeps for a
     // figure and the room the figure is given below are one number.
+    let broken = break_lines_from(&text, layout, &width_of, ahead);
+    // Every file the image lines name, found and read before any of them is
+    // measured or drawn. See `images_read`.
+    let images = images_read(&broken, near);
     let remeasure = |line: String| -> String {
         let picture_metrics = FaceMetrics {
             measure: &width_of,
             size: layout.size,
         };
-        image_remeasured(picture_remeasured(line, &picture_metrics), layout, near)
+        image_remeasured(picture_remeasured(line, &picture_metrics), layout, &images)
     };
-    let broken = break_lines_from(&text, layout, &width_of, ahead);
     // A line's remeasure reads that line, the fonts and the files it names,
     // and nothing another line wrote: no TeX state, no style stack, no shared
     // mutable table. So the lines are remeasured independently and collected
@@ -3278,13 +3281,12 @@ pub fn to_pdf_ahead(
                     true => layout.margin + (layout.measure - w).max(0.0) / 2.0,
                     false => layout.margin,
                 };
-                // A file readable when the room was reserved and unreadable
-                // now leaves the room reserved and nothing in it, which is
-                // what LaTeX does with a figure it cannot find.
-                if let Some(file) = image_file(&path, near) {
-                    if let Ok(image) = crate::image::open(&file) {
-                        page.image(image, left, y - h, w, h);
-                    }
+                // A file found and not readable leaves the room its stated
+                // lengths reserved and nothing in it, which is what LaTeX
+                // does with a figure it cannot use. Every use of a file draws
+                // the one picture read from it.
+                if let Some(image) = images.get(&path).and_then(|read| read.image.as_ref()) {
+                    page.image(std::sync::Arc::clone(image), left, y - h, w, h);
                 }
                 // Exactly what `line_height` reserved, or the line after the
                 // figure is set somewhere the fitter did not put it.
@@ -6722,11 +6724,11 @@ pub fn image_parts(line: &str) -> Option<(String, String, String)> {
 ///
 /// With one length given the other follows the file's own proportions, which
 /// is what `\includegraphics[width=\textwidth]` means and what every book in
-/// the corpus writes.
+/// the corpus writes. `image` is what reading the file gave, if it read.
 fn image_size(
     width: &str,
     height: &str,
-    file: &std::path::Path,
+    image: Option<&crate::image::Image>,
     layout: &Layout,
 ) -> Option<(f64, f64)> {
     let resolve = |spec: &str| -> Option<f64> {
@@ -6741,7 +6743,7 @@ fn image_size(
             // A pixel is a big point unless the document says otherwise, which
             // is graphicx's rule for a file stating no resolution -- and
             // neither PNG's `pHYs` nor JPEG's density is read here.
-            let image = crate::image::open(file).ok()?;
+            let image = image?;
             let (nw, nh) = (f64::from(image.width), f64::from(image.height));
             if nw <= 0.0 || nh <= 0.0 {
                 return None;
@@ -6865,19 +6867,79 @@ fn image_file(path: &str, near: Option<&std::path::Path>) -> Option<std::path::P
     resolve(named)
 }
 
+/// What one path an `\includegraphics` named came to.
+struct ImageRead {
+    /// Whether [`image_file`] found a file for it.
+    found: bool,
+    /// The picture that file holds, if it read. Shared by every line naming
+    /// the path, so the writer finds two uses to be one XObject by address
+    /// rather than by comparing their pixels.
+    image: Option<std::sync::Arc<crate::image::Image>>,
+}
+
+/// Every path the image lines name, by the path as the line spells it.
+type Images = std::collections::HashMap<String, ImageRead>;
+
+/// Find and read every file the image lines name, each once.
+///
+/// A document that repeats its figures names the same file hundreds of times,
+/// and finding and reading it per use -- once to measure, once more to draw --
+/// held a copy of the pixels for every use until the file was written: four
+/// hundred uses of ten photographs was gigabytes. A file's reading depends on
+/// the file and nothing else, so with enough image lines to pay for it the
+/// distinct files are read on the rayon pool; the table is the same whatever
+/// the thread count.
+fn images_read(lines: &[String], near: Option<&std::path::Path>) -> Images {
+    let mut uses = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    let mut paths: Vec<String> = Vec::new();
+    for line in lines {
+        // The marker's opening character first, as for counting blocks: most
+        // lines are prose, and `image_parts` decodes the path it finds.
+        let inner = line.trim_start();
+        let inner = inner.strip_prefix(CENTRE).unwrap_or(inner);
+        if !inner.starts_with(IMAGE) {
+            continue;
+        }
+        let Some((_, _, path)) = image_parts(line) else {
+            continue;
+        };
+        uses += 1;
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    let read = |path: &String| {
+        let file = image_file(path, near);
+        let image = file
+            .as_ref()
+            .and_then(|file| crate::image::open(file).ok())
+            .map(std::sync::Arc::new);
+        let found = file.is_some();
+        (path.clone(), ImageRead { found, image })
+    };
+    match uses >= PARALLEL_BLOCKS && paths.len() > 1 {
+        true => {
+            use rayon::prelude::*;
+            paths.par_iter().map(read).collect()
+        }
+        false => paths.iter().map(read).collect(),
+    }
+}
+
 /// An image line with its lengths resolved to points against the layout and
 /// the file, so the fitter and the drawing pass read one number rather than
 /// each working it out. A file that cannot be read leaves the line empty: it
 /// reserves nothing and draws nothing.
-fn image_remeasured(line: String, layout: &Layout, near: Option<&std::path::Path>) -> String {
+fn image_remeasured(line: String, layout: &Layout, images: &Images) -> String {
     let Some((width, height, path)) = image_parts(&line) else {
         return line;
     };
     let centred = is_centred(&line);
-    let Some(file) = image_file(&path, near) else {
+    let Some(read) = images.get(&path).filter(|read| read.found) else {
         return String::new();
     };
-    let Some((w, h)) = image_size(&width, &height, &file, layout) else {
+    let Some((w, h)) = image_size(&width, &height, read.image.as_deref(), layout) else {
         return String::new();
     };
     let span = image_span(&w.to_string(), &h.to_string(), &path);

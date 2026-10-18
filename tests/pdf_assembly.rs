@@ -56,7 +56,7 @@ fn pages(count: usize, fonts: &dyn Fn() -> Vec<Arc<Font>>) -> Vec<Page> {
                 page.fonts.push((name, font));
             }
             if n % 5 == 0 {
-                page.images.push(("Im1".to_string(), image.clone()));
+                page.images.push(("Im1".to_string(), image.clone().into()));
             }
             page
         })
@@ -135,10 +135,11 @@ fn pictures_alike_in_size_but_not_in_pixels_are_written_apart() {
             .map(|n| {
                 let mut page = Page::letter();
                 page.content.push_str("q 10 0 0 10 72 72 cm /Im1 Do Q\n");
-                page.images.push(("Im1".to_string(), grey(64, 1)));
+                page.images.push(("Im1".to_string(), grey(64, 1).into()));
                 if n % 3 == 0 {
-                    page.images.push(("Im2".to_string(), grey(64, second)));
-                    page.images.push(("Im3".to_string(), grey(65, 1)));
+                    page.images
+                        .push(("Im2".to_string(), grey(64, second).into()));
+                    page.images.push(("Im3".to_string(), grey(65, 1).into()));
                 }
                 page
             })
