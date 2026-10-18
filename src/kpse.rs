@@ -253,14 +253,25 @@ struct Server {
     output: BufReader<File>,
     _child: Child,
     dead: bool,
+    /// What is asked after every name, and what ends its answer: [`SENTINEL`]
+    /// for the default search, and a file of the format's own suffix for a
+    /// formatted one (see [`find_as`]).
+    sentinel: String,
 }
 
 impl Server {
-    #[cfg(unix)]
     fn start() -> Option<Server> {
+        Server::start_with(&[], SENTINEL)
+    }
+
+    /// A process started with `options` before `-interactive`, ending every
+    /// answer with `sentinel`.
+    #[cfg(unix)]
+    fn start_with(options: &[String], sentinel: &str) -> Option<Server> {
         let (master, slave) = pty()?;
         let mut child = Command::new("kpsewhich")
-            .args(["-interactive", SENTINEL])
+            .args(options)
+            .args(["-interactive", sentinel])
             .stdin(Stdio::piped())
             .stdout(Stdio::from(slave))
             .stderr(Stdio::null())
@@ -272,18 +283,19 @@ impl Server {
             output: BufReader::new(master),
             _child: child,
             dead: false,
+            sentinel: sentinel.to_string(),
         };
         // The answer to the name on the command line says it is ready, and
         // that it understood `-interactive`.
         let mut line = String::new();
         match s.output.read_line(&mut line) {
-            Ok(n) if n > 0 && line.trim() == SENTINEL => Some(s),
+            Ok(n) if n > 0 && line.trim() == s.sentinel => Some(s),
             _ => None,
         }
     }
 
     #[cfg(not(unix))]
-    fn start() -> Option<Server> {
+    fn start_with(_options: &[String], _sentinel: &str) -> Option<Server> {
         None
     }
 
@@ -297,7 +309,7 @@ impl Server {
         {
             return Err(Unaskable);
         }
-        if writeln!(self.input, "{name}\n{SENTINEL}")
+        if writeln!(self.input, "{name}\n{}", self.sentinel)
             .and_then(|()| self.input.flush())
             .is_err()
         {
@@ -314,7 +326,7 @@ impl Server {
                     return Ok(Vec::new());
                 }
             }
-            if line.trim() == SENTINEL {
+            if line.trim() == self.sentinel {
                 return Ok(lines);
             }
             lines.push(line);
@@ -540,6 +552,164 @@ fn append_disk(st: &State, file: &Path, names: &[String], found: &[Option<PathBu
     if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(file) {
         let _ = f.write_all(text.as_bytes());
     }
+}
+
+// ── formatted lookups, for the Lua `kpse` library ──────────────────────
+
+/// Where kpathsea finds `name` as a file of `format` for program `progname`:
+/// `kpsewhich -progname=P -format=F [-must-exist] NAME`, which is what
+/// LuaTeX's `kpse.find_file(name, format, mustexist)` is (lkpselib.c,
+/// `find_file` calling `kpse_find_file`).
+///
+/// [`locate`] cannot answer it: it asks the default search, which guesses the
+/// format from a name's suffix, so `luaotfload-main` (the `lua` format adds
+/// `.lua`) and `lmroman10-regular` (`opentype fonts` adds `.otf`) are not
+/// found at all, and a `.tex` name is looked up under `kpsewhich`'s own
+/// program name rather than `lualatex`'s, which is a different TEXINPUTS.
+///
+/// One interactive process per (program, format, must-exist), each answering
+/// on a pseudo-terminal as [`locate`]'s does. The answer to a formatted
+/// question has no fixed last line -- `/dev/null` is not a file of most
+/// formats and comes back as nothing -- so each process is given a SENTINEL
+/// FILE of its own format: an empty file named with the format's first suffix
+/// (`kpsewhich -help-formats`), asked by absolute path, which kpathsea answers
+/// with itself. Memoised per process; a name with no answer is remembered too,
+/// because a package that probes for an optional file asks for it repeatedly.
+pub fn find_as(name: &str, format: &str, progname: &str, must_exist: bool) -> Option<PathBuf> {
+    type Key = (String, String, bool);
+    static MEMO: OnceLock<Mutex<HashMap<(Key, String), Option<PathBuf>>>> = OnceLock::new();
+    static SERVERS: OnceLock<Mutex<HashMap<Key, Option<Server>>>> = OnceLock::new();
+    let key: Key = (progname.to_string(), format.to_string(), must_exist);
+    let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = memo.lock().ok()?.get(&(key.clone(), name.to_string())) {
+        return hit.clone();
+    }
+    let mut options = vec![format!("-progname={progname}"), format!("-format={format}")];
+    if must_exist {
+        options.push("-must-exist".to_string());
+    }
+    let ask_once = |options: &[String]| -> Option<PathBuf> {
+        let out = Command::new("kpsewhich")
+            .args(options)
+            .arg(name)
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.lines().next().map(|l| PathBuf::from(l.trim()))
+    };
+    let found = {
+        let mut servers = SERVERS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .ok()?;
+        let slot = servers
+            .entry(key.clone())
+            .or_insert_with(|| sentinel_for(format).and_then(|s| Server::start_with(&options, &s)));
+        match slot.as_mut().map(|s| s.ask(name)) {
+            Some(Ok(lines)) if !slot.as_ref().is_some_and(|s| s.dead) => lines
+                .first()
+                .map(|l| PathBuf::from(l.trim()))
+                .filter(|p| !p.as_os_str().is_empty()),
+            _ => {
+                if slot.as_ref().is_some_and(|s| s.dead) {
+                    *slot = None;
+                }
+                ask_once(&options)
+            }
+        }
+    };
+    if let Ok(mut m) = memo.lock() {
+        m.insert((key, name.to_string()), found.clone());
+    }
+    found
+}
+
+/// The sentinel file [`find_as`] asks after every name for `format`: an empty
+/// file, in this process's own temporary directory, carrying the format's
+/// first suffix, so kpathsea takes it as a file of that format.
+fn sentinel_for(format: &str) -> Option<String> {
+    let suffix = format_suffixes()
+        .get(format)
+        .and_then(|s| s.first().cloned())
+        .unwrap_or_default();
+    let dir = std::env::temp_dir().join(format!("texrs-kpse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = dir.join(format!("sentinel{suffix}"));
+    if !file.exists() {
+        std::fs::write(&file, "").ok()?;
+    }
+    Some(file.to_string_lossy().into_owned())
+}
+
+/// Every format name (and abbreviation) `kpsewhich -help-formats` lists, with
+/// the suffixes it gives it, in its order. A line reads
+/// `lua: .lua .luatex .luc .luctex .texlua .texluc .tlu  [variables: ...]`, or
+/// `bitmap font (bitmapfont):  [variables: ...]` for a format without one.
+fn format_suffixes() -> &'static HashMap<String, Vec<String>> {
+    static TABLE: OnceLock<HashMap<String, Vec<String>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let Ok(out) = Command::new("kpsewhich").arg("-help-formats").output() else {
+            return HashMap::new();
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut table = HashMap::new();
+        for line in text.lines().filter(|l| !l.starts_with(' ')) {
+            let Some((names, rest)) = line.split_once(':') else {
+                continue;
+            };
+            let rest = rest.split("[variables").next().unwrap_or_default();
+            let suffixes: Vec<String> = rest
+                .split_whitespace()
+                .filter(|s| s.starts_with('.'))
+                .map(str::to_string)
+                .collect();
+            let (name, abbrev) = match names.split_once(" (") {
+                Some((n, a)) => (n.trim(), Some(a.trim_end_matches(')').trim())),
+                None => (names.trim(), None),
+            };
+            table.insert(name.to_string(), suffixes.clone());
+            if let Some(a) = abbrev {
+                table.insert(a.to_string(), suffixes);
+            }
+        }
+        table
+    })
+}
+
+/// `kpsewhich -progname=P OPTION=VALUE`, its first line of output: what
+/// `kpse.var_value`, `kpse.expand_var`, `kpse.expand_path`,
+/// `kpse.expand_braces` and `kpse.show_path` are, each one a call into
+/// kpathsea's variable expansion with nothing to search. `None` when kpsewhich
+/// printed nothing, which is its answer for an unset variable. Memoised, since
+/// a variable cannot change under a running process.
+pub fn query(progname: &str, option: &str, value: &str) -> Option<String> {
+    static MEMO: OnceLock<Mutex<HashMap<(String, String, String), Option<String>>>> =
+        OnceLock::new();
+    let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = (progname.to_string(), option.to_string(), value.to_string());
+    if let Some(hit) = memo.lock().ok()?.get(&key) {
+        return hit.clone();
+    }
+    let answer = Command::new("kpsewhich")
+        .arg(format!("-progname={progname}"))
+        .arg(format!("{option}={value}"))
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .and_then(|out| {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let line = text.lines().next().map(str::to_string);
+            // An unset variable is a failing exit and an empty line, which is
+            // kpathsea's NULL and Lua's nil.
+            match (out.status.success(), line) {
+                (false, Some(l)) if l.is_empty() => None,
+                (_, line) => line,
+            }
+        });
+    if let Ok(mut m) = memo.lock() {
+        m.insert(key, answer.clone());
+    }
+    answer
 }
 
 #[cfg(test)]
