@@ -2,6 +2,8 @@
 # One block per case in tests/cases; tests/parity.rs replays these with
 # no TeX installed. Regenerate when a case changes, and read the diff:
 # a changed block is a changed claim about what the reference engine does.
+#==# accents_and_parshape.tex
+! OK (see the transcript file).l.6 ...ve \^o \accent"7F\it e \accent"7F}\showbox0                                                  ! OK (see the transcript file).l.9 ...nt and then the measure again\par}\showbox0                                                   )(see the transcript file for additional information
 #==# active_character.tex
 [tie] [A] [a][b]
 #==# active_character_edef.tex

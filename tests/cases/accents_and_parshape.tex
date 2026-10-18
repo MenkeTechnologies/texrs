@@ -1,0 +1,10 @@
+% make_accent (tex.web 1123-1125) with plain.tex's accent macros, its kerns
+% (for accent) and the box an accent is raised in, with a font change between
+% the accent and its letter; and \parshape (1248) in a \vbox, where the lines
+% are shifted and sized by its pairs (849, 889), undone by the group.
+\showboxdepth=10 \showboxbreadth=100
+\setbox0\hbox{\'e na\"\i ve \^o \accent"7F\it e \accent"7F}\showbox0
+\setbox0\vbox{\hsize=100pt {\parshape 2 0pt 100pt 20pt 80pt \noindent
+words enough to fill a few lines of eighty points each one\par}
+\noindent and then the measure again\par}\showbox0
+\end
