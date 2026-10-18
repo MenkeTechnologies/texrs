@@ -1,6 +1,8 @@
 # Frozen output of luatex, written by `cargo run --bin primitive-census -- --freeze`.
 # One block per case in tests/luatex_cases; tests/luatex_primitives.rs replays
 # these with no TeX installed.
+#==# attributes.tex
+[-2147483647] [3] [-7] [3] [6][\attribute12][6] [-2147483647] [6]
 #==# begincsname.tex
 [A][][N] [macro:->A||\relax ] [4] [N]
 #==# catcode_table_errors.tex

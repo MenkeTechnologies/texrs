@@ -77,14 +77,18 @@ pub fn reference(program: &str, src: &str) -> String {
     crate::parity::messages_of(&text)
 }
 
-/// What texrs prints for `src` run as a LuaTeX: the personality `texrs
+/// What texrs prints for `src` run as an INITEX LuaTeX -- no format, as
+/// `luatex --ini` runs here (`crate::run_messages_initex`) -- the personality `texrs
 /// -progname=luatex` has (`crate::expand::set_luatex_registers`), which is the
 /// one these cases compare against luatex. It is set for the process, as the
 /// command line sets it, so a caller that runs TeX82 cases in the same process
 /// must not call this.
 pub fn subject(src: &str) -> String {
     crate::expand::set_luatex_registers(true);
-    crate::parity::subject(src)
+    match crate::run_messages_initex(src) {
+        Ok(m) => m,
+        Err(e) => format!("ERROR: {}", e.0),
+    }
 }
 
 /// One primitive of luatex's table and where it comes from.

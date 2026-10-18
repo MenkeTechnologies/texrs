@@ -1,0 +1,8 @@
+% primitives: attribute attributedef
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\attribute5]}\attribute5=3 \message{[\the\attribute5]}
+{\attribute5=-7 \message{[\the\attribute5]}}\message{[\the\attribute5]}
+\attributedef\foo=12 \foo=4 \advance\foo by 2 \message{[\the\foo][\meaning\foo][\the\attribute12]}
+\attribute5=-"7FFFFFFF \message{[\the\attribute5]}
+\count1=\attribute12 \message{[\the\count1]}
+\end

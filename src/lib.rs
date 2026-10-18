@@ -783,6 +783,18 @@ pub fn run_messages_tex(src: &str) -> Result<String, TexError> {
     Ok(without_marks(&msgs.join(" ")))
 }
 
+/// What an INITEX run prints for `src`: no format preloaded, every table as
+/// §240 leaves it -- the state `luatex --ini` starts from, which is what
+/// `crate::luatex_oracle` compares against.
+pub fn run_messages_initex(src: &str) -> Result<String, TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new().tex_errors(true);
+    let cmds = lowerer.lower(&src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok(without_marks(&msgs.join(" ")))
+}
+
 pub fn run_messages(src: &str) -> Result<String, TexError> {
     let chunk = compile(src)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;
