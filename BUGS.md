@@ -631,6 +631,33 @@ The cost is real for the job texrs is meant to do: a 25,000-line book recompiles
 its mouth and expander on every run. Closing this means teaching the shard to
 carry the fonts, colour and layout beside the bytecode.
 
+## OpenType fonts are not loaded as luaotfload loads them, yet
+
+What exists is luaotfload's `mode=harf` (`src/shape.rs`) and its request
+grammar (`src/fontreq.rs`), both checked against luahbtex rather than against
+expectations written by hand. What does not:
+
+- **Node mode.** `mode=node` is luaotfload's default and fontspec's, and it is
+  not HarfBuzz: it is the ConTeXt fontloader (`fontloader-font-otr.lua`,
+  `-oup`, `-ots`, `-otj`, `-osd`), with its own glyph bounding boxes and its own
+  handling of a discretionary inside a ligature. Measured on the harf corpus run
+  in node mode instead, the two disagree on a hyphen's depth (0 against
+  -122552sp in Latin Modern, the fontloader clamping where HarfBuzz reports the
+  ink) and on the shape of a discretionary the `ffi` ligature spans. Nothing
+  here answers for node mode, and nothing pretends to.
+- **Name lookup.** `name:` and anonymous requests need luaotfload's font
+  names database (`luaotfload-database.lua`): which directories it scans, how a
+  family, a style and an optical size pick a file. Only the grammar is ported.
+- **The typesetting path.** The stomach does not call the shaper: `--pdf` still
+  measures an OpenType face by its `hmtx` advances, with no kerning and no
+  OpenType ligatures.
+- **In harf mode,** colour glyphs (`COLR`/`CPAL` layers, `sbix`/`CBDT`
+  bitmaps) are drawn as outlines; a variable font is shaped at its default
+  instance (harf-define.lua:122-198's `instance=`, `axis=` and the weight a `/B`
+  modifier picks are not ported); and `+tlig`, which luaotfload implements as
+  TFM-style ligatures the engine's own ligaturing pass applies after shaping,
+  is passed to HarfBuzz as the feature it also is and does nothing there.
+
 ## PDF output is not LuaTeX's
 
 The goal is byte-identical, and the distance is large: for `Hello world.`

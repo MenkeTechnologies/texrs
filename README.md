@@ -357,6 +357,20 @@ than none.
   references them. So this moves no book in the sweep. It is correctness for
   LaTeX documents generally, not a corpus result, and re-running the sweep to
   look for a change will find none.
+- OpenType shaping as LuaHBTeX's `mode=harf` does it (`src/shape.rs`), ported
+  from luaotfload's `luaotfload-harf-define.lua` and `luaotfload-harf-plug.lua`
+  with HarfBuzz through harfrust: a font's characters table and parameters at a
+  size, and a list cut into runs, shaped, and turned back into glyph, kern and
+  glue nodes -- discretionaries a ligature spans reshaped as luaotfload reshapes
+  them, `/ActualText` spans where a cluster is not one glyph. Checked list by
+  list against luahbtex (`tests/harf_parity.rs`, frozen by
+  `scripts/harf-freeze.sh`): Latin in a CFF and in two TrueType faces, Greek,
+  Cyrillic, Arabic right to left, Devanagari and Han agree on every glyph's slot,
+  offsets and dimensions and on every kern, glue and discretionary. A `\font`
+  request string is read as luaotfload reads it (`src/fontreq.rs`, the
+  `font_request` grammar of `luaotfload-parsers.lua`): `file:`, `name:`, `[path]`,
+  a subfont, the slash modifiers and the feature list. Neither is on the
+  typesetting path yet; [0x06] says what is missing.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
   chosen by minimising total demerits across the whole paragraph (`tex.web`
   §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
@@ -591,7 +605,10 @@ and three of the things a document controls survive the trip:
   `KAZDEO+Arimo-VF TrueType yes yes`, embedded AND subset — once, and referred
   to from every page; lines are
   broken on that font's own advance widths, out of its `hmtx` through its
-  `cmap`. A family nothing can be found for falls back to whichever of the
+  `cmap`. No kerning and no OpenType ligature reaches this path yet: the
+  harf shaper of [0x03] is a library beside it, and luaotfload's default node
+  mode is not ported (`BUGS.md`, "OpenType fonts are not loaded as luaotfload
+  loads them, yet"). A family nothing can be found for falls back to whichever of the
   fourteen carries the same metrics, not to Computer Modern. The face is
   SUBSET: only the glyphs the document actually set are kept, with `cmap`,
   `glyf`, `loca`, `hmtx`, `maxp` and `head` rebuilt rather than copied, and each
