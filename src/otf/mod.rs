@@ -147,6 +147,8 @@ impl Face {
             italicangle: post.italicangle,
             fontname: fontdata.getname("postscriptname"),
             fullname: fontdata.getname("fullname"),
+            math: layout.mathconstants.clone(),
+            hasitalics: layout.hasitalics,
         };
         Ok(Arc::new(Face {
             descriptions,
@@ -160,9 +162,15 @@ impl Face {
         }))
     }
 
-    /// The face at `size` scaled points.
+    /// The face at `size` scaled points, with luaotfload's defaults for a
+    /// text font (`itlc` on, the MATH constants dropped by `nomathparam`).
     pub fn scale(&self, size: i64) -> tfm::Scaled {
-        tfm::scale(&self.descriptions, &self.metadata, size)
+        self.scale_with(size, &tfm::Options::text())
+    }
+
+    /// The face at `size` with the features that shape the scaling.
+    pub fn scale_with(&self, size: i64, opts: &tfm::Options) -> tfm::Scaled {
+        tfm::scale(&self.descriptions, &self.metadata, size, opts)
     }
 
     /// `resources.classes[u]` (fontloader-font-otl.lua:275-285): the GDEF

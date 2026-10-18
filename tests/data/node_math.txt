@@ -1,0 +1,3291 @@
+# This is LuaHBTeX, Version 1.24.0 (TeX Live 2026)
+# MathConstants and per-character math, at 10pt in mode=base;script=math
+##### latinmodern-math.otf
+const AccentBaseHeight 294912
+const AxisHeight 163840
+const DelimitedSubFormulaMinHeight 851968
+const DisplayOperatorMinHeight 851968
+const FlattenedAccentBaseHeight 435159
+const FractionDelimiterDisplayStyleSize 1572864
+const FractionDelimiterSize 661914
+const FractionDenominatorDisplayStyleGapMin 78643
+const FractionDenominatorDisplayStyleShiftDown 449577
+const FractionDenominatorGapMin 26214
+const FractionDenominatorShiftDown 226099
+const FractionNumeratorDisplayStyleGapMin 78643
+const FractionNumeratorDisplayStyleShiftUp 443679
+const FractionNumeratorGapMin 26214
+const FractionNumeratorShiftUp 258212
+const FractionRuleThickness 26214
+const LowerLimitBaselineDropMin 393216
+const LowerLimitGapMin 109445
+const MathLeading 100925
+const MinConnectorOverlap 13107
+const OverbarExtraAscender 26214
+const OverbarRuleThickness 26214
+const OverbarVerticalGap 78643
+const RadicalDegreeBottomRaisePercent 60
+const RadicalDisplayStyleVerticalGap 96993
+const RadicalExtraAscender 26214
+const RadicalKernAfterDegree -364380
+const RadicalKernBeforeDegree 182190
+const RadicalRuleThickness 26214
+const RadicalVerticalGap 32768
+const ScriptPercentScaleDown 70
+const ScriptScriptPercentScaleDown 50
+const SkewedFractionHorizontalGap 229376
+const SkewedFractionVerticalGap 62915
+const SpaceAfterScript 36700
+const SpaceBeforeScript 36700
+const StackBottomDisplayStyleShiftDown 449577
+const StackBottomShiftDown 226099
+const StackDisplayStyleGapMin 183501
+const StackGapMin 78643
+const StackTopDisplayStyleShiftUp 443679
+const StackTopShiftUp 290980
+const StretchStackBottomShiftDown 393216
+const StretchStackGapAboveMin 131072
+const StretchStackGapBelowMin 109445
+const StretchStackTopShiftUp 72745
+const SubSuperscriptGapMin 104858
+const SubscriptBaselineDropMin 131072
+const SubscriptShiftDown 161874
+const SubscriptTopMax 225444
+const SuperscriptBaselineDropMax 163840
+const SuperscriptBottomMaxWithSubscript 225444
+const SuperscriptBottomMin 70779
+const SuperscriptShiftUp 237896
+const SuperscriptShiftUpCramped 189399
+const UnderbarExtraDescender 26214
+const UnderbarRuleThickness 26214
+const UnderbarVerticalGap 78643
+const UpperLimitBaselineRiseMin 72745
+const UpperLimitGapMin 131072
+28 next F0647
+29 next F0648
+2A accent 260833
+2F next F0729
+30 accent 166461
+31 accent 168428
+32 accent 157286
+33 accent 169083
+34 accent 231342
+35 accent 167772
+36 accent 208404
+37 italic 8520 accent 67502
+38 accent 171049
+39 accent 158597
+3D horiz_variants F076B:0:72745:145490:nil,F076C:145490:145490:145490:1,F076D:72745:0:145490:nil
+41 accent 245760
+42 accent 167772
+43 accent 332268
+44 accent 159252
+45 accent 206438
+46 accent 201851
+47 accent 332268
+48 accent 245760
+49 accent 118620
+4A accent 207749
+4B accent 247726
+4C accent 126484
+4D accent 300155
+4E accent 245760
+4F accent 254280
+50 accent 163840
+51 accent 254280
+52 italic 15729 accent 153354
+53 accent 216269
+54 accent 236585
+55 accent 245760
+56 italic 5243 accent 245760
+57 italic 5898 accent 336855
+58 italic 2621 accent 236585
+59 italic 10486 accent 245760
+5A accent 207749
+5B next F064D italic 3932
+5C next F072A
+5D next F064E
+5E italic 21627
+5F italic 18350
+60 accent 143524
+61 italic 7209 accent 140247
+62 accent 65536
+63 accent 163185
+64 accent 247071
+65 accent 154665
+66 italic 51773 accent 171704
+67 italic 8520 accent 217580
+68 italic 4588 accent 68157
+69 accent 90440
+6A accent 102236
+6B italic 7209 accent 65536
+6C italic 3277 accent 68813
+6D italic 5243 accent 229376
+6E italic 4588 accent 138281
+6F accent 163185
+70 accent 132383
+71 italic 17695 accent 208404
+72 accent 118620
+73 accent 152044
+74 accent 105513
+75 italic 4588 accent 160563
+76 italic 5243 accent 173015
+77 italic 5898 accent 236585
+78 italic 10486 accent 169083
+79 italic 5243 accent 173015
+7A accent 148111
+7B next F064B
+7C next F072E
+7D next F064C
+7E italic 17695
+A5 italic 10486
+A8 accent 165806
+A9 italic 18350
+AE italic 18350
+AF accent 164495
+B4 accent 184156
+B5 italic 3932
+BA italic 3277
+DD italic 10486
+E0 italic 7209
+E1 italic 7209
+E2 italic 7209
+E3 italic 7209
+E4 italic 7209
+E5 italic 7209
+ED italic 8520
+EE italic 26870
+EF italic 17695
+F1 italic 4588
+F9 italic 4588
+FA italic 4588
+FB italic 4588
+FC italic 4588
+FD italic 5243
+FF italic 5243
+101 italic 7209
+103 italic 7209
+105 italic 7209
+10F italic 30147
+11F italic 8520
+123 italic 8520
+128 italic 9830
+129 italic 36700
+12A italic 19005
+12B italic 45875
+12F italic 1966
+131 accent 91095
+137 italic 7209
+13A italic 17039
+13C italic 3277
+13E italic 34079
+144 italic 4588
+146 italic 4588
+148 italic 4588
+154 italic 15729
+156 italic 15729
+158 italic 15729
+169 italic 4588
+16B italic 4588
+16F italic 4588
+171 italic 4588
+173 italic 17695
+178 italic 10486
+17F italic 51773
+1A1 italic 10486
+1AF italic 2621
+1B0 italic 28180
+237 accent 100270
+2C6 accent 163840
+2C7 accent 163840
+2D8 accent 164495
+2D9 accent 90440
+2DA accent 245760
+2DC accent 164495
+2DD accent 179569
+300 accent -193331
+301 accent -152699
+302 next F0607 accent -173015
+303 next F0609 accent -173015
+304 accent -172360
+305 next F05F9 accent -173015
+306 next F0601 accent -173015
+307 accent -173670
+308 accent -171049
+309 accent -172360
+30A accent -173015
+30B accent -157286
+30C next F0605 accent -173015
+30F accent -188744
+311 next F0603 accent -173015
+323 accent -173670
+326 accent -175636
+32C next F0606 accent -173015
+32D next F0608 accent -173015
+32E next F0602 accent -173015
+32F next F0604 accent -173015
+330 next F060A accent -173015
+331 accent -172360
+332 next F05F1 accent -173015
+333 next F05F5 accent -173015
+338 accent -172360
+33F next F05FD accent -173015
+34D next F04D2
+391 accent 245105
+392 accent 187433
+393 accent 194642
+394 accent 272630
+395 accent 208404
+396 accent 207094
+397 accent 245760
+398 accent 254935
+399 accent 118620
+39A accent 247726
+39B accent 227410
+39C accent 300155
+39D accent 245760
+39E accent 218235
+39F accent 254935
+3A0 accent 245760
+3A1 accent 185467
+3A3 accent 229376
+3A4 accent 236585
+3A5 accent 254935
+3A6 accent 234619
+3A7 italic 2621 accent 236585
+3A8 accent 252969
+3A9 accent 235930
+3B1 italic 15729 accent 233308
+3B2 accent 183501
+3B3 accent 192020
+3B4 accent 152044
+3B5 accent 159908
+3B6 accent 146801
+3B7 accent 142868
+3B8 accent 161874
+3B9 italic 15729 accent 64225
+3BA italic 15073 accent 161874
+3BB italic 35389 accent 56361
+3BC italic 15073 accent 155320
+3BD accent 136970
+3BE accent 128451
+3BF accent 163840
+3C0 accent 182845
+3C1 accent 159252
+3C2 accent 155320
+3C3 accent 196608
+3C4 accent 152044
+3C5 accent 164495
+3C6 accent 197919
+3C7 italic 15729 accent 174981
+3C8 accent 228065
+3C9 accent 211026
+3D1 italic 13763 accent 190710
+3D5 accent 209715
+3D6 accent 264765
+3F0 accent 194642
+3F1 accent 163185
+3F4 accent 254935
+3F5 italic 22938 accent 158597
+1EA1 italic 7209
+1EA3 italic 7209
+1EA5 italic 7209
+1EA7 italic 7209
+1EA9 italic 7209
+1EAB italic 7209
+1EAD italic 7209
+1EAF italic 7209
+1EB1 italic 7209
+1EB3 italic 7209
+1EB5 italic 7209
+1EB7 italic 7209
+1EDB italic 10486
+1EDD italic 10486
+1EDF italic 10486
+1EE1 italic 10486
+1EE3 italic 10486
+1EE5 italic 4588
+1EE7 italic 4588
+1EE8 italic 2621
+1EE9 italic 28180
+1EEA italic 2621
+1EEB italic 28180
+1EEC italic 2621
+1EED italic 28180
+1EEE italic 2621
+1EEF italic 28180
+1EF0 italic 2621
+1EF1 italic 28180
+1EF2 italic 10486
+1EF3 italic 5243
+1EF4 italic 10486
+1EF5 italic 5243
+1EF6 italic 10486
+1EF7 italic 5243
+1EF8 italic 10486
+1EF9 italic 5243
+2013 italic 17695
+2014 italic 17695
+2016 next F072F
+2017 accent 165151
+2044 next F072B
+20D0 next F04AE accent -173015
+20D1 next F04AF accent -173015
+20D2 accent -173015
+20D3 accent -173015
+20D4 accent -173015
+20D5 accent -173015
+20D6 next F04B6 accent -173015
+20D7 next F04B7 accent -173015
+20D8 accent -173015
+20DB accent -173015
+20DC accent -173015
+20E1 next F04BE accent -173015
+20E5 accent -172360
+20E6 accent -173015
+20E8 accent -173015
+20E9 next F0659 accent -173015
+20EA accent -173015
+20EB italic 20316 accent -173015
+20EC next F04C2 accent -173015
+20ED next F04C3 accent -173015
+20EE next F04CA accent -173015
+20EF next F04CB accent -173015
+20F0 accent -173015
+2102 accent 219546
+210B accent 455475
+210C accent 276562
+210D accent 236585
+210E accent 139592
+2110 accent 307364
+2111 italic 4588 accent 220856
+2112 accent 415498
+2113 italic 5898
+2115 accent 236585
+2117 italic 18350
+2119 accent 161874
+211A accent 218235
+211B accent 348652
+211C italic 17039 accent 281805
+211D accent 161874
+211E italic 15729
+2124 accent 218235
+2126 accent 235930
+2127 accent 237240
+2128 accent 107479
+212A accent 247726
+212C accent 313917
+212D italic 19005 accent 325714
+2130 accent 294912
+2131 accent 470548
+2133 accent 460063
+213C accent 169083
+213D accent 154665
+213E accent 218235
+213F accent 218235
+2140 accent 218235
+2145 italic 9830
+2146 italic 49152
+2147 italic 11141
+2148 italic 52429
+2149 italic 52429
+2190 next 27F5
+2191 next F04DC
+2192 next 27F6
+2193 next F04DD
+2194 next 27F7
+2195 next F04F1
+2196 next F04FA
+2197 next F04FC
+2198 next F04FD
+2199 next F04FB
+219A next F04E4
+219B next F04E9
+219E next F04FE
+219F next F0506
+21A0 next F04FF
+21A1 next F0507
+21A2 next F050E
+21A3 next F050F
+21A4 next 27FB
+21A5 next F051C
+21A6 next 27FC
+21A7 next F051D
+21A9 next F0525
+21AA next F0524
+21AB next F052D
+21AC next F052C
+21AD next F05C0
+21AE next F04F5
+21B0 next F0534
+21B1 next F0536
+21B2 next F0535
+21B3 next F0537
+21B6 next F0538
+21B7 next F0539
+21BC next F053A
+21BD next F0542
+21BE next F054A
+21BF next F0552
+21C0 next F053B
+21C1 next F0543
+21C2 next F054B
+21C3 next F0553
+21C4 next F055A
+21C5 next F0562
+21C6 next F055B
+21C7 next F056A
+21C8 next F0572
+21C9 next F056B
+21CA next F0573
+21CB next F0582
+21CC next F0583
+21CD next F059F
+21CE next F05A9
+21CF next F05A4
+21D0 next 27F8
+21D1 next F0590
+21D2 next 27F9
+21D3 next F0591
+21D4 next 27FA
+21D5 next F059B
+21D6 next F05AE
+21D7 next F05B0
+21D8 next F05B1
+21D9 next F05AF
+21DA next F05B8
+21DB next F05B9
+21DC next 2B33
+21DD next 27FF
+21E6 next F05C1
+21E7 next F05C9
+21E8 next F05C2
+21E9 next F05CA
+21F3 next F05D1
+21F5 next F0563
+21F6 next F057A
+2202 accent 190710
+2207 accent 272630
+220F next F078E
+2210 next F078F
+2211 next F078D
+2212 horiz_variants F0725:0:72745:145490:nil,F0726:145490:145490:145490:1,F0727:72745:0:145490:nil
+2217 accent 163840
+221A next F0792
+2223 next F072E
+2225 next F072F
+222B next F0782 italic 217580
+222C next F0783 italic 217580
+222D next F0784 italic 217580
+222E next F0786 italic 217580
+222F next F0787 italic 217580
+2230 next F0788 italic 217580
+2231 next F0789 italic 236585
+2232 next F078B italic 229376
+2233 next F078C italic 229376
+2261 horiz_variants F076E:0:72745:145490:nil,F076F:145490:145490:145490:1,F0770:72745:0:145490:nil
+2263 horiz_variants F0771:0:72745:145490:nil,F0772:145490:145490:145490:1,F0773:72745:0:145490:nil
+22A2 next 27DD
+22A3 next 27DE
+22A4 next 27D9
+22A5 next 27D8
+22C0 next F0762
+22C1 next F0763
+22C2 next F0760
+22C3 next F0761
+22C4 italic 5243
+22C6 italic 16384
+2308 next F064F
+2309 next F0650
+230A next F0651
+230B next F0652
+2320 italic 387318
+2321 italic 387318
+2329 next F0709
+232A next F070A
+23B4 next F0659 italic 18350
+23B5 next F065A italic 18350
+23DC next F0657 italic 18350
+23DD next F0658 italic 18350
+23DE next F0655 italic 18350
+23DF next F0656 italic 18350
+23E0 next F065B italic 18350
+23E1 next F065C italic 18350
+2500 italic 31457
+250C italic 31457
+2514 italic 31457
+251C italic 31457
+252C italic 31457
+253C italic 31457
+2581 italic 18350
+2588 italic 18350
+2591 italic 18350
+2592 italic 18350
+2593 italic 18350
+26AD italic 68813
+26AE italic 141558
+27A1 next F05DA
+27E6 next F0653 italic 3932
+27E7 next F0654
+27E8 next F0709
+27E9 next F070A
+27EA next F070B
+27EB next F070C
+27EE next F0649
+27EF next F064A
+27F5 horiz_variants F04D6:0:110756:332268:nil,F04D7:220856:220856:220856:1,F04D8:110756:0:332268:nil
+27F6 horiz_variants F04D9:0:110756:332268:nil,F04DA:220856:220856:220856:1,F04DB:110756:0:332268:nil
+27F7 horiz_variants F04EE:0:108790:327025:nil,F04EF:217580:217580:217580:1,F04F0:108790:0:327025:nil
+27F8 horiz_variants F058A:0:110100:330301:nil,F058B:220201:220201:220201:1,F058C:110100:0:330957:nil
+27F9 horiz_variants F058D:0:110100:330957:nil,F058E:220201:220201:220201:1,F058F:110100:0:330301:nil
+27FA horiz_variants F0598:0:116654:349307:nil,F0599:233308:233308:233308:1,F059A:116654:0:349307:nil
+27FB horiz_variants F0516:0:109445:327025:nil,F0517:218235:218235:218235:1,F0518:109445:0:327025:nil
+27FC horiz_variants F0519:0:109445:327025:nil,F051A:218235:218235:218235:1,F051B:109445:0:327025:nil
+27FD horiz_variants F05B2:0:108790:325714:nil,F05B3:216924:216924:216924:1,F05B4:108790:0:325714:nil
+27FE horiz_variants F05B5:0:108790:325714:nil,F05B6:216924:216924:216924:1,F05B7:108790:0:325714:nil
+2906 next 27FD
+2907 next 27FE
+2A00 next F0768
+2A01 next F0769
+2A02 next F076A
+2A03 next F0766
+2A04 next F0767
+2A05 next F0764
+2A06 next F0765
+2A09 next F0728
+2A0C next F0785 italic 217580
+2A11 next F078A italic 236585
+2B04 next F05D5
+2B05 next F05D9
+2B06 next F05E1
+2B07 next F05E2
+2B0C next F05E9
+2B0D next F05ED
+2B31 next F057B
+FB00 italic 47841
+1D400 accent 284426
+1D401 accent 196608
+1D402 accent 380109
+1D403 accent 185467
+1D404 accent 229376
+1D405 accent 224133
+1D406 accent 379453
+1D407 accent 294912
+1D408 accent 142868
+1D409 accent 228065
+1D40A accent 287048
+1D40B accent 152044
+1D40C accent 357827
+1D40D accent 294912
+1D40E accent 282460
+1D40F accent 192020
+1D410 accent 282460
+1D411 italic 15073 accent 184156
+1D412 accent 245105
+1D413 accent 262144
+1D414 accent 289669
+1D415 accent 284426
+1D416 italic 1966 accent 389284
+1D417 accent 273940
+1D418 italic 5243 accent 284426
+1D419 accent 238551
+1D41A italic 14418 accent 151388
+1D41B accent 82575
+1D41C accent 195297
+1D41D accent 290980
+1D41E accent 184156
+1D41F italic 74711 accent 202506
+1D420 italic 7209 accent 234619
+1D421 italic 2621 accent 87818
+1D422 accent 104858
+1D423 accent 123863
+1D424 italic 5243 accent 82575
+1D425 accent 89129
+1D426 italic 3277 accent 273940
+1D427 italic 2621 accent 168428
+1D428 accent 188088
+1D429 accent 157942
+1D42A italic 14418 accent 241828
+1D42B accent 141558
+1D42C accent 173670
+1D42D accent 127140
+1D42E italic 2621 accent 193987
+1D42F accent 198574
+1D430 accent 271974
+1D431 italic 3932 accent 193987
+1D432 accent 198574
+1D433 accent 169738
+1D434 accent 360448
+1D435 italic 16384 accent 275251
+1D436 italic 47841 accent 390595
+1D437 italic 2621 accent 279839
+1D438 italic 35389 accent 316539
+1D439 italic 87818 accent 311296
+1D43A accent 390595
+1D43B italic 51118 accent 355205
+1D43C italic 55706 accent 227410
+1D43D italic 69468 accent 319160
+1D43E italic 44564 accent 357171
+1D43F accent 235930
+1D440 italic 66847 accent 409600
+1D441 italic 69468 accent 355205
+1D442 italic 3277 accent 324403
+1D443 italic 91750 accent 272630
+1D444 accent 324403
+1D445 italic 15729 accent 260833
+1D446 italic 39322 accent 326369
+1D447 italic 96993 accent 260833
+1D448 italic 68813 accent 275907
+1D449 italic 140247 accent 270664
+1D44A italic 86508 accent 361759
+1D44B italic 33423 accent 346030
+1D44C italic 136970 accent 261489
+1D44D italic 44564 accent 317850
+1D44E accent 188088
+1D44F italic 9175 accent 108134
+1D450 italic 16384 accent 207749
+1D451 italic 15729 accent 289669
+1D452 accent 196608
+1D453 italic 58982 accent 304087
+1D454 italic 16384 accent 207094
+1D456 accent 161874
+1D457 italic 8520 accent 235274
+1D458 italic 9830 accent 139592
+1D459 accent 120586
+1D45A accent 264765
+1D45B accent 173670
+1D45C italic 7864 accent 206438
+1D45D italic 9830 accent 161219
+1D45E italic 22282 accent 228721
+1D45F italic 8520 accent 161874
+1D460 accent 193987
+1D461 accent 147456
+1D462 accent 199885
+1D463 italic 7209 accent 192676
+1D464 italic 1966 accent 265421
+1D465 accent 215613
+1D466 italic 18350 accent 199229
+1D467 italic 19661 accent 220201
+1D468 accent 398459
+1D469 italic 10486 accent 312607
+1D46A italic 43254 accent 431227
+1D46B italic 3277 accent 304742
+1D46C italic 28180 accent 337510
+1D46D italic 96993 accent 332268
+1D46E accent 431227
+1D46F italic 47841 accent 403702
+1D470 italic 54395 accent 251003
+1D471 italic 59638 accent 338166
+1D472 italic 39322 accent 395837
+1D473 accent 259523
+1D474 italic 66847 accent 466616
+1D475 italic 68813 accent 403702
+1D476 italic 3932 accent 346030
+1D477 italic 100925 accent 306708
+1D478 accent 346030
+1D479 italic 24248 accent 299500
+1D47A italic 32113 accent 367657
+1D47B italic 106824 accent 284426
+1D47C italic 68813 accent 309985
+1D47D italic 154010 accent 311951
+1D47E italic 93061 accent 417464
+1D47F italic 22282 accent 382730
+1D480 italic 149422 accent 301466
+1D481 italic 39322 accent 349307
+1D482 accent 220201
+1D483 italic 8520 accent 147456
+1D484 italic 17039 accent 239206
+1D485 italic 14418 accent 335544
+1D486 accent 222822
+1D487 italic 56361 accent 338166
+1D488 italic 11141 accent 222167
+1D489 accent 149422
+1D48A accent 184812
+1D48B italic 4588 accent 260833
+1D48C accent 149422
+1D48D accent 128451
+1D48E accent 313262
+1D48F accent 208404
+1D490 italic 7864 accent 240517
+1D491 italic 8520 accent 193987
+1D492 italic 19005 accent 268698
+1D493 italic 2621 accent 184812
+1D494 accent 212337
+1D495 accent 166461
+1D496 accent 226099
+1D497 accent 217580
+1D498 accent 301466
+1D499 accent 235274
+1D49A italic 13107 accent 226099
+1D49B italic 7209 accent 248381
+1D49C accent 460063
+1D49E accent 302776
+1D49F accent 325059
+1D4A2 accent 331612
+1D4A5 accent 372244
+1D4A6 accent 437780
+1D4A9 accent 409600
+1D4AA accent 337510
+1D4AB accent 314573
+1D4AC accent 315884
+1D4AE accent 295567
+1D4AF accent 327680
+1D4B0 accent 283116
+1D4B1 accent 260178
+1D4B2 accent 359793
+1D4B3 accent 364380
+1D4B4 accent 260178
+1D4B5 accent 259523
+1D4D0 accent 503316
+1D4D1 accent 366346
+1D4D2 accent 342753
+1D4D3 accent 359793
+1D4D4 accent 330301
+1D4D5 accent 428605
+1D4D6 accent 374866
+1D4D7 accent 507249
+1D4D8 accent 364380
+1D4D9 accent 422707
+1D4DA accent 488243
+1D4DB accent 451543
+1D4DC accent 496108
+1D4DD accent 449577
+1D4DE accent 389284
+1D4DF accent 370934
+1D4E0 accent 365036
+1D4E1 accent 389284
+1D4E2 accent 328991
+1D4E3 accent 392561
+1D4E4 accent 325714
+1D4E5 accent 279839
+1D4E6 accent 414188
+1D4E7 accent 399770
+1D4E8 accent 293601
+1D4E9 accent 349307
+1D504 italic 13107 accent 290324
+1D505 accent 289669
+1D507 accent 266732
+1D508 italic 4588 accent 343409
+1D509 italic 24904 accent 166461
+1D50A accent 339476
+1D50D accent 145490
+1D50E italic 32768 accent 304742
+1D50F italic 4588 accent 286392
+1D510 italic 18350 accent 370934
+1D511 italic 17039 accent 296878
+1D512 accent 222822
+1D513 italic 5898 accent 285737
+1D514 accent 221512
+1D516 accent 265421
+1D517 italic 22938 accent 440402
+1D518 italic 32113 accent 256246
+1D519 italic 15073 accent 285082
+1D51A italic 24248 accent 353894
+1D51B italic 11796 accent 267387
+1D51C accent 266076
+1D51E italic 16384 accent 215613
+1D51F accent 123863
+1D520 accent 176292
+1D521 accent 108134
+1D522 accent 159252
+1D523 italic 15073 accent 145490
+1D524 accent 222167
+1D525 accent 110100
+1D526 italic 11141 accent 86508
+1D527 accent 85197
+1D528 accent 119931
+1D529 italic 17039 accent 127795
+1D52A italic 12452 accent 220856
+1D52B italic 15073 accent 148111
+1D52C accent 169083
+1D52D accent 83886
+1D52E accent 218235
+1D52F italic 22282 accent 131072
+1D530 accent 146145
+1D531 italic 28836 accent 150077
+1D532 italic 16384 accent 175636
+1D533 accent 87818
+1D534 accent 83231
+1D535 italic 6554 accent 133693
+1D536 accent 83886
+1D537 accent 121242
+1D538 accent 199885
+1D539 accent 161874
+1D53B accent 161874
+1D53C accent 218890
+1D53D accent 218890
+1D53E accent 219546
+1D540 accent 109445
+1D541 accent 308675
+1D542 accent 218235
+1D543 accent 109445
+1D544 accent 236585
+1D546 accent 218235
+1D54A accent 190710
+1D54B accent 199885
+1D54C accent 236585
+1D54D accent 199885
+1D54E accent 272630
+1D54F accent 218235
+1D550 accent 199885
+1D552 accent 154665
+1D553 accent 91095
+1D554 accent 155976
+1D555 accent 277873
+1D556 accent 154665
+1D557 italic 17695 accent 147456
+1D558 accent 154665
+1D559 accent 91095
+1D55A accent 91095
+1D55B accent 163185
+1D55C accent 91095
+1D55D accent 91095
+1D55E accent 275251
+1D55F accent 226755
+1D560 accent 154010
+1D561 accent 256246
+1D562 accent 154665
+1D563 accent 226755
+1D564 accent 122552
+1D565 accent 91095
+1D566 accent 172360
+1D567 accent 154010
+1D568 accent 218235
+1D569 accent 154665
+1D56A accent 154010
+1D56B accent 154665
+1D56C italic 5243 accent 330957
+1D56D accent 342753
+1D56E italic 22282 accent 382730
+1D56F accent 300155
+1D570 accent 391905
+1D571 italic 26870 accent 191365
+1D572 accent 414843
+1D573 accent 325059
+1D574 accent 262144
+1D575 accent 174981
+1D576 italic 34079 accent 352584
+1D577 italic 3932 accent 340132
+1D578 italic 13763 accent 431227
+1D579 italic 9175 accent 337510
+1D57A accent 262799
+1D57B accent 328991
+1D57C accent 262799
+1D57D italic 18350 accent 327680
+1D57E accent 321126
+1D57F italic 24248 accent 363069
+1D580 italic 32113 accent 357171
+1D581 italic 8520 accent 327680
+1D582 italic 21627 accent 421396
+1D583 italic 9175 accent 319816
+1D584 accent 321126
+1D585 accent 127140
+1D586 italic 8520 accent 254280
+1D587 accent 195297
+1D588 accent 204472
+1D589 accent 123863
+1D58A accent 185467
+1D58B italic 18350 accent 174326
+1D58C accent 267387
+1D58D accent 138281
+1D58E italic 15729 accent 108790
+1D58F accent 104202
+1D590 accent 140902
+1D591 italic 4588 accent 192020
+1D592 italic 4588 accent 265421
+1D593 accent 167117
+1D594 accent 218890
+1D595 accent 115999
+1D596 accent 268042
+1D597 italic 14418 accent 158597
+1D598 accent 174326
+1D599 italic 27525 accent 191365
+1D59A italic 28836 accent 207749
+1D59B accent 104858
+1D59C accent 106168
+1D59D italic 12452 accent 167117
+1D59E accent 110100
+1D59F accent 150077
+1D5A0 accent 218235
+1D5A1 accent 167772
+1D5A2 accent 269353
+1D5A3 accent 165151
+1D5A4 accent 207749
+1D5A5 accent 203162
+1D5A6 accent 266732
+1D5A7 accent 231997
+1D5A8 accent 91095
+1D5A9 accent 226099
+1D5AA accent 240517
+1D5AB accent 91095
+1D5AC accent 286392
+1D5AD accent 231997
+1D5AE accent 240517
+1D5AF accent 169738
+1D5B0 accent 240517
+1D5B1 accent 168428
+1D5B2 accent 192020
+1D5B3 accent 222822
+1D5B4 accent 225444
+1D5B5 italic 8520 accent 218235
+1D5B6 italic 8520 accent 309330
+1D5B7 italic 8520 accent 209060
+1D5B8 italic 15729 accent 218235
+1D5B9 accent 204472
+1D5BA accent 149422
+1D5BB accent 78643
+1D5BC accent 173015
+1D5BD accent 260178
+1D5BE accent 155976
+1D5BF italic 45220 accent 183501
+1D5C0 italic 8520 accent 212337
+1D5C1 accent 77988
+1D5C2 accent 78643
+1D5C3 accent 91750
+1D5C4 italic 6554 accent 78643
+1D5C5 accent 77988
+1D5C6 accent 235274
+1D5C7 accent 144179
+1D5C8 accent 163185
+1D5C9 accent 149422
+1D5CA accent 195953
+1D5CB italic 8520 accent 134349
+1D5CC italic 3277 accent 140247
+1D5CD accent 92406
+1D5CE accent 169083
+1D5CF italic 8520 accent 150733
+1D5D0 italic 8520 accent 223478
+1D5D1 italic 17695 accent 147456
+1D5D2 italic 8520 accent 150733
+1D5D3 accent 144835
+1D5D4 accent 239862
+1D5D5 accent 194642
+1D5D6 accent 283771
+1D5D7 accent 197263
+1D5D8 accent 220201
+1D5D9 accent 214958
+1D5DA accent 280494
+1D5DB accent 260178
+1D5DC accent 108790
+1D5DD accent 233308
+1D5DE accent 260833
+1D5DF accent 108134
+1D5E0 accent 320471
+1D5E1 accent 260178
+1D5E2 accent 258867
+1D5E3 accent 188744
+1D5E4 accent 258867
+1D5E5 accent 193987
+1D5E6 accent 203162
+1D5E7 accent 240517
+1D5E8 accent 250348
+1D5E9 accent 239862
+1D5EA italic 1966 accent 340132
+1D5EB accent 230031
+1D5EC italic 1966 accent 239862
+1D5ED accent 225444
+1D5EE accent 173015
+1D5EF accent 83886
+1D5F0 accent 186778
+1D5F1 accent 283771
+1D5F2 accent 174326
+1D5F3 italic 47841 accent 189399
+1D5F4 italic 7864 accent 222822
+1D5F5 accent 83231
+1D5F6 accent 83886
+1D5F7 accent 98959
+1D5F8 accent 83886
+1D5F9 accent 83886
+1D5FA accent 266076
+1D5FB accent 165806
+1D5FC accent 179569
+1D5FD accent 155320
+1D5FE accent 224133
+1D5FF italic 7864 accent 141558
+1D600 accent 148111
+1D601 accent 101581
+1D602 accent 184156
+1D603 accent 163840
+1D604 italic 1966 accent 243794
+1D605 accent 159908
+1D606 accent 164495
+1D607 accent 158597
+1D608 accent 315228
+1D609 italic 37356 accent 264110
+1D60A italic 70124 accent 366346
+1D60B italic 34079 accent 262144
+1D60C italic 77332 accent 304087
+1D60D italic 86508 accent 299500
+1D60E italic 58982 accent 363069
+1D60F italic 53084 accent 328991
+1D610 italic 53084 accent 188088
+1D611 italic 60293 accent 323092
+1D612 italic 77988 accent 337510
+1D613 accent 188088
+1D614 italic 49152 accent 383386
+1D615 italic 51773 accent 328991
+1D616 italic 35389 accent 340132
+1D617 italic 51773 accent 266076
+1D618 italic 35389 accent 340132
+1D619 italic 53740 accent 264765
+1D61A italic 51773 accent 289669
+1D61B italic 89784 accent 317194
+1D61C italic 53084 accent 321126
+1D61D italic 105513 accent 315228
+1D61E italic 105513 accent 406323
+1D61F italic 77988 accent 306053
+1D620 italic 112722 accent 315228
+1D621 italic 77988 accent 300155
+1D622 italic 13763 accent 212337
+1D623 italic 30147 accent 175636
+1D624 italic 54395 accent 235274
+1D625 italic 60948 accent 356516
+1D626 italic 36045 accent 218235
+1D627 italic 142213 accent 280494
+1D628 italic 64881 accent 274596
+1D629 italic 10486 accent 174981
+1D62A italic 60293 accent 169083
+1D62B italic 55050 accent 182190
+1D62C italic 53740 accent 175636
+1D62D italic 60948 accent 174981
+1D62E italic 11141 accent 297533
+1D62F italic 10486 accent 206438
+1D630 italic 32768 accent 226099
+1D631 italic 30147 accent 211026
+1D632 italic 27525 accent 258867
+1D633 italic 72090 accent 197263
+1D634 italic 51773 accent 203162
+1D635 italic 50463 accent 170394
+1D636 italic 26214 accent 230031
+1D637 italic 70124 accent 212337
+1D638 italic 70124 accent 285082
+1D639 italic 68157 accent 209060
+1D63A italic 70124 accent 212337
+1D63B italic 57016 accent 205783
+1D63C accent 334889
+1D63D italic 32113 accent 290324
+1D63E italic 64225 accent 380109
+1D63F italic 34079 accent 292946
+1D640 italic 68813 accent 315228
+1D641 italic 78643 accent 309985
+1D642 italic 53084 accent 376832
+1D643 italic 49807 accent 355860
+1D644 italic 49807 accent 204472
+1D645 italic 49807 accent 328335
+1D646 italic 68157 accent 355860
+1D647 accent 203817
+1D648 italic 49807 accent 416154
+1D649 italic 49807 accent 355860
+1D64A italic 35389 accent 357827
+1D64B italic 49152 accent 284426
+1D64C italic 35389 accent 357827
+1D64D italic 50463 accent 289014
+1D64E italic 44564 accent 301466
+1D64F italic 82575 accent 334889
+1D650 italic 49807 accent 346030
+1D651 italic 93716 accent 334889
+1D652 italic 95027 accent 434504
+1D653 italic 57672 accent 325714
+1D654 italic 96338 accent 334889
+1D655 italic 69468 accent 320471
+1D656 italic 32113 accent 237896
+1D657 italic 32768 accent 179569
+1D658 italic 52429 accent 251658
+1D659 italic 69468 accent 378798
+1D65A italic 38666 accent 239206
+1D65B italic 142213 accent 286392
+1D65C italic 64881 accent 286392
+1D65D italic 27525 accent 178913
+1D65E italic 71434 accent 176292
+1D65F italic 66847 accent 191365
+1D660 italic 47186 accent 179569
+1D661 italic 69468 accent 179569
+1D662 italic 27525 accent 329646
+1D663 italic 27525 accent 229376
+1D664 italic 34734 accent 244449
+1D665 italic 32768 accent 219546
+1D666 italic 38011 accent 288358
+1D667 italic 70779 accent 205128
+1D668 italic 49152 accent 212992
+1D669 italic 45875 accent 182190
+1D66A italic 37356 accent 246415
+1D66B italic 60948 accent 224788
+1D66C italic 61604 accent 305398
+1D66D italic 50463 accent 222167
+1D66E italic 60948 accent 226099
+1D66F italic 51773 accent 220201
+1D670 accent 171704
+1D671 accent 123863
+1D672 accent 237240
+1D673 accent 108134
+1D674 italic 3277 accent 166461
+1D675 accent 170394
+1D676 accent 219546
+1D677 italic 3277 accent 171704
+1D678 accent 172360
+1D679 accent 227410
+1D67A accent 167117
+1D67B accent 100270
+1D67C italic 6554 accent 171704
+1D67D accent 171704
+1D67E accent 171704
+1D67F accent 126484
+1D680 accent 171704
+1D681 italic 16384 accent 108790
+1D682 accent 202506
+1D683 accent 171704
+1D684 italic 15073 accent 171704
+1D685 italic 5898 accent 171704
+1D686 italic 10486 accent 171704
+1D687 accent 165806
+1D688 italic 5243 accent 171704
+1D689 accent 175636
+1D68A italic 14418 accent 140902
+1D68B accent 58982
+1D68C accent 200540
+1D68D italic 9830 accent 230031
+1D68E accent 177603
+1D68F accent 222822
+1D690 italic 7864 accent 217580
+1D691 italic 9830 accent 58982
+1D692 accent 172360
+1D693 accent 209060
+1D694 italic 7209 accent 61604
+1D695 accent 116654
+1D696 italic 12452 accent 137626
+1D697 italic 9830 accent 125174
+1D698 accent 171704
+1D699 accent 123208
+1D69A italic 26214 accent 207094
+1D69B accent 160563
+1D69C accent 197919
+1D69D accent 123208
+1D69E italic 9830 accent 144179
+1D69F italic 1966 accent 171704
+1D6A0 italic 7209 accent 171704
+1D6A1 accent 169083
+1D6A2 italic 1966 accent 172360
+1D6A3 accent 170394
+1D6A4 accent 110100
+1D6A5 italic 3277 accent 180224
+1D6A8 accent 283771
+1D6A9 accent 218890
+1D6AA accent 214303
+1D6AB accent 313917
+1D6AC accent 230031
+1D6AD accent 238551
+1D6AE accent 294912
+1D6AF accent 291635
+1D6B0 accent 142868
+1D6B1 accent 287048
+1D6B2 accent 264110
+1D6B3 accent 357827
+1D6B4 accent 294912
+1D6B5 accent 251003
+1D6B6 accent 281805
+1D6B7 accent 294912
+1D6B8 accent 216269
+1D6B9 accent 291635
+1D6BA accent 262799
+1D6BB accent 262144
+1D6BC accent 292946
+1D6BD accent 268698
+1D6BE accent 273940
+1D6BF accent 289669
+1D6C0 accent 271974
+1D6C1 accent 313917
+1D6C2 italic 19661 accent 256901
+1D6C3 accent 215613
+1D6C4 accent 222822
+1D6C5 accent 173015
+1D6C6 accent 178913
+1D6C7 accent 174981
+1D6C8 accent 167772
+1D6C9 accent 180224
+1D6CA italic 19661 accent 75366
+1D6CB italic 19661 accent 181535
+1D6CC italic 47841 accent 77332
+1D6CD italic 19661 accent 179569
+1D6CE accent 165151
+1D6CF accent 154010
+1D6D0 accent 188744
+1D6D1 accent 215613
+1D6D2 accent 186122
+1D6D3 accent 180879
+1D6D4 accent 228065
+1D6D5 accent 178258
+1D6D6 accent 188744
+1D6D7 accent 233308
+1D6D8 italic 19005 accent 203817
+1D6D9 accent 264110
+1D6DA accent 244449
+1D6DB accent 222167
+1D6DC italic 17695 accent 193331
+1D6DD italic 14418 accent 222822
+1D6DE accent 225444
+1D6DF accent 243139
+1D6E0 accent 182190
+1D6E1 accent 309985
+1D6E2 accent 361759
+1D6E3 italic 16384 accent 299500
+1D6E4 italic 87818 accent 302121
+1D6E5 accent 384041
+1D6E6 italic 35389 accent 315884
+1D6E7 italic 44564 accent 315228
+1D6E8 italic 51118 accent 355205
+1D6E9 italic 3277 accent 326369
+1D6EA italic 55706 accent 227410
+1D6EB italic 44564 accent 357171
+1D6EC accent 338821
+1D6ED italic 66847 accent 409600
+1D6EE italic 69468 accent 355205
+1D6EF italic 41288 accent 323748
+1D6F0 italic 3277 accent 326369
+1D6F1 italic 50463 accent 354550
+1D6F2 italic 91750 accent 297533
+1D6F3 italic 3277 accent 326369
+1D6F4 italic 35389 accent 336855
+1D6F5 italic 96993 accent 258212
+1D6F6 italic 95683 accent 252314
+1D6F7 italic 2621 accent 271974
+1D6F8 italic 33423 accent 346030
+1D6F9 italic 71434 accent 256901
+1D6FA italic 27525 accent 349307
+1D6FB accent 275251
+1D6FC accent 256901
+1D6FD italic 23593 accent 286392
+1D6FE italic 34734 accent 169738
+1D6FF italic 23593 accent 219546
+1D700 accent 186122
+1D701 italic 41943 accent 205128
+1D702 italic 17695 accent 178258
+1D703 italic 9175 accent 203162
+1D704 accent 120586
+1D705 accent 216924
+1D706 accent 155976
+1D707 accent 228721
+1D708 italic 38011 accent 194642
+1D709 italic 23593 accent 186778
+1D70A italic 7864 accent 159252
+1D70B italic 16384 accent 214958
+1D70C italic 8520 accent 231997
+1D70D italic 48497 accent 119276
+1D70E italic 15729 accent 187433
+1D70F italic 66847 accent 176292
+1D710 italic 7864 accent 200540
+1D711 accent 232653
+1D712 accent 216924
+1D713 italic 7864 accent 307364
+1D714 italic 6554 accent 226099
+1D715 italic 41288 accent 236585
+1D716 accent 176292
+1D717 accent 269353
+1D718 accent 239206
+1D719 italic 3277 accent 277217
+1D71A italic 8520 accent 236585
+1D71B italic 11141 accent 296878
+1D71C accent 399114
+1D71D italic 10486 accent 328991
+1D71E italic 96993 accent 321126
+1D71F accent 424018
+1D720 italic 28180 accent 336855
+1D721 italic 39322 accent 346030
+1D722 italic 47841 accent 403046
+1D723 italic 3277 accent 355205
+1D724 italic 54395 accent 250348
+1D725 italic 39322 accent 395182
+1D726 accent 373555
+1D727 italic 66847 accent 465961
+1D728 italic 68813 accent 403046
+1D729 italic 35389 accent 356516
+1D72A italic 3932 accent 346685
+1D72B italic 47186 accent 402391
+1D72C italic 100925 accent 324403
+1D72D italic 3277 accent 355205
+1D72E italic 28836 accent 370278
+1D72F italic 106824 accent 281805
+1D730 italic 104202 accent 290324
+1D731 accent 303432
+1D732 italic 22282 accent 382730
+1D733 italic 69468 accent 290980
+1D734 italic 22938 accent 380109
+1D735 accent 316539
+1D736 accent 287703
+1D737 italic 3932 accent 316539
+1D738 italic 36045 accent 193331
+1D739 italic 12452 accent 246415
+1D73A accent 211026
+1D73B italic 27525 accent 227410
+1D73C italic 14418 accent 209060
+1D73D italic 8520 accent 224788
+1D73E accent 129106
+1D73F accent 235274
+1D740 accent 172360
+1D741 accent 259523
+1D742 italic 35389 accent 220201
+1D743 italic 7209 accent 206438
+1D744 italic 7864 accent 192020
+1D745 italic 9175 accent 253624
+1D746 italic 8520 accent 266076
+1D747 italic 43254 accent 138936
+1D748 italic 8520 accent 224788
+1D749 italic 72745 accent 208404
+1D74A accent 231342
+1D74B accent 266076
+1D74C accent 242483
+1D74D italic 1966 accent 347341
+1D74E accent 260833
+1D74F italic 37356 accent 271974
+1D750 accent 207094
+1D751 accent 304742
+1D752 accent 271974
+1D753 accent 315884
+1D754 italic 8520 accent 262144
+1D755 italic 5243 accent 347341
+1D756 accent 239862
+1D757 accent 214303
+1D758 accent 205128
+1D759 accent 300155
+1D75A accent 220201
+1D75B accent 224788
+1D75C accent 260178
+1D75D accent 281149
+1D75E accent 108790
+1D75F accent 258212
+1D760 accent 220201
+1D761 accent 320471
+1D762 accent 260178
+1D763 accent 239862
+1D764 accent 258212
+1D765 accent 260178
+1D766 accent 208404
+1D767 accent 281149
+1D768 accent 260178
+1D769 accent 239862
+1D76A accent 280494
+1D76B accent 258212
+1D76C accent 230687
+1D76D accent 278528
+1D76E accent 256901
+1D76F accent 300155
+1D770 accent 254280
+1D771 accent 200540
+1D772 accent 258867
+1D773 accent 176292
+1D774 accent 178258
+1D775 accent 194642
+1D776 accent 241828
+1D777 accent 185467
+1D778 accent 92406
+1D779 accent 182190
+1D77A accent 110756
+1D77B accent 177603
+1D77C accent 186778
+1D77D accent 167772
+1D77E accent 195953
+1D77F accent 273940
+1D780 accent 185467
+1D781 accent 182190
+1D782 accent 245760
+1D783 accent 253624
+1D784 accent 246415
+1D785 accent 220856
+1D786 accent 258867
+1D787 accent 327680
+1D788 accent 239862
+1D789 accent 190054
+1D78A accent 176292
+1D78B accent 311296
+1D78D accent 239206
+1D78E accent 185467
+1D78F accent 370934
+1D790 accent 336200
+1D791 italic 32113 accent 304742
+1D792 italic 78643 accent 295567
+1D793 accent 391250
+1D794 italic 68813 accent 310641
+1D795 italic 69468 accent 315884
+1D796 italic 49807 accent 350618
+1D797 italic 34734 accent 375521
+1D798 italic 49807 accent 199229
+1D799 italic 68157 accent 349962
+1D79A accent 310641
+1D79B italic 49807 accent 410911
+1D79C italic 49807 accent 350618
+1D79D italic 74711 accent 329646
+1D79E italic 35389 accent 351273
+1D79F italic 49152 accent 350618
+1D7A0 italic 49152 accent 299500
+1D7A1 italic 34734 accent 375521
+1D7A2 italic 69468 accent 350618
+1D7A3 italic 82575 accent 328335
+1D7A4 italic 57672 accent 373555
+1D7A5 italic 30147 accent 348652
+1D7A6 italic 46531 accent 336855
+1D7A7 italic 59638 accent 374211
+1D7A8 italic 45875 accent 350618
+1D7A9 italic 24904 accent 346685
+1D7AA accent 313262
+1D7AB italic 27525 accent 292291
+1D7AC italic 43909 accent 320471
+1D7AD italic 34734 accent 271974
+1D7AE italic 20316 accent 239206
+1D7AF italic 15729 accent 292946
+1D7B0 italic 26870 accent 300810
+1D7B1 italic 43254 accent 277217
+1D7B2 italic 3277 accent 151388
+1D7B3 italic 2621 accent 241828
+1D7B4 accent 201196
+1D7B5 italic 2621 accent 237240
+1D7B6 italic 38666 accent 246415
+1D7B7 accent 266076
+1D7B8 italic 19005 accent 256246
+1D7B9 italic 37356 accent 331612
+1D7BA italic 18350 accent 244449
+1D7BB italic 3277 accent 242483
+1D7BC italic 38011 accent 302776
+1D7BD italic 37356 accent 311296
+1D7BE italic 23593 accent 306708
+1D7BF italic 19661 accent 280494
+1D7C0 accent 319160
+1D7C1 italic 23593 accent 421396
+1D7C2 italic 23593 accent 309330
+1D7C3 italic 31457 accent 269353
+1D7C4 accent 234619
+1D7C5 italic 34079 accent 403046
+1D7C6 italic 38666
+1D7C7 italic 17695 accent 332923
+1D7C8 italic 19005 accent 244449
+1D7C9 italic 37356 accent 440402
+1D7CE accent 188088
+1D7CF accent 193331
+1D7D0 accent 181535
+1D7D1 accent 184812
+1D7D2 accent 271319
+1D7D3 accent 190054
+1D7D4 accent 219546
+1D7D5 italic 7209 accent 81265
+1D7D6 accent 195953
+1D7D7 accent 184156
+1D7D8 accent 181535
+1D7D9 accent 181535
+1D7DA accent 188088
+1D7DB accent 189399
+1D7DC accent 259523
+1D7DD accent 182190
+1D7DE accent 174326
+1D7DF accent 181535
+1D7E0 accent 181535
+1D7E1 accent 180879
+1D7E2 accent 167772
+1D7E3 accent 170394
+1D7E4 accent 158597
+1D7E5 accent 159252
+1D7E6 accent 211681
+1D7E7 accent 163185
+1D7E8 accent 218890
+1D7E9 accent 163840
+1D7EA accent 163185
+1D7EB accent 159908
+1D7EC accent 180224
+1D7ED accent 184812
+1D7EE accent 169738
+1D7EF accent 182845
+1D7F0 accent 224788
+1D7F1 accent 176292
+1D7F2 accent 216924
+1D7F3 accent 180224
+1D7F4 accent 181535
+1D7F5 accent 169738
+1D7F6 accent 171704
+1D7F7 accent 181535
+1D7F8 accent 164495
+1D7F9 accent 162529
+1D7FA accent 211681
+1D7FB accent 171704
+1D7FC accent 207749
+1D7FD accent 51118
+1D7FE accent 171704
+1D7FF accent 171704
+F000E italic 15073
+F000F accent 161219
+F0010 italic 18350
+F0011 accent 148111
+F0013 accent 90440
+F0014 italic 1966
+F0016 accent 164495
+F0017 italic 25559
+F0019 italic 17695
+F001A italic 17695
+F001B italic 17695
+F001C accent 164495
+F001D accent 320471
+F001E accent 186122
+F001F accent 248381
+F0025 italic 21627
+F0026 italic 17695
+F0028 accent 230031
+F0029 accent 104858
+F002C accent 222822
+F002E accent 431882
+F002F accent 234619
+F0030 accent 222822
+F0035 accent 222822
+F0038 accent 217580
+F0039 italic 18350
+F003A italic 18350
+F003C accent 220201
+F003D accent 331612
+F003E accent 204472
+F0041 accent 222822
+F0043 italic 155976
+F0045 accent 131727
+F0046 accent 131727
+F0047 accent 132383
+F0048 accent 143524
+F0049 accent 279183
+F004A accent 215613
+F004B accent 231997
+F0057 accent 273285
+F0058 italic 38011 accent 234619
+F005A italic 38666
+F005E accent 227410
+F0060 accent 302776
+F0061 accent 431227
+F0062 accent 289014
+F0066 accent 197919
+F0067 accent 321126
+F0068 accent 108790
+F0069 accent 222167
+F006A accent 242483
+F006C accent 161874
+F0072 accent 283116
+F0073 accent 327680
+F0074 accent 104858
+F0075 accent 171049
+F0076 accent 109445
+F0077 italic 10486
+F0078 italic 38011
+F007B accent 389284
+F007C accent 311951
+F007D accent 222822
+F007E italic 64881
+F0081 accent 321126
+F0082 accent 193987
+F0083 accent 219546
+F0085 accent 336855
+F0086 accent 222822
+F008C accent 230687
+F0091 accent 225444
+F0092 accent 189399
+F0098 italic 18350
+F0099 accent 336855
+F009A accent 277873
+F00A2 accent 211681
+F00A3 accent 170394
+F00A6 italic 18350
+F00A7 accent 320471
+F00A8 accent 287703
+F00A9 accent 207094
+F00AE accent 103547
+F00AF accent 280494
+F00B1 accent 313917
+F00B2 accent 147456
+F00B5 accent 211026
+F00B7 accent 222822
+F00B8 italic 17695
+F00BB accent 214958
+F00BC accent 321126
+F00BD accent 223478
+F00BF italic 6554
+F00C0 italic 18350
+F00C3 accent 321126
+F00C4 accent 233964
+F00C5 accent 435159
+F00C6 accent 313917
+F00C7 accent 309985
+F00C8 accent 229376
+F00C9 accent 321126
+F00CA accent 233964
+F00CC accent 277873
+F00CD accent 202506
+F00CE accent 222822
+F00D5 accent 131727
+F00D6 accent 152699
+F00D7 accent 222822
+F0104 italic 10486
+F0134 italic 3932
+F0135 italic 33423
+F0137 italic 22282
+F013D italic 15729
+F018D italic 6554
+F018F italic 6554
+F0191 italic 6554
+F0193 italic 6554
+F0195 italic 6554
+F01B4 accent 275907
+F01B5 italic 1966 accent 159908
+F01B6 accent 209060
+F01BB italic 4588
+F01BC italic 21627
+F01BD italic 17695
+F01BF accent 193987
+F01C0 accent 81265
+F01C3 accent 186778
+F01C5 accent 371589
+F01C6 accent 193331
+F01C7 accent 186778
+F01CC accent 186778
+F01CF accent 182190
+F01D0 italic 18350
+F01D1 italic 18350
+F01D3 accent 184812
+F01D4 accent 282460
+F01D5 accent 170394
+F01D8 accent 186778
+F01DA italic 150733
+F01DC accent 106168
+F01DD accent 106168
+F01DE accent 106168
+F01DF accent 115999
+F01E0 accent 237240
+F01E1 accent 178258
+F01E2 accent 193987
+F01E3 italic 7209
+F01E4 italic 12452
+F01EE accent 231997
+F01EF italic 47186 accent 192020
+F01F1 italic 42598
+F01F5 accent 190710
+F01F7 accent 258212
+F01F8 accent 372244
+F01F9 italic 2621 accent 245105
+F01FD accent 163840
+F01FE accent 275907
+F01FF accent 84541
+F0200 accent 190054
+F0201 accent 203162
+F0203 accent 135660
+F0209 accent 237896
+F020A accent 281805
+F020B accent 81265
+F020C accent 144179
+F020D accent 85852
+F020E italic 22282
+F020F italic 47186
+F0212 accent 336855
+F0213 accent 264110
+F0214 accent 186778
+F0215 italic 70124
+F0218 accent 275907
+F0219 accent 163185
+F021A accent 187433
+F021C accent 287048
+F021D accent 186122
+F0222 italic 4588
+F0223 accent 193331
+F0228 accent 190054
+F0229 accent 155976
+F022F italic 18350
+F0230 accent 287048
+F0231 italic 5898 accent 235930
+F0239 italic 10486 accent 177603
+F023A accent 139592
+F023B italic 10486
+F023D italic 18350
+F023E accent 275907
+F023F accent 243794
+F0240 accent 173015
+F0245 italic 2621 accent 80609
+F0246 accent 235930
+F0248 accent 266732
+F0249 accent 120586
+F024C accent 184812
+F024D italic 10486
+F024E accent 186778
+F024F italic 17695
+F0251 italic 7209
+F0252 accent 178913
+F0253 accent 275907
+F0254 accent 186778
+F0256 italic 24248
+F0257 italic 18350
+F0259 italic 4588
+F025A accent 275907
+F025B accent 196608
+F025C accent 376832
+F025D accent 266732
+F025E accent 266076
+F025F accent 192020
+F0260 italic 1966 accent 275907
+F0261 accent 196608
+F0262 italic 1966
+F0263 accent 235274
+F0264 accent 169083
+F0265 accent 187433
+F026C accent 106168
+F026D accent 121897
+F026E accent 186778
+F0270 italic 1966
+F0272 italic 1966
+F0274 italic 1966
+F0276 italic 1966
+F0278 italic 1966
+F027A italic 1966
+F027C italic 1966
+F027E italic 1966
+F0280 italic 1966
+F0282 italic 1966
+F0284 italic 1966
+F0286 italic 1966
+F0288 italic 1966
+F028A italic 1966
+F028C italic 1966
+F028E italic 1966
+F0290 italic 1966
+F0292 italic 1966
+F0294 italic 1966
+F0296 italic 1966
+F029C italic 25559
+F02BC italic 2621
+F02BE italic 2621
+F02C0 italic 2621
+F02C2 italic 12452
+F02C4 italic 8520
+F02CC italic 13763
+F02CD italic 43254
+F02CE italic 3932
+F02CF italic 33423
+F02D3 italic 11141
+F02D5 italic 30802
+F02F7 italic 4588
+F02F9 italic 4588
+F02FB italic 4588
+F02FD italic 4588
+F02FF italic 4588
+F0306 italic 10486
+F0308 italic 10486
+F030A italic 10486
+F0325 italic 24248
+F0327 italic 24248
+F0329 italic 24248
+F032B italic 24248
+F032D italic 24248
+F0336 italic 1966
+F0338 italic 1966
+F033A italic 1966
+F033C italic 1966
+F033E italic 1966
+F0340 italic 1966
+F0352 accent 454164
+F0353 accent 355860
+F0354 italic 4588 accent 503316
+F0355 accent 361103
+F0356 accent 406979
+F0357 italic 70124 accent 401080
+F0358 accent 502661
+F0359 italic 4588 accent 448266
+F035A italic 7209 accent 289014
+F035B italic 30147 accent 410911
+F035C accent 455475
+F035D accent 298189
+F035E italic 22938 accent 516424
+F035F italic 26870 accent 448266
+F0360 accent 424673
+F0361 italic 72090 accent 350618
+F0362 accent 424673
+F0363 accent 337510
+F0364 accent 416154
+F0365 italic 80609 accent 356516
+F0366 italic 26870 accent 361759
+F0367 italic 131072 accent 370278
+F0368 italic 64225 accent 484311
+F0369 accent 437125
+F036A italic 126484 accent 359137
+F036B accent 406323
+F036C accent 260178
+F036D accent 150733
+F036E accent 286392
+F036F accent 378143
+F0370 accent 271974
+F0371 italic 23593 accent 377487
+F0372 accent 274596
+F0373 accent 185467
+F0374 accent 230031
+F0375 accent 304087
+F0376 accent 185467
+F0377 accent 162529
+F0378 accent 374866
+F0379 accent 260833
+F037A accent 283771
+F037B accent 237240
+F037C accent 310641
+F037D italic 5898 accent 250348
+F037E accent 264765
+F037F accent 212337
+F0380 accent 275907
+F0381 accent 264765
+F0382 accent 355205
+F0383 accent 282460
+F0384 accent 275251
+F0385 accent 294257
+F0386 accent 163185
+F0387 accent 226755
+F0388 accent 395837
+F0389 accent 306708
+F038A italic 34079 accent 433193
+F038B accent 312607
+F038C italic 19661 accent 351273
+F038D italic 83886 accent 346030
+F038E accent 433193
+F038F italic 34079 accent 390595
+F0390 italic 38011 accent 250348
+F0391 italic 55706 accent 353239
+F0392 italic 30802 accent 397148
+F0393 accent 258867
+F0394 italic 51773 accent 450888
+F0395 italic 54395 accent 390595
+F0396 accent 361759
+F0397 italic 88474 accent 302776
+F0398 accent 361759
+F0399 italic 10486 accent 290980
+F039A italic 23593 accent 358482
+F039B italic 93716 accent 296223
+F039C italic 54395 accent 307364
+F039D italic 140247 accent 308675
+F039E italic 81920 accent 409600
+F039F italic 15729 accent 380109
+F03A0 italic 136970 accent 298844
+F03A1 italic 30802 accent 349962
+F03A2 accent 212992
+F03A3 accent 123863
+F03A4 italic 7864 accent 238551
+F03A5 italic 5243 accent 325059
+F03A6 accent 222822
+F03A7 italic 49152 accent 331612
+F03A8 italic 4588 accent 236585
+F03A9 accent 155976
+F03AA accent 186122
+F03AB accent 260833
+F03AC accent 155976
+F03AD accent 135660
+F03AE accent 304742
+F03AF accent 205128
+F03B0 accent 233308
+F03B1 accent 193987
+F03B2 italic 9830 accent 259523
+F03B3 italic 6554 accent 190054
+F03B4 accent 218890
+F03B5 accent 170394
+F03B6 accent 222822
+F03B7 accent 220856
+F03B8 accent 302121
+F03B9 accent 235274
+F03BA italic 5898 accent 222822
+F03BB italic 1966 accent 246415
+F03BC accent 123208
+F03BD accent 189399
+F03BE accent 104858
+F03BF accent 115343
+F03C0 accent 365036
+F03C1 italic 3932 accent 204472
+F03C2 accent 267387
+F03C3 accent 119931
+F03C4 accent 483656
+F03C5 accent 273285
+F03C6 accent 254935
+F03C7 accent 383386
+F03C8 accent 142868
+F03C9 accent 155976
+F03CA accent 306053
+F03CB accent 234619
+F03CC accent 257556
+F03CD accent 299500
+F03CE italic 75366 accent 264765
+F03CF accent 246415
+F03D0 accent 323748
+F03D1 accent 483656
+F03D2 accent 315228
+F03D3 accent 378143
+F03D4 accent 128451
+F03D5 accent 180224
+F03D6 accent 312607
+F03D7 accent 376177
+F03D8 accent 119931
+F03D9 accent 189399
+F03DA accent 131072
+F03DB accent 456786
+F03DC accent 364380
+F03DD accent 378143
+F03DE accent 231997
+F03DF accent 228721
+F03E0 accent 367657
+F03E1 accent 247726
+F03E2 accent 256901
+F03E3 accent 260833
+F03E4 accent 222167
+F03E5 accent 367657
+F03E6 accent 309330
+F03E7 italic 4588 accent 247726
+F03E8 accent 190054
+F03E9 accent 317194
+F03EA accent 221512
+F03EB accent 121242
+F03EC accent 304742
+F03ED accent 341443
+F03EE accent 159908
+F03EF accent 245760
+F03F0 accent 231997
+F03F1 accent 371589
+F03F2 accent 262799
+F03F3 accent 365036
+F03F4 accent 262144
+F03F5 accent 497418
+F03F6 accent 354550
+F03F7 accent 351928
+F03F8 accent 256901
+F03F9 accent 365036
+F03FA accent 263455
+F03FB accent 311296
+F03FC accent 224788
+F03FD accent 248381
+F03FE accent 142868
+F03FF accent 175636
+F0400 accent 317194
+F0401 italic 11796 accent 173015
+F0402 accent 222822
+F0403 accent 97649
+F0404 accent 422052
+F0405 accent 233964
+F0406 accent 212337
+F0407 accent 328991
+F0408 accent 119276
+F0409 accent 131072
+F040A accent 259523
+F040B accent 202506
+F040C accent 216924
+F040D accent 253624
+F040E italic 78643 accent 227410
+F040F accent 211681
+F0410 accent 295567
+F0411 accent 422052
+F0412 italic 3277 accent 274596
+F0413 accent 328335
+F0414 accent 103547
+F0415 accent 157286
+F0416 accent 261489
+F0417 accent 322437
+F0418 accent 97649
+F0419 accent 165806
+F041A accent 105513
+F041B accent 397804
+F041C accent 306708
+F041D accent 328335
+F041E accent 190710
+F041F accent 203162
+F0420 accent 316539
+F0421 accent 211681
+F0422 accent 217580
+F0423 accent 218890
+F0424 accent 183501
+F0425 accent 316539
+F0426 italic 5243 accent 269353
+F0427 italic 12452 accent 207749
+F0428 accent 158597
+F0429 accent 273285
+F042A accent 188088
+F042B italic 3277 accent 95683
+F042C accent 245105
+F042D accent 293601
+F042E accent 140247
+F042F accent 209060
+F0430 accent 193331
+F0431 accent 322437
+F0432 accent 221512
+F0433 accent 317194
+F0434 accent 223478
+F0435 accent 433193
+F0436 accent 304742
+F0437 accent 304742
+F0438 accent 218890
+F0439 accent 317194
+F043A accent 223478
+F043B accent 267387
+F043C accent 190710
+F043D accent 211681
+F043E accent 119276
+F043F accent 145490
+F0440 accent 121242
+F0441 accent 184812
+F0442 accent 490209
+F0443 accent 392561
+F0444 italic 11796 accent 540672
+F0445 accent 385352
+F0446 accent 419430
+F0447 italic 95683 accent 412877
+F0448 accent 540672
+F0449 italic 12452 accent 496763
+F044A italic 14418 accent 298844
+F044B italic 32768 accent 431227
+F044C italic 7864 accent 492175
+F044D accent 308019
+F044E italic 30802 accent 575406
+F044F italic 39322 accent 496108
+F0450 accent 439091
+F0451 italic 98959 accent 373555
+F0452 accent 439091
+F0453 italic 9830 accent 373555
+F0454 accent 453509
+F0455 italic 106824 accent 372900
+F0456 italic 39322 accent 392561
+F0457 italic 165806 accent 411566
+F0458 italic 89129 accent 543293
+F0459 accent 470548
+F045A italic 154665 accent 397148
+F045B italic 9175 accent 433848
+F045C accent 283771
+F045D accent 178913
+F045E accent 306053
+F045F accent 420741
+F0460 accent 308675
+F0461 italic 33423 accent 398459
+F0462 accent 290980
+F0463 accent 184812
+F0464 accent 251003
+F0465 accent 318505
+F0466 accent 184812
+F0467 accent 157942
+F0468 accent 412877
+F0469 accent 280494
+F046A accent 311296
+F046B accent 262144
+F046C accent 340132
+F046D accent 258867
+F046E accent 276562
+F046F accent 220201
+F0470 accent 304742
+F0471 accent 285737
+F0472 accent 391905
+F0473 accent 294257
+F0474 accent 304087
+F0475 accent 309330
+F0476 accent 181535
+F0477 accent 227410
+F0478 accent 432538
+F0479 accent 344719
+F047A italic 33423 accent 473825
+F047B accent 333578
+F047C italic 17695 accent 369623
+F047D italic 100925 accent 363725
+F047E accent 473825
+F047F italic 36045 accent 439747
+F0480 italic 39977 accent 266732
+F0481 italic 50463 accent 373555
+F0482 italic 30147 accent 434504
+F0483 accent 275907
+F0484 italic 55050 accent 509215
+F0485 italic 59638 accent 439091
+F0486 accent 381420
+F0487 italic 104858 accent 327025
+F0488 accent 381420
+F0489 italic 24248 accent 327025
+F048A italic 22282 accent 399770
+F048B italic 110756 accent 318505
+F048C italic 58982 accent 341443
+F048D italic 163185 accent 351273
+F048E italic 95027 accent 467272
+F048F italic 7209 accent 416809
+F0490 italic 156631 accent 339476
+F0491 italic 30802 accent 381420
+F0492 accent 244449
+F0493 italic 2621 accent 158597
+F0494 italic 13107 accent 264765
+F0495 italic 11796 accent 370278
+F0496 accent 247071
+F0497 italic 51118 accent 362414
+F0498 italic 2621 accent 248381
+F0499 accent 162529
+F049A accent 211681
+F049B accent 283771
+F049C accent 162529
+F049D accent 138936
+F049E accent 355860
+F049F accent 239206
+F04A0 italic 1966 accent 266732
+F04A1 italic 2621 accent 231997
+F04A2 italic 10486 accent 296223
+F04A3 accent 220856
+F04A4 accent 252969
+F04A5 accent 184812
+F04A6 accent 256246
+F04A7 accent 238551
+F04A8 accent 331612
+F04A9 accent 257556
+F04AA italic 4588 accent 256246
+F04AB accent 271974
+F04AC accent 144835
+F04AD accent 199229
+F04AE horiz_variants F04B0:0:45875:136315:nil,F04B1:91095:91095:91095:1,F04B2:45875:0:136315:nil
+F04AF horiz_variants F04B3:0:45875:136315:nil,F04B4:91095:91095:91095:1,F04B5:45875:0:136315:nil
+F04B6 horiz_variants F04B8:0:45220:134349:nil,F04B9:89784:89784:89784:1,F04BA:45220:0:134349:nil
+F04B7 horiz_variants F04BB:0:45220:134349:nil,F04BC:89784:89784:89784:1,F04BD:45220:0:134349:nil
+F04BE horiz_variants F04BF:0:49807:148111:nil,F04C0:98959:98959:98959:1,F04C1:49807:0:148111:nil
+F04C2 horiz_variants F04C4:0:45875:136315:nil,F04C5:91095:91095:91095:1,F04C6:45875:0:136315:nil
+F04C3 horiz_variants F04C7:0:45875:136315:nil,F04C8:91095:91095:91095:1,F04C9:45875:0:136315:nil
+F04CA horiz_variants F04CC:0:45220:134349:nil,F04CD:89784:89784:89784:1,F04CE:45220:0:134349:nil
+F04CB horiz_variants F04CF:0:45220:134349:nil,F04D0:89784:89784:89784:1,F04D1:45220:0:134349:nil
+F04D2 horiz_variants F04D3:0:49807:148111:nil,F04D4:98959:98959:98959:1,F04D5:49807:0:148111:nil
+F04DC vert_variants F04DE:0:110756:331612:nil,F04DF:220856:220856:220856:1,F04E0:110756:0:330957:nil
+F04DD vert_variants F04E1:0:110756:330957:nil,F04E2:220856:220856:220856:1,F04E3:110756:0:331612:nil
+F04E4 horiz_variants F04E5:0:32113:252969:nil,F04E6:63570:63570:63570:1,F04E7:32113:32113:252969:nil,F04E6:63570:63570:63570:1,F04E8:32113:0:252969:nil
+F04E9 horiz_variants F04EA:0:31457:252969:nil,F04EB:62915:62915:62915:1,F04EC:31457:31457:252969:nil,F04EB:62915:62915:62915:1,F04ED:31457:0:252969:nil
+F04F1 vert_variants F04F2:0:83231:249037:nil,F04F3:166461:166461:166461:1,F04F4:83231:0:249037:nil
+F04F5 horiz_variants F04F6:0:31457:249037:nil,F04F7:62259:62259:62259:1,F04F8:31457:31457:249037:nil,F04F7:62259:62259:62259:1,F04F9:31457:0:249037:nil
+F04FE horiz_variants F0500:0:110756:332268:nil,F0501:220856:220856:220856:1,F0502:110756:0:332268:nil
+F04FF horiz_variants F0503:0:110756:332268:nil,F0504:220856:220856:220856:1,F0505:110756:0:332268:nil
+F0506 vert_variants F0508:0:110756:331612:nil,F0509:220856:220856:220856:1,F050A:110756:0:330957:nil
+F0507 vert_variants F050B:0:110756:330957:nil,F050C:220856:220856:220856:1,F050D:110756:0:331612:nil
+F050E horiz_variants F0510:0:126484:380109:nil,F0511:252969:252969:252969:1,F0512:126484:0:380109:nil
+F050F horiz_variants F0513:0:126484:380109:nil,F0514:252969:252969:252969:1,F0515:126484:0:380109:nil
+F051C vert_variants F051E:0:108790:326369:nil,F051F:217580:217580:217580:1,F0520:108790:0:326369:nil
+F051D vert_variants F0521:0:108790:326369:nil,F0522:217580:217580:217580:1,F0523:108790:0:326369:nil
+F0524 horiz_variants F0526:0:110756:332268:nil,F0527:220856:220856:220856:1,F0528:110756:0:332268:nil
+F0525 horiz_variants F0529:0:110756:332268:nil,F052A:220856:220856:220856:1,F052B:110756:0:332268:nil
+F052C horiz_variants F052E:0:110756:332268:nil,F052F:220856:220856:220856:1,F0530:110756:0:332268:nil
+F052D horiz_variants F0531:0:110756:332268:nil,F0532:220856:220856:220856:1,F0533:110756:0:332268:nil
+F053A horiz_variants F053C:0:112067:336200:nil,F053D:223478:223478:223478:1,F053E:112067:0:335544:nil
+F053B horiz_variants F053F:0:112067:335544:nil,F0540:223478:223478:223478:1,F0541:112067:0:336200:nil
+F0542 horiz_variants F0544:0:112067:335544:nil,F0545:223478:223478:223478:1,F0546:112067:0:336200:nil
+F0543 horiz_variants F0547:0:112067:335544:nil,F0548:223478:223478:223478:1,F0549:112067:0:336200:nil
+F054A vert_variants F054C:0:112067:335544:nil,F054D:223478:223478:223478:1,F054E:112067:0:336200:nil
+F054B vert_variants F054F:0:112067:336200:nil,F0550:223478:223478:223478:1,F0551:112067:0:335544:nil
+F0552 vert_variants F0554:0:112067:335544:nil,F0555:223478:223478:223478:1,F0556:112067:0:336200:nil
+F0553 vert_variants F0557:0:112067:336200:nil,F0558:223478:223478:223478:1,F0559:112067:0:335544:nil
+F055A horiz_variants F055C:0:112722:337510:nil,F055D:224788:224788:224788:1,F055E:112722:0:336855:nil
+F055B horiz_variants F055F:0:112722:336855:nil,F0560:224788:224788:224788:1,F0561:112722:0:337510:nil
+F0562 vert_variants F0564:0:112722:337510:nil,F0565:224788:224788:224788:1,F0566:112722:0:336855:nil
+F0563 vert_variants F0567:0:112722:336855:nil,F0568:224788:224788:224788:1,F0569:112722:0:337510:nil
+F056A horiz_variants F056C:0:110756:332268:nil,F056D:220856:220856:220856:1,F056E:110756:0:332268:nil
+F056B horiz_variants F056F:0:110756:332268:nil,F0570:220856:220856:220856:1,F0571:110756:0:332268:nil
+F0572 vert_variants F0574:0:110756:331612:nil,F0575:220856:220856:220856:1,F0576:110756:0:330957:nil
+F0573 vert_variants F0577:0:110756:330957:nil,F0578:220856:220856:220856:1,F0579:110756:0:331612:nil
+F057A horiz_variants F057C:0:110756:332268:nil,F057D:220856:220856:220856:1,F057E:110756:0:332268:nil
+F057B horiz_variants F057F:0:110756:332268:nil,F0580:220856:220856:220856:1,F0581:110756:0:332268:nil
+F0582 horiz_variants F0584:0:112722:337510:nil,F0585:224788:224788:224788:1,F0586:112722:0:336855:nil
+F0583 horiz_variants F0587:0:112722:336855:nil,F0588:224788:224788:224788:1,F0589:112722:0:337510:nil
+F0590 vert_variants F0592:0:110100:330957:nil,F0593:220201:220201:220201:1,F0594:110100:0:330301:nil
+F0591 vert_variants F0595:0:110100:330301:nil,F0596:220201:220201:220201:1,F0597:110100:0:330957:nil
+F059B vert_variants F059C:0:116654:349307:nil,F059D:233308:233308:233308:1,F059E:116654:0:349307:nil
+F059F horiz_variants F05A0:0:32113:251658:nil,F05A1:63570:63570:63570:1,F05A2:32113:32113:251658:nil,F05A1:63570:63570:63570:1,F05A3:32113:0:251658:nil
+F05A4 horiz_variants F05A5:0:32113:251658:nil,F05A6:63570:63570:63570:1,F05A7:32113:32113:251658:nil,F05A6:63570:63570:63570:1,F05A8:32113:0:251658:nil
+F05A9 horiz_variants F05AA:0:33423:266076:nil,F05AB:66847:66847:66847:1,F05AC:33423:33423:266076:nil,F05AB:66847:66847:66847:1,F05AD:33423:0:266076:nil
+F05B8 horiz_variants F05BA:0:110756:331612:nil,F05BB:220856:220856:220856:1,F05BC:110756:0:331612:nil
+F05B9 horiz_variants F05BD:0:110756:331612:nil,F05BE:220856:220856:220856:1,F05BF:110756:0:331612:nil
+F05C1 horiz_variants F05C3:0:113377:340132:nil,F05C4:226755:226755:226755:1,F05C5:113377:0:340132:nil
+F05C2 horiz_variants F05C6:0:113377:340132:nil,F05C7:226755:226755:226755:1,F05C8:113377:0:340132:nil
+F05C9 vert_variants F05CB:0:113377:340132:nil,F05CC:226755:226755:226755:1,F05CD:113377:0:340132:nil
+F05CA vert_variants F05CE:0:113377:340132:nil,F05CF:226755:226755:226755:1,F05D0:113377:0:340132:nil
+F05D1 vert_variants F05D2:0:114688:343409:nil,F05D3:228721:228721:228721:1,F05D4:114688:0:342753:nil
+F05D5 horiz_variants F05D6:0:114688:343409:nil,F05D7:228721:228721:228721:1,F05D8:114688:0:342753:nil
+F05D9 horiz_variants F05DB:0:107479:322437:nil,F05DC:214303:214303:214303:1,F05DD:107479:0:322437:nil
+F05DA horiz_variants F05DE:0:107479:322437:nil,F05DF:214303:214303:214303:1,F05E0:107479:0:322437:nil
+F05E1 vert_variants F05E3:0:107479:322437:nil,F05E4:214303:214303:214303:1,F05E5:107479:0:322437:nil
+F05E2 vert_variants F05E6:0:107479:322437:nil,F05E7:214303:214303:214303:1,F05E8:107479:0:322437:nil
+F05E9 horiz_variants F05EA:0:105513:317194:nil,F05EB:211026:211026:211026:1,F05EC:105513:0:317194:nil
+F05ED vert_variants F05EE:0:105513:317194:nil,F05EF:211026:211026:211026:1,F05F0:105513:0:317194:nil
+F05F1 horiz_variants F05F2:0:62259:123863:nil,F05F3:124518:124518:124518:1,F05F4:62259:0:123863:nil
+F05F5 horiz_variants F05F6:0:62259:123863:nil,F05F7:124518:124518:124518:1,F05F8:62259:0:123863:nil
+F05F9 horiz_variants F05FA:0:62259:123863:nil,F05FB:124518:124518:124518:1,F05FC:62259:0:123863:nil
+F05FD horiz_variants F05FE:0:62259:123863:nil,F05FF:124518:124518:124518:1,F0600:62259:0:123863:nil
+F0601 next F060B
+F0602 next F060C
+F0603 next F060D
+F0604 next F060E
+F0605 next F060F
+F0606 next F0610
+F0607 next F0611
+F0608 next F0612
+F0609 next F0613
+F060A next F0614
+F060B next F0615
+F060C next F0616
+F060D next F0617
+F060E next F0618
+F060F next F0619
+F0610 next F061A
+F0611 next F061B
+F0612 next F061C
+F0613 next F061D
+F0614 next F061E
+F0615 next F061F
+F0616 next F0620
+F0617 next F0621
+F0618 next F0622
+F0619 next F0623
+F061A next F0624
+F061B next F0625
+F061C next F0626
+F061D next F0627
+F061E next F0628
+F061F next F0629
+F0620 next F062A
+F0621 next F062B
+F0622 next F062C
+F0623 next F062D
+F0624 next F062E
+F0625 next F062F
+F0626 next F0630
+F0627 next F0631
+F0628 next F0632
+F0629 next F0633
+F062A next F0634
+F062B next F0635
+F062C next F0636
+F062D next F0637
+F062E next F0638
+F062F next F0639
+F0630 next F063A
+F0631 next F063B
+F0632 next F063C
+F0633 next F063D
+F0634 next F063E
+F0635 next F063F
+F0636 next F0640
+F0637 next F0641
+F0638 next F0642
+F0639 next F0643
+F063A next F0644
+F063B next F0645
+F063C next F0646
+F0647 next F065D
+F0648 next F065E
+F0649 next F065F
+F064A next F0660
+F064B next F0661
+F064C next F0662
+F064D next F0663
+F064E next F0664
+F064F next F0665
+F0650 next F0666
+F0651 next F0667
+F0652 next F0668
+F0653 next F0669 italic 3932
+F0654 next F066A
+F0655 next F066B italic 19005
+F0656 next F066C italic 18350
+F0657 next F066D italic 18350
+F0658 next F066E italic 18350
+F0659 next F066F italic 18350
+F065A next F0670 italic 18350
+F065B next F0671 italic 18350
+F065C next F0672 italic 18350
+F065D next F0673
+F065E next F0674
+F065F next F0675
+F0660 next F0676
+F0661 next F0677
+F0662 next F0678
+F0663 next F0679
+F0664 next F067A
+F0665 next F067B
+F0666 next F067C
+F0667 next F067D
+F0668 next F067E
+F0669 next F067F italic 3932
+F066A next F0680
+F066B next F0681 italic 18350
+F066C next F0682 italic 18350
+F066D next F0683 italic 18350
+F066E next F0684 italic 18350
+F066F next F0685 italic 18350
+F0670 next F0686 italic 18350
+F0671 next F0687 italic 18350
+F0672 next F0688 italic 18350
+F0673 next F0689
+F0674 next F068A
+F0675 next F068B
+F0676 next F068C
+F0677 next F068D
+F0678 next F068E
+F0679 next F068F
+F067A next F0690
+F067B next F0691
+F067C next F0692
+F067D next F0693
+F067E next F0694
+F067F next F0695 italic 3277
+F0680 next F0696
+F0681 next F0697 italic 18350
+F0682 next F0698 italic 18350
+F0683 next F0699 italic 18350
+F0684 next F069A italic 18350
+F0685 next F069B italic 18350
+F0686 next F069C italic 18350
+F0687 next F069D italic 18350
+F0688 next F069E italic 18350
+F0689 next F069F
+F068A next F06A0
+F068B next F06A1
+F068C next F06A2
+F068D next F06A3
+F068E next F06A4
+F068F next F06A5 italic 2621
+F0690 next F06A6
+F0691 next F06A7
+F0692 next F06A8
+F0693 next F06A9
+F0694 next F06AA
+F0695 next F06AB italic 3277
+F0696 next F06AC
+F0697 next F06AD italic 18350
+F0698 next F06AE italic 18350
+F0699 next F06AF italic 18350
+F069A next F06B0 italic 18350
+F069B next F06B1 italic 18350
+F069C next F06B2 italic 18350
+F069D next F06B3 italic 18350
+F069E next F06B4 italic 18350
+F069F next F06B5
+F06A0 next F06B6
+F06A1 next F06B7
+F06A2 next F06B8
+F06A3 next F06B9
+F06A4 next F06BA
+F06A5 next F06BB italic 4588
+F06A6 next F06BC
+F06A7 next F06BD
+F06A8 next F06BE
+F06A9 next F06BF
+F06AA next F06C0
+F06AB next F06C1 italic 3277
+F06AC next F06C2
+F06AD next F06C3 italic 18350
+F06AE next F06C4 italic 18350
+F06AF next F06C5 italic 18350
+F06B0 next F06C6 italic 18350
+F06B1 next F06C7 italic 18350
+F06B2 next F06C8 italic 18350
+F06B3 next F06C9 italic 18350
+F06B4 next F06CA italic 18350
+F06B5 next F06CB
+F06B6 next F06CC
+F06B7 next F06CD
+F06B8 next F06CE
+F06B9 next F06D5
+F06BA next F06D6
+F06BB next F06D9 italic 5898
+F06BC next F06DA
+F06BD next F06DB
+F06BE next F06DC
+F06BF next F06DD
+F06C0 next F06DE
+F06C1 next F06DF italic 3932
+F06C2 next F06E0
+F06C3 next F06E7 italic 18350
+F06C4 next F06E8 italic 18350
+F06C5 next F06F1 italic 18350
+F06C6 next F06F2 italic 18350
+F06C7 next F06F9 italic 18350
+F06C8 next F06FA italic 18350
+F06C9 next F0701 italic 18350
+F06CA next F0702 italic 18350
+F06CB vert_variants 239D:0:163185:979763:nil,239C:326369:326369:326369:1,239B:163185:0:979763:nil
+F06CC vert_variants 23A0:0:163185:979763:nil,239F:326369:326369:326369:1,239E:163185:0:979763:nil
+F06CD vert_variants F06CF:0:327025:1000079:nil,F06D0:654049:654049:654049:1,F06D1:327025:0:1000079:nil
+F06CE vert_variants F06D2:0:327025:1000079:nil,F06D3:654049:654049:654049:1,F06D4:327025:0:1000079:nil
+F06D5 vert_variants 23A9:0:245105:491520:nil,F06D7:490209:490209:490209:1,23A8:245105:245105:983040:nil,F06D7:490209:490209:490209:1,23A7:245105:0:491520:nil
+F06D6 vert_variants 23AD:0:245105:491520:nil,F06D8:490209:490209:490209:1,23AC:245105:245105:983040:nil,F06D8:490209:490209:490209:1,23AB:245105:0:491520:nil
+F06D9 italic 5243 vert_variants 23A3:0:327680:983040:nil,23A2:655360:655360:655360:1,23A1:327680:0:983040:nil
+F06DA vert_variants 23A6:0:327680:983040:nil,23A5:655360:655360:655360:1,23A4:327680:0:983040:nil
+F06DB vert_variants 23A2:655360:655360:655360:1,23A1:327680:0:983040:nil
+F06DC vert_variants 23A5:655360:655360:655360:1,23A4:327680:0:983040:nil
+F06DD vert_variants 23A3:0:327680:983040:nil,23A2:655360:655360:655360:1
+F06DE vert_variants 23A6:0:327680:983040:nil,23A5:655360:655360:655360:1
+F06DF italic 3932 vert_variants F06E1:0:327680:655360:nil,F06E2:655360:655360:655360:1,F06E3:327680:0:655360:nil
+F06E0 vert_variants F06E4:0:327680:655360:nil,F06E5:655360:655360:655360:1,F06E6:327680:0:655360:nil
+F06E7 italic 18350 horiz_variants F06E9:0:325714:656671:nil,F06EA:651428:651428:651428:1,F06EB:325714:325714:1312686:nil,F06EA:651428:651428:651428:1,F06EC:325714:0:656015:nil
+F06E8 italic 18350 horiz_variants F06ED:0:325714:656671:nil,F06EE:651428:651428:651428:1,F06EF:325714:325714:1312686:nil,F06EE:651428:651428:651428:1,F06F0:325714:0:656015:nil
+F06F1 italic 18350 horiz_variants F06F3:0:325714:1321206:nil,F06F4:651428:651428:651428:1,F06F5:325714:0:1321206:nil
+F06F2 italic 18350 horiz_variants F06F6:0:325714:1321206:nil,F06F7:651428:651428:651428:1,F06F8:325714:0:1321206:nil
+F06F9 italic 18350 horiz_variants F06FB:0:326369:978452:nil,F06FC:652083:652083:652083:1,F06FD:326369:0:977797:nil
+F06FA italic 18350 horiz_variants F06FE:0:326369:978452:nil,F06FF:652083:652083:652083:1,F0700:326369:0:977797:nil
+F0701 italic 18350 horiz_variants F0703:0:445645:1337590:nil,F0704:891290:891290:891290:1,F0705:445645:0:1337590:nil
+F0702 italic 18350 horiz_variants F0706:0:445645:1337590:nil,F0707:891290:891290:891290:1,F0708:445645:0:1337590:nil
+F0709 next F070D
+F070A next F070E
+F070B next F070F
+F070C next F0710
+F070D next F0711
+F070E next F0712
+F070F next F0713
+F0710 next F0714
+F0711 next F0715
+F0712 next F0716
+F0713 next F0717
+F0714 next F0718
+F0715 next F0719
+F0716 next F071A
+F0717 next F071B
+F0718 next F071C
+F0719 next F071D
+F071A next F071E
+F071B next F071F
+F071C next F0720
+F071D next F0721
+F071E next F0722
+F071F next F0723
+F0720 next F0724
+F0729 next F0730
+F072A next F0731
+F072B next F0732
+F072E next F0735
+F072F next F0736
+F0730 next F0737
+F0731 next F0738
+F0732 next F0739
+F0735 next F073C
+F0736 next F073D
+F0737 next F073E
+F0738 next F073F
+F0739 next F0740
+F073C next F0743
+F073D next F0744
+F073E next F0745
+F073F next F0746
+F0740 next F0747
+F0743 next F074A
+F0744 next F074B
+F0745 next F074C
+F0746 next F074D
+F0747 next F074E
+F074A next F0751
+F074B next F0752
+F074C next F0753
+F074D next F0754
+F074E next F0755
+F0751 next F0758
+F0752 next F0759
+F0758 vert_variants F075A:0:393871:787743:nil,F075B:787743:787743:787743:1,F075C:393871:0:787743:nil
+F0759 vert_variants F075D:0:393871:787743:nil,F075E:787743:787743:787743:1,F075F:393871:0:787743:nil
+F0782 italic 387318
+F0783 italic 387318
+F0784 italic 387318
+F0785 italic 387318
+F0786 italic 387318
+F0787 italic 387318
+F0788 italic 387318
+F0789 italic 387318
+F078A italic 387318
+F078B italic 387318
+F078C italic 387318
+F0792 next F0793
+F0793 next F0794
+F0794 next F0795
+F0795 vert_variants 23B7:0:209715:1192755:nil,F0790:419430:419430:419430:1,F0791:209715:0:406323:nil
+F079F accent 77988
+F07A0 accent 96338
+F07A1 italic 25559 accent 138281
+F07A2 italic 25559 accent 156631
+F07A3 accent 83886
+F07A4 accent 103547
+F07A5 italic 36700 accent 146145
+F07A6 italic 36700 accent 165806
+F07A7 accent 91095
+F07A8 accent 163185
+F07A9 accent 528220
+F07AA accent 348652
+F07AB accent 342753
+F07AC accent 361759
+F07AD accent 329646
+F07AE accent 538706
+F07AF accent 369623
+F07B0 accent 521011
+F07B1 accent 343409
+F07B2 accent 416809
+F07B3 accent 500040
+F07B4 accent 471859
+F07B5 accent 525599
+F07B6 accent 463995
+F07B7 accent 384041
+F07B8 accent 350618
+F07B9 accent 351273
+F07BA accent 391905
+F07BB accent 328991
+F07BC accent 370934
+F07BD accent 328335
+F07BE accent 302121
+F07BF accent 421396
+F07C0 accent 410911
+F07C1 accent 281805
+F07C2 accent 284426
+F07C3 accent 503972
+F07C4 accent 336855
+F07C5 accent 329646
+F07C6 accent 348652
+F07C7 accent 317194
+F07C8 accent 514458
+F07C9 accent 356516
+F07CA accent 498729
+F07CB accent 330957
+F07CC accent 401736
+F07CD accent 478413
+F07CE accent 452198
+F07CF accent 502006
+F07D0 accent 444334
+F07D1 accent 368312
+F07D2 accent 338166
+F07D3 accent 338166
+F07D4 accent 376832
+F07D5 accent 317194
+F07D6 accent 354550
+F07D7 accent 311951
+F07D8 accent 287048
+F07D9 accent 399114
+F07DA accent 394527
+F07DB accent 273940
+F07DC accent 275907
+F07DD accent 551813
+F07DE accent 395837
+F07DF accent 374211
+F07E0 accent 387973
+F07E1 accent 357827
+F07E2 accent 467272
+F07E3 accent 404357
+F07E4 accent 555745
+F07E5 accent 394527
+F07E6 accent 457441
+F07E7 accent 534774
+F07E8 accent 492175
+F07E9 accent 542638
+F07EA accent 490209
+F07EB accent 425984
+F07EC accent 401736
+F07ED accent 393871
+F07EE accent 422052
+F07EF accent 355205
+F07F0 accent 426639
+F07F1 accent 359137
+F07F2 accent 309330
+F07F3 accent 461373
+F07F4 accent 434504
+F07F5 accent 311951
+F07F6 accent 376832
+F07F7 accent 528876
+F07F8 accent 382730
+F07F9 accent 359137
+F07FA accent 375521
+F07FB accent 346030
+F07FC accent 449577
+F07FD accent 390595
+F07FE accent 533463
+F07FF accent 380764
+F0800 accent 441713
+F0801 accent 513147
+F0802 accent 473170
+F0803 accent 521011
+F0804 accent 471859
+F0805 accent 409600
+F0806 accent 387318
+F0807 accent 380764
+F0808 accent 407634
+F0809 accent 342753
+F080A accent 410911
+F080B accent 342753
+F080C accent 295567
+F080D accent 439747
+F080E accent 418120
+F080F accent 304087
+F0810 accent 364380
+F0811 accent 412221
+F0812 accent 410911
+F0813 accent 454164
+F0814 accent 383386
+F0815 accent 475791
+F0816 accent 263455
+F0817 accent 471204
+F0818 accent 395837
+F0819 accent 328335
+F081A accent 237896
+F081B accent 428605
+F081C accent 407634
+F081D accent 508559
+F081E accent 419430
+F081F accent 330957
+F0820 accent 406323
+F0821 accent 328991
+F0822 accent 401736
+F0823 accent 382075
+F0824 accent 591790
+F0825 accent 370934
+F0826 accent 405668
+F0827 accent 488243
+F0828 accent 384696
+F0829 accent 383386
+F082A accent 192676
+F082B accent 322437
+F082C accent 212337
+F082D accent 274596
+F082E accent 193331
+F082F accent 254280
+F0830 accent 237896
+F0831 accent 330301
+F0832 accent 195953
+F0833 accent 167117
+F0834 accent 165806
+F0835 accent 207749
+F0836 accent 216269
+F0837 accent 328991
+F0838 accent 241172
+F0839 accent 266732
+F083A accent 163840
+F083B accent 325059
+F083C accent 220856
+F083D accent 238551
+F083E accent 243794
+F083F accent 274596
+F0840 accent 169083
+F0841 accent 163840
+F0842 accent 224133
+F0843 accent 164495
+F0844 accent 209060
+F0845 accent 332268
+F0846 accent 326369
+F0847 accent 371589
+F0848 accent 304742
+F0849 accent 389284
+F084A italic 7864 accent 199885
+F084B accent 384041
+F084C accent 319160
+F084D accent 261489
+F084E accent 180224
+F084F italic 15729 accent 347996
+F0850 accent 328991
+F0851 accent 408945
+F0852 accent 334889
+F0853 accent 257556
+F0854 accent 323748
+F0855 accent 254935
+F0856 accent 318505
+F0857 accent 302121
+F0858 italic 5243 accent 495452
+F0859 italic 15073 accent 296878
+F085A accent 322437
+F085B italic 7209 accent 391250
+F085C accent 306708
+F085D accent 304087
+F085E accent 138281
+F085F accent 255590
+F0860 accent 156631
+F0861 accent 215613
+F0862 accent 141558
+F0863 accent 197263
+F0864 accent 184812
+F0865 accent 264765
+F0866 accent 141558
+F0867 accent 122552
+F0868 accent 123863
+F0869 accent 155976
+F086A accent 164495
+F086B accent 254935
+F086C accent 182845
+F086D accent 207094
+F086E accent 114688
+F086F accent 260178
+F0870 italic 4588 accent 167117
+F0871 accent 184812
+F0872 italic 11796 accent 189399
+F0873 accent 212337
+F0874 accent 117965
+F0875 accent 105513
+F0876 accent 171704
+F0877 accent 114033
+F0878 accent 159908
+F0879 accent 157942
+F087A accent 169738
+F087B accent 114033
+F087C accent 127795
+F087D italic 11141 accent 78643
+F087E accent 88474
+F087F accent 433193
+F0880 accent 445645
+F0881 accent 489554
+F0882 accent 405012
+F0883 accent 499384
+F0884 accent 274596
+F0885 accent 523633
+F0886 accent 426639
+F0887 accent 357171
+F0888 accent 261489
+F0889 accent 456786
+F088A accent 443023
+F088B accent 543293
+F088C accent 440402
+F088D accent 357827
+F088E accent 430572
+F088F accent 357827
+F0890 accent 429261
+F0891 accent 422052
+F0892 accent 468582
+F0893 accent 461373
+F0894 accent 429261
+F0895 accent 532152
+F0896 accent 420086
+F0897 accent 422052
+F0898 accent 209060
+F0899 accent 347996
+F089A accent 283116
+F089B accent 293601
+F089C accent 205128
+F089D accent 272630
+F089E accent 260833
+F089F accent 363069
+F08A0 accent 220201
+F08A1 accent 188744
+F08A2 accent 183501
+F08A3 accent 223478
+F08A4 accent 279839
+F08A5 accent 360448
+F08A6 accent 252969
+F08A7 accent 309985
+F08A8 accent 195953
+F08A9 accent 363725
+F08AA accent 243139
+F08AB accent 260178
+F08AC accent 279839
+F08AD accent 296878
+F08AE accent 184812
+F08AF accent 185467
+F08B0 accent 252314
+F08B1 accent 189399
+F08B2 accent 233964
+F08B3 accent 358482
+F08B4 accent 370934
+F08B5 italic 1966 accent 410911
+F08B6 accent 327025
+F08B7 accent 420741
+F08B8 italic 6554 accent 216269
+F08B9 accent 443679
+F08BA accent 353239
+F08BB accent 288358
+F08BC accent 199885
+F08BD italic 13763 accent 380764
+F08BE accent 368312
+F08BF accent 460718
+F08C0 accent 365036
+F08C1 accent 289014
+F08C2 accent 356516
+F08C3 accent 289014
+F08C4 accent 355205
+F08C5 accent 348652
+F08C6 italic 3932 accent 391250
+F08C7 italic 11141 accent 385352
+F08C8 accent 355205
+F08C9 accent 450232
+F08CA accent 346685
+F08CB accent 347996
+F08CC accent 150733
+F08CD accent 279839
+F08CE accent 220201
+F08CF accent 229376
+F08D0 accent 147456
+F08D1 accent 210371
+F08D2 accent 198574
+F08D3 accent 294257
+F08D4 accent 161874
+F08D5 accent 132383
+F08D6 accent 127140
+F08D7 accent 164495
+F08D8 accent 216269
+F08D9 accent 291635
+F08DA accent 191365
+F08DB accent 244449
+F08DC accent 139592
+F08DD accent 294257
+F08DE accent 182845
+F08DF accent 198574
+F08E0 italic 7209 accent 216269
+F08E1 italic 8520 accent 232653
+F08E2 accent 128451
+F08E3 accent 129106
+F08E4 accent 191365
+F08E5 accent 133038
+F08E6 accent 174326
+F08E7 accent 170394
+F08E8 accent 176947
+F08E9 accent 115343
+F08EA accent 121242
+F08EB italic 15729 accent 92406
+F08EC accent 98304
+F08ED accent 172360
+F08EE accent 172360
+F08EF accent 378143
+F08F0 accent 312607
+F08F1 accent 359137
+F08F2 accent 263455
+F08F3 accent 298189
+F08F4 accent 313262
+F08F5 accent 311296
+F08F6 accent 321126
+F08F7 accent 334234
+F08F8 accent 304087
+F08F9 accent 336200
+F08FA accent 336855
+F08FB accent 290980
+F08FC accent 314573
+F08FD accent 313262
+F08FE accent 321126
+F08FF accent 254280
+F0900 accent 280494
+F0901 accent 277873
+F0902 accent 321126
+F0903 accent 161874
+F0904 accent 327680
+F0905 accent 389284
+F0906 accent 321126
+F0907 accent 336200
+F0908 accent 251658
+F0909 accent 313917
+F090A accent 309985
+F090B accent 307364
+F090C accent 224133
+F090D accent 256246
+F090E accent 266732
+F090F accent 264765
+F0910 accent 275907
+F0911 accent 285082
+F0912 accent 258867
+F0913 accent 287048
+F0914 accent 287048
+F0915 accent 247071
+F0916 accent 268042
+F0917 accent 266732
+F0918 accent 275907
+F0919 accent 216269
+F091A accent 239206
+F091B accent 234619
+F091C accent 275907
+F091D accent 135660
+F091E accent 281805
+F091F accent 336855
+F0920 accent 275907
+F0921 accent 287048
+F0922 accent 212992
+F0923 accent 266732
+F0924 accent 266076
+F0925 accent 333578
+F0926 accent 266732
+F0927 accent 280494
+F0928 accent 228065
+F0929 accent 243139
+F092A accent 226755
+F092B accent 222167
+F092C accent 244449
+F092D accent 120586
+F092E accent 242483
+F092F accent 276562
+F0930 accent 115999
+F0931 accent 234619
+F0932 accent 214958
+F0933 accent 203817
+F0934 accent 268698
+F0935 accent 243139
+F0936 accent 286392
+F0937 accent 229376
+F0938 accent 240517
+F0939 accent 302776
+F093A accent 260178
+F093B accent 326369
+F093C accent 307364
+F093D accent 244449
+F093E accent 283771
+F093F accent 374866
+F0940 accent 243794
+F0941 accent 235274
+F0942 accent 289014
+F0943 accent 281805
+F0944 italic 5243 accent 272630
+F0945 accent 216924
+F0946 accent 225444
+F0947 accent 180224
+F0948 italic 11796 accent 190710
+F0949 accent 176947
+F094A accent 172360
+F094B accent 190710
+F094C italic 4588 accent 83886
+F094D italic 4588 accent 191365
+F094E accent 229376
+F094F italic 24904 accent 79299
+F0950 italic 5243 accent 184156
+F0951 accent 167117
+F0952 accent 155976
+F0953 accent 218235
+F0954 accent 191365
+F0955 accent 230031
+F0956 accent 180224
+F0957 accent 193987
+F0958 accent 245105
+F0959 italic 5243 accent 205783
+F095A accent 265421
+F095B accent 245760
+F095C accent 191365
+F095D italic 1966 accent 221512
+F095E accent 308675
+F095F accent 191365
+F0960 accent 184812
+F0961 accent 233308
+F0962 accent 224788
+F0963 accent 186778
+F0964 accent 223478
+F0967 accent 417464
+F0968 accent 353894
+F0969 accent 406979
+F096A accent 289014
+F096B accent 338821
+F096C accent 353894
+F096D accent 349307
+F096E accent 378143
+F096F accent 375521
+F0970 accent 344064
+F0971 accent 380109
+F0972 accent 380764
+F0973 accent 327680
+F0974 accent 363725
+F0975 accent 294912
+F0976 accent 308675
+F0977 accent 311951
+F0978 accent 378143
+F0979 accent 180224
+F097A accent 376177
+F097B accent 456786
+F097C accent 378143
+F097D accent 367657
+F097E accent 290980
+F097F accent 341443
+F0980 accent 351928
+F0981 accent 351273
+F0982 accent 243139
+F0983 accent 294257
+F0984 accent 304742
+F0985 accent 300810
+F0986 accent 328335
+F0987 accent 323748
+F0988 accent 294912
+F0989 accent 327680
+F098A accent 328335
+F098B accent 281805
+F098C accent 317194
+F098D accent 247726
+F098E accent 260178
+F098F accent 268042
+F0990 accent 328335
+F0991 accent 157286
+F0992 accent 322437
+F0993 accent 397804
+F0994 accent 328335
+F0995 accent 316539
+F0996 accent 245760
+F0997 accent 293601
+F0998 accent 304742
+F0999 italic 3932 accent 275251
+F099A accent 283116
+F099B accent 305398
+F099C accent 237240
+F099D accent 265421
+F099E accent 253624
+F099F accent 241828
+F09A0 accent 259523
+F09A1 italic 3932 accent 118620
+F09A2 italic 3932 accent 254280
+F09A3 accent 310641
+F09A4 italic 24248 accent 122552
+F09A5 italic 3932 accent 250348
+F09A6 accent 235930
+F09A7 accent 227410
+F09A8 accent 296878
+F09A9 accent 249037
+F09AA accent 311951
+F09AB accent 243794
+F09AC accent 251658
+F09AD accent 330957
+F09AE italic 3277 accent 281149
+F09AF accent 357171
+F09B0 accent 332923
+F09B1 accent 252969
+F09B2 accent 307364
+F09B3 accent 415498
+F09B4 accent 249037
+F09B5 accent 252969
+F09B6 accent 308019
+F09B7 accent 307364
+F09B8 italic 17039 accent 224788
+F09B9 accent 235930
+F09BA accent 254280
+F09BB accent 197263
+F09BC italic 11141 accent 222167
+F09BD accent 205128
+F09BE accent 198574
+F09BF accent 214958
+F09C0 italic 16384 accent 91750
+F09C1 italic 16384 accent 208404
+F09C2 accent 258867
+F09C3 italic 42598 accent 94372
+F09C4 italic 16384 accent 206438
+F09C5 accent 193987
+F09C6 accent 182190
+F09C7 accent 248381
+F09C8 accent 215613
+F09C9 accent 260178
+F09CA accent 203817
+F09CB accent 209060
+F09CC accent 277217
+F09CD italic 16384 accent 234619
+F09CE accent 300155
+F09CF accent 279839
+F09D0 accent 205783
+F09D1 italic 8520 accent 256246
+F09D2 accent 353894
+F09D3 accent 219546
+F09D4 accent 207749
+F09D5 accent 263455
+F09D6 accent 254935
+F09D7 accent 212337
+F09D8 accent 248381
+F09D9 italic 69468 accent 389284
+F09DA accent 488899
+F09DB accent 415498
+F09DC accent 428605
+F09DD accent 414188
+F09DE italic 3932 accent 446956
+F09DF accent 429916
+F09E0 italic 76022 accent 350618
+F09E1 accent 362414
+F09E2 italic 35389 accent 351273
+F09E3 accent 448266
+F09E4 accent 347996
+F09E5 accent 359793
+F09E6 italic 2621 accent 245105
+F09E7 accent 286392
+F09E8 accent 249037
+F09E9 accent 274596
+F09EA accent 260178
+F09EB accent 276562
+F09EC accent 170394
+F09ED accent 291635
+F09EE accent 321782
+F09EF accent 207749
+F09F0 accent 297533
+F09F1 accent 265421
+F09F2 accent 251658
+F09F3 accent 302776
+F09F4 accent 306053
+F09F5 accent 267387
+F09F6 italic 25559 accent 256246
+F09F7 accent 278528
+F09F8 accent 360448
+F09F9 accent 287048
+F09FA accent 408289
+F09FB accent 317194
+F09FC accent 260178
+F09FD accent 365691
+F09FE accent 409600
+F09FF accent 307364
+F0A00 italic 2621 accent 189399
+F0A01 accent 317194
+F0A02 italic 13763 accent 315884
+F0A03 italic 83886 accent 335544
+F0A04 accent 423363
+F0A05 accent 353239
+F0A06 accent 372244
+F0A07 italic 26214 accent 357171
+F0A08 italic 33423 accent 389939
+F0A09 italic 20316 accent 370934
+F0A0A italic 91750 accent 290324
+F0A0B accent 305398
+F0A0C italic 60948 accent 292291
+F0A0D italic 13107 accent 385352
+F0A0E accent 292291
+F0A0F italic 7864 accent 314573
+F0A10 italic 25559 accent 196608
+F0A11 italic 6554 accent 244449
+F0A12 accent 203162
+F0A13 italic 22282 accent 230687
+F0A14 italic 3932 accent 208404
+F0A15 accent 228721
+F0A16 accent 136315
+F0A17 accent 243139
+F0A18 accent 273940
+F0A19 accent 174326
+F0A1A accent 252969
+F0A1B italic 27525 accent 221512
+F0A1C italic 2621 accent 210371
+F0A1D italic 2621 accent 251658
+F0A1E accent 260178
+F0A1F italic 2621 accent 216924
+F0A20 italic 54395 accent 205783
+F0A21 accent 231342
+F0A22 accent 308675
+F0A23 accent 240517
+F0A24 accent 345375
+F0A25 accent 258212
+F0A26 accent 212992
+F0A27 accent 302121
+F0A28 accent 342098
+F0A29 accent 260833
+F0A2A italic 34079 accent 144179
+F0A2B accent 265421
+F0A2C italic 34079 accent 265421
+F0A2D accent 397148
+F0A2E accent 332923
+F0A2F italic 19661 accent 351273
+F0A30 italic 30802 accent 347996
+F0A31 italic 34079 accent 390595
+F0A32 italic 38011 accent 249692
+F0A33 italic 30802 accent 396493
+F0A34 italic 51773 accent 450888
+F0A35 italic 54395 accent 390595
+F0A36 accent 184812
+F0A37 accent 353239
+F0A38 italic 88474 accent 330301
+F0A39 italic 93716 accent 292946
+F0A3A italic 15729 accent 380109
+F0A3B accent 456131
+F0A3C accent 385352
+F0A3D accent 406323
+F0A3E accent 403702
+F0A3F italic 4588 accent 447611
+F0A40 italic 7209 accent 289014
+F0A41 accent 455475
+F0A42 italic 22938 accent 515768
+F0A43 italic 26870 accent 447611
+F0A44 accent 230687
+F0A45 accent 415498
+F0A46 italic 72090 accent 382075
+F0A47 italic 80609 accent 353239
+F0A48 accent 436470
+F0A49 accent 314573
+F0A4A accent 379453
+F0A4B italic 95683 accent 399114
+F0A4C accent 524288
+F0A4D accent 443679
+F0A4E accent 458097
+F0A4F accent 440402
+F0A50 italic 11141 accent 494141
+F0A51 accent 458752
+F0A52 italic 103547 accent 380109
+F0A53 accent 389284
+F0A54 italic 47841 accent 383386
+F0A55 accent 465306
+F0A56 accent 295567
+F0A57 accent 376832
+F0A58 italic 18350 accent 261489
+F0A59 accent 301466
+F0A5A accent 267387
+F0A5B accent 294912
+F0A5C accent 295567
+F0A5D accent 294257
+F0A5E accent 165806
+F0A5F accent 301466
+F0A60 accent 357827
+F0A61 accent 210371
+F0A62 accent 317850
+F0A63 italic 11141 accent 283116
+F0A64 accent 268042
+F0A65 accent 345375
+F0A66 accent 317850
+F0A67 accent 297533
+F0A68 italic 43909 accent 283771
+F0A69 accent 304742
+F0A6A accent 392561
+F0A6B accent 307364
+F0A6C accent 450888
+F0A6D accent 344064
+F0A6E accent 273940
+F0A6F accent 401080
+F0A70 accent 463995
+F0A71 accent 318505
+F0A72 italic 9175 accent 201851
+F0A73 accent 335544
+F0A74 italic 24904 accent 343409
+F0A75 italic 100925 accent 351273
+F0A76 accent 463340
+F0A77 accent 391905
+F0A78 accent 405012
+F0A79 italic 24904 accent 388628
+F0A7A italic 34734 accent 437125
+F0A7B italic 18350 accent 403702
+F0A7C italic 107479 accent 325714
+F0A7D accent 336200
+F0A7E italic 64225 accent 326369
+F0A7F italic 13107 accent 416809
+F0A80 accent 252314
+F0A81 accent 332268
+F0A82 italic 32113 accent 218890
+F0A83 accent 266732
+F0A84 accent 230687
+F0A85 italic 11796 accent 252314
+F0A86 italic 6554 accent 245105
+F0A87 accent 256246
+F0A88 accent 141558
+F0A89 accent 258867
+F0A8A accent 306053
+F0A8B accent 186122
+F0A8C accent 281805
+F0A8D italic 28836 accent 244449
+F0A8E accent 229376
+F0A8F accent 290980
+F0A90 italic 2621 accent 290980
+F0A91 accent 252969
+F0A92 italic 65536 accent 237240
+F0A93 accent 254935
+F0A94 accent 344719
+F0A95 accent 268042
+F0A96 accent 387973
+F0A97 accent 292946
+F0A98 accent 233308
+F0A99 accent 342753
+F0A9A accent 395837
+F0A9B italic 2621 accent 296223
+F0A9C italic 32768 accent 161874
+F0A9D accent 292946
+F0A9E italic 35389 accent 298844
+F0A9F accent 435159
+F0AA0 accent 361759
+F0AA1 italic 17695 accent 368312
+F0AA2 italic 30802 accent 379453
+F0AA3 italic 36045 accent 438436
+F0AA4 italic 39977 accent 266076
+F0AA5 italic 30147 accent 433193
+F0AA6 italic 55050 accent 508559
+F0AA7 italic 59638 accent 438436
+F0AA8 italic 1966 accent 215613
+F0AA9 accent 382730
+F0AAA italic 104858 accent 357171
+F0AAB italic 110756 accent 315228
+F0AAC italic 7209 accent 415498
+F0AAD accent 492831
+F0AAE accent 412221
+F0AAF accent 419430
+F0AB0 italic 9175 accent 429916
+F0AB1 italic 12452 accent 495452
+F0AB2 italic 14418 accent 297533
+F0AB3 italic 7864 accent 490865
+F0AB4 italic 30802 accent 574095
+F0AB5 italic 39322 accent 495452
+F0AB6 accent 255590
+F0AB7 accent 441713
+F0AB8 italic 98959 accent 408289
+F0AB9 italic 106824 accent 369623
+F0ABA accent 469238
+F0ABB accent 355860
+F0ABC accent 419430
+F0ABD accent 287048
+F0ABE accent 327680
+F0ABF accent 353239
+F0AC0 accent 391905
+F0AC1 accent 336200
+F0AC2 accent 380109
+F0AC3 accent 415498
+F0AC4 accent 443679
+digest STIXTwoMath-Regular.otf c8badcff3ac86c76f96d9c3a2d589311649afaa2748db7a3c66771e340037c6f 3341
+digest texgyretermes-math.otf f559016d8503f8dc216e1c7f60044e4b2d1b3d49fb73f0faf0ddf4da09d9fffb 2926
+digest texgyrepagella-math.otf 17add0e0ba03d11fbd9025abafa559bc03deec6bf79814681bb18c7f3bc72dcd 2847
