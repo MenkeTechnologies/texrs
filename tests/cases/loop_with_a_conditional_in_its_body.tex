@@ -1,0 +1,8 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\loop#1\repeat{\def\iterate{#1\relax\expandafter\iterate\fi}\iterate \let\iterate\relax}
+\let\repeat\fi
+\count1=0 \count3=0
+\def\inner{\count2=0 \loop\ifnum\count2<3 \advance\count2 by 1 \repeat}
+\loop\ifnum\count1<6 \advance\count1 by 1 \ifnum\count1=3 \inner\advance\count3 by 1 \fi\repeat
+\message{[\the\count1][\the\count2][\the\count3]}
+\end

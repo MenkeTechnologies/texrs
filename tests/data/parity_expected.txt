@@ -232,6 +232,8 @@ awb c d exyfA\a \a##[7][7]T\a via a macrogh[9][7]
 [the character =] [blank space  ] [the character =]
 #==# let_primitive_alias.tex
 NO THROUGH LESS
+#==# loop_with_a_conditional_in_its_body.tex
+[3][3][1]
 #==# macro_basic.tex
 HELLO-WORLD
 #==# macro_levels_in_error_context.tex

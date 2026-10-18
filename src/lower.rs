@@ -3401,6 +3401,19 @@ impl Lowerer {
         if body.iter().chain(cond.iter()).any(is_self) {
             return None;
         }
+        // The guard has to be THE conditional the final `\fi` closes, and an
+        // ordinary one: a conditional anywhere else in the body or the test
+        // (`\ifnum\count1=3 \inner\fi` inside latex.ltx's `\loop`) makes the
+        // last `\ifnum` some other one, and an `\unless` in front of the guard
+        // inverts it. Either way the shape is not this loop, and expanding
+        // the macro is what tex does.
+        let conditional = |t: &Token| {
+            matches!(t, Token::Cs(n) if Engine::is_conditional(*n)
+                || matches!(n.name(), "fi" | "else" | "or" | "unless"))
+        };
+        if body.iter().chain(cond.iter()).any(conditional) {
+            return None;
+        }
         Some(TailLoop {
             body,
             cond,
