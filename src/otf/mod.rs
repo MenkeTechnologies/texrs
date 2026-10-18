@@ -29,8 +29,8 @@ pub mod dsp;
 pub mod features;
 pub mod nodes;
 pub mod normalize;
-pub mod otc;
 pub mod ota;
+pub mod otc;
 pub mod otj;
 pub mod otr;
 pub mod ots;
@@ -39,6 +39,8 @@ pub mod oup;
 pub mod procs;
 pub mod stream;
 pub mod tfm;
+pub mod ttf;
+pub mod var;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -74,13 +76,35 @@ impl Face {
         Face::from_bytes(&data, sub)
     }
 
+    /// Load face `sub` at a variable font's instance: a named instance or
+    /// axis values, as a request's `instance=` or `axis=` gives them.
+    pub fn open_instance(
+        path: impl AsRef<std::path::Path>,
+        sub: usize,
+        instance: Option<&str>,
+    ) -> Result<Arc<Face>, String> {
+        let path = path.as_ref();
+        let data =
+            std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Face::from_bytes_instance(&data, sub, instance)
+    }
+
     /// `otf.load` over a file already in memory.
     pub fn from_bytes(data: &[u8], sub: usize) -> Result<Arc<Face>, String> {
+        Face::from_bytes_instance(data, sub, None)
+    }
+
+    /// `otf.load(filename, sub, instance)` over a file in memory.
+    pub fn from_bytes_instance(
+        data: &[u8],
+        sub: usize,
+        instance: Option<&str>,
+    ) -> Result<Arc<Face>, String> {
         let offsets = otr::face_offsets(data);
         let offset = *offsets
             .get(sub)
             .ok_or_else(|| "not an OpenType font, or no such face in the collection".to_string())?;
-        let (mut fontdata, mut layout) = otr::read(data, offset);
+        let (mut fontdata, mut layout) = otr::read_instance(data, offset, instance);
         oup::compact(&mut layout);
 
         // readers.rehash(data, "unicodes") (font-oup.lua:1275-1295)
@@ -109,7 +133,14 @@ impl Face {
         // cmap 14 glyph indices become slots
         let variants: BTreeMap<u32, BTreeMap<u32, u32>> = std::mem::take(&mut fontdata.variants)
             .into_iter()
-            .map(|(selector, m)| (selector, m.into_iter().filter_map(|(u, g)| ix(g).map(|s| (u, s))).collect()))
+            .map(|(selector, m)| {
+                (
+                    selector,
+                    m.into_iter()
+                        .filter_map(|(u, g)| ix(g).map(|s| (u, s)))
+                        .collect(),
+                )
+            })
             .collect();
         oup::copy_duplicates(&mut descriptions, &fontdata.duplicates);
         // unifymissing (font-oup.lua:748-772): the names of the glyphs that

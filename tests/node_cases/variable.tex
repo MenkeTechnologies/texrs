@@ -1,0 +1,12 @@
+% Variable fonts at an instance in mode=node: the advances (HVAR), outline
+% bounding boxes (gvar) and the GPOS kerns and anchors that vary with the
+% axis. Arimo-VF and Orbitron-VF are the publication corpus's fonts, copied
+% next to the case by scripts/node-freeze.sh when that checkout is there.
+\font\pr="file:PennstanderVF.ttf:mode=node;axis={wght=700}" at 10pt
+\setbox0\hbox{\pr AVAT Toyota office Wave}\directlua{harfdump.box("pennstander wght=700")}
+\font\pl="file:PennstanderVF.ttf:mode=node;axis={wght=250}" at 10pt
+\setbox0\hbox{\pl AVAT Toyota office Wave}\directlua{harfdump.box("pennstander wght=250")}
+\font\ab="file:Arimo-VF.ttf:mode=node;axis={wght=700}" at 10pt
+\setbox0\hbox{\ab AVAT Yo. LT P, Te office ``A''}\directlua{harfdump.box("arimo wght=700")}
+\font\ob="file:Orbitron-VF.ttf:mode=node;axis={wght=900}" at 10pt
+\setbox0\hbox{\ob AVAT TOYOTA LAYER}\directlua{harfdump.box("orbitron wght=900")}

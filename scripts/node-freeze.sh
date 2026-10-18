@@ -18,6 +18,11 @@ trap 'command rm -rf "$work"' EXIT
   echo "# $(luahbtex --version | head -1)"
 } >"$work/expected.txt"
 
+# the publication corpus's variable fonts, when that checkout is next to
+# this one (tests/node_cases/variable.tex uses them)
+corpus="$repo/../MenkeTechnologiesPublications/strykelang/docs/.fonts"
+if [ -d "$corpus" ]; then cp "$corpus"/*.ttf "$work/"; fi
+
 for case in "$repo"/tests/node_cases/*.tex; do
   name=$(basename "$case")
   cp "$case" "$work/$name"

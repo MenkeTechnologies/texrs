@@ -313,8 +313,36 @@ fn classes_of(def: &BTreeMap<u32, u32>) -> BTreeMap<u32, Vec<u32>> {
     out
 }
 
-/// `readposition` (font-dsp.lua:701-796) without variation deltas.
-fn position(f: &mut Stream, format: u32) -> Option<Pos> {
+/// `readvariation` (font-dsp.lua, merged :13706-13716): a VariationIndex
+/// table's outer and inner index, when it is one (format 0x8000).
+fn variation(f: &mut Stream, offset: usize) -> Option<(usize, usize)> {
+    let p = f.pos();
+    f.set(offset);
+    let outer = f.u16() as usize;
+    let inner = f.u16() as usize;
+    let format = f.u16();
+    f.set(p);
+    (format == 0x8000).then_some((outer, inner))
+}
+
+/// `getdelta` (merged :15443-15462): the GDEF variation store's delta at
+/// the instance, rounded; 0 when the store has no such row.
+fn getdelta(deltas: &[super::var::DeltaSet], outer: usize, inner: usize) -> f64 {
+    deltas
+        .get(outer)
+        .and_then(|d| d.delta(inner))
+        .map_or(0.0, super::var::round)
+}
+
+/// `readposition` (font-dsp.lua:701-796, merged :13717-13802). Only the
+/// 0x44 form picks up its variation delta: the general form's device
+/// offsets are read with `skipshort`, which returns nothing.
+fn position(
+    f: &mut Stream,
+    format: u32,
+    mainoffset: usize,
+    deltas: Option<&[super::var::DeltaSet]>,
+) -> Option<Pos> {
     if format == 0 {
         return None;
     }
@@ -339,7 +367,17 @@ fn position(f: &mut Stream, format: u32) -> Option<Pos> {
     }
     if format == 0x44 {
         h = f.i16() as f64;
-        f.skip_u16(1);
+        match deltas {
+            Some(deltas) => {
+                let d = f.i16();
+                if d > 0 {
+                    if let Some((outer, inner)) = variation(f, mainoffset + d as usize) {
+                        h += getdelta(deltas, outer, inner);
+                    }
+                }
+            }
+            None => f.skip_u16(1),
+        }
         return Some(match h == 0.0 {
             true => Pos::Zero,
             false => Pos::V([0.0, 0.0, h, 0.0]),
@@ -377,15 +415,36 @@ fn position(f: &mut Stream, format: u32) -> Option<Pos> {
     })
 }
 
-/// `readanchor` (font-dsp.lua:798-830).
-fn anchor(f: &mut Stream, offset: usize) -> Option<Anchor> {
+/// `readanchor` (font-dsp.lua:798-830, merged :13803-13834): a format 3
+/// anchor takes its variation deltas.
+fn anchor(
+    f: &mut Stream,
+    offset: usize,
+    deltas: Option<&[super::var::DeltaSet]>,
+) -> Option<Anchor> {
     if offset == 0 {
         return None;
     }
     f.set(offset);
-    let _format = f.i16();
-    let x = f.i16() as f64;
-    let y = f.i16() as f64;
+    let format = f.i16();
+    let mut x = f.i16() as f64;
+    let mut y = f.i16() as f64;
+    if format == 3 {
+        if let Some(deltas) = deltas {
+            let dx = f.i16();
+            let dy = f.i16();
+            if dx > 0 {
+                if let Some((outer, inner)) = variation(f, offset + dx as usize) {
+                    x += getdelta(deltas, outer, inner);
+                }
+            }
+            if dy > 0 {
+                if let Some((outer, inner)) = variation(f, offset + dy as usize) {
+                    y += getdelta(deltas, outer, inner);
+                }
+            }
+        }
+    }
     Some([x, y])
 }
 
@@ -798,6 +857,7 @@ fn gpos_step(
     typ: &str,
     tableoffset: usize,
     nofglyphs: u32,
+    deltas: Option<&[super::var::DeltaSet]>,
 ) -> Option<(Step, &'static str)> {
     match typ {
         "single" => {
@@ -807,13 +867,15 @@ fn gpos_step(
             let format = f.u16();
             let mut out = BTreeMap::new();
             if subtype == 1 {
-                let value = position(f, format);
+                let value = position(f, format, tableoffset, deltas);
                 for &index in coverage_map(f, tableoffset + cov).keys() {
                     out.insert(index, value.clone());
                 }
             } else if subtype == 2 {
                 let n = f.u16();
-                let values: Vec<Option<Pos>> = (0..n).map(|_| position(f, format)).collect();
+                let values: Vec<Option<Pos>> = (0..n)
+                    .map(|_| position(f, format, tableoffset, deltas))
+                    .collect();
                 for (&index, &pos) in &coverage_map(f, tableoffset + cov) {
                     out.insert(index, values.get(pos as usize).cloned().flatten());
                 }
@@ -846,7 +908,13 @@ fn gpos_step(
                         f.set(offset);
                         let n = f.u16();
                         (0..n)
-                            .map(|_| (f.u16(), position(f, format1), position(f, format2)))
+                            .map(|_| {
+                                (
+                                    f.u16(),
+                                    position(f, format1, offset, deltas),
+                                    position(f, format2, offset, deltas),
+                                )
+                            })
                             .collect()
                     })
                     .collect();
@@ -883,8 +951,8 @@ fn gpos_step(
                     .map(|_| {
                         (0..nofclasses2)
                             .map(|_| {
-                                let one = position(f, format1);
-                                let two = position(f, format2);
+                                let one = position(f, format1, tableoffset, deltas);
+                                let two = position(f, format2, tableoffset, deltas);
                                 (one.is_some() || two.is_some()).then_some(PairValue {
                                     first: one,
                                     second: two,
@@ -938,11 +1006,11 @@ fn gpos_step(
                 .map(|(entry, exit)| Cursive {
                     entry: match entry {
                         0 => None,
-                        e => anchor(f, tableoffset + e as usize),
+                        e => anchor(f, tableoffset + e as usize, deltas),
                     },
                     exit: match exit {
                         0 => None,
-                        e => anchor(f, tableoffset + e as usize),
+                        e => anchor(f, tableoffset + e as usize, deltas),
                     },
                 })
                 .collect();
@@ -986,7 +1054,7 @@ fn gpos_step(
                     0 => None,
                     o => Some(MarkRecord {
                         class,
-                        anchor: anchor(f, markoffset + o as usize),
+                        anchor: anchor(f, markoffset + o as usize, deltas),
                     }),
                 })
                 .collect();
@@ -1012,7 +1080,7 @@ fn gpos_step(
                         for (k, &o) in classes.iter().enumerate() {
                             let a = match o {
                                 0 => None,
-                                o => anchor(f, recordoffset + o as usize),
+                                o => anchor(f, recordoffset + o as usize, deltas),
                             };
                             let entry = baseclasses
                                 .entry(k + 1)
@@ -1034,7 +1102,7 @@ fn gpos_step(
                     for (j, &o) in r.iter().enumerate() {
                         let a = match o {
                             0 => None,
-                            o => anchor(f, baseoffset + o as usize),
+                            o => anchor(f, baseoffset + o as usize, deltas),
                         };
                         // `baseclasses[j][b] = readanchor(...)`: nil leaves no entry
                         if a.is_some() {
@@ -1077,7 +1145,7 @@ fn gpos_step(
             let t = f.u16();
             let far = f.u32() as usize;
             let inner = GPOS_TYPES.get(t as usize - 1).copied()?;
-            gpos_step(f, inner, tableoffset + far, nofglyphs)
+            gpos_step(f, inner, tableoffset + far, nofglyphs, deltas)
         }
         _ => None,
     }
@@ -1142,6 +1210,10 @@ pub fn read_gdef(f: &mut Stream, fontdata: &mut FontData, layout: &mut Layout) {
     let markclassoffset = f.u16() as usize;
     let marksetsoffset = match version >= 0x0001_0002 {
         true => f.u16() as usize,
+        false => 0,
+    };
+    let varsetsoffset = match version >= 0x0001_0003 {
+        true => f.u32() as usize,
         false => 0,
     };
     const CLASSES: [&str; 4] = ["base", "ligature", "mark", "component"];
@@ -1218,6 +1290,17 @@ pub fn read_gdef(f: &mut Stream, fontdata: &mut FontData, layout: &mut Layout) {
                     layout.nofmarksets = layout.nofmarksets.max(i + 1);
                 }
             }
+        }
+    }
+    // the variation store, for the GPOS values and anchors that vary
+    // (merged :15439-15464)
+    if varsetsoffset != 0 {
+        if let Some(factors) = fontdata.factors.clone() {
+            fontdata.gdef_deltas = Some(super::var::readvariationdata(
+                f,
+                tableoffset + varsetsoffset,
+                &factors,
+            ));
         }
     }
 }
@@ -1425,7 +1508,7 @@ pub fn read_scripts(f: &mut Stream, fontdata: &mut FontData, layout: &mut Layout
         for &sub in &raw.subtables {
             let got = match what {
                 "gsub" => gsub_step(f, raw.typ, sub, nofglyphs),
-                _ => gpos_step(f, raw.typ, sub, nofglyphs),
+                _ => gpos_step(f, raw.typ, sub, nofglyphs, fontdata.gdef_deltas.as_deref()),
             };
             if let Some((step, lt)) = got {
                 typ = lt;

@@ -190,6 +190,18 @@ fn write_list(
     }
 }
 
+/// A font by kpathsea, or the publication corpus's variable fonts next to
+/// this repository.
+fn locate(file: &str) -> Option<std::path::PathBuf> {
+    if let Some(p) = texrs::kpse::locate(file) {
+        return Some(p);
+    }
+    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../MenkeTechnologiesPublications/strykelang/docs/.fonts")
+        .join(file);
+    corpus.exists().then_some(corpus)
+}
+
 struct Widths<'a>(&'a BTreeMap<usize, Scaled>);
 
 impl otj::Widths for Widths<'_> {
@@ -211,32 +223,43 @@ fn node_mode_matches_luaotfload() {
         let mut missing = false;
         for (id, size, request) in &case.fonts {
             let spec = texrs::fontreq::analyze(request).unwrap();
-            if !faces.contains_key(&spec.name) {
-                match texrs::kpse::locate(&spec.name) {
+            // a variable font's instance: `axis=` values, else a named
+            // `instance=` (luaotfload-features.lua:453-459)
+            let text = |k: &str| match spec.raw.get(k) {
+                Some(texrs::shape::FeatureValue::Text(t)) => Some(t.clone()),
+                _ => None,
+            };
+            let instance = text("axis").or_else(|| text("instance"));
+            let key = format!("{}|{}", spec.name, instance.clone().unwrap_or_default());
+            if !faces.contains_key(&key) {
+                match locate(&spec.name) {
                     Some(path) => {
-                        faces.insert(spec.name.clone(), Face::open(&path, 0).unwrap());
+                        faces.insert(
+                            key.clone(),
+                            Face::open_instance(&path, 0, instance.as_deref()).unwrap(),
+                        );
                     }
                     None => missing = true,
                 }
             }
-            specs.push((*id, *size, spec));
+            specs.push((*id, *size, spec, key));
         }
         if missing {
             eprintln!("skipping {:?}: a font it uses is not installed", case.label);
             continue;
         }
         let mut scaled = BTreeMap::new();
-        for (id, size, spec) in &specs {
-            scaled.insert(*id, faces[&spec.name].scale(*size));
+        for (id, size, _, key) in &specs {
+            scaled.insert(*id, faces[key].scale(*size));
         }
         let mut fonts = BTreeMap::new();
-        for (id, _, spec) in &specs {
+        for (id, _, spec, key) in &specs {
             let s = &scaled[id];
             let f = features::node_features(&spec.raw);
             fonts.insert(
                 *id,
                 Font {
-                    face: &faces[&spec.name],
+                    face: &faces[key],
                     id: *id,
                     factor: s.parameters.factor,
                     threshold: 0.0,

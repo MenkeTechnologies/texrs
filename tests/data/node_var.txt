@@ -1,0 +1,9 @@
+# This is LuaHBTeX, Version 1.24.0 (TeX Live 2026)
+# file|axis sha256 lines, at 10pt in mode=node
+digest PennstanderVF.ttf| 5395037cf26b474878cedbcdbb3bf90eb0cd85f63ee6f7c86ca8da040590aa42 1530
+digest PennstanderVF.ttf|wght=700 e928386ed6f2871e1309227c8e1dc66d5400519953eb8291acef00f565f685d3 1530
+digest PennstanderVF.ttf|wght=250 ab645233636ec796b4058607acd59d6e5a86655a34b2815d37ef7f84a8d7a25b 1530
+digest Arimo-VF.ttf|wght=400 540f00855b5403f1c767c49ac5d8ee090168c4699ec2848c61ce30669ff8832f 3317
+digest Arimo-VF.ttf|wght=700 e72b51768625dd70876daa8d4fd906237862985163b39c47bca415f4b0ecd951 3317
+digest Arimo-Italic-VF.ttf|wght=700 fba17864d6eea64598d22c8e50f612bf14e6c730acf1863366f61635d19eeb5a 3322
+digest Orbitron-VF.ttf|wght=900 aa9670a1e391a2bdef415be0b7b4649eef6ccc1cde9250121ce090c615745970 277

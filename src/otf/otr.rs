@@ -94,6 +94,16 @@ pub struct FontData {
     /// `opentype` when there is a CFF or CFF2 table, else `truetype`.
     pub format: &'static str,
     pub names: BTreeMap<String, NameEntry>,
+    /// `extras`: every name record kept, by name id.
+    pub extras: BTreeMap<u32, Vec<u8>>,
+    /// `variabledata` (fvar, avar, STAT, HVAR).
+    pub variabledata: Option<super::var::VariableData>,
+    /// `factors`: the instance's normalised coordinates.
+    pub factors: Option<Vec<f64>>,
+    /// GDEF's variation store at the instance (`temporary.getdelta`).
+    pub gdef_deltas: Option<Vec<super::var::DeltaSet>>,
+    /// Whether an instance was asked for (`specification.instance`).
+    pub instance: bool,
     pub windowsmetrics: Option<WindowsMetrics>,
     pub fontheader: Option<FontHeader>,
     pub horizontalheader: Option<HorizontalHeader>,
@@ -346,6 +356,7 @@ fn read_name(f: &mut Stream, fontdata: &mut FontData) {
         platform: &'static str,
         encoding: &'static str,
         language: &'static str,
+        index: u32,
         name: Option<&'static str>,
         length: usize,
         offset: usize,
@@ -366,6 +377,7 @@ fn read_name(f: &mut Stream, fontdata: &mut FontData) {
                             platform: p,
                             encoding,
                             language,
+                            index: index as u32,
                             name: RESERVED_NAMES.get(index).copied(),
                             length,
                             offset,
@@ -394,6 +406,7 @@ fn read_name(f: &mut Stream, fontdata: &mut FontData) {
                 if e.is_none_or(|e| e == r.encoding) && l.is_none_or(|l| l == r.language) {
                     f.set(r.offset);
                     let content = decode(r.platform, r.encoding, f.bytes(r.length));
+                    fontdata.extras.insert(r.index, content.clone());
                     if let Some(name) = r.name {
                         fontdata
                             .names
@@ -1180,25 +1193,58 @@ fn read_glyf(f: &mut Stream, fontdata: &mut FontData) {
 /// `readdata` (font-otr.lua:2093-2238) for the tables node mode's metrics
 /// read, from the font at `offset` (a collection's face).
 pub fn read(data: &[u8], offset: usize) -> (FontData, super::dsp::Layout) {
+    read_instance(data, offset, None)
+}
+
+/// `readdata` with `specification.instance`: a variable font's named
+/// instance or axis values (`wght=700`). An instance, even of a font that
+/// does not vary, also has every glyph's bounding box measured again from
+/// its outline.
+pub fn read_instance(
+    data: &[u8],
+    offset: usize,
+    instance: Option<&str>,
+) -> (FontData, super::dsp::Layout) {
     let mut f = Stream::new(data);
     let mut fontdata = FontData {
         filesize: data.len(),
+        instance: instance.is_some(),
         ..FontData::default()
     };
     let mut layout = super::dsp::Layout::default();
     load_tables(&mut f, offset, &mut fontdata);
     read_name(&mut f, &mut fontdata);
+    super::var::read_stat(&mut f, &mut fontdata);
+    super::var::read_avar(&mut f, &mut fontdata);
+    super::var::read_fvar(&mut f, &mut fontdata);
+    if let Some(vd) = fontdata.variabledata.as_mut() {
+        super::var::complete_instances(vd);
+        fontdata.factors = super::var::getfactors(vd, instance);
+    }
     read_os2(&mut f, &mut fontdata);
     read_head(&mut f, &mut fontdata);
     read_maxp(&mut f, &mut fontdata);
     read_hhea(&mut f, &mut fontdata);
     read_hmtx(&mut f, &mut fontdata);
     read_post(&mut f, &mut fontdata);
+    if let Some(factors) = fontdata.factors.clone() {
+        super::var::read_mvar(&mut f, &mut fontdata, &factors);
+        super::var::read_hvar(&mut f, &mut fontdata, &factors);
+    }
     super::dsp::read_gdef(&mut f, &mut fontdata, &mut layout);
     super::cff::read(&mut f, &mut fontdata);
     read_cmap(&mut f, &mut fontdata);
     read_loca(&mut f, &mut fontdata);
     read_glyf(&mut f, &mut fontdata);
+    if fontdata.instance && fontdata.table("glyf").is_some() && !fontdata.locations.is_empty() {
+        let locations = fontdata.locations.clone();
+        let mut shapes = super::ttf::read_shapes(&mut f, &fontdata, &locations);
+        if let Some(factors) = fontdata.factors.clone() {
+            super::ttf::gvar(&mut f, &mut fontdata, &mut shapes, &factors);
+        }
+        super::ttf::merge_composites(&mut shapes);
+        super::ttf::bounding_boxes(&mut fontdata, &shapes);
+    }
     super::dsp::read_scripts(&mut f, &mut fontdata, &mut layout, "gsub");
     super::dsp::read_scripts(&mut f, &mut fontdata, &mut layout, "gpos");
     super::dsp::read_kern(&mut f, &mut fontdata, &mut layout);
