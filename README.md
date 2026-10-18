@@ -308,6 +308,13 @@ than none.
   `\message`, and over a register the run holds; `\begincsname` and
   `\lastnamedcs` wherever they expand; `\immediateassignment` and
   `\immediateassigned` in running text.
+- `\tracinggroups` and `\tracingassigns` write what luatex writes, in its
+  order: a group is reported entering and leaving (after its restores, as
+  luatex's `unsave` does), and an assignment as `changing`, `into` or
+  `reassigning` -- a macro, a `\let`, a `\chardef` (which is `\relax` while its
+  number is read), a parameter, a token list, and a count or dimension whose
+  value the lowerer follows. Tracing output after the last message reaches
+  the terminal.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

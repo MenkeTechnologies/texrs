@@ -510,6 +510,12 @@ impl Lowerer {
             return;
         }
         if !self.reported {
+            // Tracing output (§245) reported no error, and is printed all the
+            // same: a trace after the last message reaches the terminal
+            // before the file's `)`, as tex prints it.
+            if !held.is_empty() {
+                cmds.push(Cmd::Reports(held));
+            }
             // Nothing was reported while LOWERING, which does not settle it:
             // §1236's checked arithmetic reports on the VM, and only the VM
             // knows whether it did. The notice becomes a command the run
@@ -1268,7 +1274,8 @@ impl Lowerer {
                     let reg = self.eng.scan_register_file(lx)?;
                     self.eng.skip_equals_file(lx)?;
                     let v = self.number(lx)?;
-                    self.note_global(&[reg]);
+                    let global = self.note_global(&[reg]);
+                    self.trace_register(reg, &v, global);
                     out.push(Cmd::SetCount(reg, v));
                 }
                 // `\dimen0=1pt`. A dimension register is a register in the same
@@ -1308,7 +1315,8 @@ impl Lowerer {
                     self.eng.clear_scaling_sites();
                     let v = self.dimen_number(lx, false)?;
                     let slot = crate::compiler::DIMEN_BASE + reg;
-                    self.note_global(&[slot]);
+                    let global = self.note_global(&[slot]);
+                    self.trace_register(slot, &v, global);
                     self.note_scaling_site(&mut out, lx, &v);
                     out.push(Cmd::SetCount(slot, v));
                 }
@@ -1349,7 +1357,8 @@ impl Lowerer {
                             true => self.dimen_number(lx, false)?,
                             false => self.number(lx)?,
                         };
-                        self.note_global(&[reg]);
+                        let global = self.note_global(&[reg]);
+                        self.trace_register(reg, &v, global);
                         self.note_scaling_site(&mut out, lx, &v);
                         out.push(Cmd::SetCount(reg, v));
                         self.couple_offsets(&mut out, reg);
@@ -5464,15 +5473,46 @@ impl Lowerer {
     /// See the `globals` field: a group must not restore a register a `\global`
     /// wrote inside it, and the only place that can be known is here, where the
     /// prefix and the register number are both in hand.
-    fn note_global(&mut self, regs: &[i64]) {
+    fn note_global(&mut self, regs: &[i64]) -> bool {
         if !self.eng.take_global_prefix() {
-            return;
+            return false;
         }
         // Pushed every time, not once per register: a group reads only the
         // slice its own body added, so a register a LATER group writes
         // globally must be in that slice even if an earlier one wrote it too.
         self.pending_keeps.extend_from_slice(regs);
         self.globals.extend_from_slice(regs);
+        true
+    }
+
+    /// luatex's `eq_word_define` and `geq_word_define` under
+    /// `\tracingassigns`, for a count or dimension register or parameter:
+    /// `{changing \count1=0}{into \count1=5}`, or `reassigning` when a local
+    /// assignment leaves the value as it was. Known only where the lowerer
+    /// follows the register (`crate::known`); a value only the run has is not
+    /// traced.
+    fn trace_register(&mut self, slot: i64, value: &Num, global: bool) {
+        if self.eng.intpar_named("tracingassigns") <= 0 {
+            return;
+        }
+        let (Some(old), Some(new)) = (self.eng.known.get(slot), self.eng.known.num(value)) else {
+            return;
+        };
+        let shown = |v: i64| match slot >= crate::compiler::DIMEN_BASE {
+            true => format!("{}pt", crate::dimen::print_scaled(v)),
+            false => v.to_string(),
+        };
+        let name = self.eng.register_name_pub(slot);
+        if !global && old == new {
+            self.eng.diagnostic(&format!("{{reassigning {name}={}}}", shown(old)));
+            return;
+        }
+        let verb = match global {
+            true => "globally changing",
+            false => "changing",
+        };
+        self.eng.diagnostic(&format!("{{{verb} {name}={}}}", shown(old)));
+        self.eng.diagnostic(&format!("{{into {name}={}}}", shown(new)));
     }
 }
 

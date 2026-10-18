@@ -1,0 +1,9 @@
+% primitives: tracingassigns chardef
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\tracingonline=1 \tracingassigns=1
+\def\a{x}\def\a{x}\def\a#1{y}\let\b\a \let\b\a
+\tolerance=200 \tolerance=200 \catcode`\~=13 \count1=5 \count1=5 \dimen0=2pt
+\toks0={a}\chardef\c=65
+\global\def\g{}{\def\a{z}}
+\tracingassigns=0
+\end

@@ -51,6 +51,10 @@ a! Bad interaction mode (7).l.3 \message{a}\interactionmode=7                   
 [\protected macro:->P][macro:->\p Q] [\protected\long macro:#1->S]
 #==# show_tokens_and_groups.tex
 x> \a b ##.l.4 \message{x}\showtokens{\a b #}                                  \message{y}y> A.l.5 \showtokens\expandafter{\a}                               ! OK (see the transcript file).l.6 {\begingroup\showgroups                           \endgroup}### semi simple group (level 2) entered at line 8 (\begingroup)### simple group (level 1) entered at line 8 ({)### bottom level! OK.l.9 \showgroups               \endgroup}### bottom level! OK.l.10 \showgroups                )(see the transcript file for additional information
+#==# tracing_assigns.tex
+{changing \a=undefined}{into \a=macro:->x}{changing \a=macro:->x}{into \a=macro:->x}{changing \a=macro:->x}{into \a=macro:#1->y}{changing \b=undefined}{into \b=macro:#1->y}{reassigning \b=macro:#1->y}{changing \tolerance=10000}{into \tolerance=200}{reassigning \tolerance=200}{changing \count1=0}{into \count1=5}{reassigning \count1=5}{changing \dimen0=0.0pt}{into \dimen0=2.0pt}{changing \toks0=}{into \toks0=a}{changing \c=undefined}{into \c=\relax}{changing \c=\relax}{into \c=\char"41}{globally changing \g=undefined}{into \g=macro:->}{reassigning \nolocalwhatsits=0}{reassigning \nolocaldirs=0}{changing \a=macro:#1->y}{into \a=macro:->z}{changing \tracingassigns=1}{into \tracingassigns=0}
+#==# tracing_groups.tex
+a{entering simple group (level 1) at line 4}b{entering semi simple group (level 2) at line 4}c{leaving semi simple group (level 2) entered at line 4}{leaving simple group (level 1) entered at line 4}d{entering simple group (level 1) at line 5}{leaving simple group (level 1) entered at line 5}{entering simple group (level 1) at line 5}{leaving simple group (level 1) entered at line 5}e
 #==# unexpanded.tex
 [macro:->A\a \b B] [macro:->\a B]
 #==# unless.tex

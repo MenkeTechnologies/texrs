@@ -1,0 +1,7 @@
+% primitives: tracinggroups
+\catcode`\{=1 \catcode`\}=2
+\tracingonline=1 \tracinggroups=1
+\message{a}{\message{b}\begingroup\message{c}\endgroup}\message{d}
+{\tracinggroups=0 }{
+}\message{e}
+\end

@@ -577,6 +577,39 @@ impl Engine {
         self.groups.push(Vec::new());
         self.group_kinds.push(kind);
         self.group_lines.push(line);
+        self.group_trace(false, kind, self.group_kinds.len(), line);
+        // luatex's `run_left_brace` and `run_begin_group` (maincontrol.c)
+        // reset two internal integers on every group they open, which
+        // `\tracingassigns` shows; texrs never changes either, so both are
+        // reassigned their zero.
+        if self.intpar_named("tracingassigns") > 0 {
+            let e = self.esc();
+            self.diagnostic(&format!("{{reassigning {e}nolocalwhatsits=0}}"));
+            self.diagnostic(&format!("{{reassigning {e}nolocaldirs=0}}"));
+        }
+    }
+
+    /// etex.ch's `group_trace`: under `\tracinggroups`, `{entering simple group
+    /// (level 1) at line 3}` as a group opens and `{leaving simple group (level
+    /// 1) entered at line 3}` as it closes, once it has restored what it saved
+    /// (luatex's order; see `end_group`).
+    fn group_trace(&mut self, leaving: bool, kind: GroupKind, level: usize, line: u32) {
+        if self.intpar_named("tracinggroups") <= 0 {
+            return;
+        }
+        let what = match kind {
+            GroupKind::Simple => "simple",
+            GroupKind::SemiSimple => "semi simple",
+        };
+        let (verb, at) = match leaving {
+            true => ("leaving", "entered at line"),
+            false => ("entering", "at line"),
+        };
+        let line = match line {
+            0 => String::new(),
+            n => format!(" {at} {n}"),
+        };
+        self.diagnostic(&format!("{{{verb} {what} group (level {level}){line}}}"));
     }
 
     /// What opened the innermost open group, or `None` at §269's
@@ -610,8 +643,11 @@ impl Engine {
         let Some(frame) = self.groups.pop() else {
             return Err(TexError("Too many }'s".into()));
         };
-        self.group_kinds.pop();
-        self.group_lines.pop();
+        // luatex's `unsave` traces the group AFTER restoring what it saved
+        // (equivalents.c), so `\tracinggroups` is read as the group leaves
+        // it -- where etex.ch reads it before.
+        let left = (self.group_kinds.pop(), self.group_lines.pop());
+        let level = self.group_kinds.len() + 1;
         // §282: the tokens `\aftergroup` held come out in the order they were
         // given, AFTER the group's own restores. Collected before the undo pass
         // so the reverse walk below does not reverse them too, and buffered
@@ -650,6 +686,9 @@ impl Engine {
                 // value to put back.
                 Save::AfterGroup(_) => {}
             }
+        }
+        if let (Some(kind), Some(line)) = left {
+            self.group_trace(true, kind, level, line);
         }
         Ok(())
     }
@@ -1207,6 +1246,31 @@ impl Engine {
 
     fn set_meaning(&mut self, name: CsId, m: Meaning) {
         let old = self.meanings.get(&name).cloned();
+        // luatex's `eq_define` and `geq_define` (equivalents.c): under
+        // `\tracingassigns` the entry before and after, or `reassigning` when
+        // a local definition would change nothing -- the same command and the
+        // same `equiv`, which for a macro is the same body, not an equal one.
+        if self.intpar_named("tracingassigns") > 0 {
+            let global = self.global_defs_applied(self.global);
+            let same = match (&old, &m) {
+                (Some(Meaning::Macro(a)), Meaning::Macro(b)) => Rc::ptr_eq(a, b),
+                (Some(a), b) => a == b,
+                (None, _) => false,
+            };
+            if same && !global {
+                self.trace_entry("reassigning", name);
+                return;
+            }
+            let verb = match global {
+                true => "globally changing",
+                false => "changing",
+            };
+            self.trace_entry(verb, name);
+            self.save(Save::Meaning(name, old));
+            self.meanings.insert(name, m);
+            self.trace_entry("into", name);
+            return;
+        }
         // A global assignment wipes the saved values other groups hold (see
         // `save`), so no `}` can restore the old meaning over it.
         self.save(Save::Meaning(name, old));
@@ -1283,15 +1347,40 @@ impl Engine {
     }
 
     fn set_intpar(&mut self, i: usize, v: i64) {
+        // luatex's `eq_word_define`: an equal value is `reassigning`, and is
+        // not saved; see `set_meaning`.
+        let trace = self.intpar_named("tracingassigns") > 0;
+        if self.global_defs_applied(self.global) {
+            return self.set_intpar_globally(i, v);
+        }
+        if self.intpars.get(i) == v {
+            if trace {
+                self.trace_intpar("reassigning", i);
+            }
+            return;
+        }
+        if trace {
+            self.trace_intpar("changing", i);
+        }
         self.save(Save::IntPar(i, self.intpars.get(i)));
         self.store_intpar(i, v);
+        if trace {
+            self.trace_intpar("into", i);
+        }
     }
 
     /// §279's `geq_word_define` for an integer parameter: assigned at the
     /// outermost level, so no open group restores it.
     fn set_intpar_globally(&mut self, i: usize, v: i64) {
+        let trace = self.intpar_named("tracingassigns") > 0;
+        if trace {
+            self.trace_intpar("globally changing", i);
+        }
         self.save_as(Save::IntPar(i, self.intpars.get(i)), true);
         self.store_intpar(i, v);
+        if trace {
+            self.trace_intpar("into", i);
+        }
     }
 
     /// Write an integer parameter, keeping the mouth's copy of `\endlinechar`
@@ -3371,8 +3460,23 @@ impl Engine {
                 }
             }
         };
+        // §1226 stores an empty list as `null`, so two empty assignments are
+        // the same `equiv`; any other list is a new one.
+        let global = self.global_defs_applied(self.global);
+        let trace = self.intpar_named("tracingassigns") > 0;
+        let empty_before = self.toks.get(&reg).is_none_or(|t| t.is_empty());
+        if trace && !global && value.is_empty() && empty_before {
+            self.trace_toks("reassigning", reg);
+            return Ok(());
+        }
+        if trace {
+            self.trace_toks(if global { "globally changing" } else { "changing" }, reg);
+        }
         self.save(Save::Toks(reg, self.toks.get(&reg).cloned()));
         self.toks.insert(reg, value);
+        if trace {
+            self.trace_toks("into", reg);
+        }
         Ok(())
     }
 
@@ -4509,6 +4613,10 @@ impl Engine {
 
     fn numeric_def(&mut self, lx: &mut Lexer, kind: &str) -> R<()> {
         let name = self.get_r_token(lx, false)?;
+        // §1224's `define(p, relax, 256)`: the name means `\relax` while its
+        // number is read, so reading it there finds `\relax` -- and
+        // `\tracingassigns` shows both definitions.
+        self.set_meaning(name, Meaning::Primitive(CsId::intern("relax")));
         self.skip_equals_file(lx)?;
         let mut v = self.scan_number_file(lx)?;
         // Both are limited to 0..255, and tex names the limit differently for
@@ -6802,5 +6910,49 @@ impl Engine {
                 None
             }
         }
+    }
+}
+
+impl Engine {
+    /// luatex's `diagnostic_trace` of a control sequence's entry: `{changing
+    /// \a=macro:->x}`, as `show_eqtb` writes it.
+    fn trace_entry(&mut self, verb: &str, name: CsId) {
+        let shown = format!(
+            "{{{verb} {}={}}}",
+            self.sprint_cs(name),
+            self.meaning_text(&Token::Cs(name))
+        );
+        self.diagnostic(&shown);
+    }
+
+    /// The same for integer parameter `i`: `{changing \tolerance=10000}`.
+    fn trace_intpar(&mut self, verb: &str, i: usize) {
+        let shown = format!(
+            "{{{verb} {}{}={}}}",
+            self.esc(),
+            crate::intpar::NAMES[i],
+            self.intpars.get(i)
+        );
+        self.diagnostic(&shown);
+    }
+
+    /// The same for token register or parameter `reg`: `{into \toks0=a}`.
+    fn trace_toks(&mut self, verb: &str, reg: i64) {
+        let name = match reg >= crate::params::TOKS_BASE {
+            true => crate::params::TOKS_NAMES
+                .get((reg - crate::params::TOKS_BASE) as usize)
+                .map_or_else(String::new, |n| n.to_string()),
+            false => format!("toks{reg}"),
+        };
+        let shown = format!("{{{verb} {}{name}={}}}", self.esc(), self.toks_shown(reg));
+        self.diagnostic(&shown);
+    }
+}
+
+impl Engine {
+    /// The register in `slot`, spelt as `\showthe` and `\tracingassigns`
+    /// spell it: `\count1`, `\dimen0`, `\hsize`.
+    pub fn register_name_pub(&self, slot: i64) -> String {
+        self.register_name(slot)
     }
 }
