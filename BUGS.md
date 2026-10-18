@@ -394,22 +394,17 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
 - **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
   `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,
   `token.scan_list`, `token.scan_toks(true)`.
-- **The `pdf` library, where it is not luatex's.** Its dictionary strings,
-  variables and objects are the backend's (`crate::backend`) and reach the
-  file as `\pdfextension`'s do. Where it differs: an object's text passes
-  through UTF-8, so a binary stream given as a Lua string is not kept byte for
-  byte; a stream's own `compresslevel` is checked and then ignored;
-  `setxformresources`/`setxformattributes` are kept and read back, but no form
-  is written from them; `getnofobjects` refuses, because the writer does not
-  count written and dropped objects apart; `getobjtype` of an object stream is
-  `nil` where luatex says `objstm`; and below PDF 1.5 an immediate object
-  still goes into an object stream, where luatex writes none. A dimension
-  variable assigned from Lua inside a group is restored at its end (see the
-  next item). `pdf.print`, the font/page/xform name and number questions,
-  `includechar`/`includefont`/`includeimage` and `registerannot` refuse; the
-  position functions answer 0 and the matrix the identity, as luatex does
-  before shipout. `newcolorstack`, `mapfile`/`mapline` and
-  `setfontattributes` are kept and do not reach the writer.
+- **The `pdf` library is not yet the writer's.** Its dictionaries
+  (`setcatalog`, `setpageresources`, ...), variables and objects are kept and
+  answered back, and object numbers are handed out as luatex's backend hands
+  them out (an immediate raw object goes into an object stream above PDF 1.4,
+  which takes the next number); but nothing a chunk sets is written into the
+  file, and the numbers are not the ones the writer gives its own objects. The
+  variables are `\pdfvariable`'s, a dimension one assigned from Lua inside
+  a group restored at its end (see the next item). `pdf.print`, the
+  font/page/xform name and number questions, `includechar`/`includefont`/
+  `includeimage` and `registerannot` refuse; the position functions answer 0
+  and the matrix the identity, as luatex does before shipout.
   `pdf.getcreationdate` is the writer's `/CreationDate`, in UT where luatex
   writes local time.
 - **A `"global"` register assignment from Lua is local:**
@@ -444,9 +439,8 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
 - **Internal quantities texrs does not hold** -- `tex.prevdepth`,
   `tex.spacefactor`, `tex.prevgraf`, `tex.pagegoal`, `tex.deadcycles`,
   `tex.insertpenalties`, `tex.lastpenalty` and the other `last` items, the
-  direction parameters (`tex.bodydir`, `tex.pagedir`, ...) -- refuse where
-  luatex answers. `tex.getcatcode` and `tex.setcatcode` read and set the
-  current catcode table whatever table they are given.
+  direction parameters (`tex.bodydir`, `tex.pagedir`, ...) and
+  `tex.catcodetable` -- refuse where luatex answers.
 - **`\catcode` from Lua past code 255** is set straight into the table and
   not saved for the enclosing group: the engine's `\catcode` reads a code of
   0..255. `tex.setmathcode` refuses a family past 15 or a character past 255
@@ -813,28 +807,40 @@ carry the fonts, colour and layout beside the bytecode.
 
 ## OpenType fonts are not loaded as luaotfload loads them, yet
 
-What exists is luaotfload's `mode=harf` (`src/shape.rs`) and its request
-grammar (`src/fontreq.rs`), both checked against luahbtex rather than against
-expectations written by hand. What does not:
+What exists is luaotfload's `mode=harf` (`src/shape.rs`), its request grammar
+(`src/fontreq.rs`), and its default `mode=node` (`src/otf/`): the characters
+table, the parameters and the processing of a list, each checked against
+luahbtex rather than against expectations written by hand. What does not:
 
-- **Node mode.** `mode=node` is luaotfload's default and fontspec's, and it is
-  not HarfBuzz: it is the ConTeXt fontloader (`fontloader-font-otr.lua`,
-  `-oup`, `-ots`, `-otj`, `-osd`), with its own glyph bounding boxes and its own
-  handling of a discretionary inside a ligature. Measured on the harf corpus run
-  in node mode instead, the two disagree on a hyphen's depth (0 against
-  -122552sp in Latin Modern, the fontloader clamping where HarfBuzz reports the
-  ink) and on the shape of a discretionary the `ffi` ligature spans. Nothing
-  here answers for node mode, and nothing pretends to.
+- **The typesetting path.** The stomach calls neither: `--pdf` still measures an
+  OpenType face by its `hmtx` advances, with no kerning and no OpenType
+  ligatures.
 - **Name lookup.** `name:` and anonymous requests need luaotfload's font
   names database (`luaotfload-database.lua`): which directories it scans, how a
   family, a style and an optical size pick a file. Only the grammar is ported.
-- **The typesetting path.** The stomach does not call the shaper: `--pdf` still
-  measures an OpenType face by its `hmtx` advances, with no kerning and no
-  OpenType ligatures.
+- **Variable fonts.** Both modes load a variable font at its default instance:
+  `axis=`, `instance=` and the weight a `/B` modifier picks (harf-define.lua's
+  variation handling, the fontloader's `fvar`/`gvar`/`HVAR` readers) are not
+  ported, and the corpus's Arimo-VF and Orbitron-VF ask for `wght=700`.
+- **Node mode, the parts not ported.** The Indic analyzers of `font-osd.lua`
+  (Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Tamil,
+  Telugu, Sinhala), Khmer, Myanmar and Mongolian: a font with one of those
+  scripts is refused rather than processed without its analyzer.
+  `normalize=nfd`/`nfkd` leave the text as it is. `semiignored-node`'s
+  push/pop around the GPOS lookups (which only moves nodes something else
+  flagged `zwnj`), the `collapse` and `blockligatures` extra features, and the
+  `random` alternate (`math.random`, which nothing here reproduces) are not
+  there. Where the Lua walks a hash -- the order `checklookups` visits
+  ligatures for `/ToUnicode`, `nodepass`'s order of fonts, the first glyph-0
+  slot `setnotdef` meets -- the port takes the ascending order, which the Lua
+  does not promise: DejaVu Sans's U+EF19 and a few hundred of Amiri's Arabic
+  presentation forms get a different `/ToUnicode` than luatex gives them on
+  this machine.
+- **Math.** The MATH table is read, but its constants, variants, assemblies
+  and kerns are not carried into a font as `copytotfm` carries them, and
+  nothing of LuaTeX's OpenType math layout (`mlist.c`) uses them.
 - **In harf mode,** colour glyphs (`COLR`/`CPAL` layers, `sbix`/`CBDT`
-  bitmaps) are drawn as outlines; a variable font is shaped at its default
-  instance (harf-define.lua:122-198's `instance=`, `axis=` and the weight a `/B`
-  modifier picks are not ported); and `+tlig`, which luaotfload implements as
+  bitmaps) are drawn as outlines; and `+tlig`, which luaotfload implements as
   TFM-style ligatures the engine's own ligaturing pass applies after shaping,
   is passed to HarfBuzz as the feature it also is and does nothing there.
 

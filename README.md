@@ -411,8 +411,8 @@ than none.
   reads and assigns the internal parameters texrs holds and the catcode,
   lccode, uccode, sfcode, mathcode and delcode tables through the engine's
   own assignments; `font` defines fonts from Lua tables and reads TFMs as
-  luatex does; `pdf` hands its dictionary strings, `\pdfvariable`s and objects to
-  the backend that `\pdfextension` writes through, so they reach the file. A list callback
+  luatex does; `pdf` keeps the dictionaries, variables and objects a chunk
+  gives it and numbers objects as luatex's backend does. A list callback
   (`hpack_filter`, `pre_linebreak_filter` and the rest) registered from a chunk
   is called by the stomach while the program runs, with luatex's arguments, and
   its answer is what gets packed. TeX Live's luaotfload loads under ltluatex
@@ -447,8 +447,27 @@ than none.
   offsets and dimensions and on every kern, glue and discretionary. A `\font`
   request string is read as luaotfload reads it (`src/fontreq.rs`, the
   `font_request` grammar of `luaotfload-parsers.lua`): `file:`, `name:`, `[path]`,
-  a subfont, the slash modifiers and the feature list. Neither is on the
-  typesetting path yet; [0x06] says what is missing.
+  a subfont, the slash modifiers and the feature list.
+- OpenType fonts as luaotfload's default `mode=node` loads and processes them
+  (`src/otf/`), ported from the ConTeXt fontloader luaotfload carries rather
+  than from HarfBuzz: the font tables read as `font-otr`, `font-cff` and
+  `font-dsp` read them and unified as `font-oup` unifies them, so a font's
+  characters table -- slots, private slots, widths, heights, depths,
+  `/ToUnicode` -- and its parameters come out as luaotfload hands them to the
+  engine (`tests/node_chars.rs`); and a list processed as `font-ots` and
+  `font-otj` process it: the features a request asks for, worked out as
+  `apply_default_features` works them out, applied lookup by lookup with their
+  discretionary handling, the positioning injected as font kerns, offsets and
+  wider spaces, and luaotfload's own processors around them (NFC
+  normalisation, the Arabic joining analyzer and mark reordering, `notdef`,
+  default ignorables, variation sequences, `tlig` and the other extra
+  features). Checked list by list against luahbtex in `mode=node`
+  (`tests/node_parity.rs`, frozen by `scripts/node-freeze.sh`): Latin with
+  kerns, ligatures, space kerns and hyphenation discretionaries in CFF and
+  TrueType faces, optional features and alternates, Greek, Cyrillic, combining
+  marks, Han and ideographic variation sequences, and Arabic right to left.
+  Neither this nor the harf shaper is on the typesetting path yet; [0x06] says
+  what is missing.
 - `--pdf`: the PDF itself, and the better half of the typesetter. Lines are
   chosen by minimising total demerits across the whole paragraph (`tex.web`
   §813-§890) with Liang hyphenation, and set to the measure with PDF's `Tw`,
@@ -625,7 +644,7 @@ is how Lua reaches the stomach's lists, and of the stomach's hook points only
 `hpack_filter` is called yet. `node.ligaturing`, `node.kerning`,
 `node.hyphenating` and `node.mlist_to_hlist` are not ported. Of LuaTeX's other
 libraries, `lang`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and `socket` are
-not there, no `\font` goes through
+not there, `pdf` is not yet read by the writer, no `\font` goes through
 `define_font` yet, and a font defined from Lua is not yet one the stomach sets
 type in. The shell is disabled (`os.execute`, `io.popen` and
 `kpse.check_permission` answer as `luatex -no-shell-escape` does), and an error
@@ -721,9 +740,8 @@ and three of the things a document controls survive the trip:
   to from every page; lines are
   broken on that font's own advance widths, out of its `hmtx` through its
   `cmap`. No kerning and no OpenType ligature reaches this path yet: the
-  harf shaper of [0x03] is a library beside it, and luaotfload's default node
-  mode is not ported (`BUGS.md`, "OpenType fonts are not loaded as luaotfload
-  loads them, yet"). A family nothing can be found for falls back to whichever of the
+  harf shaper and the node-mode processing of [0x03] are libraries beside it
+  (`BUGS.md`, "OpenType fonts are not loaded as luaotfload loads them, yet"). A family nothing can be found for falls back to whichever of the
   fourteen carries the same metrics, not to Computer Modern. The face is
   SUBSET: only the glyphs the document actually set are kept, with `cmap`,
   `glyf`, `loca`, `hmtx`, `maxp` and `head` rebuilt rather than copied, and each
