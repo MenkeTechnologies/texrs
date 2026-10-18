@@ -341,6 +341,7 @@ fn b_err_site(vm: &mut VM, _argc: u8) -> Value {
 /// something `(see the transcript file ...)` follows; its own closing paren is
 /// left off, as the comparison against tex's output leaves it off.
 fn b_transcript_notice(vm: &mut VM, _argc: u8) -> Value {
+    let glued = vm.pop().to_int() != 0;
     let notes = render(&vm.pop());
     let reported = REPORTED.with(|r| *r.borrow());
     if !reported && notes.is_empty() {
@@ -355,11 +356,24 @@ fn b_transcript_notice(vm: &mut VM, _argc: u8) -> Value {
     let mut text = format!("){notes}");
     match reported {
         true => text.push_str("(see the transcript file for additional information"),
+        // The stream ends where the last paren the run printed does, as the
+        // comparison reads a terminal (`parity::messages_of`): the last note's
+        // own `)` -- or, after luatex's group listing, the `)` that closes
+        // the listing's last `(...)`.
         false => {
-            text.pop();
+            if let Some(at) = text.rfind(')') {
+                text.truncate(at);
+            }
         }
     }
-    MESSAGES.with(|m| m.borrow_mut().push(text));
+    // LuaTeX's paren is written hard against the last message.
+    MESSAGES.with(|m| {
+        let mut m = m.borrow_mut();
+        match (glued, m.last_mut()) {
+            (true, Some(last)) => last.push_str(&text),
+            _ => m.push(text),
+        }
+    });
     Value::Int(0)
 }
 

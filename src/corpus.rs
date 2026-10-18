@@ -65,6 +65,24 @@ pub const CORPUS: &[Entry] = &[
         "A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence.",
         "\\count1=`\\A\n\\message{\\the\\count1}   % => 65",
     ),
+    (
+        "\\catcodetable",
+        "Category codes",
+        "Which category-code table the mouth reads with, as a number: LuaTeX keeps many, so a document can switch regimes in one assignment. Only table 0 and the tables `\\savecatcodetable` or `\\initcatcodetable` have made can be switched to; anything else is `! Invalid \\catcode table`. Local to the group unless `\\global`, and a `\\catcode` changes the table that is current, which the group's end restores whatever table is current then.",
+        "\\catcodetable=<number>\n\\initcatcodetable 3 \\catcodetable 3   % INITEX's codes",
+    ),
+    (
+        "\\savecatcodetable",
+        "Category codes",
+        "Make table N a copy of the current one. N may not be the current table, and must be in 0..32767.",
+        "\\savecatcodetable 1",
+    ),
+    (
+        "\\initcatcodetable",
+        "Category codes",
+        "Make table N INITEX's: letters 11, `\\` 0, `%` 14, the space 10, `^^M` 5, `^^@` 9, `^^?` 15, everything else 12.",
+        "\\initcatcodetable 2",
+    ),
     // ══ Macro definition — expand::do_def / do_let ═════════════════════════
     (
         "\\def",

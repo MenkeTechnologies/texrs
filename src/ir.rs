@@ -177,7 +177,12 @@ pub enum Cmd {
     /// fact about the whole run: an error the VM reported is as much a reason
     /// to print it as one the lowerer reported, and only the VM knows whether
     /// one happened. Emits nothing when the run was clean.
-    TranscriptNotice(Vec<String>),
+    TranscriptNotice {
+        notes: Vec<String>,
+        /// LuaTeX's `final_cleanup` closes the file with `)` hard against what
+        /// was printed last (`report_stop_file`); tex.web §1335 prints ` )`.
+        glued: bool,
+    },
     /// A run of the document's own text.
     ///
     /// Ordinary characters -- the words of the document, as opposed to what
@@ -325,7 +330,7 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
             }
             Cmd::ErrorSite(site) => out.push_str(&format!("{pad}ErrorSite {site:?}\n")),
-            Cmd::TranscriptNotice(notes) => {
+            Cmd::TranscriptNotice { notes, .. } => {
                 out.push_str(&format!("{pad}TranscriptNotice {notes:?}\n"))
             }
             Cmd::Text(t) => out.push_str(&format!("{pad}Text {t:?}\n")),

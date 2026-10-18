@@ -33,7 +33,7 @@ const END: &str = "<!-- primitive-census:end -->";
 /// the end of the census.
 fn subject(src: &str) -> String {
     let src = src.to_string();
-    std::panic::catch_unwind(move || texrs::parity::subject(&src))
+    std::panic::catch_unwind(move || texrs::luatex_oracle::subject(&src))
         .unwrap_or_else(|_| "PANIC".to_string())
 }
 

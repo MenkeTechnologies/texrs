@@ -3,6 +3,10 @@
 # these with no TeX installed.
 #==# begincsname.tex
 [A][][N] [macro:->A||\relax ] [4] [N]
+#==# catcode_table_errors.tex
+! Invalid \catcode table.l.3 \catcodetable 5                   x! Invalid \catcode table.l.4 \message{x}\savecatcodetable 0                                  ! Invalid \catcode table.l.5 \initcatcodetable 40000                             \message{y}y)(see the transcript file for additional information
+#==# catcode_tables.tex
+[0] (2)(12)(12) [11] [12] [11] [1][12] [11] [1] (1)
 #==# csstring.tex
 [relax][a][a][\relax]
 #==# detokenize.tex
@@ -13,6 +17,10 @@
 [macro:->####] [macro:->\a ##] [##]
 #==# end_closes_the_file.tex
 ! Undefined control sequence.l.3 \undefined              \message{b}\endb)(see the transcript file for additional information
+#==# end_inside_conditionals.tex
+a b c)(\end occurred when \ifcase on line 4 was incomplete)(\end occurred when \if on line 4 was incomplete)(\end occurred when \if on line 3 was incomplete)(\end occurred when \if on line 3 was incomplete
+#==# end_inside_groups.tex
+a b)(\end occurred inside a group at level 2)### semi simple group (level 2) entered at line 3 (\begingroup)### simple group (level 1) entered at line 3 ({
 #==# expanded.tex
 [AAA] [macro:->\b ]
 #==# expr_overflow.tex

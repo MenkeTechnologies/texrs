@@ -405,13 +405,68 @@ const PREFIXED_ASSIGNMENTS: &[&str] = &[
     "errorstopmode",
 ];
 
+/// LuaTeX's commands above `max_non_prefixed_command` (commands.h, from
+/// `toks_register_cmd` to `set_font_id_cmd`), spelt as `token.create` names
+/// them in `crate::luatex_primitives`: every one a prefix may stand in front of.
+const PREFIXED_LUATEX_COMMANDS: &[&str] = &[
+    "toks_register",
+    "assign_toks",
+    "assign_int",
+    "assign_attr",
+    "assign_dimen",
+    "assign_glue",
+    "assign_mu_glue",
+    "assign_font_dimen",
+    "assign_font_int",
+    "assign_hang_indent",
+    "set_aux",
+    "set_prev_graf",
+    "set_page_dimen",
+    "set_page_int",
+    "set_box_dimen",
+    "set_tex_shape",
+    "set_etex_shape",
+    "def_char_code",
+    "def_del_code",
+    "extdef_math_code",
+    "extdef_del_code",
+    "def_family",
+    "set_math_param",
+    "set_font",
+    "def_font",
+    "register",
+    "assign_box_direction",
+    "assign_box_dir",
+    "assign_direction",
+    "assign_dir",
+    "combinetoks",
+    "advance",
+    "multiply",
+    "divide",
+    "prefix",
+    "let",
+    "shorthand_def",
+    "def_lua_call",
+    "read_to_cs",
+    "def",
+    "set_box",
+    "hyph_data",
+    "set_interaction",
+    "letterspace_font",
+    "expand_font",
+    "copy_font",
+    "set_font_id",
+];
+
 /// Whether the primitive `name` is a command a prefix may stand in front of
-/// (§1211): a parameter, or one of `PREFIXED_ASSIGNMENTS`.
+/// (§1211): a parameter, one of `PREFIXED_ASSIGNMENTS`, or one of LuaTeX's
+/// assignments (`PREFIXED_LUATEX_COMMANDS`).
 pub fn is_prefixed_assignment(name: &str) -> bool {
     let parameters = NAMES.iter().position(|n| *n == " ").unwrap_or(0);
     PREFIXED_ASSIGNMENTS.contains(&name)
         || NAMES[..parameters].contains(&name)
         || crate::intpar::index(name).is_some()
+        || luatex_command(name).is_some_and(|cmd| PREFIXED_LUATEX_COMMANDS.contains(&cmd))
 }
 
 /// The primitives other than the conditionals that expand (§366): the

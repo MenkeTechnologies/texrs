@@ -1,0 +1,15 @@
+% primitives: catcodetable savecatcodetable initcatcodetable
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\catcodetable]}
+\savecatcodetable 1
+\catcode`\@=11
+\initcatcodetable 2
+\catcodetable 2 \catcode`\[=1 \catcode`\]=2 \message[(\the\catcodetable)(\the\catcode`\{)(\the\catcode`\@)]
+\catcodetable0 \message{[\the\catcode`\@]}
+\catcodetable1 \message{[\the\catcode`\@]}
+{\catcodetable0 \message{[\the\catcode`\@]}\catcode`\@=12 }\message{[\the\catcodetable][\the\catcode`\@]}
+\catcodetable0 \message{[\the\catcode`\@]}
+{\global\catcodetable1 }\message{[\the\catcodetable]}
+\catcodetable2 \message[(\the\catcode`\[)]
+\catcodetable0
+\end

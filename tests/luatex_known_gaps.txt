@@ -8,19 +8,6 @@ edef_reads_general_text.tex
 #                  own general text and the `#' is never a parameter of the
 #                  definition. texrs reads the whole body first and expands it
 #                  after, so the `#}' is `Illegal parameter number'.
-end_closes_the_file.tex
-#                  luatex's final_cleanup closes each open file with `)'
-#                  (report_stop_file), where tex.web 1335 prints ` )'; texrs
-#                  prints tex's, so a run that reported an error -- the only
-#                  kind whose stream keeps the paren -- ends `b )' for `b)'.
-expr_overflow.tex  Every report and value agrees with luatex; the stream ends
-#                  with the closing paren end_closes_the_file.tex describes.
 glueexpr.tex       `\the\glueexpr' and `\the\muexpr' are refused
 #                  (`Unsupported \the'): only \numexpr and \dimexpr have an
 #                  expression the run evaluates.
-interaction_errors.tex
-#                  The reports and the mode agree with luatex; the stream ends
-#                  with the closing paren end_closes_the_file.tex describes.
-show_tokens_and_groups.tex
-#                  Every listing and report agrees with luatex; the stream ends
-#                  with the closing paren end_closes_the_file.tex describes.

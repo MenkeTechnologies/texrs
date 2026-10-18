@@ -286,11 +286,12 @@ impl Compiler {
                 self.b.emit(Op::CallBuiltin(ops::ERR_SITE, 1), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
-            Cmd::TranscriptNotice(notes) => {
+            Cmd::TranscriptNotice { notes, glued } => {
                 let k = self.str_const(&notes.concat())?;
                 self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::LoadInt(i64::from(*glued)), self.line);
                 self.b
-                    .emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 1), self.line);
+                    .emit(Op::CallBuiltin(ops::TRANSCRIPT_NOTICE, 2), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Color { rgb, body } => {

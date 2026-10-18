@@ -315,6 +315,14 @@ than none.
   number is read), a parameter, a token list, and a count or dimension whose
   value the lowerer follows. Tracing output after the last message reaches
   the terminal.
+- LuaTeX's category-code tables: `\catcodetable`, `\savecatcodetable` and
+  `\initcatcodetable`, with luatex's checks (`! Invalid \catcode table`) and a
+  group restoring a `\catcode` into the table it was made in. Every prefixable
+  LuaTeX command takes `\global`.
+- `\end` reports the conditionals it found incomplete, with the line each
+  began on (§1335), and run as a LuaTeX (`-progname=luatex`, or any LaTeX
+  document) ends as luatex does: the file's `)` against the last message, and
+  the open groups listed.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).
@@ -884,8 +892,8 @@ started passing, so the list cannot go stale.
 LuaTeX's own primitives -- e-TeX's, LuaTeX's, the ones TeX82 has not got -- are
 compared against `luatex` the same way, by the cases in `tests/luatex_cases`:
 INITEX luatex with every extra primitive enabled under its own name, the state
-a LaTeX format starts from. Each case names the primitives it exercises, the
-gaps are listed in `tests/luatex_known_gaps.txt` under the same two-way rule,
+a LaTeX format starts from, against texrs run as a LuaTeX (`-progname=luatex`).
+Each case names the primitives it exercises, the gaps are listed in `tests/luatex_known_gaps.txt` under the same two-way rule,
 and `bash scripts/primitive-census.sh` measures every primitive luatex has
 against texrs and writes the verdicts into `BUGS.md`:
 

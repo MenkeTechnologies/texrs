@@ -532,7 +532,7 @@ impl Lowerer {
             // that is how `src/format.rs` knows a format has lost nothing by
             // dumping it.
             if !cmds.is_empty() || !self.end_notes.is_empty() {
-                cmds.push(Cmd::TranscriptNotice(std::mem::take(&mut self.end_notes)));
+                cmds.push(self.transcript_notice());
             }
             return;
         }
@@ -542,7 +542,16 @@ impl Lowerer {
         if !held.is_empty() {
             cmds.push(Cmd::Reports(held));
         }
-        cmds.push(Cmd::TranscriptNotice(std::mem::take(&mut self.end_notes)));
+        cmds.push(self.transcript_notice());
+    }
+
+    /// §1335's closing: the end notes, after the file's paren -- `)` hard
+    /// against the last message in LuaTeX, ` )` in TeX82.
+    fn transcript_notice(&mut self) -> Cmd {
+        Cmd::TranscriptNotice {
+            notes: std::mem::take(&mut self.end_notes),
+            glued: self.eng.is_luatex(),
+        }
     }
 
     /// §1335: `\end` with groups still open says how many, once, as the run
@@ -554,6 +563,12 @@ impl Lowerer {
                 "({}end occurred inside a group at level {level})",
                 self.eng.esc()
             ));
+            // etex.ch's `final_cleanup` lists the groups too
+            // (`show_save_groups`), which luatex prints and tex does not.
+            if self.eng.is_luatex() {
+                let listing = self.eng.save_groups_listing();
+                self.end_notes.push(listing);
+            }
         }
     }
 
@@ -1251,12 +1266,18 @@ impl Lowerer {
             match name.name() {
                 "end" => {
                     self.note_open_groups();
+                    self.end_notes.extend(self.eng.open_conditional_notes());
                     self.ended = true;
                     break;
                 }
                 // Compile-time: these change how the REST of the file reads.
                 "def" | "gdef" => self.eng.compile_time_def(lx, name.name())?,
                 "catcode" => self.eng.compile_time_catcode(lx)?,
+                "catcodetable" => self.eng.compile_time_catcodetable(lx)?,
+                "savecatcodetable" | "initcatcodetable" => {
+                    let init = name.name() == "initcatcodetable";
+                    self.eng.compile_time_catcode_table_copy(lx, init)?
+                }
                 // The other per-character tables. Like `\catcode` they change
                 // how the rest of the file reads, so they are compile-time.
                 // Named one by one rather than through a guard: the corpus
@@ -1651,6 +1672,7 @@ impl Lowerer {
                     // `\unless` belongs to this conditional, so it is taken
                     // before the test can expand a conditional of its own.
                     let negated = self.eng.take_unless();
+                    let line = lx.line();
                     let abs = name.name() == "ifabsnum";
                     let left = magnitude(abs, self.number(lx)?);
                     let rel = match self.eng.read_relation_file(lx, name.name())? {
@@ -1666,7 +1688,8 @@ impl Lowerer {
                     // tex. Lowering both arms ran both definitions and the
                     // losing one won.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
-                        self.eng.enter_decided_file(lx, truth != negated)?;
+                        let opened_by = (if abs { "ifabsnum" } else { "ifnum" }, negated, line);
+                        self.eng.enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
                     self.eng.set_unless(negated);
@@ -1686,6 +1709,7 @@ impl Lowerer {
                 // real branch rather than being recognised and skipped.
                 "ifdim" | "ifabsdim" => {
                     let negated = self.eng.take_unless();
+                    let line = lx.line();
                     let abs = name.name() == "ifabsdim";
                     let left = magnitude(abs, self.dimen_number(lx, false)?);
                     let rel = match self.eng.read_relation_file(lx, name.name())? {
@@ -1696,7 +1720,8 @@ impl Lowerer {
                     let right = magnitude(abs, self.dimen_number(lx, false)?);
                     // Decided now when both dimensions are known; see `\ifnum`.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
-                        self.eng.enter_decided_file(lx, truth != negated)?;
+                        let opened_by = (if abs { "ifabsdim" } else { "ifdim" }, negated, line);
+                        self.eng.enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
                     self.eng.set_unless(negated);
@@ -1717,14 +1742,14 @@ impl Lowerer {
                 // same equality chain the `\message` arm builds. Leaving this
                 // to the expander answered from its own copy of the register,
                 // which no run-time `\count1=2` ever reaches.
-                "ifcase" => match self.number(lx)? {
+                "ifcase" => match (lx.line(), self.number(lx)?) {
                     // A selector whose value is known -- a constant, or a
                     // register the lowerer has followed -- is the expander's.
-                    value if self.eng.known.num(&value).is_some() => {
+                    (line, value) if self.eng.known.num(&value).is_some() => {
                         let n = self.eng.known.num(&value).expect("just matched");
-                        self.eng.ifcase_file(lx, n)?
+                        self.eng.ifcase_file(lx, n, line)?
                     }
-                    value => {
+                    (_, value) => {
                         self.flush_reports(&mut out);
                         let branches = self.case_arms(lx)?;
                         out.extend(case_chain_cmds(value, branches));
@@ -1732,9 +1757,11 @@ impl Lowerer {
                 },
                 "ifodd" => {
                     let negated = self.eng.take_unless();
+                    let line = lx.line();
                     let value = self.number(lx)?;
                     if let Some(v) = self.eng.known.num(&value) {
-                        self.eng.enter_decided_file(lx, (v % 2 != 0) != negated)?;
+                        self.eng
+                            .enter_decided_file(lx, (v % 2 != 0) != negated, ("ifodd", negated, line))?;
                         continue;
                     }
                     self.eng.set_unless(negated);
@@ -5676,7 +5703,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
-            | Cmd::TranscriptNotice(_)
+            | Cmd::TranscriptNotice { .. }
             | Cmd::Line(_)
             | Cmd::RustCompile(_) => {}
         }
@@ -5814,7 +5841,7 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::RustCompile(_)
                 | Cmd::FileClose
                 | Cmd::ErrorSite(_)
-                | Cmd::TranscriptNotice(_)
+                | Cmd::TranscriptNotice { .. }
                 // The stomach's slots are not saved by a group (see
                 // `crate::compiler::is_stomach_slot`).
                 | Cmd::List(_) => {}

@@ -1,0 +1,4 @@
+% primitives: end unless
+\catcode`\{=1 \catcode`\}=2
+\message{a}\iftrue\ifnum1<2
+\unless\ifx ab\message{b}\ifcase 2\or\or\message{c}\end

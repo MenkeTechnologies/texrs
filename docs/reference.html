@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">273</div>
+            <div class="stat-val">276</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -111,6 +111,10 @@
 ^^41  % the hex form: A</pre></td></tr>
             <tr><td><code>`</code></td><td>A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence.</td><td><pre>\count1=`\A
 \message{\the\count1}   % =&gt; 65</pre></td></tr>
+            <tr><td><code>\catcodetable</code></td><td>Which category-code table the mouth reads with, as a number: LuaTeX keeps many, so a document can switch regimes in one assignment. Only table 0 and the tables <code>\savecatcodetable</code> or <code>\initcatcodetable</code> have made can be switched to; anything else is <code>! Invalid \catcode table</code>. Local to the group unless <code>\global</code>, and a <code>\catcode</code> changes the table that is current, which the group's end restores whatever table is current then.</td><td><pre>\catcodetable=&lt;number&gt;
+\initcatcodetable 3 \catcodetable 3   % INITEX's codes</pre></td></tr>
+            <tr><td><code>\savecatcodetable</code></td><td>Make table N a copy of the current one. N may not be the current table, and must be in 0..32767.</td><td><pre>\savecatcodetable 1</pre></td></tr>
+            <tr><td><code>\initcatcodetable</code></td><td>Make table N INITEX's: letters 11, <code>\</code> 0, <code>%</code> 14, the space 10, <code>^^M</code> 5, <code>^^@</code> 9, <code>^^?</code> 15, everything else 12.</td><td><pre>\initcatcodetable 2</pre></td></tr>
           </tbody>
         </table>
       </section>

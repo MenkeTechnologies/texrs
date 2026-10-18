@@ -197,7 +197,9 @@ pub struct ExpandedRegister {
 /// rather than snapshotting the whole state, which is what makes deep grouping
 /// affordable; the same choice is made here.
 enum Save {
-    Cat(char, Cat),
+    Cat(i64, char, Cat),
+    /// The `\catcodetable` a group switched away from.
+    CatTable(i64),
     /// One token register as it stood before a group assigned to it.
     Toks(i64, Option<Vec<Token>>),
     /// One entry of one character-code table, as it stood before a group
@@ -232,7 +234,8 @@ impl Save {
     /// `\global` assignment can name, so they match nothing.
     fn same_entry(&self, other: &Save) -> bool {
         match (self, other) {
-            (Save::Cat(a, _), Save::Cat(b, _)) => a == b,
+            (Save::Cat(ta, a, _), Save::Cat(tb, b, _)) => ta == tb && a == b,
+            (Save::CatTable(_), Save::CatTable(_)) => true,
             (Save::Toks(a, _), Save::Toks(b, _)) => a == b,
             (Save::CharCode(ta, a, _), Save::CharCode(tb, b, _)) => ta == tb && a == b,
             (Save::IntPar(a, _), Save::IntPar(b, _)) => a == b,
@@ -298,6 +301,10 @@ pub struct Engine {
     group_lines: Vec<u32>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
     conds: Vec<CondState>,
+    /// What opened each of `conds` and on which line (§489's `cur_if` and
+    /// `if_line`), for §1335's `(\end occurred when \iftrue on line 2 was
+    /// incomplete)`: the primitive's name, and whether `\unless` negated it.
+    cond_info: Vec<(&'static str, bool, u32)>,
     /// Set by `\global`, cleared by the assignment it prefixes.
     /// `\mathcode`, `\lccode`, `\uccode`, `\sfcode`, `\delcode`.
     pub charcodes: crate::charcodes::CharCodes,
@@ -397,6 +404,12 @@ pub struct Engine {
     /// luatex's `last_cs_name`: what the last `\csname`, `\begincsname` or
     /// `\ifcsname` looked up, for `\lastnamedcs`. `None` is `null_cs`.
     last_cs_name: Option<CsId>,
+    /// LuaTeX's `\catcodetable`: which table `cats` is.
+    pub cat_table: i64,
+    /// The other tables `\savecatcodetable` and `\initcatcodetable` have made
+    /// valid (textcodes.c's `catcode_heads`), by number; the current one is
+    /// `cats`, and is not here.
+    cat_tables: FxHashMap<i64, CatTable>,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -551,6 +564,7 @@ impl Engine {
             group_kinds: Vec::new(),
             group_lines: Vec::new(),
             conds: Vec::new(),
+            cond_info: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
             toks: std::collections::HashMap::new(),
             global: false,
@@ -574,6 +588,8 @@ impl Engine {
             interaction: 1,
             in_csname: 0,
             last_cs_name: None,
+            cat_table: 0,
+            cat_tables: FxHashMap::default(),
             after_group_tokens: Vec::new(),
             after_assignment: None,
         }
@@ -678,7 +694,15 @@ impl Engine {
             }));
         for save in frame.into_iter().rev() {
             match save {
-                Save::Cat(c, cat) => self.cats.set(c, cat),
+                Save::Cat(table, c, cat) => match table == self.cat_table {
+                    true => self.cats.set(c, cat),
+                    false => {
+                        if let Some(t) = self.cat_tables.get_mut(&table) {
+                            t.set(c, cat);
+                        }
+                    }
+                },
+                Save::CatTable(table) => self.switch_cat_table(table),
                 Save::Toks(reg, was) => {
                     match was {
                         Some(v) => self.toks.insert(reg, v),
@@ -1135,6 +1159,13 @@ impl Engine {
     /// the two groups the expander opens are here; a box, alignment or math
     /// group is the stomach's.
     pub fn show_groups(&mut self, lx: &Lexer) {
+        let listing = self.save_groups_listing();
+        self.show_whatever_ok(lx, &listing);
+    }
+
+    /// etex.ch's `show_save_groups`, as one line of text with nothing between
+    /// its lines (the message stream has no line ends).
+    pub fn save_groups_listing(&self) -> String {
         let mut listing = String::new();
         for (level, (kind, line)) in self
             .group_kinds
@@ -1153,7 +1184,7 @@ impl Engine {
             ));
         }
         listing.push_str("### bottom level");
-        self.show_whatever_ok(lx, &listing);
+        listing
     }
 
     /// The end §1298 gives `\showbox`, `\showlists` and e-TeX's `\showgroups`
@@ -1461,7 +1492,7 @@ impl Engine {
     }
 
     fn set_cat(&mut self, c: char, cat: Cat) {
-        self.save(Save::Cat(c, self.cats.get(c)));
+        self.save(Save::Cat(self.cat_table, c, self.cats.get(c)));
         self.cats.set(c, cat);
     }
 
@@ -1647,7 +1678,7 @@ impl Engine {
             // is running, is `if_limit` being too small: `Extra`, and ignored.
             "else" => match self.conds.last() {
                 Some(CondState::Taken | CondState::TakenCase) => {
-                    self.conds.pop();
+                    self.close_cond();
                     self.skip_to(lx, false, pending_only)?;
                     Ok(true)
                 }
@@ -1655,13 +1686,13 @@ impl Engine {
             },
             "or" => match self.conds.last() {
                 Some(CondState::TakenCase) => {
-                    self.conds.pop();
+                    self.close_cond();
                     self.skip_to(lx, false, pending_only)?;
                     Ok(true)
                 }
                 _ => Ok(self.extra_fi_or_else(lx, "or")),
             },
-            "fi" => match self.conds.pop() {
+            "fi" => match self.close_cond() {
                 Some(_) => Ok(true),
                 None => Ok(self.extra_fi_or_else(lx, "fi")),
             },
@@ -1906,6 +1937,9 @@ impl Engine {
         // that a conditional inside the test -- `\ifx` over two macros one of
         // which expands -- cannot spend it.
         let negated = std::mem::take(&mut self.unless);
+        // §495's `if_line`: the line the conditional began on, before its
+        // test is read.
+        let line = lx.line();
         let truth = match name {
             "iftrue" => true,
             "iffalse" => false,
@@ -2021,29 +2055,77 @@ impl Engine {
             }
             "ifcase" => {
                 let n = self.scan_number(lx, pending_only)?;
-                return self.do_ifcase(lx, n, pending_only);
+                return self.do_ifcase(lx, n, pending_only, line);
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
-        self.enter_decided(lx, truth != negated, pending_only)
+        let name = CONDITIONALS.iter().find(|c| **c == name).copied().unwrap_or("if");
+        self.enter_decided(lx, truth != negated, pending_only, (name, negated, line))
     }
 
     /// §498's ending, once the test is decided: a true test runs on into its
     /// own text and leaves the conditional open for its `\else` or `\fi`; a
     /// false one skips (§494's `pass_text`) to the `\else`, whose text then
     /// runs, or past the `\fi`.
-    fn enter_decided(&mut self, lx: &mut Lexer, truth: bool, pending_only: bool) -> R<()> {
+    fn enter_decided(
+        &mut self,
+        lx: &mut Lexer,
+        truth: bool,
+        pending_only: bool,
+        (name, negated, line): (&'static str, bool, u32),
+    ) -> R<()> {
         match truth {
-            true => self.conds.push(CondState::Taken),
+            true => self.open_cond(CondState::Taken, name, negated, line),
             false => {
                 // Skip to `\else` (run that branch) or `\fi` (run nothing).
                 let hit_else = self.skip_to(lx, true, pending_only)?;
                 if hit_else {
-                    self.conds.push(CondState::Done);
+                    self.open_cond(CondState::Done, name, negated, line);
                 }
             }
         }
         Ok(())
+    }
+
+    fn open_cond(&mut self, state: CondState, name: &'static str, negated: bool, line: u32) {
+        self.conds.push(state);
+        self.cond_info.push((name, negated, line));
+    }
+
+    fn close_cond(&mut self) -> Option<CondState> {
+        self.cond_info.pop();
+        self.conds.pop()
+    }
+
+    /// §1335's note for each conditional `\end` found open, innermost first:
+    /// `(\end occurred when \iftrue on line 2 was incomplete)`.
+    pub fn open_conditional_notes(&self) -> Vec<String> {
+        let e = self.esc();
+        let luatex = self.is_luatex();
+        self.cond_info
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(depth, (name, negated, line))| {
+                // luatex 1.24.0 names only the innermost conditional; each
+                // outer one prints as `\if` (measured): its `final_cleanup`
+                // reads `cur_if` from the condition node's subtype, which does
+                // not hold it.
+                let (name, negated) = match luatex && depth > 0 {
+                    true => ("if", &false),
+                    false => (*name, negated),
+                };
+                let unless = match negated {
+                    true => format!("{e}unless"),
+                    false => String::new(),
+                };
+                let on = match line {
+                    0 => String::new(),
+                    n => format!(" on line {n}"),
+                };
+                format!("({e}end occurred when {unless}{e}{name}{on} was incomplete)")
+            })
+            .collect()
     }
 
     /// A conditional in running text whose test the LOWERER decided -- an
@@ -2051,8 +2133,13 @@ impl Engine {
     /// From here on it is the expander's like any other, so its `\else` and
     /// `\fi` are met on the one condition stack. `truth` already carries any
     /// `\unless`.
-    pub fn enter_decided_file(&mut self, lx: &mut Lexer, truth: bool) -> R<()> {
-        self.enter_decided(lx, truth, false)
+    pub fn enter_decided_file(
+        &mut self,
+        lx: &mut Lexer,
+        truth: bool,
+        opened_by: (&'static str, bool, u32),
+    ) -> R<()> {
+        self.enter_decided(lx, truth, false, opened_by)
     }
 
     /// `\ifcase<n>` selects the nth `\or` branch, `\else` being the default.
@@ -2063,7 +2150,7 @@ impl Engine {
     /// nothing run. That is why a selector that is NEGATIVE, or past the last
     /// `\or`, takes the `\else` branch rather than case 0 -- a negative n never
     /// reaches zero, so every `\or` is skipped until the `\else` stops it.
-    fn do_ifcase(&mut self, lx: &mut Lexer, n: i64, pending_only: bool) -> R<()> {
+    fn do_ifcase(&mut self, lx: &mut Lexer, n: i64, pending_only: bool, line: u32) -> R<()> {
         let mut remaining = n;
         while remaining != 0 {
             match self.pass_text(lx, pending_only)? {
@@ -2072,14 +2159,14 @@ impl Engine {
                 // §509's `common_ending` with `cur_chr <> fi_code`: the else
                 // text runs and its `\fi` closes the conditional.
                 Stop::Else => {
-                    self.conds.push(CondState::Done);
+                    self.open_cond(CondState::Done, "ifcase", false, line);
                     return Ok(());
                 }
                 // The conditional ended before the case was reached.
                 Stop::Fi => return Ok(()),
             }
         }
-        self.conds.push(CondState::TakenCase);
+        self.open_cond(CondState::TakenCase, "ifcase", false, line);
         Ok(())
     }
 
@@ -4590,6 +4677,7 @@ impl Engine {
             "eTeXminorversion" => Some(2),
             "luatexversion" => Some(124),
             "interactionmode" => Some(self.interaction),
+            "catcodetable" => Some(self.cat_table),
             "currentgrouplevel" => Some(self.group_level() as i64),
             "currentgrouptype" => Some(match self.innermost_group() {
                 None => 0,
@@ -6104,8 +6192,8 @@ impl Engine {
 
     /// `\ifcase` at the top of a file with a selector known while lowering:
     /// §509's case selection, with the cases that lose skipped unlowered.
-    pub fn ifcase_file(&mut self, lx: &mut Lexer, n: i64) -> R<()> {
-        self.do_ifcase(lx, n, false)
+    pub fn ifcase_file(&mut self, lx: &mut Lexer, n: i64, line: u32) -> R<()> {
+        self.do_ifcase(lx, n, false, line)
     }
 
     pub fn expand_macro_file(&mut self, lx: &mut Lexer, name: CsId) -> R<()> {
@@ -7100,5 +7188,75 @@ impl Engine {
     /// spell it: `\count1`, `\dimen0`, `\hsize`.
     pub fn register_name_pub(&self, slot: i64) -> String {
         self.register_name(slot)
+    }
+}
+
+impl Engine {
+    /// Make table `to` the one the mouth reads with (LuaTeX's catcode tables,
+    /// textcodes.c). The table being left keeps its codes for a later switch
+    /// back; `\endlinechar`, which the table carries for the mouth, is the
+    /// parameter's whichever table is current.
+    fn switch_cat_table(&mut self, to: i64) {
+        if to == self.cat_table {
+            return;
+        }
+        let Some(next) = self.cat_tables.remove(&to) else {
+            return;
+        };
+        let generation = self.cats.generation();
+        let left = std::mem::replace(&mut self.cats, next);
+        self.cat_tables.insert(self.cat_table, left);
+        self.cat_table = to;
+        self.cats.follow_generation(generation);
+        self.cats
+            .set_end_line_char(self.intpars.get(crate::intpar::END_LINE_CHAR));
+    }
+
+    /// Whether `\catcodetable` may switch to table `h` (`valid_catcode_table`).
+    fn valid_cat_table(&self, h: i64) -> bool {
+        h == self.cat_table || self.cat_tables.contains_key(&h)
+    }
+
+    /// `\catcodetable=n` (maincontrol.c's `assign_internal_value`): a switch to
+    /// a valid table, local unless `\global`, or `Invalid \catcode table`.
+    pub fn compile_time_catcodetable(&mut self, lx: &mut Lexer) -> R<()> {
+        self.skip_equals(lx)?;
+        let to = self.scan_number(lx, false)?;
+        let global = self.take_global_prefix();
+        if !self.valid_cat_table(to) {
+            self.report(lx, "Invalid \\catcode table");
+            return Ok(());
+        }
+        if to != self.cat_table {
+            self.save_as(Save::CatTable(self.cat_table), global);
+            self.switch_cat_table(to);
+        }
+        Ok(())
+    }
+
+    /// `\savecatcodetable n` and `\initcatcodetable n` (maincontrol.c's
+    /// `run_normal`): table `n` becomes a copy of the current one, or
+    /// INITEX's. Neither may name the current table, or one outside 0..0x7FFF.
+    pub fn compile_time_catcode_table_copy(&mut self, lx: &mut Lexer, init: bool) -> R<()> {
+        let n = self.scan_number(lx, false)?;
+        if !(0..=0x7FFF).contains(&n) || n == self.cat_table {
+            self.report(lx, "Invalid \\catcode table");
+            return Ok(());
+        }
+        let table = match init {
+            true => CatTable::new(),
+            false => self.cats.clone(),
+        };
+        self.cat_tables.insert(n, table);
+        Ok(())
+    }
+}
+
+impl Engine {
+    /// Whether this engine is a LuaTeX: LuaTeX-ranged by the command line's
+    /// program name or by being a LaTeX run (`register_limit`), which is also
+    /// what decides the few places luatex prints differently from tex.
+    pub fn is_luatex(&self) -> bool {
+        self.register_limit > 255
     }
 }

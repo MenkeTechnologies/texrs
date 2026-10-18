@@ -10,6 +10,9 @@
 //! file still says what luatex says -- a frozen file can only vouch for
 //! texrs, never for itself.
 //!
+//! texrs runs each case as a LuaTeX (`-progname=luatex`'s personality: its
+//! 65536 registers, its closing paren), since that is what luatex is.
+//!
 //! A case that diverges is allowed only if `tests/luatex_known_gaps.txt` names
 //! it, and a named case that has started passing fails until the entry goes.
 
@@ -73,7 +76,7 @@ fn every_case_still_prints_what_luatex_printed() {
     for (name, want) in frozen() {
         let src = std::fs::read_to_string(repo().join("tests/luatex_cases").join(&name))
             .expect("a frozen case exists");
-        let got = texrs::parity::subject(&src);
+        let got = texrs::luatex_oracle::subject(&src);
         match (got == want, known.contains(&name)) {
             (false, false) => regressions.push(format!("{name}\n  luatex: {want:?}\n  texrs : {got:?}")),
             (true, true) => healed.push(name),

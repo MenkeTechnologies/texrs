@@ -120,6 +120,8 @@ macro:->10.0pt|3.0pt|1.0pt plus 2.0fil minus 3.0pt|1.0pt|7
 [macro:->a##b][a##b] [macro:#1->(#1)##1][(z)##1]
 #==# edef_with_parameters.tex
 [A|B|7]
+#==# end_inside_conditionals.tex
+a b c )(\end occurred when \ifcase on line 3 was incomplete)(\end occurred when \ifx on line 3 was incomplete)(\end occurred when \ifnum on line 2 was incomplete)(\end occurred when \iftrue on line 2 was incomplete
 #==# end_inside_group_is_noted.tex
 [a] [b] )(\end occurred inside a group at level 3
 #==# end_inside_group_with_an_error.tex

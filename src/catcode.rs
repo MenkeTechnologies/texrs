@@ -82,6 +82,7 @@ impl Cat {
 /// meanings from plain.tex, NOT from the engine — which is why a bare INITEX
 /// run treats `{` as an ordinary character. Reproducing that split matters: a
 /// document that sets its own catcodes has to see the same starting point.
+#[derive(Clone)]
 pub struct CatTable {
     codes: [Cat; 256],
     /// Bumped by every `set`.
@@ -146,6 +147,13 @@ impl CatTable {
     pub fn set_end_line_char(&mut self, v: i64) {
         self.end_line_char = v;
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Take a generation past `other`'s: a table switched in by
+    /// `\catcodetable` must not look like one the mouth already read ahead
+    /// under, whatever its own count says.
+    pub fn follow_generation(&mut self, other: u32) {
+        self.generation = self.generation.max(other).wrapping_add(1);
     }
 
     pub fn get(&self, c: char) -> Cat {
