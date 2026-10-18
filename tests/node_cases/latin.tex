@@ -1,0 +1,26 @@
+% Latin text in mode=node: luaotfload's default features (kern, liga, mark,
+% mkmk, calt, clig, ...), so GPOS pair kerns, ligatures and the hyphenation
+% discretionaries luatex puts into an \hbox.
+\font\lm="file:lmroman10-regular.otf:mode=node" at 10pt
+\setbox0\hbox{\lm AVAT office Tea. fluffy}\directlua{harfdump.box("lm default")}
+\setbox0\hbox{\lm dif\-fi\-cult e-mail}\directlua{harfdump.box("lm explicit discretionaries")}
+\font\lmnk="file:lmroman10-regular.otf:mode=node;-kern;-liga" at 10pt
+\setbox0\hbox{\lmnk AVAT office}\directlua{harfdump.box("lm -kern -liga")}
+\font\lmtl="file:lmroman10-regular.otf:mode=node;+tlig" at 10pt
+\setbox0\hbox{\lmtl ``quotes'' -- and --- dashes}\directlua{harfdump.box("lm +tlig")}
+\font\lmtiny="file:lmroman10-regular.otf:mode=node" at 500sp
+\setbox0\hbox{\lmtiny AV To office}\directlua{harfdump.box("lm at 500sp")}
+\setbox0\hbox{\lm f\-f\-i dif\-fi\-c fi\-c}\directlua{harfdump.box("lm chained discretionaries")}
+\setbox0\hbox{\lm\discretionary{f-}{fi}{ffi}x Waffle-iron afflict}\directlua{harfdump.box("lm explicit discretionary")}
+\setbox0\hbox{\lm A\hbox{}V A\vrule V}\directlua{harfdump.box("lm box and rule")}
+% Arimo kerns the space against neighbouring letters (space kerns) and has
+% class-based pair kerning.
+\font\ar="file:Arimo-Regular.ttf:mode=node" at 10pt
+\setbox0\hbox{\ar AVAT Yo. LT P, Te ``A'' T. Wa}\directlua{harfdump.box("arimo kerns")}
+\setbox0\hbox{\ar W\-A\-V T\-o}\directlua{harfdump.box("arimo kerns across discretionaries")}
+\font\tm="file:texgyretermes-regular.otf:mode=node" at 12pt
+\setbox0\hbox{\tm Effective fjord ffl AWAY}\directlua{harfdump.box("termes")}
+\font\eb="file:EBGaramond-Regular.otf:mode=node" at 11pt
+\setbox0\hbox{\eb Th ct st office Quaff}\directlua{harfdump.box("ebgaramond")}
+\font\lib="file:LibertinusSerif-Regular.otf:mode=node" at 10pt
+\setbox0\hbox{\lib Theft fifty AVOW}\directlua{harfdump.box("libertinus")}

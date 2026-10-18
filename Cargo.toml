@@ -26,6 +26,7 @@ exclude = [
     "/.github/",
     "/tests/cases/",
     "/tests/harf_cases/",
+    "/tests/node_cases/",
     "/tests/common/",
     "/tests/data/",
     "/tests/*.rs",

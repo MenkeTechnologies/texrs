@@ -1,0 +1,12 @@
+% Greek and Cyrillic in mode=node, and Latin with combining marks positioned
+% by GPOS mark and mkmk lookups.
+\font\no="file:NotoSerif-Regular.ttf:mode=node" at 10pt
+\setbox0\hbox{\no Ἀθῆναι ΑΥΤΟ Λόγος}\directlua{harfdump.box("noto greek")}
+\setbox0\hbox{\no Москва ТУЛА Гоголь}\directlua{harfdump.box("noto cyrillic")}
+\setbox0\hbox{\no e^^^^0301 a^^^^0308^^^^0301 n^^^^0303 q^^^^0323^^^^0307}\directlua{harfdump.box("noto combining marks")}
+\font\dj="file:DejaVuSans.ttf:mode=node" at 10pt
+\setbox0\hbox{\dj Ā́ x^^^^0300^^^^0301 AVA Ты}\directlua{harfdump.box("dejavu marks and kerns")}
+\font\nogrc="file:NotoSerif-Regular.ttf:mode=node;script=grek" at 10pt
+\setbox0\hbox{\nogrc Ἀθῆναι ΑΥΤΟ}\directlua{harfdump.box("noto script=grek")}
+\font\nosrb="file:NotoSerif-Regular.ttf:mode=node;script=cyrl;language=SRB" at 10pt
+\setbox0\hbox{\nosrb бгдпт}\directlua{harfdump.box("noto cyrillic serbian locl")}

@@ -26,7 +26,14 @@
 
 pub mod cff;
 pub mod dsp;
+pub mod features;
+pub mod nodes;
+pub mod normalize;
+pub mod otc;
+pub mod otj;
 pub mod otr;
+pub mod ots;
+pub mod ott;
 pub mod oup;
 pub mod stream;
 pub mod tfm;
@@ -111,7 +118,9 @@ impl Face {
 
         // readers.expand (font-oup.lua:3129-3335)
         oup::expand_dimensions(&mut descriptions, 0.0);
-        let expanded = oup::expand_lookups(&mut layout);
+        let mut expanded = oup::expand_lookups(&mut layout);
+        // otfenhancers.apply: the "check extra features" enhancer
+        otc::enhance(&descriptions, &mut layout, &mut expanded);
 
         let m = fontdata.windowsmetrics.clone().unwrap_or_default();
         let post = fontdata.postscript.clone().unwrap_or_default();
