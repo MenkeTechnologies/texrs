@@ -191,7 +191,7 @@ impl Shipper<'_> {
                     cur.0 += b.width;
                 }
                 Node::Math(width) | Node::MathOff(width) => cur.0 += width,
-                Node::Kern { width, .. } => cur.0 += width,
+                Node::Kern { width, .. } | Node::AccKern(width) => cur.0 += width,
                 Node::Glue(g) => {
                     let mut rule_wd = g.spec.natural - cur_g;
                     glue_step(&g.spec, this_box, &mut cur_glue, &mut cur_g);

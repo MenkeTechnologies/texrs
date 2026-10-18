@@ -684,6 +684,49 @@ impl Stomach {
         self.tail_append(Node::Glue(node));
     }
 
+    /// `new_character(f,c)` (§582): the character's node, or `None` with
+    /// §581's warning when the font has no such character.
+    fn new_character(&mut self, f: usize, c: char) -> Option<CharNode> {
+        let font = self.font(f);
+        match font.metrics(c) {
+            Some(m) => Some(font.char_node(f, c, m)),
+            None => {
+                self.char_warning(f, c);
+                None
+            }
+        }
+    }
+
+    /// `make_accent` (§1123-§1125): accent `a` from font `f`, over character
+    /// `c` from font `g` (the font after §1123's `do_assignments`), or alone
+    /// when there is no character to put it over.
+    pub fn make_accent(&mut self, f: usize, a: char, g: usize, c: Option<char>, tol: crate::pack::Tolerances) {
+        let Some(p) = self.new_character(f, a) else {
+            return;
+        };
+        let x = self.font(f).param(5);
+        let s = self.font(f).param(1) as f64 / 65536.0;
+        let a_width = p.width;
+        let mut p = Node::Char(p);
+        if let Some(q) = c.and_then(|c| self.new_character(g, c)) {
+            // §1125.
+            let t = self.font(g).param(1) as f64 / 65536.0;
+            let (w, h) = (q.width, q.height);
+            if h != x {
+                let mut b = crate::pack::hpack(vec![p], crate::pack::NATURAL, tol, None).node;
+                b.shift_amount = x - h;
+                p = Node::Box(b);
+            }
+            let delta = ((w - a_width) as f64 / 2.0 + h as f64 * t - x as f64 * s).round() as Scaled;
+            self.tail_append(Node::AccKern(delta));
+            self.tail_append(p);
+            self.tail_append(Node::AccKern(-a_width - delta));
+            p = Node::Char(q);
+        }
+        self.tail_append(p);
+        self.cur_mut().space_factor = 1000;
+    }
+
     /// `\/` (§1113): the italic correction of the character at the tail.
     pub fn italic_correction(&mut self) {
         // §1112: `mmode+ital_corr: tail_append(new_kern(0))`.

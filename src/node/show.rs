@@ -253,6 +253,12 @@ impl Display<'_> {
                 }
                 out.push_str(&print_scaled(*width));
             }
+            Node::AccKern(width) => {
+                self.esc(out, "kern");
+                out.push(' ');
+                out.push_str(&print_scaled(*width));
+                out.push_str(" (for accent)");
+            }
             // §192.
             Node::Math(width) | Node::MathOff(width) => {
                 let side = match p {

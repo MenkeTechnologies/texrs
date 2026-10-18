@@ -229,11 +229,12 @@ struct Register {
     level: usize,
 }
 
-/// A save-stack entry for a box register (§268's `restore_old_value`).
+/// A save-stack entry (§268's `restore_old_value`): a box register, or
+/// `\parshape` with the level it was assigned at.
 #[derive(Clone, Debug)]
-struct Saved {
-    n: u16,
-    old: Register,
+enum Saved {
+    Box { n: u16, old: Register },
+    ParShape { old: Vec<(Scaled, Scaled)>, level: usize },
 }
 
 /// The stomach's state for one run.
@@ -290,6 +291,10 @@ pub struct Stomach {
     /// `\hoffset` and `\voffset`, which §640 adds to every page.
     pub h_offset: Scaled,
     pub v_offset: Scaled,
+    /// `par_shape_ptr` (§230): `\parshape`'s (indent, width) pairs, and the
+    /// level they were assigned at.
+    pub par_shape: Vec<(Scaled, Scaled)>,
+    par_shape_level: usize,
     /// The field of the tail noad `scan_math` fills next (§1151).
     pub math_target: Option<math::Target>,
     /// `just_box` (§814): the last line `post_line_break` made, which §1146
@@ -339,6 +344,8 @@ impl Stomach {
             pack_begin_line: 0,
             h_offset: 0,
             v_offset: 0,
+            par_shape: Vec::new(),
+            par_shape_level: 1,
             math_target: None,
             just_box: None,
             slot_writes: Vec::new(),
@@ -423,10 +430,7 @@ impl Stomach {
         // this level already.
         if r.level != level {
             if let Some(frame) = self.saves.last_mut() {
-                frame.push(Saved {
-                    n,
-                    old: r.clone(),
-                });
+                frame.push(Saved::Box { n, old: r.clone() });
             }
         }
         *r = Register { value, level };
@@ -445,12 +449,42 @@ impl Stomach {
             return;
         };
         for s in frame.into_iter().rev() {
-            let r = &mut self.registers[s.n as usize];
-            if r.level != 1 {
-                *r = s.old;
+            match s {
+                Saved::Box { n, old } => {
+                    let r = &mut self.registers[n as usize];
+                    if r.level != 1 {
+                        *r = old;
+                    }
+                    self.dirty.push(n);
+                }
+                Saved::ParShape { old, level } => {
+                    if self.par_shape_level != 1 {
+                        self.par_shape = old;
+                        self.par_shape_level = level;
+                    }
+                }
             }
-            self.dirty.push(s.n);
         }
+    }
+
+    /// `\parshape` (§1248): `eq_define` or `geq_define` of `par_shape_loc`.
+    pub fn set_par_shape(&mut self, shape: Vec<(Scaled, Scaled)>, global: bool) {
+        let level = self.saves.len() + 1;
+        if global {
+            self.par_shape = shape;
+            self.par_shape_level = 1;
+            return;
+        }
+        if self.par_shape_level != level {
+            if let Some(frame) = self.saves.last_mut() {
+                frame.push(Saved::ParShape {
+                    old: std::mem::take(&mut self.par_shape),
+                    level: self.par_shape_level,
+                });
+            }
+        }
+        self.par_shape = shape;
+        self.par_shape_level = level;
     }
 
     /// The registers changed since the last [`Mirror`] pass.

@@ -371,6 +371,10 @@ pub enum Node {
         width: Scaled,
         explicit: bool,
     },
+    /// A kern of subtype `acc_kern` (§155), one of the two `make_accent`
+    /// puts around an accent (§1125): a kern that is neither a breakpoint nor
+    /// removable, and that ends a word for the hyphenation pass.
+    AccKern(Scaled),
     Penalty(i64),
 }
 
@@ -391,7 +395,7 @@ impl Node {
             Node::Whatsit(_) => 8,
             Node::Math(_) | Node::MathOff(_) => 9,
             Node::Glue(_) => 10,
-            Node::Kern { .. } => 11,
+            Node::Kern { .. } | Node::AccKern(_) => 11,
             Node::Penalty(_) => 12,
             // A char node has no `type` field at all in `tex.web` -- the
             // pointer itself says so (`is_char_node`). Everything that asks

@@ -217,6 +217,11 @@ pub enum ListOp<N = Num> {
     ResumeAfterDisplay,
     /// `\mkern` (§1061 with `mu_glue`).
     MuKern(N),
+    /// `\parshape` (§1248): the (indent, width) pairs, flattened.
+    ParShape { global: bool, dims: Vec<N> },
+    /// `make_accent` (§1123): character `accent` of font `f`, over character
+    /// `over` (-1 for none) of font `g`.
+    Accent { f: u16, accent: u32, g: u16, over: i64 },
 }
 
 /// One argument as the compiler pushes it.
@@ -340,6 +345,8 @@ impl<N> ListOp<N> {
             ListOp::EndMath(_) => 57,
             ListOp::ResumeAfterDisplay => 58,
             ListOp::MuKern(_) => 59,
+            ListOp::Accent { .. } => 60,
+            ListOp::ParShape { .. } => 61,
         }
     }
 
@@ -445,6 +452,18 @@ impl<N> ListOp<N> {
             ListOp::LeftRight { right, delim } => {
                 f(Arg::Int(i64::from(*right)));
                 f(Arg::Num(delim));
+            }
+            ListOp::Accent { f: font, accent, g, over } => {
+                f(Arg::Int(i64::from(*font)));
+                f(Arg::Int(i64::from(*accent)));
+                f(Arg::Int(i64::from(*g)));
+                f(Arg::Int(*over));
+            }
+            ListOp::ParShape { global, dims } => {
+                f(Arg::Int(i64::from(*global)));
+                for d in dims {
+                    f(Arg::Num(d));
+                }
             }
             ListOp::EndMath(fams) => {
                 for &g in fams {
@@ -812,6 +831,20 @@ impl ListOp<i64> {
             }
             58 => ListOp::ResumeAfterDisplay,
             59 => ListOp::MuKern(r.int()),
+            61 => {
+                let global = r.int() == 1;
+                let mut dims = Vec::new();
+                while r.rest() > 0 {
+                    dims.push(r.int());
+                }
+                ListOp::ParShape { global, dims }
+            }
+            60 => ListOp::Accent {
+                f: r.u16(),
+                accent: u32::try_from(r.int()).unwrap_or(0),
+                g: r.u16(),
+                over: r.int(),
+            },
             _ => return None,
         })
     }

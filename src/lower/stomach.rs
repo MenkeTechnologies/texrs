@@ -96,6 +96,9 @@ pub(super) struct State {
     /// Set by the command that ends the block being lowered without a `}`:
     /// a formula's closing `$` (§1193) and `\right` (§1191).
     pub(super) end_block: bool,
+    /// Whether a `\parshape` has been given, after which §1070's
+    /// `normal_paragraph` has one to reset.
+    par_shape_given: bool,
 }
 
 impl Default for State {
@@ -113,6 +116,7 @@ impl Default for State {
             page_has_content: false,
             lowering_output: false,
             end_block: false,
+            par_shape_given: false,
         }
     }
 }
@@ -639,6 +643,20 @@ impl Lowerer {
                 self.st_after_assignment(lx);
             }
             "showbox" => self.st_show_box(lx, out)?,
+            // §1248's `set_shape`.
+            "parshape" => {
+                let global = self.eng.take_global_prefix();
+                self.eng.skip_equals_file(lx)?;
+                let n = self.eng.scan_number_file(lx)?;
+                let mut dims = Vec::new();
+                for _ in 0..n.max(0) {
+                    dims.push(self.dimen_number(lx, false)?);
+                    dims.push(self.dimen_number(lx, false)?);
+                }
+                self.st.par_shape_given = true;
+                self.st_emit(out, ListOp::ParShape { global, dims })?;
+                self.st_after_assignment(lx);
+            }
             // §960 and §934: the text between the braces, for the program's
             // hyphenation pass. §961 reads it with `get_x_token`; texrs reads
             // the characters, which is what a pattern file holds.
@@ -859,6 +877,7 @@ impl Lowerer {
                     self.st.no_boundary = true;
                 }
             }
+            "accent" if managed && mode.horizontal() => self.st_make_accent(lx, out)?,
             "char" if managed && mode.horizontal() => {
                 let Num::Literal(code) = self.number(lx)? else {
                     return Err(TexError(
@@ -950,6 +969,12 @@ impl Lowerer {
         }
         if let Some(slot) = crate::params::register_slot("hangindent") {
             out.push(Cmd::SetCount(slot, Num::Literal(0)));
+        }
+        if self.st.par_shape_given {
+            out.push(Cmd::List(ListOp::ParShape {
+                global: false,
+                dims: Vec::new(),
+            }));
         }
     }
 
@@ -1406,6 +1431,7 @@ fn assigns_box_locally(cmds: &[Cmd]) -> bool {
         Cmd::List(ListOp::BeginBox { context, .. }) | Cmd::List(ListOp::Fetch { context, .. }) => {
             matches!(context, Context::SetBox { global: false, .. })
         }
+        Cmd::List(ListOp::ParShape { global: false, .. }) => true,
         Cmd::Group { body, .. } | Cmd::Loop { body, .. } | Cmd::Color { body, .. } => {
             assigns_box_locally(body)
         }
@@ -1644,5 +1670,66 @@ impl Lowerer {
             }
             Err((e, _)) => Err(e),
         }
+    }
+}
+
+impl Lowerer {
+    /// `make_accent` (§1123-§1124) as the lowerer reads it: the accent's
+    /// code, §1270's `do_assignments`, and the character it goes over.
+    ///
+    /// The assignments `do_assignments` carries out here are font selections
+    /// and integer parameters, which is what an accent is written with
+    /// (`\accent"7F\it e` is `\fam\itfam\tenit`); any other command ends
+    /// the scan and is read again after the accent.
+    fn st_make_accent(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        let Num::Literal(code) = self.number(lx)? else {
+            return Err(TexError("\\accent needs a number known while lowering".into()));
+        };
+        let accent = u32::try_from(code).unwrap_or(0);
+        let f = self.eng.cur_font;
+        let next = loop {
+            let Some((t, p)) = self.st_next_non_blank(lx)? else {
+                break None;
+            };
+            if let Token::Cs(n) = t {
+                let font = match self.eng.meanings.get(&n) {
+                    Some(Meaning::Font(g)) => Some(*g),
+                    _ if p.unwrap_or(n).name() == "nullfont" => Some(0),
+                    _ => None,
+                };
+                if let Some(g) = font {
+                    let global = self.eng.take_global_prefix();
+                    self.eng.select_font(g, global);
+                    continue;
+                }
+                if let Some(i) = self.eng.intpar_cs(n) {
+                    self.eng.compile_time_intpar(lx, i)?;
+                    continue;
+                }
+            }
+            break Some((self.st_implicit(t), p));
+        };
+        let g = self.eng.cur_font;
+        // §1124: a character to put the accent over, or none.
+        let over: i64 = match next {
+            Some((Token::Char(c, Cat::Letter | Cat::Other), _)) => i64::from(u32::from(c)),
+            Some((Token::Cs(n), p)) => match self.eng.meanings.get(&n) {
+                Some(Meaning::CharDef(code)) => *code,
+                _ if p.unwrap_or(n).name() == "char" => match self.number(lx)? {
+                    Num::Literal(v) => v,
+                    _ => return Err(TexError("\\char needs a number known while lowering".into())),
+                },
+                _ => {
+                    lx.push_back(&[Token::Cs(n)]);
+                    -1
+                }
+            },
+            Some((t, _)) => {
+                lx.push_back(&[t]);
+                -1
+            }
+            None => -1,
+        };
+        self.st_emit(out, ListOp::Accent { f, accent, g, over })
     }
 }

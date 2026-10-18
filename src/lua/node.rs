@@ -1304,6 +1304,7 @@ fn to_engine(arena: &Arena, at: usize) -> mlua::Result<Vec<ENode>> {
             },
         }),
         // tex.web §155: subtype `explicit` is 1.
+        KERN if sub == 2 => ENode::AccKern(cell.int("kern")),
         KERN => ENode::Kern {
             width: cell.int("kern"),
             explicit: sub == 1,
@@ -1487,6 +1488,12 @@ fn one_from_engine(arena: &mut Arena, n: &ENode) -> mlua::Result<usize> {
         }
         ENode::Kern { width, explicit } => {
             let at = arena.make(KERN, Some(i64::from(*explicit)));
+            arena.cell_mut(at)?.set("kern", Some(FV::I(*width)));
+            at
+        }
+        // LuaTeX's kern subtype 2, `accentkern`.
+        ENode::AccKern(width) => {
+            let at = arena.make(KERN, Some(2));
             arena.cell_mut(at)?.set("kern", Some(FV::I(*width)));
             at
         }

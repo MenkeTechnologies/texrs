@@ -198,9 +198,14 @@ impl Stomach {
     }
 
     /// §1149: the length and shift of line `prev_graf+2`, which a display is
-    /// treated as, from `\hangindent` and `\hangafter` (texrs keeps no
-    /// `\parshape`).
+    /// treated as, from `\parshape`, or `\hangindent` and `\hangafter`.
     fn display_line(&self, e: &dyn Eqtb) -> (Scaled, Scaled) {
+        if let Some(&last) = self.par_shape.last() {
+            let n = self.par_shape.len() as i64;
+            let k = (self.cur().prev_graf + 2).min(n).max(1) as usize;
+            let (indent, width) = self.par_shape.get(k - 1).copied().unwrap_or(last);
+            return (width, indent);
+        }
         let hsize = dimen_par(e, "hsize");
         let hang_indent = dimen_par(e, "hangindent");
         let hang_after = self.int_par("hangafter");

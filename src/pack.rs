@@ -245,7 +245,10 @@ pub fn hpack(
                 shrink.add(g.spec.shrink, g.spec.shrink_order);
             }
             // §651: a kern and a math node contribute width and nothing else.
-            Node::Kern { width, .. } | Node::Math(width) | Node::MathOff(width) => x += *width,
+            Node::Kern { width, .. }
+            | Node::AccKern(width)
+            | Node::Math(width)
+            | Node::MathOff(width) => x += *width,
             // §651's `othercases do_nothing`.
             Node::Disc(_) | Node::Whatsit(_) | Node::Penalty(_) => {}
             // §655: kept only when there is no adjustment list.

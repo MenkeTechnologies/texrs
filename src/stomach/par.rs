@@ -96,11 +96,14 @@ impl Stomach {
         let hsize = dimen_par(e, "hsize");
         let hang_indent = dimen_par(e, "hangindent");
         let hang_after = self.int_par("hangafter");
-        // §848: `\parshape` is not a register texrs keeps yet, so the shape is
-        // `\hangindent`'s or `\hsize`'s.
-        let shape = match hang_indent == 0 {
-            true => crate::postline::LineShape::fixed(hsize),
-            false => crate::postline::LineShape::hanging(hsize, hang_indent, hang_after),
+        // §848: `\parshape`, else `\hangindent` and `\hangafter`, else
+        // `\hsize`.
+        let shape = if !self.par_shape.is_empty() {
+            crate::postline::LineShape::par_shape(hsize, self.par_shape.clone())
+        } else if hang_indent == 0 {
+            crate::postline::LineShape::fixed(hsize)
+        } else {
+            crate::postline::LineShape::hanging(hsize, hang_indent, hang_after)
         };
         let left_skip = glue_par(e, "leftskip");
         let right_skip = glue_par(e, "rightskip");

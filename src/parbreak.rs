@@ -294,6 +294,7 @@ impl Search<'_> {
                     true => self.kern_break(cur_p, auto_breaking, *width),
                     false => self.active_width[0] += width,
                 },
+                Node::AccKern(width) => self.active_width[0] += width,
                 Node::Ligature(..) => self.active_width[0] += node_width(&list[cur_p]),
                 Node::Disc(d) => {
                     // §869.
