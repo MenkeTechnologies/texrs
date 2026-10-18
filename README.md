@@ -407,7 +407,7 @@ than none.
   state is built the way LuaTeX's `luainterpreter()` builds it: LPeg,
   slnunicode (`unicode`), LuaFileSystem and `bit32` compiled from the C sources
   LuaTeX itself ships (`vendor/luatex/`), `zlib` and `gzip` over zlib, `md5`
-  and `sha2`, the `string` and `os` extensions, the compatibility functions
+  and `sha2`, `fio` and `sio`, the `string` and `os` extensions, the compatibility functions
   TeX Live's Lua is built with (`module`, `package.seeall`, `math.pow`,
   `__ipairs`), `kpse`, `lua` (bytecode registers, `\luabytecode`), `callback`
   (LuaTeX's registry and slot numbers) and `status` answering for the LuaTeX
@@ -654,11 +654,10 @@ reach `tex.box[n]`, `tex.getlist` or the current list (`node.write`,
 is how Lua reaches the stomach's lists, and of the stomach's hook points only
 `hpack_filter` is called yet. `node.ligaturing`, `node.kerning`,
 `node.hyphenating` and `node.mlist_to_hlist` are not ported. Of LuaTeX's other
-libraries, `lang`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and `socket` are
-not there, no `\font` goes through
+libraries, `lang`, `vf`, `img`, `mplib`, `ffi` and `socket` are not there, no `\font` goes through
 `define_font` yet, and a font defined from Lua is not yet one the stomach sets
 type in. The shell is disabled (`os.execute`, `io.popen` and
-`kpse.check_permission` answer as `luatex -no-shell-escape` does), and an error
+`kpse.check_permission` answer as `luatex -no-shell-escape` does), and a file a chunk opens, removes or makes goes through kpathsea's `openin_any`/`openout_any` checks as in luatex, and an error
 a Rust library function raises is a userdata that prints, concatenates and
 matches like the string luatex's C would raise, but is not `type` string. See
 BUGS.md for each.

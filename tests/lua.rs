@@ -1822,3 +1822,31 @@ fn iftex_loads_through_its_own_lua_and_says_luatex() {
     assert_eq!(oracle, "[L]", "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn files_from_lua_go_through_kpathseas_openin_and_openout_checks() {
+    // luatex-core.lua's policy: with shell escape not fully on, `io.open`
+    // for writing, `os.remove` and `lfs.mkdir` are refused outside the
+    // working directory and for dot files (`openout_any = p`), reading is not
+    // (`openin_any = a`), and `io.lines` reads with `fio.readline`, which ends
+    // a line at `\r\n` too.
+    let body = shows(
+        "local r = {} local function add(...) local t = table.pack(...) for i = 1, t.n do \
+         r[#r + 1] = tostring(t[i]) end end \
+         add(io.open('/etc/hosts') ~= nil, io.open('/tmp/texrs-policy-probe.txt', 'w') ~= nil, \
+         io.open('.hidden-probe', 'w') ~= nil) \
+         local f = io.open('probe.txt', 'w') add(f ~= nil) f:write('a' .. string.char(13, 10) .. 'b') f:close() \
+         for l in io.lines('probe.txt') do add(l) end \
+         add(os.remove('/tmp/texrs-policy-probe-none')) add(lfs.mkdir('/tmp/texrs-policy-probe-dir')) \
+         os.remove('probe.txt') local out = table.concat(r, ' ') ",
+    );
+    let want = "[true false false true a b nil LuaTeX: operation not permitted -1 \
+                nil LuaTeX: operation not permitted -1]";
+    let Some(lua) = luatex() else {
+        eprintln!("skipping: the probe writes a file, which only the two-engine run sandboxes");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

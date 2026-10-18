@@ -103,6 +103,7 @@ use std::rc::Rc;
 pub mod callback;
 mod ctx;
 mod extraprimitives;
+mod fio;
 pub mod font;
 mod kpse;
 mod libs;

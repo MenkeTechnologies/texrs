@@ -428,19 +428,18 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   luatex keeps it; the lowerer's record of global writes, which decides what a
   group restores, is not reachable from a chunk. An internal integer parameter
   set with `"global"` goes through the engine's own assignment and is global.
-- **Missing libraries:** `lang`, `vf`, `img`, `mplib`, `pdfscanner`, `fio`,
-  `sio`, `ffi`, `socket`/`mime`, `zip`. `pdfe` is there with each function
-  refusing by name (pplib is not ported); the luaotfload font loader takes
-  `pdfe.new` at load time. lualibs and the luaotfload font loader test for
-  `fio` and `sio` and use their own Lua readers without them.
+- **Missing libraries:** `lang`, `vf`, `img`, `mplib`, `pdfscanner`, `ffi`,
+  `socket`/`mime`, `zip`. `pdfe` is there with each function refusing by
+  name (pplib is not ported); the luaotfload font loader takes `pdfe.new` at
+  load time.
 - **No shell.** `status.shell_escape` is 0 and `os.execute`, `os.exec`,
   `os.spawn`, `io.popen`/`os.kpsepopen` and `kpse.check_permission` refuse with
   luatex's own messages; luatex in TeX Live's default configuration is
   restricted (2) and runs the commands `shell_escape_commands` lists.
-- **`luatex-core.lua`'s file policy is not applied.** `io.open`, `io.lines`
-  and the `lfs` functions are Lua's own, not wrapped in
-  `kpse.in_name_ok_silent_extended`/`out_name_ok_silent_extended`; the two
-  checks themselves are ported (`openout_any`'s paranoia, measured rules).
+- **`luatex-core.lua` is not run verbatim:** its statements are, in its
+  order, so an error raised from one names `luatex-core:<line>` where
+  luatex names `[string "-- luatex-core security and io overloads ..."]` and
+  that file's line.
 - **`texio` to the log alone is dropped:** texrs writes no transcript, so a
   `"log"` line goes nowhere rather than to the terminal. `write_nl` always
   writes its line end, where `print_nl` omits it at the start of a line.

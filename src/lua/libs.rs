@@ -93,6 +93,8 @@ pub(super) fn new_state() -> mlua::Result<Lua> {
         let f = unsafe { lua.create_c_function(opener)? };
         f.call::<()>(())?;
     }
+    // `luaopen_fio(L)`, straight after them.
+    super::fio::open(&lua)?;
     Ok(lua)
 }
 
@@ -803,18 +805,20 @@ fn open_oslibext(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-/// `luatex-core.lua`, the part that is not about permissions.
+/// `luatex-core.lua`.
 ///
 /// Run after the TeX libraries are in place, as `load_luatex_core_lua` is
-/// (luainit.c), because it reads `status`. The policy half -- `io.open`
-/// and `lfs` wrapped in `kpse.in_name_ok_silent_extended` checks -- is in
-/// `super::kpse`, which owns those checks.
+/// (luainit.c), because it reads `status`, `kpse` and `fio`. With shell
+/// escape not fully on, `io.open`, `io.lines`, `os.rename`, `os.remove` and
+/// the `lfs` functions that name a file go through kpathsea's
+/// `openin_any`/`openout_any` checks (`kpse.in_name_ok_silent_extended`),
+/// and a file a chunk opens is recorded.
 pub(super) fn core(lua: &Lua) -> mlua::Result<()> {
     lua.load(CORE).set_name("=luatex-core").exec()
 }
 
-/// The statements of `luatex-core.lua` (LuaTeX 1.24, LUATEXCOREVERSION 1.255)
-/// that fill gaps, in its order. The `bit32` fallbacks are not here: `bit32`
+/// The statements of `luatex-core.lua` (LuaTeX 1.24, LUATEXCOREVERSION 1.255),
+/// in its order. The `bit32` fallbacks are not here: `bit32`
 /// is always the C library in this state.
 const CORE: &str = r#"
 LUATEXCOREVERSION = 1.255
@@ -827,6 +831,121 @@ function lfs.mkdirp(path)
         r1, r2, r3 = lfs.mkdir(full)
     end
     return r1, r2, r3
+end
+-- kpseused == 1 and status.shell_escape ~= 1: files through kpathsea's
+-- openin_any/openout_any checks.
+if status.shell_escape ~= 1 then
+    local type, find = type, string.find
+    local mt = getmetatable(io.stderr)
+    local in_ok = kpse.in_name_ok_silent_extended
+    local out_ok = kpse.out_name_ok_silent_extended
+    local record_in, record_out = kpse.record_input_file, kpse.record_output_file
+    local io_open, io_lines = io.open, io.lines
+    local fio_readline = fio.readline
+    io.saved_lines = io_lines
+    mt.saved_lines = mt.lines
+    local os_rename, os_remove = os.rename, os.remove
+    local lfs_attributes, lfs_chdir, lfs_lock_dir = lfs.attributes, lfs.chdir, lfs.lock_dir
+    local lfs_dir, lfs_link, lfs_mkdir = lfs.dir, lfs.link, lfs.mkdir
+    local lfs_rmdir, lfs_symlinkattributes, lfs_touch = lfs.rmdir, lfs.symlinkattributes, lfs.touch
+    local EPERM, EPERM_MSG = -1, "LuaTeX: operation not permitted"
+    local error = error
+    local function both(name) return in_ok(name) and out_ok(name) end
+    io.open = function(name, how)
+        if not how then how = 'r' end
+        local check
+        if how == 'r' or how == 'rb' or how == '' then
+            check = in_ok(name)
+        else
+            check = out_ok(name)
+        end
+        local f = nil
+        if check then
+            f = io_open(name, how)
+            if f then
+                if type(how) == 'string' and find(how, 'w') then
+                    record_out(name, 'w')
+                else
+                    record_in(name, 'r')
+                end
+            end
+        end
+        return f
+    end
+    io.lines = function(name, how)
+        if type(name) == "string" then
+            local f = in_ok(name) and io_open(name, how or 'r')
+            if f then
+                return function()
+                    local l = fio_readline(f)
+                    if not l then f:close() end
+                    return l
+                end
+            else
+                error("patched 'io.lines' can't open '" .. name .. "'")
+            end
+        else
+            return io_lines()
+        end
+    end
+    mt.lines = function(f) return function() return fio_readline(f) end end
+    io.popen = os.kpsepopen
+    os.rename = function(old, new)
+        if in_ok(old) and out_ok(new) then return os_rename(old, new) end
+        return nil, EPERM_MSG, EPERM
+    end
+    os.remove = function(name)
+        if in_ok(name) and out_ok(name) then return os_remove(name) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.attributes = function(path, opt)
+        if in_ok(path) then return lfs_attributes(path, opt) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.chdir = function(name)
+        if both(name) then return lfs_chdir(name) end
+        return nil, EPERM_MSG
+    end
+    lfs.lock_dir = function(name, stale)
+        if both(name) then return lfs_lock_dir(name, stale) end
+        return nil, EPERM_MSG
+    end
+    lfs.dir = function(name)
+        if in_ok(name) then return lfs_dir(name) end
+        error(EPERM_MSG)
+    end
+    lfs.link = function(old, new, symlink)
+        if both(new) and both(old) then return lfs_link(old, new, symlink) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.mkdir = function(name)
+        if both(name) then return lfs_mkdir(name) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.mkdirp = function(name)
+        if both(name) then
+            local full = ""
+            local r1, r2, r3
+            for sub in gmatch(name, "(/*[^\\/]+)") do
+                full = full .. sub
+                r1, r2, r3 = lfs_mkdir(full)
+            end
+            return r1, r2, r3
+        end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.rmdir = function(name)
+        if both(name) then return lfs_rmdir(name) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.symlinkattributes = function(path, aname)
+        if in_ok(path) then return lfs_symlinkattributes(path, aname) end
+        return nil, EPERM_MSG, EPERM
+    end
+    lfs.touch = function(name, atime, mtime)
+        if both(name) then return lfs_touch(name, atime, mtime) end
+        return nil, EPERM_MSG
+    end
 end
 -- The debug library is enabled only when shell escape permits everything
 -- (luainit.c), so here it is cut down to traceback.
