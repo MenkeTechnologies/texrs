@@ -399,13 +399,19 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   answered back, and object numbers are handed out as luatex's backend hands
   them out (an immediate raw object goes into an object stream above PDF 1.4,
   which takes the next number); but nothing a chunk sets is written into the
-  file, the numbers are not the ones the writer gives its own objects, and the
-  variables are this table's, not `\pdfvariable`'s. `pdf.print`, the
+  file, and the numbers are not the ones the writer gives its own objects. The
+  variables are `\pdfvariable`'s, a dimension one assigned from Lua inside
+  a group restored at its end (see the next item). `pdf.print`, the
   font/page/xform name and number questions, `includechar`/`includefont`/
   `includeimage` and `registerannot` refuse; the position functions answer 0
   and the matrix the identity, as luatex does before shipout.
   `pdf.getcreationdate` is the writer's `/CreationDate`, in UT where luatex
   writes local time.
+- **A `"global"` register assignment from Lua is local:**
+  `tex.setcount("global", 1, 7)` inside a group is undone at its end, where
+  luatex keeps it; the lowerer's record of global writes, which decides what a
+  group restores, is not reachable from a chunk. An internal integer parameter
+  set with `"global"` goes through the engine's own assignment and is global.
 - **Missing libraries:** `lang`, `vf`, `img`, `mplib`, `pdfscanner`, `fio`,
   `sio`, `ffi`, `socket`/`mime`, `zip`. `pdfe` is there with each function
   refusing by name (pplib is not ported); the luaotfload font loader takes

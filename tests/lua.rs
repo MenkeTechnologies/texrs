@@ -1592,3 +1592,25 @@ fn a_parameter_never_assigned_reads_its_initial_value_and_a_zero_reads_zero() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn the_pdf_variables_are_pdfvariables_entries() {
+    // `pdf.setcompresslevel` and its siblings store into the entry
+    // `\pdfvariable` names (`set_tex_extension_count_register`, a plain store
+    // that a group does not undo), and `pdf.get*` reads it, so `\the`, Lua and
+    // the writer agree on one value.
+    let body = "\\pdfvariable compresslevel=4 \
+        {\\directlua{pdf.setobjcompresslevel(3) pdf.setcompresslevel(12)}}\
+        \\directlua{tex.sprint(string.char(92) .. 'message{[' .. pdf.getcompresslevel() .. ' ' \
+        .. pdf.getobjcompresslevel() .. ']}')}\
+        \\message{[\\the\\pdfvariable compresslevel/\\the\\pdfvariable objcompresslevel]}";
+    let want = "[9 3] [9/3]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

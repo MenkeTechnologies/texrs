@@ -9,16 +9,16 @@
 //!   that is not a string is ignored, `l_set_pdf_value`), and read back by the
 //!   matching getter.
 //! - **The backend's variables** -- `compresslevel`, `objcompresslevel`,
-//!   `decimaldigits`, the PDF version and the rest of `\pdfvariable` -- which
-//!   start at the values `crate::pdfdoc::Variables` gives the writer, LuaTeX's
-//!   own format's (`pdftexconfig.tex`).
+//!   `decimaldigits`, the PDF version and the rest -- which are `\pdfvariable`'s
+//!   entries (`crate::backend`), read and stored as luatex reads and stores
+//!   them, so the writer, `\the\pdfvariable` and Lua agree.
 //! - **Objects** -- `pdf.obj`, `pdf.immediateobj`, `pdf.reserveobj` -- which
 //!   are numbered and their contents kept, with luatex's argument checking.
 //!
-//! [`state`] and [`variables`] are what the writer would read. It does not read
-//! them yet -- the dictionaries, objects and variables a chunk sets are kept
-//! and answered back, and not yet written into the file (BUGS.md); the object
-//! numbers are this table's own, counted from 1 as a fresh luatex counts them.
+//! [`state`] is what the writer would read for the other two. It does not read
+//! it yet -- the dictionaries and objects a chunk sets are kept and answered
+//! back, and not yet written into the file (BUGS.md); the object numbers are
+//! this table's own, counted from 1 as a fresh luatex counts them.
 //!
 //! What has no meaning before shipout returns what luatex returns then: the
 //! position functions answer 0, the matrix is the identity.
@@ -45,7 +45,6 @@ pub struct State {
     /// `pageattributes`, `pagesattributes`, `xformresources`,
     /// `xformattributes`, `trailerid`.
     pub strings: BTreeMap<&'static str, Vec<u8>>,
-    pub variables: BTreeMap<&'static str, i64>,
     /// Every object number handed out, from 1: `obj_tab`'s type and what
     /// was put in it.
     pub table: Vec<Slot>,
@@ -84,40 +83,13 @@ const OS_MAX_OBJS: usize = 100;
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// The chunk's view of the registers, for the dimension variables.
+    static BRIDGE: RefCell<Option<Rc<RefCell<Bridge>>>> = const { RefCell::new(None) };
 }
 
 /// What the backend has been told, for the writer.
 pub fn state() -> State {
     STATE.with(|s| s.borrow().clone())
-}
-
-/// The variables as the writer takes them, the document's settings over the
-/// format's.
-pub fn variables() -> crate::pdfdoc::Variables {
-    let mut v = crate::pdfdoc::Variables::default();
-    STATE.with(|s| {
-        let s = s.borrow();
-        let get = |k: &str| s.variables.get(k).copied();
-        if let Some(n) = get("compresslevel") {
-            v.compress_level = n.clamp(0, 9) as u32;
-        }
-        if let Some(n) = get("objcompresslevel") {
-            v.objcompress_level = n.clamp(0, 3) as u32;
-        }
-        if let Some(n) = get("decimaldigits") {
-            v.decimal_digits = n.clamp(0, 4) as u32;
-        }
-        if let Some(n) = get("gentounicode") {
-            v.gen_tounicode = n > 0;
-        }
-        if let Some(n) = get("majorversion") {
-            v.major_version = n.max(1) as u32;
-        }
-        if let Some(n) = get("minorversion") {
-            v.minor_version = n.max(0) as u32;
-        }
-    });
-    v
 }
 
 pub(super) fn reset() {
@@ -137,25 +109,6 @@ const KEYS: &[&str] = &[
     "xformattributes",
     "trailerid",
 ];
-
-/// The variables and the value each starts at: the format's for the five the
-/// writer reads (`crate::pdfdoc::Variables::default`), luatex's own for the
-/// rest (`pdftexconfig.tex`: pk resolution 600, the origin one true inch,
-/// 4736286sp; every other one 0).
-fn initial(name: &str) -> i64 {
-    let v = crate::pdfdoc::Variables::default();
-    match name {
-        "compresslevel" => i64::from(v.compress_level),
-        "objcompresslevel" => i64::from(v.objcompress_level),
-        "decimaldigits" => i64::from(v.decimal_digits),
-        "gentounicode" => i64::from(v.gen_tounicode),
-        "majorversion" => i64::from(v.major_version),
-        "minorversion" => i64::from(v.minor_version),
-        "pkresolution" => 600,
-        "horigin" | "vorigin" => 4_736_286,
-        _ => 0,
-    }
-}
 
 const VARIABLES: &[&str] = &[
     "compresslevel",
@@ -181,14 +134,63 @@ const VARIABLES: &[&str] = &[
     "ptexprefix",
 ];
 
-fn var(name: &str) -> i64 {
-    STATE
-        .with(|s| s.borrow().variables.get(name).copied())
-        .unwrap_or_else(|| initial(name))
+/// The `\pdfvariable` key a getter or setter reads: `getomitinfo` is
+/// `pdf_omit_infodict`, the rest are spelled as their key.
+fn key(name: &str) -> &str {
+    match name {
+        "omitinfo" => "omitinfodict",
+        other => other,
+    }
 }
 
-fn set_var(name: &'static str, v: i64) {
-    STATE.with(|s| s.borrow_mut().variables.insert(name, v));
+/// A backend variable as luatex reads it, the eqtb entry `\pdfvariable`
+/// names (`get_tex_extension_count_register` and its dimension twin): what
+/// the document assigned, by `\pdfvariable` or from Lua, else the value the
+/// format leaves it at (`crate::backend::format_default`), which is what the
+/// writer reads too. A dimension assigned zero cannot be told from one never
+/// assigned and reads the format's value.
+fn var(name: &str) -> i64 {
+    let key = key(name);
+    let parameter = crate::backend::parameter(key);
+    if let Some(i) = crate::intpar::index(&parameter) {
+        if ctx::depth() > 0 {
+            if let Ok(Some(v)) = ctx::with("pdf", |eng, _| Ok(eng.intpars.assigned(i))) {
+                return v;
+            }
+        }
+        return crate::backend::format_default(key);
+    }
+    if let Some(slot) = crate::params::register_slot(&parameter) {
+        let v = BRIDGE.with(|b| b.borrow().as_ref().map(|b| slot_value(&b.borrow(), slot)));
+        if let Some(v) = v.filter(|v| *v != 0) {
+            return v;
+        }
+    }
+    crate::backend::format_default(key)
+}
+
+/// `set_tex_extension_count_register` and its dimension twin: a plain store
+/// into the entry, not saved for the enclosing group (`int_par(...) = d`).
+fn set_var(name: &str, v: i64) {
+    let parameter = crate::backend::parameter(key(name));
+    if let Some(i) = crate::intpar::index(&parameter) {
+        if ctx::depth() > 0 {
+            let _ = ctx::with("pdf", |eng, _| {
+                eng.store_intpar(i, v);
+                Ok(())
+            });
+        }
+        return;
+    }
+    if let Some(slot) = crate::params::register_slot(&parameter) {
+        BRIDGE.with(|b| {
+            if let Some(b) = b.borrow().as_ref() {
+                let mut b = b.borrow_mut();
+                b.counts.insert(slot, v);
+                b.counts_written.insert(slot, v);
+            }
+        });
+    }
 }
 
 fn bytes(v: &Value) -> mlua::Result<Option<Vec<u8>>> {
@@ -563,8 +565,9 @@ fn orig_obj(args: &Variadic<Value>) -> mlua::Result<i64> {
 }
 
 /// The `pdf` table.
-pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
+pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Table> {
     reset();
+    BRIDGE.with(|b| *b.borrow_mut() = Some(bridge.clone()));
     let t = lua.create_table()?;
     for key in KEYS {
         let key: &'static str = key;

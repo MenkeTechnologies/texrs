@@ -950,7 +950,7 @@ fn build(owner: usize) -> mlua::Result<Runtime> {
     register("lua", lualib::table(&lua)?)?;
     register("status", status_table(&lua)?)?;
     register("font", font::table(&lua)?)?;
-    register("pdf", pdf::table(&lua)?)?;
+    register("pdf", pdf::table(&lua, &bridge)?)?;
     register(
         "pdfe",
         unported(
