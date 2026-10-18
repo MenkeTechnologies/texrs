@@ -1,0 +1,11 @@
+% primitives: detokenize unexpanded expanded edef
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{A}\def\b{\a\a}\def\x{\a b}
+\edef\c{\detokenize{\a b}|\detokenize\expandafter{\x}}
+\message{[\meaning\c]}
+\edef\c{\expanded{\b\noexpand\a}|\unexpanded\expandafter{\x}}
+\message{[\meaning\c]}
+\message{[\detokenize\relax{\a}][\unexpanded{\a}]}
+\edef\c{\expandafter\unexpanded\expandafter{\expanded{\noexpand\b\a}}}
+\message{[\meaning\c]}
+\end

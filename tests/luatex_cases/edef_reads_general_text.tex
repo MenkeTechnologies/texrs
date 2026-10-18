@@ -1,0 +1,8 @@
+% primitives: detokenize edef
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\edef\c{\detokenize{##}}
+\message{[\meaning\c]}
+\edef\c{\detokenize{\a #}}
+\message{[\meaning\c]}
+\message{[\detokenize{#}]}
+\end

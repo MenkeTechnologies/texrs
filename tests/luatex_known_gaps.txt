@@ -2,18 +2,14 @@
 # line, with the reason. The gate fails on a case that diverges and is not
 # listed, and on a listed case that has started passing.
 
-detokenize.tex     `\detokenize\expandafter{\x}': etex.ch's scan_general_text
-#                  reads its brace with §473's scan_toks, whose §403
-#                  scan_left_brace EXPANDS until it finds one; texrs takes
-#                  the next token as it is and detokenizes `\expandafter'.
-unexpanded.tex     `\unexpanded\expandafter{\b}' inside an \edef: the same
-#                  scan_left_brace expansion.
-expanded.tex       `\expanded' in a \message body leaves its result unexpanded
-#                  where luatex's back_list puts it back to be expanded again
-#                  (`[AA\a ]' for `[AAA]'), and `\expandafter' does not expand
-#                  it inside an \edef.
 numexpr.tex        `\the\numexpr' in a \message body is refused
 #                  (`Unsupported \the'): the message lowering has no
 #                  expression operand.
 dimexpr.tex        The same, for `\the\dimexpr'.
 glueexpr.tex       The same, for `\the\glueexpr' and `\the\muexpr'.
+edef_reads_general_text.tex
+#                  `\edef\c{\detokenize{\a #}}': tex.web 473 expands an \edef
+#                  body WHILE reading it, so \detokenize reads `{\a #}' as its
+#                  own general text and the `#' is never a parameter of the
+#                  definition. texrs reads the whole body first and expands it
+#                  after, so the `#}' is `Illegal parameter number'.

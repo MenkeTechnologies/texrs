@@ -4252,7 +4252,7 @@ impl Lowerer {
                 // `\detokenize{...}` writes the tokens as text -- the same rule
                 // `\the\toks` uses, and the same renderer.
                 "detokenize" => {
-                    let group = self.eng.read_group_tokens(work)?;
+                    let group = self.eng.scan_general_text(work)?;
                     text.push_str(&self.eng.tokens_shown(&group));
                 }
                 "string" => {
@@ -4290,19 +4290,31 @@ impl Lowerer {
                         text.push_str(&self.eng.meaning_text(&next));
                     }
                 }
-                // `\expanded{...}` puts the group back to be expanded, which
-                // is what this loop does to everything it meets anyway -- so
-                // the primitive is the wrapper coming off.
+                // `\expanded{...}` expands its general text as an \edef body is
+                // expanded and puts the result back, where this loop expands
+                // it again: a `\noexpand` in the text holds for the first
+                // pass only. The first pass needs the registers the text
+                // reads, which the lowerer knows only while nothing has
+                // assigned them (see `edef_snapshot`); otherwise the text goes
+                // back as it stands, which differs only in what a `\noexpand`
+                // protects.
                 "expanded" => {
-                    let group = self.eng.read_group_tokens(work)?;
-                    work.push_back(&group);
+                    let group = self.eng.scan_general_text(work)?;
+                    let mark = self.eng.report_mark();
+                    let macros = self.eng.expand_macros_only(&group)?;
+                    self.eng.drain_diagnostics(mark);
+                    let again = match self.reads_only_untouched_registers(&macros) {
+                        true => self.eng.expand_edef_body(&group)?,
+                        false => group,
+                    };
+                    work.push_back(&again);
                 }
                 // `\unexpanded{...}` writes the tokens as they stand. In a
                 // message that is the same rendering `\detokenize` gives, and
                 // the two only part company inside an `\edef`, where these
                 // tokens survive as tokens.
                 "unexpanded" => {
-                    let group = self.eng.read_group_tokens(work)?;
+                    let group = self.eng.scan_general_text(work)?;
                     text.push_str(&self.eng.tokens_shown(&group));
                 }
                 // `\begincsname` is `\csname` that does not define what it does

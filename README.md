@@ -281,6 +281,10 @@ than none.
   `\attribute` or `\Umathchar` as luatex does, whether or not texrs executes it;
   `BUGS.md` has the census of which ones it does. `\ifdefined` of a character
   that is not active is true, as in luatex.
+- `\detokenize`, `\unexpanded` and `\expanded` read their text as e-TeX's
+  `scan_general_text` does, expanding up to the brace (`\detokenize\expandafter{\x}`),
+  in running text, in an `\edef` body and in a `\message`; `\expanded`'s result is
+  expanded again where it lands, so a `\noexpand` in it protects one pass only.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

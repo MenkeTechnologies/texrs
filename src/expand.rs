@@ -1501,6 +1501,34 @@ impl Engine {
                 }
                 Ok(true)
             }
+            // etex.ch's `the_toks` for `show_tokens` (chr 2 of the `the`
+            // command, §478 as e-TeX extends it): `\detokenize` reads a general
+            // text and makes it characters. `\unexpanded` (chr 1) is the
+            // general text itself; read where the gullet expands, as here, the
+            // list goes back to be read like any other (§1381's
+            // `ins_the_toks`). Inside an \edef the list is not expanded again,
+            // which is `expand_edef_body`'s arm, not this one.
+            "detokenize" => {
+                let text = self.scan_general_text(lx)?;
+                lx.push_back(&self.detokenized(&text));
+                Ok(true)
+            }
+            "unexpanded" => {
+                let text = self.scan_general_text(lx)?;
+                lx.push_back(&text);
+                Ok(true)
+            }
+            // luatex's `\expanded` (a `convert` command): the general text is
+            // expanded as an \edef body is -- `scan_toks(false, true)` -- and
+            // the result goes back into the input, where it is read, and
+            // expanded, again. A `\noexpand` in the text protects a token
+            // through the first expansion only.
+            "expanded" => {
+                let text = self.scan_general_text(lx)?;
+                let expanded = self.expand_edef_body(&text)?;
+                lx.push_back(&expanded);
+                Ok(true)
+            }
             "csname" => {
                 let built = self.read_csname(lx, pending_only)?;
                 // An undefined \csname name becomes \relax, per tex.web §372.
@@ -4025,6 +4053,25 @@ impl Engine {
         }
     }
 
+    /// etex.ch's `scan_general_text`, the argument of `\detokenize`,
+    /// `\unexpanded`, `\expanded` and `\scantokens`: §473's `scan_toks`, whose
+    /// §403 `scan_left_brace` EXPANDS until it meets the brace -- so
+    /// `\detokenize\expandafter{\x}` reads `\x`'s replacement, and a blank or
+    /// `\relax` in front of the brace is passed over. Anything else is
+    /// `Missing { inserted`, read again as the first token of the text.
+    pub fn scan_general_text(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
+        self.scan_left_brace(lx)?;
+        self.read_balanced(lx)
+    }
+
+    /// The tokens `\detokenize` makes of `toks`: §295's `show_token_list`
+    /// spelling (a parameter character doubled, a space after a control word),
+    /// turned back into characters by §464's `str_toks`, which makes a space
+    /// a space and everything else category 12.
+    pub fn detokenized(&self, toks: &[Token]) -> Vec<Token> {
+        str_toks(&self.tokens_shown(toks))
+    }
+
     pub fn read_group_tokens(&mut self, lx: &mut Lexer) -> R<Vec<Token>> {
         loop {
             let Some(t) = lx.next_token(&self.cats) else {
@@ -5197,18 +5244,13 @@ impl Engine {
                 continue;
             }
             // `\unexpanded{...}` is the one thing that stops this pass: its
-            // group goes into the body AS TOKENS, so a macro inside it is
-            // called when the body runs rather than now. `\expanded{...}` is
-            // the opposite and needs no more than the wrapper coming off,
-            // because everything here is expanded anyway.
-            if name.name() == "unexpanded" {
-                let group = self.read_group_tokens(&mut lx)?;
+            // general text goes into the body AS TOKENS (etex.ch: in an \edef
+            // the list `the_toks` makes is not expanded again), so a macro
+            // inside it is called when the body runs rather than now.
+            // `\expanded` is the gullet's, in `try_expand`.
+            if self.primitive_meaning(name).name() == "unexpanded" {
+                let group = self.scan_general_text(&mut lx)?;
                 out.extend(group);
-                continue;
-            }
-            if name.name() == "expanded" {
-                let group = self.read_group_tokens(&mut lx)?;
-                lx.push_back(&group);
                 continue;
             }
             // §478's `the_toks`, which is what `\the` means inside an \edef:
