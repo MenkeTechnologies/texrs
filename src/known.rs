@@ -78,7 +78,7 @@ impl Known {
         let mut out: Vec<(i64, i64)> = self
             .map
             .iter()
-            .filter(|(slot, _)| (0..crate::compiler::DIMEN_BASE).contains(*slot))
+            .filter(|(slot, _)| crate::compiler::is_count_slot(**slot))
             .filter_map(|(slot, v)| v.filter(|v| *v != 0).map(|v| (*slot, v)))
             .collect();
         out.sort_unstable();

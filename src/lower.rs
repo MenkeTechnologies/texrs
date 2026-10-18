@@ -436,6 +436,10 @@ impl Lowerer {
         // text macros for the PDF path, so the list commands are not lowered
         // as lists.
         self.st.enabled = false;
+        // What this path replaces is `lualatex`, so its registers are
+        // LuaTeX's 65536 of each kind: latex.ltx itself `\countdef`s
+        // register 258.
+        self.eng.register_limit = crate::expand::LUATEX_REGISTER_LIMIT;
         let out = self.lower_located(src);
         // The prelude's own diagnostics belong to the prelude, and the document
         // is what tex is reporting on: an error the prelude recovered from must
@@ -1271,7 +1275,9 @@ impl Lowerer {
                     self.eng.compile_time_intpar(lx, i)?
                 }
                 "count" => {
-                    let reg = self.eng.scan_register_file(lx)?;
+                    let reg = self
+                        .eng
+                        .scan_register_slot(lx, false, crate::compiler::RegFile::Count)?;
                     self.eng.skip_equals_file(lx)?;
                     let v = self.number(lx)?;
                     let global = self.note_global(&[reg]);
@@ -1286,7 +1292,7 @@ impl Lowerer {
                 // body, so it is stored while lowering rather than in a slot,
                 // and nothing in the braces expands.
                 "toks" => {
-                    let reg = self.eng.scan_register_file(lx)?;
+                    let reg = self.eng.scan_register_number(lx, false)?;
                     self.eng.do_toks_assign(lx, reg)?;
                 }
                 // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
@@ -1295,18 +1301,16 @@ impl Lowerer {
                 // glue file: what differs is the unit the right-hand side is
                 // read in, and `glue_assign` reads that off the base.
                 "skip" | "muskip" => {
-                    let file = match name.name() {
-                        "muskip" => crate::compiler::MUSKIP_BASE,
-                        _ => crate::compiler::SKIP_BASE,
-                    };
-                    let reg = self.eng.scan_register_file(lx)?;
+                    let file = crate::compiler::RegFile::of_name(name.name()).expect("skip or muskip");
+                    let base = self.eng.scan_register_slot(lx, false, file)?;
                     self.eng.skip_equals_file(lx)?;
-                    let base = file + reg * crate::compiler::SKIP_STRIDE;
                     self.note_global(&[base, base + 1, base + 2, base + 3]);
                     out.extend(self.glue_assign(lx, base)?);
                 }
                 "dimen" => {
-                    let reg = self.eng.scan_register_file(lx)?;
+                    let slot = self
+                        .eng
+                        .scan_register_slot(lx, false, crate::compiler::RegFile::Dimen)?;
                     self.eng.skip_equals_file(lx)?;
                     // `\dimen1=\dimen0` copies a register whose value is only
                     // known at run time, and `\dimen1=\skip0` takes a glue's
@@ -1314,7 +1318,6 @@ impl Lowerer {
                     // refused both.
                     self.eng.clear_scaling_sites();
                     let v = self.dimen_number(lx, false)?;
-                    let slot = crate::compiler::DIMEN_BASE + reg;
                     let global = self.note_global(&[slot]);
                     self.trace_register(slot, &v, global);
                     self.note_scaling_site(&mut out, lx, &v);
@@ -1353,9 +1356,9 @@ impl Lowerer {
                         out.extend(cmds);
                     } else {
                         self.eng.clear_scaling_sites();
-                        let v = match reg >= crate::compiler::DIMEN_BASE {
-                            true => self.dimen_number(lx, false)?,
-                            false => self.number(lx)?,
+                        let v = match crate::compiler::is_count_slot(reg) {
+                            false => self.dimen_number(lx, false)?,
+                            true => self.number(lx)?,
                         };
                         let global = self.note_global(&[reg]);
                         self.trace_register(reg, &v, global);
@@ -1388,23 +1391,13 @@ impl Lowerer {
                     // the slot falls in is what says which kind it is.
                     let reg = match self.eng.numeric_cs(what) {
                         Some(crate::expand::NumericCs::Register(r)) => r,
-                        _ => match what.name() {
-                            "count" => self.eng.scan_register_file(lx)?,
-                            "dimen" => {
-                                crate::compiler::DIMEN_BASE + self.eng.scan_register_file(lx)?
-                            }
-                            "skip" => {
-                                crate::compiler::SKIP_BASE
-                                    + self.eng.scan_register_file(lx)?
-                                        * crate::compiler::SKIP_STRIDE
-                            }
-                            "muskip" => {
-                                crate::compiler::MUSKIP_BASE
-                                    + self.eng.scan_register_file(lx)?
-                                        * crate::compiler::SKIP_STRIDE
-                            }
-                            other => {
-                                return Err(TexError(format!("Unsupported register \\{other}")))
+                        _ => match crate::compiler::RegFile::of_name(what.name()) {
+                            Some(file) => self.eng.scan_register_slot(lx, false, file)?,
+                            None => {
+                                return Err(TexError(format!(
+                                    "Unsupported register \\{}",
+                                    what.name()
+                                )))
                             }
                         },
                     };
@@ -1416,7 +1409,7 @@ impl Lowerer {
                     // has. Reading the wrong one stores a prefix of the value
                     // and leaves the rest in the document.
                     let glue = crate::compiler::is_glue_slot(reg);
-                    let dimen = !glue && reg >= crate::compiler::DIMEN_BASE;
+                    let dimen = !glue && !crate::compiler::is_count_slot(reg);
                     if glue {
                         self.note_global(&[reg, reg + 1, reg + 2, reg + 3]);
                     } else {
@@ -3647,7 +3640,7 @@ impl Lowerer {
                 if matches!(n.name(), "the" | "number") {
                     lx.push_back(&[t]);
                     if let Some(reg) = self.eng.take_expanded_register(lx, pending)? {
-                        let integer = !reg.the || reg.slot < crate::compiler::DIMEN_BASE;
+                        let integer = !reg.the || crate::compiler::is_count_slot(reg.slot);
                         if integer && !self.eng.number_continues(lx, pending, false)? {
                             return Ok(Some(signed(negative, reg.slot)));
                         }
@@ -3748,8 +3741,8 @@ impl Lowerer {
     /// nothing is consumed otherwise.
     fn peek_glue_register(&mut self, lx: &mut Lexer, mu: bool) -> R<Option<(i64, bool)>> {
         let (want, file) = match mu {
-            true => ("muskip", crate::compiler::MUSKIP_BASE),
-            false => ("skip", crate::compiler::SKIP_BASE),
+            true => ("muskip", crate::compiler::RegFile::MuSkip),
+            false => ("skip", crate::compiler::RegFile::Skip),
         };
         let mut eaten = Vec::new();
         let mut negative = false;
@@ -3769,8 +3762,8 @@ impl Lowerer {
             }
             if let Token::Cs(n) = &t {
                 if n.name() == want {
-                    let reg = self.eng.scan_register_file(lx)?;
-                    return Ok(Some((file + reg * crate::compiler::SKIP_STRIDE, negative)));
+                    let slot = self.eng.scan_register_slot(lx, false, file)?;
+                    return Ok(Some((slot, negative)));
                 }
                 if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(*n) {
                     // A `\skipdef` name is a glue register and a `\muskipdef`
@@ -3835,23 +3828,25 @@ impl Lowerer {
             }
             match n.name() {
                 "dimen" => {
-                    let reg = self.eng.scan_register_any(lx, pending)?;
-                    return Ok(Num::Count(crate::compiler::DIMEN_BASE + reg));
+                    let slot =
+                        self.eng
+                            .scan_register_slot(lx, pending, crate::compiler::RegFile::Dimen)?;
+                    return Ok(Num::Count(slot));
                 }
                 // A glue where a dimension is wanted is its NATURAL width
                 // (`tex.web` §430's coercion), which is the first of its slots.
                 "skip" => {
-                    let reg = self.eng.scan_register_any(lx, pending)?;
-                    return Ok(Num::Count(
-                        crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
-                    ));
+                    let slot =
+                        self.eng
+                            .scan_register_slot(lx, pending, crate::compiler::RegFile::Skip)?;
+                    return Ok(Num::Count(slot));
                 }
                 _ => {}
             }
             // A `\dimendef` or `\skipdef` name is that register, in every
             // position the spelt-out form works.
             if let Some(crate::expand::NumericCs::Register(r)) = self.eng.numeric_cs(n) {
-                if r >= crate::compiler::DIMEN_BASE {
+                if !crate::compiler::is_count_slot(r) {
                     return Ok(Num::Count(r));
                 }
             }
@@ -3892,9 +3887,11 @@ impl Lowerer {
                 t,
                 Token::Cs(n) if matches!(n.name(), "count" | "dimen" | "skip" | "muskip" | "toks" | "wd" | "ht" | "dp")
             );
-            let n = match is_register {
-                true => self.eng.scan_register_file(lx)?,
-                false => self.eng.scan_number_file(lx)?,
+            let boxed = matches!(t, Token::Cs(n) if matches!(n.name(), "wd" | "ht" | "dp"));
+            let n = match (is_register, boxed) {
+                (true, true) => self.eng.scan_register_file(lx)?,
+                (true, false) => self.eng.scan_register_number(lx, false)?,
+                (false, _) => self.eng.scan_number_file(lx)?,
             };
             spelt.extend(n.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
             spelt.push(Token::Char(' ', Cat::Space));
@@ -3951,7 +3948,9 @@ impl Lowerer {
         if let Some(name) = crate::params::name_of_slot(slot) {
             return Ok(vec![Token::cs(name)]);
         }
+        let pooled = self.eng.pooled_register(slot).map(|(file, n)| (file.name(), n));
         let (word, n) = match slot {
+            _ if pooled.is_some() => pooled.expect("just matched"),
             s if s < DIMEN_BASE => ("count", s),
             s if s < SKIP_BASE => ("dimen", s - DIMEN_BASE),
             s if s < MUSKIP_BASE => ("skip", (s - SKIP_BASE) / SKIP_STRIDE),
@@ -4325,7 +4324,7 @@ impl Lowerer {
                             // `\the\toks0` is the token list as text, and it
                             // is known while lowering because the table is.
                             Some(Token::Cs(w)) if w.name() == "toks" => {
-                                let reg = self.eng.scan_register_pending(work)?;
+                                let reg = self.eng.scan_register_number(work, true)?;
                                 text.push_str(&self.eng.toks_shown(reg));
                                 continue;
                             }
@@ -4337,11 +4336,10 @@ impl Lowerer {
                             Some(Token::Cs(w)) if w.name() == "skip" || w.name() == "muskip" => {
                                 let mu = w.name() == "muskip";
                                 let file = match mu {
-                                    true => crate::compiler::MUSKIP_BASE,
-                                    false => crate::compiler::SKIP_BASE,
+                                    true => crate::compiler::RegFile::MuSkip,
+                                    false => crate::compiler::RegFile::Skip,
                                 };
-                                let reg = self.eng.scan_register_pending(work)?;
-                                let base = file + reg * crate::compiler::SKIP_STRIDE;
+                                let base = self.eng.scan_register_slot(work, true, file)?;
                                 let slots = [
                                     Num::Count(base),
                                     Num::Count(base + 1),
@@ -4355,10 +4353,12 @@ impl Lowerer {
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "dimen" => {
-                                let reg = self.eng.scan_register_pending(work)?;
-                                out.push(MsgOp::Dimen(Num::Count(
-                                    crate::compiler::DIMEN_BASE + reg,
-                                )));
+                                let slot = self.eng.scan_register_slot(
+                                    work,
+                                    true,
+                                    crate::compiler::RegFile::Dimen,
+                                )?;
+                                out.push(MsgOp::Dimen(Num::Count(slot)));
                                 continue;
                             }
                             // e-TeX's `\numexpr` and `\dimexpr`: the value, written
@@ -4428,7 +4428,7 @@ impl Lowerer {
                                         MsgOp::MuGlue(slots)
                                     } else if crate::compiler::is_glue_slot(r) {
                                         MsgOp::Glue(slots)
-                                    } else if r >= crate::compiler::DIMEN_BASE {
+                                    } else if !crate::compiler::is_count_slot(r) {
                                         MsgOp::Dimen(Num::Count(r))
                                     } else {
                                         MsgOp::Number(Num::Count(r))
@@ -4443,7 +4443,9 @@ impl Lowerer {
                             },
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
-                        let reg = self.eng.scan_register_pending(work)?;
+                        let reg =
+                            self.eng
+                                .scan_register_slot(work, true, crate::compiler::RegFile::Count)?;
                         out.push(MsgOp::Number(Num::Count(reg)));
                         continue;
                     }
@@ -4464,25 +4466,27 @@ impl Lowerer {
                     // `\number\skip0` gives the natural component only.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "skip") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_register_pending(work)?;
-                        out.push(MsgOp::Number(Num::Count(
-                            crate::compiler::SKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
-                        )));
+                        let slot =
+                            self.eng
+                                .scan_register_slot(work, true, crate::compiler::RegFile::Skip)?;
+                        out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "muskip") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_register_pending(work)?;
-                        out.push(MsgOp::Number(Num::Count(
-                            crate::compiler::MUSKIP_BASE + reg * crate::compiler::SKIP_STRIDE,
-                        )));
+                        let slot =
+                            self.eng
+                                .scan_register_slot(work, true, crate::compiler::RegFile::MuSkip)?;
+                        out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
                     // `\number\dimen0` gives the scaled points, unrendered.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "dimen") {
                         let _ = work.pending.pop();
-                        let reg = self.eng.scan_register_pending(work)?;
-                        out.push(MsgOp::Number(Num::Count(crate::compiler::DIMEN_BASE + reg)));
+                        let slot =
+                            self.eng
+                                .scan_register_slot(work, true, crate::compiler::RegFile::Dimen)?;
+                        out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
                     // `\count` and every `\countdef` name are read when the

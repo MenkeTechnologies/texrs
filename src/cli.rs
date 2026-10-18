@@ -161,6 +161,16 @@ impl Default for Cli {
 }
 
 impl Cli {
+    /// Whether the run is a LuaTeX by its program name or its format: `luatex`,
+    /// `luahbtex`, `lualatex` and the `-dev` and `dvi` variants fmtutil.cnf
+    /// builds from them all begin `lua` or `dvilua`.
+    pub fn is_luatex(&self) -> bool {
+        [self.progname.as_deref(), self.format.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|n| n.starts_with("lua") || n.starts_with("dvilua"))
+    }
+
     /// The TeX source this invocation asks for, when it came from the command
     /// line rather than a file.
     ///

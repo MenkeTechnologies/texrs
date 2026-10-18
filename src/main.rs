@@ -39,6 +39,11 @@ fn main() -> ExitCode {
     };
     // Where `\openout` writes a relative name, as tex's own option says.
     texrs::write::set_output_directory(cli.output_directory.clone());
+    // A web2c engine takes its personality from the program name it runs
+    // as (`pdftex -progname=pdflatex`). Run as a LuaTeX -- `-progname=luatex`,
+    // `lualatex` or `luahbtex`, or with a format of one of those names --
+    // texrs has LuaTeX's register ranges; otherwise TeX82's.
+    texrs::expand::set_luatex_registers(cli.is_luatex());
 
     match cli.mode {
         texrs::cli::Mode::Help => {

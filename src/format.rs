@@ -30,7 +30,7 @@ use crate::token::{CsId, Token};
 pub const FORMAT_MAGIC: u32 = 0x5458_464D;
 
 /// Bumped whenever what is dumped changes shape. An older file is rebuilt.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// One token, by name rather than by interned id.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -82,6 +82,12 @@ pub struct Format {
     /// Only the codes that differ from INITEX's table, since most do not.
     catcodes: Vec<(u32, u8)>,
     counts: Vec<(i64, i64)>,
+    /// The slots registers past 255 were given (`Engine::register_address`):
+    /// slot, file and register number. A `\countdef` name and a register's
+    /// value are both stored by slot, so the same register has to be the same
+    /// slot after the format is loaded.
+    #[serde(default)]
+    pooled: Vec<(i64, u8, i64)>,
     meanings: Vec<(String, MeaningRepr)>,
     /// Where [`crate::lower::Lowerer::scratch_mark`] had got to.
     scratch_mark: i64,
@@ -130,6 +136,11 @@ impl Format {
                 .collect(),
             catcodes,
             counts,
+            pooled: engine
+                .pooled_registers()
+                .into_iter()
+                .map(|(slot, file, reg)| (slot, file as u8, reg))
+                .collect(),
             meanings,
             scratch_mark,
         }
@@ -154,6 +165,11 @@ impl Format {
         let end_line_char = engine.intpars.get(crate::intpar::END_LINE_CHAR);
         engine.cats.set_end_line_char(end_line_char);
         engine.known.clear();
+        engine.restore_pooled(
+            self.pooled
+                .iter()
+                .filter_map(|(slot, file, reg)| Some((*slot, file_of(*file)?, *reg))),
+        );
         for (register, value) in &self.counts {
             engine.known.set(*register, Some(*value));
         }
@@ -203,6 +219,14 @@ fn cat_to_u8(cat: Cat) -> u8 {
 /// `tex.web` §207 numbers the categories, and so does this: the number is the
 /// wire format, so a match rather than a transmute — a byte out of range is a
 /// damaged file, not undefined behaviour.
+/// A register file from the number a format stores it as (`RegFile as u8`).
+fn file_of(n: u8) -> Option<crate::compiler::RegFile> {
+    use crate::compiler::RegFile;
+    [RegFile::Count, RegFile::Dimen, RegFile::Skip, RegFile::MuSkip]
+        .into_iter()
+        .find(|f| *f as u8 == n)
+}
+
 fn u8_to_cat(n: u8) -> Cat {
     match n {
         0 => Cat::Escape,

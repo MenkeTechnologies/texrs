@@ -681,8 +681,9 @@ fn slot(reg: i64) -> u16 {
 /// dimensions, 256 glues and 256 math glues at four slots each, then the
 /// dimension, glue and math glue PARAMETERS (`crate::params`), then what the
 /// stomach mirrors for the program to read (`crate::stomach::Mirror`), then
-/// LuaTeX's parameters.
-pub const TOTAL_SLOTS: u16 = LUAGLUEPAR_END as u16;
+/// LuaTeX's parameters, then the pools registers past 255 are given slots
+/// from.
+pub const TOTAL_SLOTS: u16 = HIGH_END as u16;
 
 /// Where §247's dimension parameters start: one slot each, past every register.
 pub const DIMPAR_BASE: i64 = MUSKIP_BASE + 256 * SKIP_STRIDE;
@@ -718,6 +719,93 @@ const STOMACH_END: i64 = INTERNAL_BASE + crate::stomach::INTERNAL_SLOTS;
 /// past every slot that was there before them, so adding them moved none.
 pub const LUADIMPAR_BASE: i64 = STOMACH_END;
 
+/// The four register files that live in slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RegFile {
+    Count,
+    Dimen,
+    Skip,
+    MuSkip,
+}
+
+impl RegFile {
+    /// The file a register primitive names: `\count`, `\dimen`, `\skip`,
+    /// `\muskip`.
+    pub fn of_name(name: &str) -> Option<RegFile> {
+        match name {
+            "count" => Some(RegFile::Count),
+            "dimen" => Some(RegFile::Dimen),
+            "skip" => Some(RegFile::Skip),
+            "muskip" => Some(RegFile::MuSkip),
+            _ => None,
+        }
+    }
+
+    /// The primitive's name, for a register's display (`\count300`).
+    pub fn name(self) -> &'static str {
+        match self {
+            RegFile::Count => "count",
+            RegFile::Dimen => "dimen",
+            RegFile::Skip => "skip",
+            RegFile::MuSkip => "muskip",
+        }
+    }
+
+    /// How many slots one register of the file takes.
+    pub fn stride(self) -> i64 {
+        match self {
+            RegFile::Count | RegFile::Dimen => 1,
+            RegFile::Skip | RegFile::MuSkip => SKIP_STRIDE,
+        }
+    }
+
+    /// Where registers 0 to 255 of the file start.
+    pub fn low_base(self) -> i64 {
+        match self {
+            RegFile::Count => 0,
+            RegFile::Dimen => DIMEN_BASE,
+            RegFile::Skip => SKIP_BASE,
+            RegFile::MuSkip => MUSKIP_BASE,
+        }
+    }
+
+    /// The pool the file's registers past 255 are given slots from, and how
+    /// many registers it holds (`crate::expand::Engine::register_address`).
+    pub fn high_pool(self) -> (i64, i64) {
+        match self {
+            RegFile::Count => (HIGH_COUNT_BASE, HIGH_COUNTS),
+            RegFile::Dimen => (HIGH_DIMEN_BASE, HIGH_DIMENS),
+            RegFile::Skip => (HIGH_SKIP_BASE, HIGH_SKIPS),
+            RegFile::MuSkip => (HIGH_MUSKIP_BASE, HIGH_MUSKIPS),
+        }
+    }
+}
+
+/// LuaTeX has 65536 registers of each kind (the LuaTeX manual, "Registers":
+/// "The number of registers is 65536"); TeX82 has 256. A slot file of 65536
+/// of each is more than fusevm's 16-bit slot index can address, and no
+/// document uses more than a few hundred past the first 256 -- a lualatex run
+/// with amsmath, hyperref, tikz, fontspec and unicode-math ends with `\count10`
+/// at 347 and `\count11` at 275, measured. So a register past 255 is given a
+/// slot from a pool the first time it is named, and the pools are sized well
+/// past that.
+pub const HIGH_COUNT_BASE: i64 = LUAGLUEPAR_END;
+pub const HIGH_COUNTS: i64 = 2048;
+pub const HIGH_DIMEN_BASE: i64 = HIGH_COUNT_BASE + HIGH_COUNTS;
+pub const HIGH_DIMENS: i64 = 1024;
+pub const HIGH_SKIP_BASE: i64 = HIGH_DIMEN_BASE + HIGH_DIMENS;
+pub const HIGH_SKIPS: i64 = 512;
+pub const HIGH_MUSKIP_BASE: i64 = HIGH_SKIP_BASE + HIGH_SKIPS * SKIP_STRIDE;
+pub const HIGH_MUSKIPS: i64 = 128;
+/// One past the last pooled slot.
+const HIGH_END: i64 = HIGH_MUSKIP_BASE + HIGH_MUSKIPS * SKIP_STRIDE;
+
+/// Whether `slot` is an integer register: one of `\count0`-`\count255`, or a
+/// pooled count register past them.
+pub fn is_count_slot(slot: i64) -> bool {
+    (0..DIMEN_BASE).contains(&slot) || (HIGH_COUNT_BASE..HIGH_DIMEN_BASE).contains(&slot)
+}
+
 /// Whether `slot` is one the stomach writes: a box dimension or kind, or an
 /// internal quantity. Such a slot is not an `eqtb` entry, so a group does not
 /// save or restore it (§1247 changes a box in place; `\prevdepth` belongs to
@@ -732,12 +820,15 @@ pub fn is_glue_slot(slot: i64) -> bool {
     (SKIP_BASE..DIMPAR_BASE).contains(&slot)
         || (GLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
         || (LUAGLUEPAR_BASE..LUAGLUEPAR_END).contains(&slot)
+        || (HIGH_SKIP_BASE..HIGH_END).contains(&slot)
 }
 
 /// Whether `slot` holds (a component of) a MATH glue: a `\muskip` register or
 /// one of the three math glue parameters.
 pub fn is_mu_slot(slot: i64) -> bool {
-    (MUSKIP_BASE..DIMPAR_BASE).contains(&slot) || (MUGLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+    (MUSKIP_BASE..DIMPAR_BASE).contains(&slot)
+        || (MUGLUEPAR_BASE..MUGLUEPAR_END).contains(&slot)
+        || (HIGH_MUSKIP_BASE..HIGH_END).contains(&slot)
 }
 
 impl Default for Compiler {

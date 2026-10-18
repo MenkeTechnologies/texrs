@@ -263,6 +263,17 @@ pub struct Engine {
     /// The registers, as far as the frontend can follow them; see
     /// [`crate::known`].
     pub known: crate::known::Known,
+    /// The highest register number a `\count`, `\dimen`, `\skip`, `\muskip` or
+    /// `\toks` may have: TeX82's 255 (§433's `scan_eight_bit_int`), or
+    /// LuaTeX's 65535 for a run that is being luatex -- a LaTeX document, or
+    /// `--luatex`. See [`Engine::register_address`].
+    pub register_limit: i64,
+    /// The slots registers past 255 were given, by file and number, and the
+    /// way back from a slot to its register for a display.
+    high_slots: FxHashMap<(crate::compiler::RegFile, i64), i64>,
+    high_names: FxHashMap<i64, (crate::compiler::RegFile, i64)>,
+    /// How many slots of each pool are taken, in `RegFile` order.
+    high_used: [i64; 4],
     pub messages: Vec<String>,
     /// The line `\inputlineno` was last read on (§1382's `line`). A read
     /// primitive answers the line of the token that named it, so the mouth
@@ -525,6 +536,10 @@ impl Engine {
             meanings: FxHashMap::default(),
             optional_defaults: FxHashMap::default(),
             known: crate::known::Known::default(),
+            register_limit: default_register_limit(),
+            high_slots: FxHashMap::default(),
+            high_names: FxHashMap::default(),
+            high_used: [0; 4],
             messages: Vec::new(),
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
@@ -2542,12 +2557,8 @@ impl Engine {
                 }
             }
             if let Token::Cs(n) = &t {
-                let spelt = match n.name() {
-                    "dimen" => Some(crate::compiler::DIMEN_BASE),
-                    "skip" => Some(crate::compiler::SKIP_BASE),
-                    "muskip" => Some(crate::compiler::MUSKIP_BASE),
-                    _ => None,
-                };
+                let spelt = crate::compiler::RegFile::of_name(n.name())
+                    .filter(|f| *f != crate::compiler::RegFile::Count);
                 // `\wd n`, `\ht n`, `\dp n` (§420) and the stomach's internal
                 // dimensions (§424) are slots the program writes
                 // (`crate::stomach::Mirror`), so they are internal units too.
@@ -2571,18 +2582,12 @@ impl Engine {
                     }
                 }
                 let reg = match spelt {
-                    Some(base) => {
-                        let stride = match base >= crate::compiler::SKIP_BASE {
-                            true => crate::compiler::SKIP_STRIDE,
-                            false => 1,
-                        };
-                        Some(base + self.scan_register_any(lx, pending_only)? * stride)
-                    }
+                    Some(file) => Some(self.scan_register_slot(lx, pending_only, file)?),
                     // A `\dimendef`, `\skipdef` or `\muskipdef` name is the
                     // register it was given, in every position the spelt-out
                     // form works -- and `10\p@` is that position.
                     None => match self.numeric_cs(*n) {
-                        Some(NumericCs::Register(r)) if r >= crate::compiler::DIMEN_BASE => Some(r),
+                        Some(NumericCs::Register(r)) if !crate::compiler::is_count_slot(r) => Some(r),
                         _ => None,
                     },
                 };
@@ -2700,7 +2705,7 @@ impl Engine {
         // -- the register, whole, and §453's optional space after its unit.
         if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
             let dimension =
-                reg.slot >= crate::compiler::DIMEN_BASE && !crate::compiler::is_glue_slot(reg.slot);
+                !crate::compiler::is_count_slot(reg.slot) && !crate::compiler::is_glue_slot(reg.slot);
             if reg.the && dimension {
                 if let Some(t) = self.take(lx, pending_only) {
                     if !t.is_space() {
@@ -2928,15 +2933,7 @@ impl Engine {
         name: CsId,
         pending_only: bool,
     ) -> R<Option<(i64, Vec<Token>)>> {
-        // Where the file starts, and how many slots one register of it takes:
-        // a glue is four and everything else is one.
-        let file = match name.name() {
-            "count" => Some((0, 1)),
-            "dimen" => Some((crate::compiler::DIMEN_BASE, 1)),
-            "skip" => Some((crate::compiler::SKIP_BASE, crate::compiler::SKIP_STRIDE)),
-            "muskip" => Some((crate::compiler::MUSKIP_BASE, crate::compiler::SKIP_STRIDE)),
-            _ => None,
-        };
+        let file = crate::compiler::RegFile::of_name(name.name());
         let mut spelt = vec![Token::Cs(name)];
         // A box dimension is three slots per register (`crate::stomach`).
         if let Some(which) = match name.name() {
@@ -2958,11 +2955,11 @@ impl Engine {
             }
         }
         let mut spelt = vec![Token::Cs(name)];
-        if let Some((base, stride)) = file {
-            let reg = self.scan_register_any(lx, pending_only)?;
+        if let Some(file) = file {
+            let reg = self.scan_register_number(lx, pending_only)?;
             spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
             spelt.push(Token::Char(' ', Cat::Space));
-            return Ok(Some((base + reg * stride, spelt)));
+            return Ok(Some((self.register_address(file, reg)?, spelt)));
         }
         // A `\countdef`, `\dimendef`, `\skipdef` or `\muskipdef` name is that
         // register, in every position the spelt-out form works.
@@ -3114,7 +3111,7 @@ impl Engine {
                 if matches!(n.name(), "the" | "number") {
                     lx.push_back(std::slice::from_ref(&t));
                     if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
-                        let integer = !reg.the || reg.slot < crate::compiler::DIMEN_BASE;
+                        let integer = !reg.the || crate::compiler::is_count_slot(reg.slot);
                         if integer && !self.number_continues(lx, pending_only, true)? {
                             return Ok(Some(NumericCs::Register(reg.slot)));
                         }
@@ -3133,9 +3130,11 @@ impl Engine {
                 // is 11pt. Their values are frontend state, known now.
                 let table = crate::charcodes::Table::from_name(n.name());
                 let found = match n.name() {
-                    "count" => Some(NumericCs::Register(
-                        self.scan_register_any(lx, pending_only)?,
-                    )),
+                    "count" => Some(NumericCs::Register(self.scan_register_slot(
+                        lx,
+                        pending_only,
+                        crate::compiler::RegFile::Count,
+                    )?)),
                     "catcode" => {
                         let c = self.scan_char_code(lx, pending_only)?;
                         Some(NumericCs::Value(self.cats.get(c) as i64))
@@ -3153,7 +3152,7 @@ impl Engine {
                     // `\mathchardef` one is its number; both are internal
                     // integers in §449's sense.
                     _ => match self.numeric_cs(n) {
-                        Some(NumericCs::Register(r)) if r < crate::compiler::DIMEN_BASE => {
+                        Some(NumericCs::Register(r)) if crate::compiler::is_count_slot(r) => {
                             Some(NumericCs::Register(r))
                         }
                         Some(NumericCs::Value(v)) => Some(NumericCs::Value(v)),
@@ -3359,6 +3358,9 @@ impl Engine {
         let e = self.esc();
         if let Some(name) = crate::params::name_of_slot(slot) {
             return format!("{e}{name}");
+        }
+        if let Some((file, n)) = self.pooled_register(slot) {
+            return format!("{e}{}{n}", file.name());
         }
         if slot >= crate::compiler::MUSKIP_BASE {
             let n = (slot - crate::compiler::MUSKIP_BASE) / crate::compiler::SKIP_STRIDE;
@@ -4626,11 +4628,19 @@ impl Engine {
         // Each has its own limit and its own message, all measured: a mathchar
         // runs to "7FFF and is reported as `Bad mathchar', while the other two
         // stop at 255 and name the table they overran.
+        // A LuaTeX-ranged run (`register_limit`) has 65536 registers and
+        // every Unicode character: `\countdef\e=65535` and `\chardef\b=1114111`
+        // are accepted there and the next number past each is the same
+        // report, measured.
+        let chars = match self.register_limit > 255 {
+            true => 0x10FFFF,
+            false => 255,
+        };
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
-            "dimendef" | "skipdef" | "muskipdef" | "toksdef" => (255, "register code"),
-            "chardef" => (255, "character code"),
-            _ => (255, "register code"),
+            "dimendef" | "skipdef" | "muskipdef" | "toksdef" => (self.register_limit, "register code"),
+            "chardef" => (chars, "character code"),
+            _ => (self.register_limit, "register code"),
         };
         // `tex.web` §434's `scan_char_num` and §433's `scan_eight_bit_int` both
         // say "I changed this one to zero": the code is reported, replaced by
@@ -4648,19 +4658,17 @@ impl Engine {
             "mathchardef" => Meaning::MathCharDef(v),
             // A dimension register is a register: the name stands for the slot,
             // and the slot is the one the dimensions live in.
-            "dimendef" => Meaning::CountDef(crate::compiler::DIMEN_BASE + v),
+            "dimendef" => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Dimen, v)?),
             // A token register is not a slot: the list lives in the frontend,
             // so the name stands for the register number itself.
             "toksdef" => Meaning::ToksDef(v),
-            "skipdef" => {
-                Meaning::CountDef(crate::compiler::SKIP_BASE + v * crate::compiler::SKIP_STRIDE)
-            }
+            "skipdef" => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Skip, v)?),
             // A math glue register is a glue register in the second glue file,
             // so its name stands for a slot exactly as `\skipdef`'s does.
             "muskipdef" => {
-                Meaning::CountDef(crate::compiler::MUSKIP_BASE + v * crate::compiler::SKIP_STRIDE)
+                Meaning::CountDef(self.register_address(crate::compiler::RegFile::MuSkip, v)?)
             }
-            _ => Meaning::CountDef(v),
+            _ => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Count, v)?),
         };
         self.set_meaning(name, meaning);
         Ok(())
@@ -5334,7 +5342,8 @@ impl Engine {
                 return Ok(sign * self.scan_expr(lx, pending_only, false)?);
             }
             if name.name() == "count" {
-                let reg = self.scan_register_any(lx, pending_only)?;
+                let reg =
+                    self.scan_register_slot(lx, pending_only, crate::compiler::RegFile::Count)?;
                 return Ok(sign * self.count_value(reg)?);
             }
             // `tex.web` §413: each of the six code tables is an INTERNAL
@@ -5830,7 +5839,7 @@ impl Engine {
             return Ok(None);
         };
         let reg = match what.name() {
-            "toks" => self.scan_register_any(lx, pending_only)?,
+            "toks" => self.scan_register_number(lx, pending_only)?,
             _ => match self.toks_cs(what) {
                 Some(r) => r,
                 None => {
@@ -5886,7 +5895,7 @@ impl Engine {
         // is frontend state like a macro body -- see the `toks` field -- so it
         // is as knowable here as a catcode is.
         if what.name() == "toks" {
-            let reg = self.scan_register_any(lx, pending_only)?;
+            let reg = self.scan_register_number(lx, pending_only)?;
             return Ok(self.toks_text(reg));
         }
         if let Some(reg) = self.toks_cs(what) {
@@ -5901,7 +5910,7 @@ impl Engine {
             "dimen" | "skip" | "muskip" => true,
             _ => matches!(
                 self.numeric_cs(what),
-                Some(NumericCs::Register(r)) if r >= crate::compiler::DIMEN_BASE
+                Some(NumericCs::Register(r)) if !crate::compiler::is_count_slot(r)
             ),
         };
         if is_dimen {
@@ -6475,6 +6484,97 @@ impl Engine {
     ///
     /// Reported where the number ends, so the token that ended it is the
     /// `<to be read again>` of the display, as tex has it.
+    /// A register number for one of the slot files or for `\toks`: §433's
+    /// scan, against this run's [`Engine::register_limit`] -- 255 for TeX82,
+    /// 65535 for LuaTeX, which reports a number outside its range the same
+    /// way (`Bad register code`, zero used).
+    pub fn scan_register_number(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
+        let n = self.scan_number(lx, pending_only)?;
+        match (0..=self.register_limit).contains(&n) {
+            true => Ok(n),
+            false => {
+                self.report(lx, &format!("Bad register code ({n})"));
+                Ok(0)
+            }
+        }
+    }
+
+    /// A register of `file`, scanned and turned into its slot.
+    pub fn scan_register_slot(
+        &mut self,
+        lx: &mut Lexer,
+        pending_only: bool,
+        file: crate::compiler::RegFile,
+    ) -> R<i64> {
+        let n = self.scan_register_number(lx, pending_only)?;
+        self.register_address(file, n)
+    }
+
+    /// The slot register `reg` of `file` lives in.
+    ///
+    /// Registers 0 to 255 have the slots `crate::compiler` lays out for them.
+    /// One past 255 -- which only a LuaTeX run can name -- is given the next
+    /// slot of its file's pool the first time it is named, and keeps it: a
+    /// slot is where the run keeps the value, so the same register must always
+    /// be the same slot.
+    pub fn register_address(&mut self, file: crate::compiler::RegFile, reg: i64) -> R<i64> {
+        if reg < 256 {
+            return Ok(file.low_base() + reg * file.stride());
+        }
+        if let Some(&slot) = self.high_slots.get(&(file, reg)) {
+            return Ok(slot);
+        }
+        let (base, size) = file.high_pool();
+        let used = &mut self.high_used[file as usize];
+        if *used >= size {
+            return Err(TexError(format!(
+                "TeX capacity exceeded, sorry [\\{} registers past 255={size}]",
+                file.name()
+            )));
+        }
+        let slot = base + *used * file.stride();
+        *used += 1;
+        self.high_slots.insert((file, reg), slot);
+        self.high_names.insert(slot, (file, reg));
+        Ok(slot)
+    }
+
+    /// Put back the pooled registers a format carried, replacing any this
+    /// engine has given out.
+    pub fn restore_pooled(
+        &mut self,
+        pooled: impl IntoIterator<Item = (i64, crate::compiler::RegFile, i64)>,
+    ) {
+        self.high_slots.clear();
+        self.high_names.clear();
+        self.high_used = [0; 4];
+        for (slot, file, reg) in pooled {
+            self.high_slots.insert((file, reg), slot);
+            self.high_names.insert(slot, (file, reg));
+            let (base, _) = file.high_pool();
+            let next = (slot - base) / file.stride() + 1;
+            let used = &mut self.high_used[file as usize];
+            *used = (*used).max(next);
+        }
+    }
+
+    /// The register a pooled slot was given to, for a display.
+    pub fn pooled_register(&self, slot: i64) -> Option<(crate::compiler::RegFile, i64)> {
+        self.high_names.get(&slot).copied()
+    }
+
+    /// Every pooled register and its slot, in slot order: what a format has to
+    /// carry so that a register is the same slot after it is loaded.
+    pub fn pooled_registers(&self) -> Vec<(i64, crate::compiler::RegFile, i64)> {
+        let mut out: Vec<_> = self
+            .high_names
+            .iter()
+            .map(|(slot, (file, reg))| (*slot, *file, *reg))
+            .collect();
+        out.sort_unstable_by_key(|(slot, ..)| *slot);
+        out
+    }
+
     pub fn scan_register_any(&mut self, lx: &mut Lexer, pending_only: bool) -> R<i64> {
         let n = self.scan_number(lx, pending_only)?;
         match (0..=255).contains(&n) {
@@ -6772,6 +6872,28 @@ fn validate_params(params: &[Token]) -> R<()> {
 /// `"m2d5c2l5x2v5i"`: each letter is followed by the divisor that gives the
 /// next one's value, and a subtractive pair (`cm`, `iv`) is found by looking
 /// one or two letters ahead. A number that is not positive prints nothing.
+/// Whether a new engine is LuaTeX in its register ranges: set once by the
+/// command line's `--luatex` (and `-progname=lualatex`), for a whole process.
+/// A LaTeX document's engine is made LuaTeX-ranged where it is built, whatever
+/// this says, since what that path replaces is `lualatex`.
+static LUATEX_REGISTERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Make every engine built after this LuaTeX-ranged, or TeX82-ranged again.
+pub fn set_luatex_registers(on: bool) {
+    LUATEX_REGISTERS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// LuaTeX's highest register number (the LuaTeX manual, "Registers": 65536 of
+/// each kind), against TeX82's 255.
+pub const LUATEX_REGISTER_LIMIT: i64 = 65535;
+
+fn default_register_limit() -> i64 {
+    match LUATEX_REGISTERS.load(std::sync::atomic::Ordering::Relaxed) {
+        true => LUATEX_REGISTER_LIMIT,
+        false => 255,
+    }
+}
+
 pub fn roman_int(mut n: i64) -> String {
     const POOL: &[u8] = b"m2d5c2l5x2v5i";
     let mut out = String::new();
