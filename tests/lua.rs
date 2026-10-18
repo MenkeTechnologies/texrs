@@ -2059,3 +2059,23 @@ fn set_lua_makes_an_expandable_or_a_protected_lua_call() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn an_expandable_lua_call_runs_wherever_the_gullet_expands() {
+    // A `token.set_lua` name without "protected" is a `lua_expandable_call`:
+    // luatex 1.24.0 runs it inside `\edef` and `\message`, and leaves the
+    // protected one in the body as itself.
+    let body = "\\directlua{local t = lua.get_functions_table() \
+          t[11] = function() tex.sprint('E') end t[12] = function() tex.sprint('P') end \
+          token.set_lua('ex', 11) token.set_lua('pr', 12, 'protected')}\
+        \\edef\\x{\\ex\\pr}\\message{[\\meaning\\x]}\\message{[\\ex]}";
+    let want = "[macro:->E\\pr ] [E]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}
