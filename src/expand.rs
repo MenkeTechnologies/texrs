@@ -354,6 +354,9 @@ pub struct Engine {
     /// (`tex.web` §1269's `after_token`). One only: a second `\afterassignment`
     /// before the assignment replaces the first, as it does there.
     after_assignment: Option<Token>,
+    /// Inside [`Engine::local_control`]: what `step` does there reaches no
+    /// program, so an assignment only the program could make is refused.
+    in_local_control: bool,
     advice_depth: u32,
     /// Whether an `\unless` is waiting for the conditional it negates.
     ///
@@ -621,6 +624,41 @@ impl Engine {
             unset_cat_tables: std::collections::HashSet::new(),
             after_group_tokens: Vec::new(),
             after_assignment: None,
+            in_local_control: false,
+        }
+    }
+
+    /// luatex's `local_control` for `tex.runtoks`: execute what is in front of
+    /// the mouth until it is read down to `stop` tokens of pending input -- the
+    /// depth before the Lua function put its tokens back -- expanding as it
+    /// goes. Definitions, `\let`, the code tables, groups and the integer
+    /// parameters take effect here as in the lowerer; a `\count` assignment, a
+    /// count `\advance`/`\multiply`/`\divide` and `\message` are the program's
+    /// in the lowerer and are refused by name, as is `\end`.
+    pub fn local_control(&mut self, lx: &mut Lexer, stop: usize) -> R<()> {
+        self.in_local_control = true;
+        let out = (|| {
+            while lx.pending.len() > stop {
+                let Some(tok) = lx.next_token(&self.cats) else {
+                    break;
+                };
+                if self.step(lx, tok)? {
+                    return Err(TexError("\\end inside tex.runtoks".into()));
+                }
+            }
+            Ok(())
+        })();
+        self.in_local_control = false;
+        out
+    }
+
+    /// The refusal [`Self::local_control`] makes for `what`.
+    fn not_in_local_control(&self, what: &str) -> R<()> {
+        match self.in_local_control {
+            true => Err(TexError(format!(
+                "\\{what} inside tex.runtoks is not supported"
+            ))),
+            false => Ok(()),
         }
     }
 
@@ -1697,7 +1735,10 @@ impl Engine {
                     .expect("one of the five just matched");
                 self.do_charcode(lx, t)?
             }
-            "count" => self.do_count_assign(lx)?,
+            "count" => {
+                self.not_in_local_control("count")?;
+                self.do_count_assign(lx)?
+            }
             _ if self.intpar_cs(name).is_some() => {
                 let i = self.intpar_cs(name).expect("just matched");
                 self.do_intpar_assign(lx, i)?
@@ -1706,6 +1747,7 @@ impl Engine {
             "multiply" => self.do_arith(lx, Arith::Mul)?,
             "divide" => self.do_arith(lx, Arith::Div)?,
             "message" => {
+                self.not_in_local_control("message")?;
                 let text = self.read_group_text(lx)?;
                 self.messages.push(text);
             }
@@ -5597,6 +5639,7 @@ impl Engine {
         if what.name() != "count" {
             return Err(TexError(format!("Unsupported register \\{}", what.name())));
         }
+        self.not_in_local_control("count")?;
         let reg = self.scan_number(lx, false)?;
         self.skip_by(lx)?;
         let val = self.scan_number(lx, false)?;
@@ -7698,5 +7741,47 @@ impl Engine {
             src.push('\n');
         }
         src
+    }
+}
+
+#[cfg(test)]
+mod local_control_tests {
+    use super::*;
+
+    /// Tokens as the mouth reads `src` under INITEX's codes plus braces.
+    fn tokens(eng: &Engine, src: &str) -> Vec<Token> {
+        let mut lx = Lexer::new(src);
+        std::iter::from_fn(|| lx.next_token(&eng.cats)).collect()
+    }
+
+    #[test]
+    fn runs_what_was_put_back_and_stops_at_the_depth_it_was_given() {
+        let mut eng = Engine::new();
+        eng.cats.set('{', Cat::BeginGroup);
+        eng.cats.set('}', Cat::EndGroup);
+        // The file goes on after the tokens: local control must not read it.
+        let mut lx = Lexer::new("\\def\\after{no}");
+        let stop = lx.pending.len();
+        lx.push_back(&tokens(
+            &eng,
+            "\\let\\a\\relax \\def\\b{x}\\catcode`\\@=11 ",
+        ));
+        eng.local_control(&mut lx, stop).unwrap();
+        assert_eq!(eng.meaning_text(&Token::cs("a")), "\\relax");
+        assert_eq!(eng.meaning_text(&Token::cs("b")), "macro:->x");
+        assert_eq!(eng.cats.get('@'), Cat::Letter);
+        assert_eq!(eng.meaning_text(&Token::cs("after")), "undefined");
+        assert_eq!(lx.next_token(&eng.cats), Some(Token::cs("def")));
+    }
+
+    #[test]
+    fn a_count_assignment_is_refused_by_name_not_dropped() {
+        let mut eng = Engine::new();
+        let mut lx = Lexer::new("");
+        lx.push_back(&tokens(&eng, "\\count1=5 "));
+        let err = eng.local_control(&mut lx, 0).unwrap_err();
+        assert!(err.0.contains("\\count inside tex.runtoks"), "{}", err.0);
+        // Outside it the engine assigns as before.
+        assert!(eng.run("\\count1=5 ").is_ok());
     }
 }
