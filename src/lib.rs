@@ -60,6 +60,7 @@ pub mod luatex_oracle;
 pub mod luatex_primitives;
 pub mod math;
 pub mod node;
+pub mod otf;
 pub mod pack;
 pub mod page;
 pub mod parallel;

@@ -1,0 +1,115 @@
+//! OpenType fonts as luaotfload's node mode loads them.
+//!
+//! `mode=node` is luaotfload's default and fontspec's: the font is read by
+//! the ConTeXt fontloader that luaotfload carries (`fontloader-font-otr.lua`
+//! and the files around it, merged into `fontloader-2023-12-28.lua` in TeX
+//! Live 2026), not by HarfBuzz, and its numbers are its own -- a glyph's
+//! height is the top of a box that counts curve control points, a duplicate
+//! code point is a copy of the glyph rather than an alias, and a glyph no
+//! Unicode reaches lives at a private slot from U+F0000 on. This module is a
+//! port of that loader, file by file:
+//!
+//! - [`stream`]: the byte reader;
+//! - [`otr`]: the table directory and the tables the metrics read;
+//! - [`cff`]: CFF dictionaries, charsets and charstring bounding boxes;
+//! - [`oup`]: the glyphs keyed by Unicode, duplicates, and the Unicode a
+//!   glyph is guessed to stand for;
+//! - [`tfm`]: the scaled characters and parameters.
+//!
+//! What is not here yet is the feature side -- GDEF classes, the GSUB and
+//! GPOS lookups and the processing that applies them (`font-dsp`, `font-ots`,
+//! `font-otj`) -- and variable fonts; `BUGS.md` keeps the list. A face is read
+//! once and shared by `Arc`; nothing in it changes after loading.
+
+pub mod cff;
+pub mod otr;
+pub mod oup;
+pub mod stream;
+pub mod tfm;
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use oup::Description;
+
+/// A font file's face as node mode holds it: `otf.load`'s `data`
+/// (fontloader-font-otl.lua:132-290), descriptions keyed by Unicode or
+/// private slot.
+#[derive(Clone, Debug)]
+pub struct Face {
+    pub descriptions: BTreeMap<u32, Description>,
+    pub metadata: tfm::Metadata,
+    /// `opentype` (CFF outlines) or `truetype`.
+    pub format: &'static str,
+    /// Name to Unicode (`resources.unicodes`).
+    pub unicodes: BTreeMap<String, u32>,
+    /// The next unused private slot.
+    pub private: u32,
+}
+
+impl Face {
+    /// Load face `sub` (0 for the first) of the font at `path`.
+    pub fn open(path: impl AsRef<std::path::Path>, sub: usize) -> Result<Arc<Face>, String> {
+        let path = path.as_ref();
+        let data =
+            std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Face::from_bytes(&data, sub)
+    }
+
+    /// `otf.load` over a file already in memory.
+    pub fn from_bytes(data: &[u8], sub: usize) -> Result<Arc<Face>, String> {
+        let offsets = otr::face_offsets(data);
+        let offset = *offsets
+            .get(sub)
+            .ok_or_else(|| "not an OpenType font, or no such face in the collection".to_string())?;
+        let mut fontdata = otr::read(data, offset);
+        // readers.rehash(data, "unicodes") (font-oup.lua:1275-1295)
+        let (mut descriptions, _indices, private) = oup::unify_glyphs(&mut fontdata);
+        oup::copy_duplicates(&mut descriptions, &fontdata.duplicates);
+        // unifymissing (font-oup.lua:748-772): the names of the glyphs that
+        // have a real Unicode, then addtounicode.
+        let mut unicodes = BTreeMap::new();
+        for (&u, d) in &descriptions {
+            if u < otr::PRIVATE && !(0xE000..=0xF8FF).contains(&u) {
+                if let Some(n) = &d.name {
+                    unicodes.insert(n.clone(), u);
+                }
+            }
+        }
+        oup::add_tounicode(&mut descriptions, &mut unicodes, &oup::Lookups::default());
+        oup::strip_redundant(&mut descriptions);
+        let cffinfo = fontdata.cffinfo.clone().unwrap_or_default();
+        oup::expand_dimensions(&mut descriptions, 0.0);
+        let unicodes = oup::unicode_table(&descriptions);
+
+        let m = fontdata.windowsmetrics.clone().unwrap_or_default();
+        let post = fontdata.postscript.clone().unwrap_or_default();
+        let head = fontdata.fontheader.clone().unwrap_or_default();
+        let metadata = tfm::Metadata {
+            units: head.units as f64,
+            designsize: None,
+            monospaced: post.monospaced > 0 || m.panose[3] == 9,
+            averagewidth: Some(m.averagewidth as f64),
+            xheight: m.xheight.map(|x| x as f64),
+            capheight: m.capheight.map(|x| x as f64),
+            ascender: Some(m.typoascender as f64),
+            descender: Some(m.typodescender as f64),
+            italicangle: post.italicangle,
+            fontname: fontdata.getname("postscriptname"),
+            fullname: fontdata.getname("fullname"),
+        };
+        let _ = cffinfo;
+        Ok(Arc::new(Face {
+            descriptions,
+            metadata,
+            format: fontdata.format,
+            unicodes,
+            private,
+        }))
+    }
+
+    /// The face at `size` scaled points.
+    pub fn scale(&self, size: i64) -> tfm::Scaled {
+        tfm::scale(&self.descriptions, &self.metadata, size)
+    }
+}
