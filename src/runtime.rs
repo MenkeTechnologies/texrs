@@ -120,7 +120,17 @@ pub(crate) fn tell(said: Vec<crate::stomach::Said>, online: bool) {
             // puts in them, as `report` does with an error's context.
             Said::Report(text) => push_report(&text.replace('\n', "")),
             Said::Terminal(text) => {
-                let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+                // A report ends with `print_ln` (§663), so what §638 prints
+                // after one starts its line with no space before it.
+                let after_report = BUILDING.with(|b| {
+                    let len = b.borrow().len();
+                    len > 0 && REPORTS_END.with(|end| *end.borrow() == len)
+                });
+                let held = take_building();
+                if after_report {
+                    record(held + &text);
+                    continue;
+                }
                 if !held.is_empty() {
                     record(held);
                 }
