@@ -1426,6 +1426,11 @@ fn tex_table(
                 let Ok(slot) = resolve(&b, kind, &key) else {
                     return Ok(Value::Boolean(false));
                 };
+                if let Ok(Some((_, n))) =
+                    ctx::with("tex.is", |eng, _| Ok(eng.pooled_register(slot)))
+                {
+                    return Ok(Value::Integer(n));
+                }
                 let base = match kind {
                     Kind::Count | Kind::Toks => 0,
                     Kind::Dimen => crate::compiler::DIMEN_BASE,
@@ -1793,15 +1798,12 @@ const ATTRIBUTE_BASE: i64 = 1 << 20;
 
 /// How many registers of each kind there are.
 ///
-/// TeX82's 256 (`tex.web` §236), which is what `crate::compiler` lays out and
-/// what `\countdef`, `\dimendef` and `\skipdef` accept — not LuaTeX's 65,536.
-/// The check matters rather than being decoration: the count, dimension and
-/// glue files are consecutive ranges of ONE slot file, so `tex.count[300]`
-/// unchecked is a write to `\dimen44` and `tex.dimen[300]` unchecked is a write
-/// into the middle of `\skip11`. An out-of-range index is refused, because a
-/// document that silently wrote to a register it did not name is the failure
-/// mode this whole module exists to end.
-const REGISTERS: i64 = 256;
+/// LuaTeX's 65,536 of each kind (the manual, "Registers"), as the engine has
+/// them: 0..255 at fixed slots and the rest from a pool per file. An index past
+/// the end is refused rather than turned into a slot, because the files are
+/// ranges of ONE slot file and a slot computed for a register that is not
+/// there would be a write to whichever neighbour it landed in.
+const REGISTERS: i64 = 65536;
 
 /// A register index from a Lua key: a number, or a `\countdef`-style name.
 fn resolve(b: &Bridge, kind: Kind, key: &Value) -> mlua::Result<i64> {
@@ -1822,15 +1824,32 @@ fn resolve(b: &Bridge, kind: Kind, key: &Value) -> mlua::Result<i64> {
         // An attribute is storage this module keeps for the chunk and a token
         // register is a map rather than a slot range, so neither can collide
         // with a neighbour and neither is bounded by the slot file.
-        let bounded = matches!(kind, Kind::Count | Kind::Dimen | Kind::Glue | Kind::MuGlue);
-        if bounded && !(0..REGISTERS).contains(&n) {
+        let file = match kind {
+            Kind::Count => Some(crate::compiler::RegFile::Count),
+            Kind::Dimen => Some(crate::compiler::RegFile::Dimen),
+            Kind::Glue => Some(crate::compiler::RegFile::Skip),
+            Kind::MuGlue => Some(crate::compiler::RegFile::MuSkip),
+            _ => None,
+        };
+        let Some(file) = file else {
+            return Ok(base + n * stride);
+        };
+        if !(0..REGISTERS).contains(&n) {
             return Err(mlua::Error::runtime(format!(
-                "\\{}{n} is out of range: texrs has {REGISTERS} {} registers",
+                "\\{}{n} is out of range: there are {REGISTERS} {} registers",
                 kind.primitive(),
                 kind.primitive(),
             )));
         }
-        return Ok(base + n * stride);
+        if n < 256 {
+            return Ok(base + n * stride);
+        }
+        // A register past 255 has a slot from its file's pool, given the
+        // first time it is named (`Engine::register_address`).
+        return ctx::with("tex", |eng, _| {
+            eng.register_address(file, n)
+                .map_err(|e| mlua::Error::runtime(e.0))
+        });
     }
     let Value::String(s) = key else {
         return Err(mlua::Error::runtime(

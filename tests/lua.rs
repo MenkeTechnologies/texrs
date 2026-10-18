@@ -543,14 +543,21 @@ fn the_node_half_of_the_register_interface_refuses_rather_than_inventing_a_value
 #[test]
 fn a_register_index_past_the_end_is_refused_and_not_written_to_its_neighbour() {
     // The count, dimension and glue files are consecutive ranges of ONE slot
-    // file, so an unchecked `tex.count[300]` is a write to `\dimen44` and an
-    // unchecked `tex.dimen[300]` lands in the middle of `\skip11`. Both are the
-    // failure this module exists to end: a document silently wrong somewhere it
-    // never named.
-    let e = fails("\\directlua{tex.count[300] = 5}");
+    // file, so an unchecked index past LuaTeX's 65,536 would be a write to a
+    // neighbour: the failure this module exists to end, a document silently
+    // wrong somewhere it never named.
+    let e = fails("\\directlua{tex.count[65536] = 5}");
     assert!(e.contains("out of range"), "{e}");
-    let e = fails("\\directlua{tex.dimen[300] = 5}");
+    let e = fails("\\directlua{tex.dimen[70000] = 5}");
     assert!(e.contains("out of range"), "{e}");
+    // A register past 255 is one of LuaTeX's, and its own: `\count300` is not
+    // `\dimen44`.
+    assert_eq!(
+        out(
+            "\\dimen44=1pt \\directlua{tex.count[300] = 5}\\directlua{tex.sprint(string.char(92) .. \"message{[\" .. tex.count[300] .. \"]}\")}\\message{[\\the\\dimen44]}"
+        ),
+        "[5] [1.0pt]"
+    );
     // And the neighbour it would have hit is untouched.
     assert_eq!(
         out("\\dimen44=1pt \\directlua{pcall(function() tex.count[300] = 5 end)}\\message{[\\the\\dimen44]}"),
@@ -1306,10 +1313,9 @@ fn the_muskip_registers_reach_lua_the_same_way_the_skips_do() {
         assert!(!want.is_empty(), "the oracle said nothing for {body}");
         assert_eq!(got, want, "{body}");
     }
-    // The bound is texrs's 256 registers, not LuaTeX's 65,536, and the muskip
-    // file sits above the skip file in one slot range -- so an unchecked index
-    // would land in a neighbour exactly as `tex.count[300]` would.
-    let e = fails("\\directlua{tex.muskip[300] = node.new(\"glue_spec\")}");
+    // The bound is LuaTeX's 65,536, and the muskip file sits above the skip
+    // file in one slot range -- so an unchecked index would land in a neighbour.
+    let e = fails("\\directlua{tex.muskip[65536] = node.new(\"glue_spec\")}");
     assert!(e.contains("out of range") && e.contains("muskip"), "{e}");
 }
 

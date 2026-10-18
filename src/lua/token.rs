@@ -272,7 +272,7 @@ fn cmd_chr(eng: &Engine, tok: &Token) -> (i64, i64) {
         Some(Meaning::CharDef(n)) => (command("char_given"), *n),
         Some(Meaning::MathCharDef(n)) => (command("math_given"), *n),
         Some(Meaning::ToksDef(r)) => (command("assign_toks"), TOKS_BASE + r),
-        Some(Meaning::CountDef(slot)) => register_cmd(*slot),
+        Some(Meaning::CountDef(slot)) => register_cmd(eng, *slot),
         // A font identifier is `set_font` with the font's number (§1257).
         Some(Meaning::Font(f)) => (command("set_font"), i64::from(*f)),
         None => primitive_cmd(name.name()),
@@ -283,8 +283,17 @@ fn cmd_chr(eng: &Engine, tok: &Token) -> (i64, i64) {
 /// as a SLOT in the register file `crate::compiler` lays out -- counts from
 /// 0, dimensions from `DIMEN_BASE`, glue four slots wide from `SKIP_BASE`,
 /// muglue after it -- and the slot says which family it is.
-fn register_cmd(slot: i64) -> (i64, i64) {
-    use crate::compiler::{DIMEN_BASE, MUSKIP_BASE, SKIP_BASE as TX_SKIP, SKIP_STRIDE};
+fn register_cmd(eng: &Engine, slot: i64) -> (i64, i64) {
+    use crate::compiler::{RegFile, DIMEN_BASE, MUSKIP_BASE, SKIP_BASE as TX_SKIP, SKIP_STRIDE};
+    // A register past 255 was given a pooled slot; the engine knows which.
+    if let Some((file, n)) = eng.pooled_register(slot) {
+        return match file {
+            RegFile::Count => (command("assign_int"), COUNT_BASE + n),
+            RegFile::Dimen => (command("assign_dimen"), SCALED_BASE + n),
+            RegFile::Skip => (command("assign_glue"), SKIP_BASE + n),
+            RegFile::MuSkip => (command("assign_mu_glue"), MU_SKIP_BASE + n),
+        };
+    }
     if slot >= super::ATTRIBUTE_BASE {
         (
             command("assign_attr"),
