@@ -1,0 +1,71 @@
+%!PS-Adobe-3.0 Resource-CMap
+%%DocumentNeededResources: ProcSet (CIDInit)
+%%IncludeResource: ProcSet (CIDInit)
+%%BeginResource: CMap (TeX-KHCQVN-Arimo-0)
+%%Title: (TeX-KHCQVN-Arimo-0 TeX KHCQVN-Arimo 0)
+%%Version: 1.000
+%%EndComments
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo
+<< /Registry (TeX)
+/Ordering (KHCQVN-Arimo)
+/Supplement 0
+>> def
+/CMapName /TeX-Identity-KHCQVN-Arimo def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+43 beginbfchar
+<0010> <002D>
+<0013> <0030>
+<0014> <0031>
+<0015> <0032>
+<0016> <0033>
+<0017> <0034>
+<0018> <0035>
+<0019> <0036>
+<001A> <0037>
+<001B> <0038>
+<001C> <0039>
+<0024> <0041>
+<0032> <004F>
+<0037> <0054>
+<0039> <0056>
+<0044> <0061>
+<0046> <0063>
+<0048> <0065>
+<0049> <0066>
+<004A> <0067>
+<004C> <0069>
+<004F> <006C>
+<0050> <006D>
+<0051> <006E>
+<0052> <006F>
+<0055> <0072>
+<0056> <0073>
+<0057> <0074>
+<005A> <0077>
+<0063> <00C5>
+<0070> <00E9>
+<0078> <00F1>
+<007C> <00F6>
+<0081> <00FC>
+<012D> <03B1>
+<01D0> <0174>
+<0217> <03B8>
+<0218> <03B9>
+<021C> <03BD>
+<03AE> <01C5>
+<05AE> <0450>
+<06E2> <1F08>
+<0790> <1FC6>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+%%EndResource
+%%EOF

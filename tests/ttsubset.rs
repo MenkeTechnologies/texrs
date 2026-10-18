@@ -45,3 +45,22 @@ fn truetype_subsets_are_luatexs() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn cid_tounicode_cmaps_are_luatexs() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/ttsubset");
+    for name in ["DejaVuSans", "Arimo-Regular", "NotoSerif-Regular"] {
+        let read = |ext: &str| std::fs::read_to_string(dir.join(format!("{name}.{ext}"))).unwrap();
+        let mut used = std::collections::BTreeMap::new();
+        for line in read("used").lines() {
+            let w: Vec<&str> = line.split(' ').collect();
+            let c = u32::from_str_radix(w[0], 16).unwrap();
+            let tu = (w[2] != "nil").then(|| w[2].to_string());
+            used.insert(c, (w[1].parse::<u16>().unwrap(), tu));
+        }
+        let fontname = read("fontname");
+        let (tag, base) = fontname.trim().split_once('+').unwrap();
+        let got = texrs::otf::cidcmap::write_cid_tounicode(Some(tag), base, &used, true);
+        assert_eq!(got, read("tounicode"), "{name}");
+    }
+}

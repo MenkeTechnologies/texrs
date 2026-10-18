@@ -1,0 +1,70 @@
+%!PS-Adobe-3.0 Resource-CMap
+%%DocumentNeededResources: ProcSet (CIDInit)
+%%IncludeResource: ProcSet (CIDInit)
+%%BeginResource: CMap (TeX-XAXQRE-NotoSerif-Regular-0)
+%%Title: (TeX-XAXQRE-NotoSerif-Regular-0 TeX XAXQRE-NotoSerif-Regular 0)
+%%Version: 1.000
+%%EndComments
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo
+<< /Registry (TeX)
+/Ordering (XAXQRE-NotoSerif-Regular)
+/Supplement 0
+>> def
+/CMapName /TeX-Identity-XAXQRE-NotoSerif-Regular def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+42 beginbfchar
+<0010> <002D>
+<0013> <0030>
+<0014> <0031>
+<0015> <0032>
+<0016> <0033>
+<0017> <0034>
+<0018> <0035>
+<0019> <0036>
+<001A> <0037>
+<001B> <0038>
+<001C> <0039>
+<0024> <0041>
+<0032> <004F>
+<0037> <0054>
+<0039> <0056>
+<0044> <0061>
+<0046> <0063>
+<0048> <0065>
+<004A> <0067>
+<0050> <006D>
+<0051> <006E>
+<0052> <006F>
+<0055> <0072>
+<0056> <0073>
+<0057> <0074>
+<005A> <0077>
+<0087> <00C5>
+<00AB> <00E9>
+<00B3> <00F1>
+<00B8> <00F6>
+<00BE> <00FC>
+<0135> <0174>
+<017D> <03B1>
+<0184> <03B8>
+<0185> <03B9>
+<0189> <03BD>
+<024A> <0450>
+<0394> <01C5>
+<0638> <1F08>
+<06E6> <1FC6>
+<0854> <006600660069>
+<0857> <0066006C>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+%%EndResource
+%%EOF

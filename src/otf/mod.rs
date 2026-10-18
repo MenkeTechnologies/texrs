@@ -25,6 +25,7 @@
 //! after loading.
 
 pub mod cff;
+pub mod cidcmap;
 pub mod dsp;
 pub mod features;
 pub mod names;
