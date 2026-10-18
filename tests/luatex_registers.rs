@@ -61,3 +61,31 @@ fn a_register_past_255_keeps_its_value_through_a_group() {
     );
     assert!(out.contains("[5][9]"), "{out}");
 }
+
+#[test]
+fn attribute_registers_start_unset_and_are_scoped_like_counts() {
+    // luatex: `[-2147483647][-2147483647] [3][\attribute5][3] [9] [3][4] [5]`,
+    // then `[-2147483647]` for an explicitly unset one, then
+    // `! Bad register code (65536).` and `five`.
+    let out = run(
+        "attributes",
+        &["-ini", "-progname=luatex"],
+        concat!(
+            "\\catcode`\\{=1 \\catcode`\\}=2\n",
+            "\\message{[\\the\\attribute0][\\number\\attribute7]}\n",
+            "\\attributedef\\a=5 \\a=3 \\message{[\\the\\a][\\meaning\\a][\\the\\attribute5]}\n",
+            "{\\a=9 \\global\\attribute6=4 \\message{[\\the\\a]}}\\message{[\\the\\a][\\the\\attribute6]}\n",
+            "\\advance\\a by 2 \\message{[\\the\\a]}\n",
+            "\\attribute8=-2147483647 \\message{[\\the\\attribute8]}\n",
+            "\\attribute65535=1 \\attribute65536=1\n",
+            "\\ifnum\\a=5 \\message{five}\\fi\n",
+            "\\end\n",
+        ),
+    );
+    assert!(
+        out.contains("[-2147483647][-2147483647] [3][\\attribute5][3] [9] [3][4] [5] [-2147483647]"),
+        "{out}"
+    );
+    assert!(out.contains("! Bad register code (65536)."), "{out}");
+    assert!(out.contains("five"), "{out}");
+}

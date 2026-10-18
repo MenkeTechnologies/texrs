@@ -73,6 +73,8 @@ pub enum Meaning {
     /// `\font\tenrm=cmr10` -- a font identifier (§1257's `set_font`), by
     /// internal font number. `\meaning` prints `select font cmr10` (§1261).
     Font(u16),
+    /// `\attributedef\a=5` -- another name for LuaTeX's attribute register 5.
+    AttributeDef(i64),
 }
 
 /// An argument as §392 read it, or what it held when a `\par` stopped it.
@@ -200,6 +202,8 @@ enum Save {
     Cat(i64, char, Cat),
     /// The `\catcodetable` a group switched away from.
     CatTable(i64),
+    /// One LuaTeX attribute register as it stood before a group assigned it.
+    Attribute(i64, i64),
     /// One token register as it stood before a group assigned to it.
     Toks(i64, Option<Vec<Token>>),
     /// One entry of one character-code table, as it stood before a group
@@ -239,6 +243,7 @@ impl Save {
         match (self, other) {
             (Save::Cat(ta, a, _), Save::Cat(tb, b, _)) => ta == tb && a == b,
             (Save::CatTable(_), Save::CatTable(_)) => true,
+            (Save::Attribute(a, _), Save::Attribute(b, _)) => a == b,
             (Save::Toks(a, _), Save::Toks(b, _)) => a == b,
             (Save::CharCode(ta, a, _), Save::CharCode(tb, b, _)) => ta == tb && a == b,
             (Save::IntPar(a, _), Save::IntPar(b, _)) => a == b,
@@ -281,6 +286,11 @@ pub struct Engine {
     high_names: FxHashMap<i64, (crate::compiler::RegFile, i64)>,
     /// How many slots of each pool are taken, in `RegFile` order.
     high_used: [i64; 4],
+    /// LuaTeX's attribute registers (`\attribute n`), each unset --
+    /// [`UNUSED_ATTRIBUTE`] -- until assigned. Frontend state like the integer
+    /// parameters: what the stomach attaches to a node is the value in force
+    /// when the node is made, which is known while lowering.
+    attributes: FxHashMap<i64, i64>,
     pub messages: Vec<String>,
     /// The line `\inputlineno` was last read on (§1382's `line`). A read
     /// primitive answers the line of the token that named it, so the mouth
@@ -480,6 +490,8 @@ enum CondState {
     TakenCase,
     /// A branch was skipped to get here; `\else` must not re-enter.
     Done,
+    /// The test is still being read (§498's `if_limit=if_code`).
+    Testing,
 }
 
 #[derive(Debug)]
@@ -569,6 +581,7 @@ impl Engine {
             high_slots: FxHashMap::default(),
             high_names: FxHashMap::default(),
             high_used: [0; 4],
+            attributes: FxHashMap::default(),
             messages: Vec::new(),
             input_line: 0,
             intpars: crate::intpar::IntPars::new(),
@@ -719,6 +732,9 @@ impl Engine {
                     }
                 },
                 Save::CatTable(table) => self.switch_cat_table(table),
+                Save::Attribute(n, v) => {
+                    self.attributes.insert(n, v);
+                }
                 Save::Toks(reg, was) => {
                     match was {
                         Some(v) => self.toks.insert(reg, v),
@@ -851,7 +867,7 @@ impl Engine {
             Some(Meaning::Char(..) | Meaning::CharDef(_) | Meaning::MathCharDef(_)) => {
                 return AfterPrefix::Other
             }
-            Some(Meaning::ToksDef(_) | Meaning::CountDef(_)) => {
+            Some(Meaning::ToksDef(_) | Meaning::CountDef(_) | Meaning::AttributeDef(_)) => {
                 return AfterPrefix::Assignment { def: false }
             }
             _ => {}
@@ -1522,6 +1538,57 @@ impl Engine {
         out
     }
 
+    /// LuaTeX attribute register `n` (the LuaTeX manual, "Attributes"): unset
+    /// until assigned, and `\the` of an unset one is `-2147483647`, measured.
+    pub fn attribute_value(&self, n: i64) -> i64 {
+        self.attributes.get(&n).copied().unwrap_or(UNUSED_ATTRIBUTE)
+    }
+
+    /// The attribute register a `\attributedef` name stands for.
+    pub fn attribute_of(&self, name: CsId) -> Option<i64> {
+        match self.meanings.get(&name) {
+            Some(Meaning::AttributeDef(n)) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn set_attribute(&mut self, n: i64, v: i64) {
+        self.save(Save::Attribute(n, self.attribute_value(n)));
+        self.attributes.insert(n, v);
+    }
+
+    /// `\attribute n = v`, or a `\attributedef` name and `= v`: an integer
+    /// assignment, scoped by the group unless `\global`.
+    pub fn compile_time_attribute(&mut self, lx: &mut Lexer, n: i64) -> R<()> {
+        self.global = self.take_global_prefix();
+        let out = self.skip_equals(lx).and_then(|_| self.scan_number(lx, false));
+        if let Ok(v) = &out {
+            self.set_attribute(n, *v);
+        }
+        self.global = false;
+        out.map(|_| ())
+    }
+
+    /// `\advance`, `\multiply` or `\divide` of attribute register `n`, as
+    /// §1236 does it for an integer.
+    pub fn compile_time_attribute_arith(&mut self, lx: &mut Lexer, n: i64, op: &str) -> R<()> {
+        let op = match op {
+            "advance" => Arith::Add,
+            "multiply" => Arith::Mul,
+            _ => Arith::Div,
+        };
+        self.global = self.take_global_prefix();
+        let out = self.skip_by(lx).and_then(|_| self.scan_number(lx, false));
+        if let Ok(by) = &out {
+            match arith_int(self.attribute_value(n), *by, op) {
+                Some(v) => self.set_attribute(n, v),
+                None => self.report(lx, "Arithmetic overflow"),
+            }
+        }
+        self.global = false;
+        out.map(|_| ())
+    }
+
     fn set_cat(&mut self, c: char, cat: Cat) {
         self.save(Save::Cat(self.cat_table, c, self.cats.get(c)));
         self.cats.set(c, cat);
@@ -1688,6 +1755,7 @@ impl Engine {
             self.expand_macro(lx, name, pending_only)?;
             return Ok(true);
         }
+        let original = name;
         let name = self.primitive_meaning(name);
         match name.name() {
             // The advice markers: they carry the "inside advice" depth through
@@ -1707,6 +1775,10 @@ impl Engine {
             // case, the `\or`) that follows it, and the rest to the `\fi` is
             // skipped. An `\else` after an `\else`, or an `\or` where no case
             // is running, is `if_limit` being too small: `Extra`, and ignored.
+            "else" | "or" | "fi" if matches!(self.conds.last(), Some(CondState::Testing)) => {
+                self.insert_relax(lx, original);
+                Ok(true)
+            }
             "else" => match self.conds.last() {
                 Some(CondState::Taken | CondState::TakenCase) => {
                     self.close_cond();
@@ -2009,6 +2081,10 @@ impl Engine {
         // §495's `if_line`: the line the conditional began on, before its
         // test is read.
         let line = lx.line();
+        // §498 pushes the conditional before it reads the test, with
+        // `if_limit=if_code`, so an `\or`, `\else` or `\fi` the test's own
+        // scanning expands is §510's `insert_relax` rather than `Extra`.
+        self.begin_test();
         let truth = match name {
             "iftrue" => true,
             "iffalse" => false,
@@ -2124,16 +2200,40 @@ impl Engine {
             }
             "ifcase" => {
                 let n = self.scan_number(lx, pending_only)?;
+                self.end_test();
                 return self.do_ifcase(lx, n, pending_only, line);
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
+        self.end_test();
         let name = CONDITIONALS
             .iter()
             .find(|c| **c == name)
             .copied()
             .unwrap_or("if");
         self.enter_decided(lx, truth != negated, pending_only, (name, negated, line))
+    }
+
+    /// §498's `push_cond` with `if_limit=if_code`: a conditional whose test is
+    /// being read. The lowerer reads the test of an `\ifnum` itself, and opens
+    /// and closes it through these too.
+    pub fn begin_test(&mut self) {
+        self.conds.push(CondState::Testing);
+    }
+
+    /// The test has been read; the conditional is decided next.
+    pub fn end_test(&mut self) {
+        if let Some(at) = self.conds.iter().rposition(|c| matches!(c, CondState::Testing)) {
+            self.conds.remove(at);
+        }
+    }
+
+    /// §510's `insert_relax`: an `\or`, `\else` or `\fi` met while a test is
+    /// still being read goes back, behind a `\relax` that ends whatever the
+    /// test was scanning, and is read again once the test is decided.
+    fn insert_relax(&mut self, lx: &mut Lexer, end: CsId) {
+        let relax = Token::Cs(CsId::intern("relax").noexpanded());
+        lx.back_input(&[relax, Token::Cs(end)]);
     }
 
     /// §498's ending, once the test is decided: a true test runs on into its
@@ -3486,6 +3586,7 @@ impl Engine {
             Some(Meaning::MathCharDef(v)) => format!("{}mathchar\"{v:X}", self.esc()),
             Some(Meaning::CountDef(r)) => self.register_name(*r),
             Some(Meaning::ToksDef(r)) => format!("{}toks{r}", self.esc()),
+            Some(Meaning::AttributeDef(r)) => format!("{}attribute{r}", self.esc()),
             Some(Meaning::Font(f)) => format!("select font {}", self.fonts.describe(*f)),
             Some(Meaning::Primitive(p)) => self.unbound_meaning(*p),
             Some(Meaning::Macro(m)) => {
@@ -4852,10 +4953,16 @@ impl Engine {
         match self.meanings.get(&name) {
             Some(Meaning::CharDef(v) | Meaning::MathCharDef(v)) => Some(NumericCs::Value(*v)),
             Some(Meaning::CountDef(r)) => Some(NumericCs::Register(*r)),
+            Some(Meaning::AttributeDef(n)) => Some(NumericCs::Value(self.attribute_value(*n))),
             // eTeX's `\inputlineno` (etex.ch `input_line_no_code`) is a
             // read-only integer: the line it was read on.
             None if name.name() == "inputlineno" => {
                 Some(NumericCs::Value(i64::from(self.input_line)))
+            }
+            // `\catcodetable` reads as the table in force (`assign_int`).
+            None if name.name() == "catcodetable" => Some(NumericCs::Value(self.cat_table)),
+            Some(Meaning::Primitive(p)) if p.name() == "catcodetable" => {
+                Some(NumericCs::Value(self.cat_table))
             }
             None if self.last_item_value(name.name()).is_some() => {
                 self.last_item_value(name.name()).map(NumericCs::Value)
@@ -4905,7 +5012,9 @@ impl Engine {
         };
         let (limit, what) = match kind {
             "mathchardef" => (32767, "mathchar"),
-            "dimendef" | "skipdef" | "muskipdef" | "toksdef" => (self.register_limit, "register code"),
+            "dimendef" | "skipdef" | "muskipdef" | "toksdef" | "attributedef" => {
+                (self.register_limit, "register code")
+            }
             "chardef" => (chars, "character code"),
             _ => (self.register_limit, "register code"),
         };
@@ -4929,6 +5038,7 @@ impl Engine {
             // A token register is not a slot: the list lives in the frontend,
             // so the name stands for the register number itself.
             "toksdef" => Meaning::ToksDef(v),
+            "attributedef" => Meaning::AttributeDef(v),
             "skipdef" => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Skip, v)?),
             // A math glue register is a glue register in the second glue file,
             // so its name stands for a slot exactly as `\skipdef`'s does.
@@ -5399,11 +5509,19 @@ impl Engine {
     /// §413's reader in `scan_number`.
     fn scan_char_code(&mut self, lx: &mut Lexer, pending_only: bool) -> R<char> {
         let mut ch = self.scan_number(lx, pending_only)?;
-        if !(0..=255).contains(&ch) {
+        // §434's `scan_char_num`, over the characters this run has: 256 for
+        // TeX82, every Unicode scalar value for LuaTeX (`Bad character code
+        // (1114112)` there, measured).
+        let last = match self.register_limit > 255 {
+            true => 0x10FFFF,
+            false => 255,
+        };
+        let valid = (0..=last).contains(&ch) && char::from_u32(ch as u32).is_some();
+        if !valid {
             self.report(lx, &format!("Bad character code ({ch})"));
             ch = 0;
         }
-        Ok(char::from(ch as u8))
+        Ok(char::from_u32(ch as u32).unwrap_or('\0'))
     }
 
     fn do_catcode(&mut self, lx: &mut Lexer) -> R<()> {
@@ -5613,6 +5731,10 @@ impl Engine {
                     self.scan_register_slot(lx, pending_only, crate::compiler::RegFile::Count)?;
                 return Ok(sign * self.count_value(reg)?);
             }
+            if name.name() == "attribute" {
+                let n = self.scan_register_number(lx, pending_only)?;
+                return Ok(sign * self.attribute_value(n));
+            }
             // `tex.web` §413: each of the six code tables is an INTERNAL
             // INTEGER, so `\catcode`\@' stands wherever a number is scanned and
             // not only on the left of an assignment. It is the whole of what
@@ -5714,14 +5836,10 @@ impl Engine {
                         any = true;
                     }
                     other if other.is_space() && any => break,
-                    // §445 reads each digit with `get_x_token`: a macro after
-                    // the first digits expands and the constant goes on.
-                    // Only a macro: a conditional here belongs to whichever
-                    // pass owns it, and the lowerer decides those itself.
-                    Token::Cs(n) if self.is_macro(*n) => {
-                        let n = *n;
-                        self.expand_macro(lx, n, pending_only)?;
-                    }
+                    // §445 reads each digit with `get_x_token`: whatever
+                    // expands after the first digits expands and the constant
+                    // goes on.
+                    Token::Cs(n) if self.digit_position_expands(lx, *n, pending_only)? => {}
                     other => {
                         // §444: what ends the constant is read again.
                         lx.back_input(std::slice::from_ref(other));
@@ -5750,11 +5868,9 @@ impl Engine {
                 // `\ifnum\count0>3 BIG` rendered as " BIG".
                 other if other.is_space() && any => break,
                 // §445 reads each digit with `get_x_token`: `\count1=1\d`
-                // over `\def\d{23}` is 123.
-                Token::Cs(n) if self.is_macro(*n) => {
-                    let n = *n;
-                    self.expand_macro(lx, n, pending_only)?;
-                }
+                // over `\def\d{23}` is 123, and `0\ifx\a\b\else 1\fi` is 01 --
+                // latex.ltx's `\IncludeInRelease` builds its test that way.
+                Token::Cs(n) if self.digit_position_expands(lx, *n, pending_only)? => {}
                 other => {
                     // §444: what ends the constant is read again.
                     lx.back_input(std::slice::from_ref(other));
@@ -5770,6 +5886,33 @@ impl Engine {
             return Ok(self.missing_number(lx));
         }
         Ok(sign * value)
+    }
+
+    /// Expand `n`, met where §445 reads the next digit with `get_x_token`,
+    /// and say whether it expanded. A macro, a conditional, `\csname` and the
+    /// rest of §366's expandable commands do; `\the` and `\number` put back the
+    /// characters §465 and §470 make of their operand, which the digit loop
+    /// then reads.
+    fn digit_position_expands(&mut self, lx: &mut Lexer, n: CsId, pending_only: bool) -> R<bool> {
+        // A name with no meaning ends the constant here and is reported where
+        // it is executed; the frontend's own markers (a message body's end)
+        // have none, and must end it.
+        let defined = match self.meanings.get(&n) {
+            Some(Meaning::Macro(_)) => true,
+            Some(Meaning::Primitive(p)) => Self::expandable_primitive(p.name()),
+            None => self.is_primitive_name(n) && Self::expandable_primitive(n.name()),
+            Some(_) => false,
+        };
+        if defined && self.try_expand(lx, n, pending_only)? {
+            return Ok(true);
+        }
+        let prim = self.primitive_meaning(n);
+        if matches!(prim.name(), "the" | "number") && !self.is_macro(n) {
+            let text = self.read_the(lx, prim.name() == "number", pending_only)?;
+            lx.push_back(&str_toks(&text));
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// §446's astonishment that no number was here: reported, with what was
@@ -7154,6 +7297,10 @@ static LUATEX_REGISTERS: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 pub fn set_luatex_registers(on: bool) {
     LUATEX_REGISTERS.store(on, std::sync::atomic::Ordering::Relaxed);
 }
+
+/// What an attribute register holds before anything assigns it: LuaTeX's
+/// `UNUSED_ATTRIBUTE`, `-0x7FFFFFFF`, which `\the` prints as `-2147483647`.
+pub const UNUSED_ATTRIBUTE: i64 = -0x7FFF_FFFF;
 
 /// LuaTeX's highest register number (the LuaTeX manual, "Registers": 65536 of
 /// each kind), against TeX82's 255.

@@ -85,6 +85,10 @@ impl Cat {
 #[derive(Clone)]
 pub struct CatTable {
     codes: [Cat; 256],
+    /// The codes of characters past 255 that have been assigned one. LuaTeX
+    /// reads characters, not bytes, and every one of them has a catcode
+    /// (`\catcode"0410=11`), `other` until assigned -- so this is sparse.
+    wide: rustc_hash::FxHashMap<u32, Cat>,
     /// Bumped by every `set`.
     ///
     /// Lexing ahead of the expander is only valid while the table it was done
@@ -126,6 +130,7 @@ impl CatTable {
         codes[127] = Cat::Invalid;
         Self {
             codes,
+            wide: rustc_hash::FxHashMap::default(),
             generation: 0,
             end_line_char: 13,
         }
@@ -173,8 +178,9 @@ impl CatTable {
             // named `textgreater→key`, so a real document full of arrows and
             // dashes failed on names that do not exist. `Other` is both closer
             // to what tex does and the only choice that ends a control word
-            // where tex ends it.
-            n if n > 255 => Cat::Other,
+            // where tex ends it. A LuaTeX run can give one a code of its own
+            // (`\catcode"0410=11`), and then it has that.
+            n if n > 255 => self.wide.get(&n).copied().unwrap_or(Cat::Other),
             n => self.codes[n as usize],
         }
     }
@@ -187,10 +193,13 @@ impl CatTable {
                 // lexed ahead has to be re-checked, and pretending otherwise
                 // would make correctness depend on the old value.
                 self.codes[i] = cat;
-                self.generation = self.generation.wrapping_add(1);
+            } else {
+                self.wide.insert(u32::from(c), cat);
             }
+            self.generation = self.generation.wrapping_add(1);
         }
     }
+
 }
 
 /// `tex.web`'s numbering, for `\catcode` reads and writes.

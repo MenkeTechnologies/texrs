@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">286</div>
+            <div class="stat-val">288</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -362,6 +362,10 @@
 \message{\the\toks0}   % =&gt; a\b c</pre></td></tr>
             <tr><td><code>\toksdef</code></td><td>Give a token register a name, as <code>\countdef</code> does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.</td><td><pre>\toksdef\toks@=0
 \toks@={...}</pre></td></tr>
+            <tr><td><code>\attribute</code></td><td>LuaTeX's attribute registers, 65536 of them: unset until assigned, which <code>\the</code> prints as <code>-2147483647</code>, and scoped by a group like a count. Their values are frontend state, so a conditional over one is decided while lowering.</td><td><pre>\attribute N=V
+\attribute5=3 \message{\the\attribute5}   % =&gt; 3</pre></td></tr>
+            <tr><td><code>\attributedef</code></td><td>Give an attribute register a name, as <code>\countdef</code> does for a count; <code>\meaning</code> writes the register (<code>\attribute5</code>).</td><td><pre>\attributedef\a=5
+\a=3</pre></td></tr>
             <tr><td><code>\numexpr</code></td><td>An integer expression, closed by an optional <code>\relax</code>: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code> with ordinary precedence and parentheses. Division ROUNDS, half away from zero, so <code>\numexpr 7/2</code> is 4 where <code>\divide</code> gives 3 -- the two are different operations and texrs keeps them apart. A multiplication followed by a division is one scaling, <code>7*11/3</code> taken without the product overflowing, and a step outside the integer range makes the whole expression zero with <code>! Arithmetic overflow</code>. A register operand is read when the program runs, so <code>\count2=\numexpr\count1*3\relax</code> uses the value <code>\count1</code> has then. An eTeX primitive, so the oracle for it is LuaTeX rather than tex; <code>tests/luatex_cases</code> holds the comparison.</td><td><pre>\count0=\numexpr (2+3)*4\relax   % =&gt; 20</pre></td></tr>
             <tr><td><code>\dimexpr</code></td><td>The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so <code>\dimexpr 1pt*3</code> is three points. The arithmetic happens in scaled points, which is the only form a dimension has, and is bounded by the largest dimension rather than the largest integer.</td><td><pre>\dimen0=\dimexpr 1pt+2pt\relax   % =&gt; 3.0pt</pre></td></tr>
             <tr><td><code>\glueexpr</code></td><td>A glue expression, the same grammar as <code>\numexpr</code> over glue. Addition is componentwise with TeX's order rule -- an infinite component beats a finite one however large, a higher infinity beats a lower, and only equal orders add -- while <code>*</code> and <code>/</code> scale every component. A higher-order stretch or shrink REPLACES the one it meets even when it is being subtracted, as luatex's <code>scan_expr</code> does. An eTeX primitive. The operands are glue WRITTEN OUT; a register standing where one is wanted is refused rather than read.</td><td><pre>\skip0=\glueexpr 1pt plus 2pt+3pt plus 4fil\relax</pre></td></tr>

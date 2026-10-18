@@ -16,6 +16,9 @@
   '("\\catcode"
     "^^X"
     "`"
+    "\\catcodetable"
+    "\\savecatcodetable"
+    "\\initcatcodetable"
     "\\def"
     "\\gdef"
     "\\edef"
@@ -92,6 +95,9 @@
     "\\ifincsname"
     "\\ifprimitive"
     "\\ifcondition"
+    "\\currentiflevel"
+    "\\currentiftype"
+    "\\currentifbranch"
     "\\count"
     "\\advance"
     "\\multiply"
@@ -147,6 +153,11 @@
     "\\noindent"
     "\\noboundary"
     "\\prevgraf"
+    "\\fontdimen"
+    "\\hyphenchar"
+    "\\skewchar"
+    "\\patterns"
+    "\\hyphenation"
     "\\intercept"
     "\\proceed"
     "\\char"
@@ -169,6 +180,8 @@
     "\\muskipdef"
     "\\toks"
     "\\toksdef"
+    "\\attribute"
+    "\\attributedef"
     "\\numexpr"
     "\\dimexpr"
     "\\unless"
@@ -180,6 +193,8 @@
     "\\Uchar"
     "\\expanded"
     "\\unexpanded"
+    "\\scantokens"
+    "\\scantextokens"
     "\\lastnamedcs"
     "\\immediateassignment"
     "\\immediateassigned"
@@ -293,6 +308,9 @@
     (puthash "\\catcode" "\\catcode  —  Set or read a character's category code. [Category codes]" table)
     (puthash "^^X" "^^X  —  Control-character notation (tex.web §352), in two forms decided by what follows: `^^` and two LOWERCASE hex digits is that hex code, while `^^` and anything else is one character shifted by 64. [Category codes]" table)
     (puthash "`" "`  —  A character code as a number, for a register assignment or a comparison: a backtick followed by a character is that character's code, and the backslash before the character is optional unless it is a control sequence. [Category codes]" table)
+    (puthash "\\catcodetable" "\\catcodetable  —  Which category-code table the mouth reads with, as a number: LuaTeX keeps many, so a document can switch regimes in one assignment. [Category codes]" table)
+    (puthash "\\savecatcodetable" "\\savecatcodetable  —  Make table N a copy of the current one. [Category codes]" table)
+    (puthash "\\initcatcodetable" "\\initcatcodetable  —  Make table N INITEX's: letters 11, `\\` 0, `%` 14, the space 10, `^^M` 5, `^^@` 9, `^^?` 15, everything else 12. [Category codes]" table)
     (puthash "\\def" "\\def  —  Define a macro. [Macro definition]" table)
     (puthash "\\gdef" "\\gdef  —  Define globally: the definition survives the enclosing group, where a `\\def` inside braces is undone at the closing brace. [Macro definition]" table)
     (puthash "\\edef" "\\edef  —  Define with the body expanded NOW, so a register read is frozen at definition time and a later assignment cannot move it. [Macro definition]" table)
@@ -369,6 +387,9 @@
     (puthash "\\ifincsname" "\\ifincsname  —  True while a `\\csname`, `\\ifcsname` or `\\begincsname` is reading its name, so a macro can tell it is being expanded into one. [Conditionals]" table)
     (puthash "\\ifprimitive" "\\ifprimitive  —  Is the next token, unexpanded, a primitive that still means itself? A `\\let` copy under another name is not, and neither is a primitive's name once something has redefined it. [Conditionals]" table)
     (puthash "\\ifcondition" "\\ifcondition  —  Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written `\\ifcondition\\mytest` and still nest. [Conditionals]" table)
+    (puthash "\\currentiflevel" "\\currentiflevel  —  How many conditionals are open where it is read, a read-only integer -- a conditional whose text is running, whether the lowerer decided it or the run will. [Conditionals]" table)
+    (puthash "\\currentiftype" "\\currentiftype  —  Which conditional is innermost, in luatex's numbering: `\\if` 1, `\\ifnum` 3, `\\ifx` 13, `\\iftrue` 15, `\\ifcase` 17, `\\ifdefined` 18, `\\ifcsname` 19, `\\ifabsnum` 23 and so on, negative under `\\unless`, 0 outside every one. [Conditionals]" table)
+    (puthash "\\currentifbranch" "\\currentifbranch  —  Which text of the innermost conditional is running: 1 the true text, -1 the `\\else` text, 0 outside every conditional. [Conditionals]" table)
     (puthash "\\count" "\\count  —  A count register. [Registers]" table)
     (puthash "\\advance" "\\advance  —  Add to a register. [Registers]" table)
     (puthash "\\multiply" "\\multiply  —  Multiply a register. [Registers]" table)
@@ -424,6 +445,11 @@
     (puthash "\\noindent" "\\noindent  —  In horizontal mode, nothing (§1093). [Boxes]" table)
     (puthash "\\noboundary" "\\noboundary  —  Cancel the font's boundary character on that side of the next or previous run of characters (§1034, §1038), so a boundary ligature or kern is not made. [Boxes]" table)
     (puthash "\\prevgraf" "\\prevgraf  —  The number of lines in the most recent paragraph of the nearest enclosing vertical list (§422), read and assigned (§1244). [Boxes]" table)
+    (puthash "\\fontdimen" "\\fontdimen  —  Font parameter N of a font (tex.web §558, §578): read as a dimension, and assigned globally (§1253). [Boxes]" table)
+    (puthash "\\hyphenchar" "\\hyphenchar  —  The character a font hyphenates with (§1253): `\\-` puts it in a discretionary and the main loop follows each one it sets with an empty discretionary. [Boxes]" table)
+    (puthash "\\skewchar" "\\skewchar  —  The character whose kerns position a font's math accents (§1253). [Boxes]" table)
+    (puthash "\\patterns" "\\patterns  —  Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. [Boxes]" table)
+    (puthash "\\hyphenation" "\\hyphenation  —  Words with their hyphens written in (§934), which the second pass takes over the patterns. [Boxes]" table)
     (puthash "\\intercept" "\\intercept  —  Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. [Intercepts]" table)
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
     (puthash "\\char" "\\char  —  Set the character of a code in the text (tex.web §1110): `A\\char66 C` sets `ABC`. [Registers]" table)
@@ -446,6 +472,8 @@
     (puthash "\\muskipdef" "\\muskipdef  —  Give a math glue register a name, as `\\skipdef` does for an ordinary one. [Registers]" table)
     (puthash "\\toks" "\\toks  —  A token register: a token list stored VERBATIM, since nothing inside the braces expands -- which is the difference between it and a macro, and why `\\toks0={\\x}` reads back as `\\x` whatever `\\x` means. [Registers]" table)
     (puthash "\\toksdef" "\\toksdef  —  Give a token register a name, as `\\countdef` does for a count. [Registers]" table)
+    (puthash "\\attribute" "\\attribute  —  LuaTeX's attribute registers, 65536 of them: unset until assigned, which `\\the` prints as `-2147483647`, and scoped by a group like a count. [Registers]" table)
+    (puthash "\\attributedef" "\\attributedef  —  Give an attribute register a name, as `\\countdef` does for a count; `\\meaning` writes the register (`\\attribute5`). [Registers]" table)
     (puthash "\\numexpr" "\\numexpr  —  An integer expression, closed by an optional `\\relax`: `+`, `-`, `*`, `/` with ordinary precedence and parentheses. [Registers]" table)
     (puthash "\\dimexpr" "\\dimexpr  —  The same for dimensions: the operands are lengths and the multiplier and divisor are integers, so `\\dimexpr 1pt*3` is three points. [Registers]" table)
     (puthash "\\unless" "\\unless  —  Negate the conditional that follows: `\\unless\\ifnum 1>2 A\\else B\\fi` runs A. [Conditionals]" table)
@@ -457,6 +485,8 @@
     (puthash "\\Uchar" "\\Uchar  —  The character with the given code: `\\Uchar65` is `A`. [Expansion]" table)
     (puthash "\\expanded" "\\expanded  —  Expand the group's contents completely, here and now, and put the result back. [Expansion]" table)
     (puthash "\\unexpanded" "\\unexpanded  —  The opposite: the group's tokens are used as they stand. [Expansion]" table)
+    (puthash "\\scantokens" "\\scantokens  —  Read a token list again as a file: written as `\\meaning` writes a body, cut into lines at the `\\newlinechar`, each line ended with the `\\endlinechar`, and tokenised as it is read -- so a `\\catcode` inside it changes the rest. [Expansion]" table)
+    (puthash "\\scantextokens" "\\scantextokens  —  `\\scantokens` with no line end after the last line and nothing inserted at the end, so it can stand inside an `\\edef` without an `\\everyeof`. [Expansion]" table)
     (puthash "\\lastnamedcs" "\\lastnamedcs  —  The control sequence the last `\\csname`, `\\begincsname` or `\\ifcsname` looked up, put back where this stands -- so a name built once can be used again without building it twice. [Expansion]" table)
     (puthash "\\immediateassignment" "\\immediateassignment  —  Carry out the assignment that follows even while expanding. [Expansion]" table)
     (puthash "\\immediateassigned" "\\immediateassigned  —  The same for every assignment in a braced text; the braces open no group. [Expansion]" table)

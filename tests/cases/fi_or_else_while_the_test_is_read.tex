@@ -1,0 +1,8 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\ifcase0\or a\fi][\ifcase1\or a\fi][\ifnum1=1\fi x]}
+\def\e{}\def\f{x}
+\ifnum0\ifx\e\f\else 1\fi\ifnum 3=0 1\fi=1 \message{A}\else\message{B}\fi
+\count1=0\ifx\e\e 2\fi3 \message{\the\count1}
+\def\al#1{\ifcase#1\or a\or b\or c\or d\or e\or f\or g\fi}
+\count2=7 \message{[\al{\count2}][\al7]}
+\end

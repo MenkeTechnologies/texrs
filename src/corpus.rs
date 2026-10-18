@@ -1055,6 +1055,18 @@ pub const CORPUS: &[Entry] = &[
         "Give a token register a name, as `\\countdef` does for a count. The list is frontend state like a macro body rather than a number in a slot, so the name stands for the register itself.",
         "\\toksdef\\toks@=0\n\\toks@={...}",
     ),
+    (
+        "\\attribute",
+        "Registers",
+        "LuaTeX's attribute registers, 65536 of them: unset until assigned, which `\\the` prints as `-2147483647`, and scoped by a group like a count. Their values are frontend state, so a conditional over one is decided while lowering.",
+        "\\attribute N=V\n\\attribute5=3 \\message{\\the\\attribute5}   % => 3",
+    ),
+    (
+        "\\attributedef",
+        "Registers",
+        "Give an attribute register a name, as `\\countdef` does for a count; `\\meaning` writes the register (`\\attribute5`).",
+        "\\attributedef\\a=5\n\\a=3",
+    ),
     // ══ eTeX extensions — expand::scan_expr ═══════════════════════════════
     (
         "\\numexpr",

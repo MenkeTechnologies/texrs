@@ -1339,6 +1339,16 @@ impl Lowerer {
                     let reg = self.eng.scan_register_number(lx, false)?;
                     self.eng.do_toks_assign(lx, reg)?;
                 }
+                // LuaTeX's attribute registers are frontend state, like the
+                // integer parameters: assigned while lowering.
+                "attribute" => {
+                    let n = self.eng.scan_register_number(lx, false)?;
+                    self.eng.compile_time_attribute(lx, n)?
+                }
+                _ if self.eng.attribute_of(name).is_some() => {
+                    let n = self.eng.attribute_of(name).expect("just matched");
+                    self.eng.compile_time_attribute(lx, n)?
+                }
                 // `\skip0=1pt plus 2pt minus 3pt`. Four slots, written
                 // together, so the whole glue is one assignment.
                 // `\muskip0=3mu plus 1mu`. The same four slots in the second
@@ -1419,6 +1429,17 @@ impl Lowerer {
                     };
                     let i = self.eng.intpar_cs(what).expect("intpar_follows matched it");
                     self.eng.compile_time_intpar_arith(lx, i, name.name())?
+                }
+                // The same for an attribute register, by number or by name.
+                "advance" | "multiply" | "divide" if self.attribute_follows(lx) => {
+                    let Some(Token::Cs(what)) = lx.next_token(&self.eng.cats) else {
+                        unreachable!("attribute_follows saw a control sequence")
+                    };
+                    let n = match self.eng.attribute_of(what) {
+                        Some(n) => n,
+                        None => self.eng.scan_register_number(lx, false)?,
+                    };
+                    self.eng.compile_time_attribute_arith(lx, n, name.name())?
                 }
                 "advance" | "multiply" | "divide" => {
                     let op = match name.name() {
@@ -1711,6 +1732,8 @@ impl Lowerer {
                     let negated = self.eng.take_unless();
                     let line = lx.line();
                     let abs = name.name() == "ifabsnum";
+                    // §498: the conditional is open while its test is read.
+                    self.eng.begin_test();
                     let left = magnitude(abs, self.number(lx)?);
                     let rel = match self.eng.read_relation_file(lx, name.name())? {
                         '<' => Rel::Less,
@@ -1718,6 +1741,7 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.number(lx)?);
+                    self.eng.end_test();
                     // §498 decides the test when the mouth reaches it. When
                     // every register it reads has a value the lowerer has
                     // followed (`crate::known`), that is now, and only the arm
@@ -1750,6 +1774,7 @@ impl Lowerer {
                     let negated = self.eng.take_unless();
                     let line = lx.line();
                     let abs = name.name() == "ifabsdim";
+                    self.eng.begin_test();
                     let left = magnitude(abs, self.dimen_number(lx, false)?);
                     let rel = match self.eng.read_relation_file(lx, name.name())? {
                         '<' => Rel::Less,
@@ -1757,6 +1782,7 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.dimen_number(lx, false)?);
+                    self.eng.end_test();
                     // Decided now when both dimensions are known; see `\ifnum`.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         let opened_by = (if abs { "ifabsdim" } else { "ifdim" }, negated, line);
@@ -1783,7 +1809,13 @@ impl Lowerer {
                 // same equality chain the `\message` arm builds. Leaving this
                 // to the expander answered from its own copy of the register,
                 // which no run-time `\count1=2` ever reaches.
-                "ifcase" => match (lx.line(), self.number(lx)?) {
+                "ifcase" => match {
+                    self.eng.begin_test();
+                    let line = lx.line();
+                    let selector = self.number(lx);
+                    self.eng.end_test();
+                    (line, selector?)
+                } {
                     // A selector whose value is known -- a constant, or a
                     // register the lowerer has followed -- is the expander's.
                     (line, value) if self.eng.known.num(&value).is_some() => {
@@ -1799,7 +1831,10 @@ impl Lowerer {
                 "ifodd" => {
                     let negated = self.eng.take_unless();
                     let line = lx.line();
-                    let value = self.number(lx)?;
+                    self.eng.begin_test();
+                    let value = self.number(lx);
+                    self.eng.end_test();
+                    let value = value?;
                     if let Some(v) = self.eng.known.num(&value) {
                         self.eng.enter_decided_file(
                             lx,
@@ -1845,7 +1880,7 @@ impl Lowerer {
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
                 "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "muskipdef"
-                | "toksdef" => self.eng.compile_time_numeric_def(lx, name.name())?,
+                | "toksdef" | "attributedef" => self.eng.compile_time_numeric_def(lx, name.name())?,
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
                     self.eng.compile_time_newcommand(lx, name.name())?
                 }
@@ -3784,6 +3819,19 @@ impl Lowerer {
         hit
     }
 
+    /// Whether the next token is `\attribute` or a `\attributedef` name,
+    /// leaving it where it was.
+    fn attribute_follows(&mut self, lx: &mut Lexer) -> bool {
+        let Some(t) = lx.next_token(&self.eng.cats) else {
+            return false;
+        };
+        let hit = matches!(t, Token::Cs(cs)
+            if self.eng.primitive_meaning(cs).name() == "attribute"
+                || self.eng.attribute_of(cs).is_some());
+        lx.push_back(&[t]);
+        hit
+    }
+
     fn number(&mut self, lx: &mut Lexer) -> R<Num> {
         // A register becomes a slot read rather than a constant, because its
         // value is the run's and not the lowerer's.
@@ -4256,29 +4304,7 @@ impl Lowerer {
                 None => return Err(TexError("Missing file name".into())),
             }
         };
-        if let Token::Char(_, Cat::BeginGroup) = first {
-            lx.push_back(&[first]);
-            let body = self.eng.read_balanced_group(lx)?;
-            let body = self.eng.expand_edef_body(&body)?;
-            let escape = self.eng.esc();
-            return Ok(body.iter().map(|t| t.to_text(escape)).collect());
-        }
-        let mut name = String::new();
-        let mut next = Some(first);
-        while let Some(t) = next {
-            match t {
-                // A `"` quotes a stretch with spaces in it and is not part of
-                // the name (web2c's `more_name`).
-                Token::Char(_, _) if t.is_space() && name.matches('"').count() % 2 == 0 => break,
-                Token::Char(c, _) => name.push(c),
-                Token::Cs(_) => {
-                    lx.push_back(&[t]);
-                    break;
-                }
-            }
-            next = self.eng.next_unexpandable(lx)?.map(|(t, _)| t);
-        }
-        Ok(name.replace('"', ""))
+        self.file_name_from(lx, first)
     }
 
     /// §1373's `out_what` (`wrapup_leader` in LuaTeX): do what a whatsit asks
@@ -4537,6 +4563,12 @@ impl Lowerer {
                                 continue;
                             }
                             Some(Token::Cs(w)) if w.name() == "count" => {}
+                            // A LuaTeX attribute register is frontend state.
+                            Some(Token::Cs(w)) if w.name() == "attribute" => {
+                                let n = self.eng.scan_register_number(work, true)?;
+                                text.push_str(&self.eng.attribute_value(n).to_string());
+                                continue;
+                            }
                             // A §236 parameter is frontend state, so its value
                             // is known now.
                             Some(Token::Cs(w)) if self.eng.intpar_cs(w).is_some() => {
@@ -4937,6 +4969,7 @@ impl Lowerer {
                 }
                 "ifnum" | "ifabsnum" => {
                     let abs = n.name() == "ifabsnum";
+                    self.eng.begin_test();
                     let left = magnitude(abs, self.msg_number(work)?);
                     let rel = match self.eng.read_relation_pending(work, n.name())? {
                         '<' => Rel::Less,
@@ -4944,6 +4977,7 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.msg_number(work)?);
+                    self.eng.end_test();
                     // Two known values are a frontend fact: decide here, as
                     // §498 does, so only the arm taken is lowered. Lowering both
                     // made `\def\r#1{\ifnum#1>0 \r{0}\fi}` unbounded
@@ -4966,6 +5000,7 @@ impl Lowerer {
                 // the file-level dispatch.
                 "ifdim" | "ifabsdim" => {
                     let abs = n.name() == "ifabsdim";
+                    self.eng.begin_test();
                     let left = magnitude(abs, self.dimen_number(work, true)?);
                     let rel = match self.eng.read_relation_pending(work, n.name())? {
                         '<' => Rel::Less,
@@ -4973,6 +5008,7 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.dimen_number(work, true)?);
+                    self.eng.end_test();
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         self.open_decided(work, n, truth, &mut decided)?;
                         continue;
@@ -4988,7 +5024,10 @@ impl Lowerer {
                     });
                 }
                 "ifodd" => {
-                    let value = self.msg_number(work)?;
+                    self.eng.begin_test();
+                    let value = self.msg_number(work);
+                    self.eng.end_test();
+                    let value = value?;
                     if let Some(v) = self.eng.known.num(&value) {
                         self.open_decided(work, n, v % 2 != 0, &mut decided)?;
                         continue;
@@ -5002,7 +5041,10 @@ impl Lowerer {
                     });
                 }
                 "ifcase" => {
-                    let value = self.msg_number(work)?;
+                    self.eng.begin_test();
+                    let value = self.msg_number(work);
+                    self.eng.end_test();
+                    let value = value?;
                     let branches = self.msg_case_arms(work)?;
                     flush!();
                     out.push(self.case_chain(value, branches));
@@ -5443,53 +5485,58 @@ fn environment_option(body: &str) -> (&str, &str) {
 }
 
 impl Lowerer {
-    /// The file name after `\input`, per `tex.web` §537: leading spaces are
-    /// skipped and the name runs to the first space or end of line.
-    ///
-    /// A control sequence ends it too and is put back — `\input foo\relax` names
-    /// `foo`.
+    /// The file name after `\input`, `\openin` and their kin: §526's
+    /// `scan_file_name` as LuaTeX has it (filename.c). Blanks are skipped with
+    /// `get_x_token`; a name in braces is its expanded list; otherwise the
+    /// name is characters read with `get_x_token` up to a space or the first
+    /// token that is not a character, which is put back -- `\input foo\relax`
+    /// names `foo`, and `\input\jobname.aux` the job's `.aux`. A `"` quotes a
+    /// stretch with spaces in it and is not part of the name (web2c's
+    /// `more_name`), which is how latex.ltx asks for a file:
+    /// `\openin\@inputcheck"#1" `.
     fn scan_file_name(&mut self, lx: &mut Lexer) -> R<String> {
-        let mut name = String::new();
-        while let Some(t) = lx.next_token(&self.eng.cats) {
-            match &t {
-                t if t.is_space() => {
-                    if name.is_empty() {
-                        continue;
-                    }
-                    break;
-                }
-                // LaTeX writes `\input{NAME}`, and the name inside the braces
-                // may be BUILT: `article.cls` ends on
-                // `\input{size1\@ptsize.clo}`, where `\@ptsize` is the macro
-                // the class options set to `0`, `1` or `2`. §537 reads a file
-                // name with `get_x_token`, so expansion is not an extra here --
-                // it is what tex does. The group is read whole and its macros
-                // expanded; `\the`, the conditionals and the primitives are
-                // left alone by `expand_macros_only`, and none of them belongs
-                // in a file name.
-                Token::Char(_, Cat::BeginGroup) if name.is_empty() => {
-                    lx.push_back(std::slice::from_ref(&t));
-                    let body = self.eng.read_balanced_group(lx)?;
-                    let body = self.eng.expand_macros_only(&body)?;
-                    let escape = self.eng.esc();
-                    name = body.iter().map(|t| t.to_text(escape)).collect();
-                    // A control word's `to_text` writes the space that ends its
-                    // name, and a file name has no spaces in it.
-                    name.retain(|c| !c.is_whitespace());
-                    break;
-                }
-                Token::Char(c, _) => name.push(*c),
-                Token::Cs(_) => {
-                    lx.push_back(std::slice::from_ref(&t));
-                    break;
-                }
+        let first = loop {
+            match self.eng.next_unexpandable(lx)? {
+                Some((t, _)) if t.is_space() => continue,
+                Some((t, _)) => break t,
+                None => return Err(TexError("Missing file name".into())),
             }
-        }
+        };
+        let name = self.file_name_from(lx, first)?;
         match name.is_empty() {
             true => Err(TexError("Missing file name".into())),
             false => Ok(name),
         }
     }
+
+    /// The rest of a file name whose first non-blank token is `first`: the
+    /// braced form, or §526's loop with web2c's quotes.
+    fn file_name_from(&mut self, lx: &mut Lexer, first: Token) -> R<String> {
+        if let Token::Char(_, Cat::BeginGroup) = first {
+            lx.push_back(&[first]);
+            let body = self.eng.read_balanced_group(lx)?;
+            let body = self.eng.expand_edef_body(&body)?;
+            let escape = self.eng.esc();
+            return Ok(body.iter().map(|t| t.to_text(escape)).collect());
+        }
+        let mut name = String::new();
+        let mut quoted = false;
+        let mut next = Some(first);
+        while let Some(t) = next {
+            match t {
+                Token::Char('"', _) => quoted = !quoted,
+                Token::Char(_, _) if t.is_space() && !quoted => break,
+                Token::Char(c, _) => name.push(c),
+                Token::Cs(_) => {
+                    lx.push_back(&[t]);
+                    break;
+                }
+            }
+            next = self.eng.next_unexpandable(lx)?.map(|(t, _)| t);
+        }
+        Ok(name)
+    }
+
 
     /// Find `name`, read it, and say what to print for it.
     ///

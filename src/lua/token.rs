@@ -273,6 +273,9 @@ fn cmd_chr(eng: &Engine, tok: &Token) -> (i64, i64) {
         Some(Meaning::MathCharDef(n)) => (command("math_given"), *n),
         Some(Meaning::ToksDef(r)) => (command("assign_toks"), TOKS_BASE + r),
         Some(Meaning::CountDef(slot)) => register_cmd(eng, *slot),
+        // `\attributedef` names an attribute register, which the engine keeps
+        // by number (`Engine::attribute_value`).
+        Some(Meaning::AttributeDef(n)) => (command("assign_attr"), ATTRIBUTE_BASE + n),
         // A font identifier is `set_font` with the font's number (§1257).
         Some(Meaning::Font(f)) => (command("set_font"), i64::from(*f)),
         None => primitive_cmd(name.name()),

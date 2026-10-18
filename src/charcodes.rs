@@ -8,7 +8,7 @@
 //! already loaded a format that changes several of them.
 
 /// Which table an assignment or a `\the` is talking about.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Table {
     /// `\mathcode` — how a character is set in math mode.
     Math,
@@ -85,6 +85,10 @@ pub struct CharCodes {
     upper: [i64; 256],
     space: [i64; 256],
     delimiter: [i64; 256],
+    /// The codes characters past 255 have been given, by table: LuaTeX has a
+    /// code of each kind for every character, and only the assigned ones
+    /// differ from the defaults `get` answers.
+    wide: rustc_hash::FxHashMap<(Table, u32), i64>,
 }
 
 impl Default for CharCodes {
@@ -105,6 +109,7 @@ impl Default for CharCodes {
             // -1 everywhere means "not a delimiter"; the period is the one
             // character INITEX gives a real code, and that code is 0.
             delimiter: [-1; 256],
+            wide: rustc_hash::FxHashMap::default(),
         };
         const VAR_CODE: i64 = 0x7000;
         for k in 0..256usize {
@@ -147,12 +152,13 @@ impl CharCodes {
         }
     }
 
-    /// What `table` says about `c`. A character outside the 256 the tables
-    /// cover reads as the default rather than as an error, which is what an
-    /// engine reading bytes would have given.
+    /// What `table` says about `c`. A character past 255 reads as what it was
+    /// given, or as the default when it was given nothing -- what an engine
+    /// reading bytes would have given, and what LuaTeX's INITEX gives it.
     pub fn get(&self, table: Table, c: char) -> i64 {
         match (c as u32) < 256 {
             true => self.slot(table)[c as usize],
+            false if self.wide.contains_key(&(table, c as u32)) => self.wide[&(table, c as u32)],
             false => match table {
                 Table::Math => c as i64,
                 Table::Space => 1000,
@@ -167,8 +173,11 @@ impl CharCodes {
         if let Some(msg) = table.invalid(v) {
             return Err(msg);
         }
-        if (c as u32) < 256 {
-            self.slot_mut(table)[c as usize] = v;
+        match (c as u32) < 256 {
+            true => self.slot_mut(table)[c as usize] = v,
+            false => {
+                self.wide.insert((table, c as u32), v);
+            }
         }
         Ok(())
     }
