@@ -38,10 +38,13 @@ pub mod ots;
 pub mod ott;
 pub mod oup;
 pub mod procs;
+pub mod registry;
 pub mod stream;
 pub mod tfm;
 pub mod ttf;
 pub mod var;
+
+pub use registry::{clear_lua_fonts, is_lua_font, lua_font, register_lua_font, LuaFont};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
