@@ -23,6 +23,13 @@ thread_local! {
     /// expands the whole text -- reporting what goes wrong -- before it prints
     /// any of it (§1279).
     static REPORTS_END: RefCell<usize> = const { RefCell::new(0) };
+    /// Whether the message last taken ended with a report, whose `print_ln`
+    /// leaves the terminal at the start of a line, and whether the message
+    /// last recorded did.
+    static TAKEN_ENDS_LINE: RefCell<bool> = const { RefCell::new(false) };
+    /// Where in [`BUILDING`] the last report ended.
+    static REPORT_TAIL: RefCell<usize> = const { RefCell::new(0) };
+    static RECORDED_ENDS_LINE: RefCell<bool> = const { RefCell::new(false) };
 }
 
 thread_local! {
@@ -100,6 +107,8 @@ fn record(done: String) {
             _ => m.push(done),
         }
     });
+    let ends = TAKEN_ENDS_LINE.with(|t| std::mem::take(&mut *t.borrow_mut()));
+    RECORDED_ENDS_LINE.with(|r| *r.borrow_mut() = ends);
 }
 
 /// What the stomach said during one list action, into the terminal stream
@@ -122,17 +131,16 @@ pub(crate) fn tell(said: Vec<crate::stomach::Said>, online: bool) {
             Said::Terminal(text) => {
                 // A report ends with `print_ln` (§663), so what §638 prints
                 // after one starts its line with no space before it.
-                let after_report = BUILDING.with(|b| {
-                    let len = b.borrow().len();
-                    len > 0 && REPORTS_END.with(|end| *end.borrow() == len)
-                });
                 let held = take_building();
-                if after_report {
-                    record(held + &text);
-                    continue;
-                }
+                let after_report = match held.is_empty() {
+                    true => RECORDED_ENDS_LINE.with(|r| *r.borrow()),
+                    false => TAKEN_ENDS_LINE.with(|t| *t.borrow()),
+                };
                 if !held.is_empty() {
                     record(held);
+                }
+                if after_report {
+                    GLUED.with(|g| *g.borrow_mut() = true);
                 }
                 record(text);
             }
@@ -159,6 +167,7 @@ fn push_report(text: &str) {
             }
         });
         b.push_str(text);
+        REPORT_TAIL.with(|t| *t.borrow_mut() = b.len());
     });
 }
 
@@ -183,7 +192,10 @@ fn report_before_text(text: &str) {
 /// The message being built, taken: what it held, and no reports in front.
 fn take_building() -> String {
     REPORTS_END.with(|end| *end.borrow_mut() = 0);
-    BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()))
+    let tail = REPORT_TAIL.with(|t| std::mem::take(&mut *t.borrow_mut()));
+    let held = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    TAKEN_ENDS_LINE.with(|t| *t.borrow_mut() = !held.is_empty() && tail == held.len());
+    held
 }
 
 /// One step of an e-TeX expression: the operands, the operation's code and
