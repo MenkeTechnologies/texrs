@@ -41,6 +41,7 @@ pub mod procs;
 pub mod registry;
 pub mod stream;
 pub mod tfm;
+pub mod ttsubset;
 pub mod ttf;
 pub mod var;
 
