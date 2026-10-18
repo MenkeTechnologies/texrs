@@ -34,19 +34,24 @@ pub(super) enum CMode {
     /// The outer list, while the paragraph builder is off: characters and
     /// paragraphs go where they went before this file existed.
     Unmanaged,
-    /// `-vmode`: a `\vbox`, `\vtop`, `\insert` or `\vadjust`.
+    /// `vmode`: the page's own list, when the paragraph builder is on.
+    Vertical,
+    /// `-vmode`: a `\vbox`, `\vtop`, `\insert`, `\vadjust` or the output
+    /// routine.
     InternalVertical,
+    /// `hmode`: a paragraph.
+    Horizontal,
     /// `-hmode`: an `\hbox`, or one of a discretionary's lists.
     RestrictedHorizontal,
 }
 
 impl CMode {
     fn horizontal(self) -> bool {
-        self == CMode::RestrictedHorizontal
+        matches!(self, CMode::Horizontal | CMode::RestrictedHorizontal)
     }
 
     fn vertical(self) -> bool {
-        matches!(self, CMode::Unmanaged | CMode::InternalVertical)
+        matches!(self, CMode::Unmanaged | CMode::Vertical | CMode::InternalVertical)
     }
 }
 
@@ -71,6 +76,14 @@ pub(super) struct State {
     run_open: bool,
     /// A `\noboundary` (§1045) waiting for the run it affects.
     no_boundary: bool,
+    /// The `\output` token list the program was last given, compiled.
+    lowered_output: Option<String>,
+    /// Whether a box, a rule or a paragraph has reached the page's own list,
+    /// before which the page builder cannot fire.
+    page_has_content: bool,
+    /// Whether the output routine is being lowered, which no list action
+    /// inside it may start again.
+    lowering_output: bool,
 }
 
 impl Default for State {
@@ -84,6 +97,9 @@ impl Default for State {
             fonts_told: 1,
             run_open: false,
             no_boundary: false,
+            lowered_output: None,
+            page_has_content: false,
+            lowering_output: false,
         }
     }
 }
@@ -110,14 +126,151 @@ impl Lowerer {
 
     /// Emit a list action, with whatever the program has not been told yet
     /// in front of it.
-    fn st_emit(&mut self, out: &mut Vec<Cmd>, op: ListOp) {
-        self.st_sync(out);
+    fn st_emit(&mut self, out: &mut Vec<Cmd>, op: ListOp) -> R<()> {
+        self.st_sync_values(out);
+        // The output routine is lowered where the page builder may next fire
+        // it, which is after an action that can build the page (§1076,
+        // §1091, §1094, §1100, §1103, §1054) -- as late as the lowerer can
+        // place it, so that what it expands has been defined.
+        let builds = matches!(
+            op,
+            ListOp::NewGraf(_)
+                | ListOp::EndGraf
+                | ListOp::BuildPage
+                | ListOp::End
+                | ListOp::Penalty(_)
+                | ListOp::EndBox
+                | ListOp::Fetch { .. }
+                | ListOp::EndInsert { .. }
+        );
+        // A box, a rule or a paragraph on the page's own list is what lets
+        // the builder fire (§1000-§1001).
+        let contributes = matches!(
+            op,
+            ListOp::NewGraf(_)
+                | ListOp::Rule { leader: false, .. }
+                | ListOp::EndBox
+                | ListOp::Fetch { .. }
+                | ListOp::Unpackage { .. }
+        );
+        if contributes && self.st_mode() == CMode::Vertical {
+            self.st.page_has_content = true;
+        }
+        if builds {
+            self.st_sync(out)?;
+        }
         self.st.run_open = false;
         out.push(Cmd::List(op));
+        Ok(())
     }
 
-    /// Bring the program's integer parameters and fonts up to date.
-    fn st_sync(&mut self, out: &mut Vec<Cmd>) {
+    /// Bring the program's integer parameters, fonts and output routine up
+    /// to date.
+    fn st_sync(&mut self, out: &mut Vec<Cmd>) -> R<()> {
+        self.st_sync_values(out);
+        // Before the page has a box or a rule on it the builder cannot fire
+        // (§1000 discards glue, kerns and penalties at the top of an empty
+        // page), so the routine is not lowered before then.
+        if self.st.paragraphs && !self.st.lowering_output && self.st.page_has_content {
+            let reg = crate::params::toks_register("output").unwrap_or(0);
+            let toks = self.eng.toks.get(&reg).cloned().unwrap_or_default();
+            self.st_lower_output(toks, out)?;
+        }
+        Ok(())
+    }
+
+    /// §1025's routine, lowered where the program is told about it: the
+    /// `\output` text as one group in internal vertical mode, which §1026
+    /// closes with `end_graf` if it left a paragraph open.
+    ///
+    /// The routine runs whenever the page builder fires it, so nothing the
+    /// lowerer knows about the registers here holds when it does: it is
+    /// lowered with the register tracker blind (`crate::known`), and what it
+    /// assigns is unknown afterwards.
+    fn st_lower_output(&mut self, toks: Vec<Token>, out: &mut Vec<Cmd>) -> R<()> {
+        if toks.is_empty() {
+            if self.st.lowered_output.as_deref() != Some("") {
+                self.st.lowered_output = Some(String::new());
+                out.push(Cmd::OutputRoutine(None));
+            }
+            return Ok(());
+        }
+        // Lowered again at every place the builder may fire it, because
+        // what it expands may have been redefined since -- a `\footline`
+        // changed after the first page -- and emitted only when what it
+        // lowers to is not what the program already holds.
+        let keep_slot = self.next_keep_slot;
+        let globals = self.globals.len();
+        self.st.lowering_output = true;
+        let blind = self.eng.known.set_opaque(true);
+        let open = std::mem::take(&mut self.st.run_open);
+        self.eng.compile_time_begin_group(GroupKind::Simple, 0);
+        self.st.nest.push(CMode::InternalVertical);
+        let mark = self.globals.len();
+        let known_mark = self.eng.known.mark();
+        let mut body = Vec::new();
+        let lowered = self.lower_into(&toks, &mut body);
+        if lowered.is_ok() && self.st_mode() == CMode::Horizontal {
+            self.st_end_graf(&mut body)?;
+        }
+        while self.st.nest.len() > 1 && self.st_mode() != CMode::InternalVertical {
+            self.st.nest.pop();
+        }
+        self.st.nest.pop();
+        let ended = self.eng.compile_time_end_group();
+        self.st.run_open = open;
+        self.eng.known.set_opaque(blind);
+        self.st.lowering_output = false;
+        lowered?;
+        ended?;
+        let key: String = crate::ir::render(&body)
+            .lines()
+            .filter(|l| {
+                let l = l.trim_start();
+                !l.starts_with("KeepGlobal") && !l.starts_with("Line")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if self.st.lowered_output.as_deref() == Some(key.as_str()) {
+            self.next_keep_slot = keep_slot;
+            self.globals.truncate(globals);
+            self.eng.known.undo_to(known_mark, None);
+            return Ok(());
+        }
+        self.st.lowered_output = Some(key);
+        let (saves, keeps) = self.group_parts(&mut body, mark)?;
+        self.known_after_group(known_mark, &saves, &keeps);
+        out.push(Cmd::OutputRoutine(Some(vec![Cmd::Group { saves, keeps, body }])));
+        Ok(())
+    }
+
+    /// §1091's `new_graf` as the lowerer follows it: the paragraph opens,
+    /// and `\everypar` is read next.
+    fn st_new_graf(&mut self, lx: &mut Lexer, indented: bool, out: &mut Vec<Cmd>) -> R<()> {
+        self.st_emit(out, ListOp::NewGraf(indented))?;
+        self.st.nest.push(CMode::Horizontal);
+        if let Some(reg) = crate::params::toks_register("everypar") {
+            if let Some(toks) = self.eng.toks.get(&reg).cloned() {
+                lx.push_back(&toks);
+            }
+        }
+        Ok(())
+    }
+
+    /// §1096's `end_graf`, when a paragraph is open, with §1070's
+    /// `normal_paragraph` after it.
+    fn st_end_graf(&mut self, out: &mut Vec<Cmd>) -> R<()> {
+        if self.st_mode() != CMode::Horizontal {
+            return Ok(());
+        }
+        self.st_emit(out, ListOp::EndGraf)?;
+        self.st.nest.pop();
+        self.st_normal_paragraph(out);
+        Ok(())
+    }
+
+    /// The integer parameters and fonts, without the output routine.
+    fn st_sync_values(&mut self, out: &mut Vec<Cmd>) {
         let mut changed = Vec::new();
         for (i, was) in self.st.synced.iter_mut().enumerate() {
             let now = self.eng.intpars.get(i);
@@ -155,6 +308,24 @@ impl Lowerer {
             let slot = crate::stomach::box_dimen_slot(n as u16, which);
             return Ok(Some(MsgOp::Dimen(Num::Count(slot))));
         }
+        // §425 and §578: a font's parameters are the lowerer's font memory.
+        match w.name() {
+            "fontdimen" => {
+                let (f, n) = self.st_find_font_dimen(work, false)?;
+                let v = self.eng.fonts.get(f).param(n as usize);
+                return Ok(Some(MsgOp::Dimen(Num::Literal(v))));
+            }
+            "hyphenchar" | "skewchar" => {
+                let f = self.st_scan_font_ident(work)?;
+                let font = self.eng.fonts.get(f);
+                let v = match w.name() {
+                    "hyphenchar" => font.hyphen_char,
+                    _ => font.skew_char,
+                };
+                return Ok(Some(MsgOp::Number(Num::Literal(v))));
+            }
+            _ => {}
+        }
         let Some(i) = Internal::of_name(w.name()) else {
             return Ok(None);
         };
@@ -181,7 +352,13 @@ impl Lowerer {
 
     /// A character token in a list this file manages; `false` when it is
     /// not this file's to lower.
-    pub(super) fn st_char(&mut self, c: char, cat: Cat, out: &mut Vec<Cmd>) -> R<bool> {
+    pub(super) fn st_char(
+        &mut self,
+        lx: &mut Lexer,
+        c: char,
+        cat: Cat,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
         if !self.st_managed() {
             return Ok(false);
         }
@@ -191,26 +368,23 @@ impl Lowerer {
                 self.st.run_open = false;
                 if self.st_mode().horizontal() {
                     let f = self.eng.cur_font;
-                    self.st_emit(out, ListOp::Space { f, normal: false });
+                    self.st_emit(out, ListOp::Space { f, normal: false })?;
                 }
                 return Ok(true);
             }
             _ => return Ok(false),
         }
-        self.st_letter(c, out)?;
+        self.st_letter(lx, c, out)?;
         Ok(true)
     }
 
     /// §1045's `hmode+letter` and `hmode+other_char` (and `char_given`):
     /// extend the run of characters the main loop is reading, or start one.
-    fn st_letter(&mut self, c: char, out: &mut Vec<Cmd>) -> R<()> {
+    fn st_letter(&mut self, lx: &mut Lexer, c: char, out: &mut Vec<Cmd>) -> R<()> {
         if self.st_mode().vertical() {
-            // §1090: a letter in vertical mode starts a paragraph.
-            return Err(TexError(
-                "a paragraph inside a \\vbox needs the paragraph builder, which \
-                 texrs's list path does not have yet"
-                    .into(),
-            ));
+            // §1090: a letter in vertical mode starts a paragraph, and is
+            // read again after `\everypar`.
+            self.st_new_graf(lx, true, out)?;
         }
         let f = self.eng.cur_font;
         let c = self.st_sf_sync(c, out);
@@ -225,7 +399,7 @@ impl Lowerer {
             }
         }
         let cancel_left = std::mem::take(&mut self.st.no_boundary);
-        self.st_sync(out);
+        self.st_sync(out)?;
         out.push(Cmd::List(ListOp::Chars {
             f,
             text: c.to_string(),
@@ -283,16 +457,66 @@ impl Lowerer {
             return Ok(true);
         }
         // §1045's `char_given`: a `\chardef` name is a character.
-        if self.st_managed() && self.st_mode().horizontal() {
+        if self.st_managed() {
             if let Some(Meaning::CharDef(code)) = self.eng.meanings.get(&name) {
                 let code = *code;
                 self.st.run_open = was_open;
-                return self.st_char_code(code, out).map(|_| true);
+                return self.st_char_code(lx, code, out).map(|_| true);
             }
         }
         let managed = self.st_managed();
         let mode = self.st_mode();
+        if managed && mode != CMode::Unmanaged {
+            // §1090: a command that belongs to a paragraph begins one when it
+            // meets vertical mode, and is read again inside it.
+            if mode.vertical() && begins_paragraph(name.name()) {
+                match name.name() {
+                    "indent" | "noindent" => {
+                        self.st_new_graf(lx, name.name() == "indent", out)?;
+                    }
+                    _ => {
+                        lx.push_back(&[Token::Cs(name)]);
+                        self.st_new_graf(lx, true, out)?;
+                    }
+                }
+                return Ok(true);
+            }
+            // §1094-§1095's `head_for_vmode`: a command that belongs to the
+            // vertical list ends the paragraph first -- by inserting `\par`,
+            // whatever it means now -- or, in an `\hbox`, closes the box.
+            if mode.horizontal() && ends_paragraph(name.name()) {
+                if mode == CMode::Horizontal {
+                    lx.push_back(&[Token::cs("par"), Token::Cs(name)]);
+                } else if name.name() != "hrule" {
+                    // §1064's `off_save`.
+                    lx.push_back(&[Token::Char('}', Cat::EndGroup), Token::Cs(name)]);
+                    self.eng.report(lx, "Missing } inserted");
+                } else {
+                    let esc = self.eng.esc().to_string();
+                    self.eng.report(
+                        lx,
+                        &format!("You can't use `{esc}hrule' here except with leaders"),
+                    );
+                }
+                return Ok(true);
+            }
+        }
         match name.name() {
+            // §1094: `\par` ends the paragraph (§1096) and builds the page;
+            // in vertical mode it is `normal_paragraph`, and the page is
+            // built after it in the outer list.
+            "par" if managed && mode == CMode::Horizontal => self.st_end_graf(out)?,
+            "par" if managed && mode == CMode::Vertical => {
+                self.st_normal_paragraph(out);
+                self.st_emit(out, ListOp::BuildPage)?;
+            }
+            // §1054: `\end` on the page's own list ships what is left; the
+            // rest of the lowerer then stops reading, as `its_all_over` does.
+            "end" if managed && mode == CMode::Vertical => {
+                self.st_emit(out, ListOp::End)?;
+                self.st.run_open = false;
+                return Ok(false);
+            }
             "nullfont" => {
                 let global = self.eng.take_global_prefix();
                 self.eng.select_font(0, global);
@@ -316,10 +540,72 @@ impl Lowerer {
                 let n = self.eng.scan_register_file(lx)? as u16;
                 self.eng.skip_equals_file(lx)?;
                 let value = self.dimen_number(lx, false)?;
-                self.st_emit(out, ListOp::SetBoxDimen { n, which, value });
+                self.st_emit(out, ListOp::SetBoxDimen { n, which, value })?;
                 self.st_after_assignment(lx);
             }
             "showbox" => self.st_show_box(lx, out)?,
+            // §960 and §934: the text between the braces, for the program's
+            // hyphenation pass. §961 reads it with `get_x_token`; texrs reads
+            // the characters, which is what a pattern file holds.
+            "patterns" | "hyphenation" => {
+                let text = self.group_chars(lx)?;
+                let op = match name.name() {
+                    "patterns" => ListOp::Patterns(text),
+                    _ => ListOp::Hyphenation(text),
+                };
+                self.st_emit(out, op)?;
+            }
+            // §1253's `assign_font_int`: global, as every font assignment is.
+            "hyphenchar" | "skewchar" => {
+                let _ = self.eng.take_global_prefix();
+                let f = self.st_scan_font_ident(lx)?;
+                self.eng.skip_equals_file(lx)?;
+                let value = self.number(lx)?;
+                if let (Num::Literal(v), Some(font)) = (&value, self.eng.fonts.get_mut(f)) {
+                    match name.name() {
+                        "hyphenchar" => font.hyphen_char = *v,
+                        _ => font.skew_char = *v,
+                    }
+                }
+                let op = match name.name() {
+                    "hyphenchar" => ListOp::SetHyphenChar { f, value },
+                    _ => ListOp::SetSkewChar { f, value },
+                };
+                self.st_emit(out, op)?;
+                self.st_after_assignment(lx);
+            }
+            // §1253's `assign_font_dimen`, through §578's `find_font_dimen`.
+            "fontdimen" => {
+                let _ = self.eng.take_global_prefix();
+                let (f, n) = self.st_find_font_dimen(lx, true)?;
+                self.eng.skip_equals_file(lx)?;
+                let value = self.dimen_number(lx, false)?;
+                if let (Num::Literal(v), Some(font)) = (&value, self.eng.fonts.get_mut(f)) {
+                    let i = (n as usize).saturating_sub(1);
+                    if i < font.params.len() {
+                        font.params[i] = *v;
+                    }
+                }
+                self.st_emit(out, ListOp::SetFontDimen { f, n, value })?;
+                self.st_after_assignment(lx);
+            }
+            // §1234's `def_family`.
+            "textfont" | "scriptfont" | "scriptscriptfont" => {
+                let global = self.eng.take_global_prefix();
+                let size = match name.name() {
+                    "textfont" => 0,
+                    "scriptfont" => 1,
+                    _ => 2,
+                };
+                let fam = self.eng.scan_number_file(lx)?;
+                if !(0..16).contains(&fam) {
+                    self.eng.report(lx, &format!("Bad number ({fam})"));
+                }
+                self.eng.skip_equals_file(lx)?;
+                let f = self.st_scan_font_ident(lx)?;
+                self.eng.define_family(size, (fam & 15) as u8, f, global);
+                self.st_after_assignment(lx);
+            }
             "ifvoid" | "ifhbox" | "ifvbox" => {
                 let negated = self.eng.take_unless();
                 let n = self.eng.scan_register_file(lx)?;
@@ -375,7 +661,7 @@ impl Lowerer {
                         mu: false,
                         leaders: None,
                     },
-                );
+                )?;
             }
             "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" if managed && mode.vertical() => {
                 let spec = self.st_glue_spec(lx, name.name())?;
@@ -386,15 +672,15 @@ impl Lowerer {
                         mu: false,
                         leaders: None,
                     },
-                );
+                )?;
             }
             "kern" if managed => {
                 let w = self.dimen_number(lx, false)?;
-                self.st_emit(out, ListOp::Kern(w));
+                self.st_emit(out, ListOp::Kern(w))?;
             }
             "penalty" if managed => {
                 let p = self.number(lx)?;
-                self.st_emit(out, ListOp::Penalty(p));
+                self.st_emit(out, ListOp::Penalty(p))?;
             }
             "unpenalty" | "unkern" | "unskip" if managed => {
                 let what = match name.name() {
@@ -402,33 +688,37 @@ impl Lowerer {
                     "unkern" => crate::stomach::build::Removed::Kern,
                     _ => crate::stomach::build::Removed::Glue,
                 };
-                self.st_emit(out, ListOp::DeleteLast(what));
+                self.st_emit(out, ListOp::DeleteLast(what))?;
             }
             "hrule" if managed && mode.vertical() => {
                 let op = self.st_rule(lx, false, false)?;
-                self.st_emit(out, op);
+                self.st_emit(out, op)?;
             }
             "vrule" if managed && mode.horizontal() => {
                 let op = self.st_rule(lx, true, false)?;
-                self.st_emit(out, op);
+                self.st_emit(out, op)?;
             }
             "unhbox" | "unhcopy" if managed && mode.horizontal() => {
                 let n = self.eng.scan_register_file(lx)? as u16;
                 let copy = name.name() == "unhcopy";
-                self.st_emit(out, ListOp::Unpackage { n, copy });
+                self.st_emit(out, ListOp::Unpackage { n, copy })?;
             }
             "unvbox" | "unvcopy" if managed && mode.vertical() => {
                 let n = self.eng.scan_register_file(lx)? as u16;
                 let copy = name.name() == "unvcopy";
-                self.st_emit(out, ListOp::Unpackage { n, copy });
+                self.st_emit(out, ListOp::Unpackage { n, copy })?;
             }
-            "/" if managed && mode.horizontal() => self.st_emit(out, ListOp::ItalicCorrection),
+            "number" | "romannumeral" | "the" if managed && mode != CMode::Unmanaged => {
+                self.st.run_open = was_open;
+                return self.st_converted(lx, name.name(), out);
+            }
+            "/" if managed && mode.horizontal() => self.st_emit(out, ListOp::ItalicCorrection)?,
             "-" if managed && mode.horizontal() => {
                 let f = self.eng.cur_font;
-                self.st_emit(out, ListOp::Hyphen(f));
+                self.st_emit(out, ListOp::Hyphen(f))?;
             }
             "discretionary" if managed && mode.horizontal() => {
-                self.st_emit(out, ListOp::BeginDiscretionary);
+                self.st_emit(out, ListOp::BeginDiscretionary)?;
                 for k in 0..3u8 {
                     self.st_list_body(lx, CMode::RestrictedHorizontal, Closer::Disc(k), out)?;
                 }
@@ -438,7 +728,7 @@ impl Lowerer {
                 // expands it, which is what `\message` does.
                 let parts = self.message_parts(lx)?;
                 let text = self.static_text(&parts);
-                self.st_emit(out, ListOp::Mark(text));
+                self.st_emit(out, ListOp::Mark(text))?;
             }
             "insert" if managed => {
                 let mut n = self.eng.scan_register_file(lx)? as u16;
@@ -446,26 +736,15 @@ impl Lowerer {
                     self.eng.report(lx, "You can't \\insert255");
                     n = 0;
                 }
-                self.st_emit(out, ListOp::BeginInsert(n));
+                self.st_emit(out, ListOp::BeginInsert(n))?;
                 self.st_list_body(lx, CMode::InternalVertical, Closer::Insert, out)?;
             }
             "vadjust" if managed && mode.horizontal() => {
-                self.st_emit(out, ListOp::BeginInsert(255));
+                self.st_emit(out, ListOp::BeginInsert(255))?;
                 self.st_list_body(lx, CMode::InternalVertical, Closer::Insert, out)?;
             }
-            "indent" if managed && mode.horizontal() => {
-                // §1093: an empty box `\parindent` wide.
-                self.st_emit(
-                    out,
-                    ListOp::BeginBox {
-                        kind: BoxKind::H,
-                        exactly: true,
-                        size: Num::Count(crate::params::register_slot("parindent").unwrap_or(0)),
-                        context: Context::Shift(Num::Literal(0)),
-                    },
-                );
-                self.st_emit(out, ListOp::EndBox);
-            }
+            // §1093: an empty box `\parindent` wide.
+            "indent" if managed && mode.horizontal() => self.st_emit(out, ListOp::Indent)?,
             "noindent" if managed && mode.horizontal() => {}
             "noboundary" if managed && mode.horizontal() => {
                 // §1045: before a run it cancels the left boundary; after
@@ -487,11 +766,11 @@ impl Lowerer {
                     ));
                 };
                 self.st.run_open = was_open;
-                self.st_char_code(code, out)?;
+                self.st_char_code(lx, code, out)?;
             }
             " " if managed && mode.horizontal() => {
                 let f = self.eng.cur_font;
-                self.st_emit(out, ListOp::Space { f, normal: true });
+                self.st_emit(out, ListOp::Space { f, normal: true })?;
             }
             "par" if managed => {
                 // §1094: `\par` in restricted horizontal mode ends nothing;
@@ -507,7 +786,7 @@ impl Lowerer {
                     "spacefactor" => ListOp::SetSpaceFactor(self.number(lx)?),
                     _ => ListOp::SetPrevGraf(self.number(lx)?),
                 };
-                self.st_emit(out, op);
+                self.st_emit(out, op)?;
                 self.st_after_assignment(lx);
             }
             _ => {
@@ -542,12 +821,12 @@ impl Lowerer {
 
     /// A character by code in the current font (§1045's `char_num` and
     /// `char_given`, §1038's lookahead +1).
-    fn st_char_code(&mut self, code: i64, out: &mut Vec<Cmd>) -> R<()> {
+    fn st_char_code(&mut self, lx: &mut Lexer, code: i64, out: &mut Vec<Cmd>) -> R<()> {
         let c = u32::try_from(code)
             .ok()
             .and_then(char::from_u32)
             .ok_or_else(|| TexError(format!("Bad character code ({code})")))?;
-        self.st_letter(c, out)
+        self.st_letter(lx, c, out)
     }
 
     /// §1269 after an assignment this file made.
@@ -632,7 +911,7 @@ impl Lowerer {
                         id: font.id_text.clone(),
                         size: font.size,
                     };
-                    self.st_emit(out, op);
+                    self.st_emit(out, op)?;
                 }
                 self.eng.define_font_identifier(u, f, global);
             }
@@ -647,7 +926,7 @@ impl Lowerer {
                 );
             }
         }
-        self.st_sync(out);
+        self.st_sync(out)?;
         self.st_after_assignment(lx);
         Ok(())
     }
@@ -755,7 +1034,7 @@ impl Lowerer {
                         Fetch::Vsplit(n, self.dimen_number(lx, false)?)
                     }
                 };
-                self.st_emit(out, ListOp::Fetch { from, context });
+                self.st_emit(out, ListOp::Fetch { from, context })?;
                 Ok(())
             }
             "hbox" | "vbox" | "vtop" => {
@@ -768,7 +1047,7 @@ impl Lowerer {
             }
             "hrule" | "vrule" if matches!(context, Context::Leaders(_)) => {
                 let op = self.st_rule(lx, prim == "vrule", true)?;
-                self.st_emit(out, op);
+                self.st_emit(out, op)?;
                 Ok(())
             }
             _ => {
@@ -804,7 +1083,7 @@ impl Lowerer {
                 size,
                 context,
             },
-        );
+        )?;
         let mode = match kind {
             BoxKind::H => CMode::RestrictedHorizontal,
             _ => CMode::InternalVertical,
@@ -851,6 +1130,11 @@ impl Lowerer {
         let known_mark = self.eng.known.mark();
         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
         self.st.run_open = false;
+        // §1085 and §1100: a `\vbox`, `\vtop` or insertion ends the paragraph
+        // it holds before it is packaged.
+        if self.st_mode() == CMode::Horizontal {
+            self.st_end_graf(&mut body)?;
+        }
         // §1086 reads `\boxmaxdepth` and §1100 the split parameters before
         // `unsave`, so they are read inside the group.
         let dimen = |name: &str| Num::Count(crate::params::register_slot(name).unwrap_or(0));
@@ -883,7 +1167,7 @@ impl Lowerer {
         // the group's registers come back.
         let insert = matches!(closer, Closer::Insert);
         out.push(Cmd::Group { saves, keeps, body });
-        self.st_sync(out);
+        self.st_sync(out)?;
         match closer {
             Closer::Box => out.push(Cmd::List(ListOp::EndBox)),
             Closer::Disc(k) => out.push(Cmd::List(ListOp::EndDiscList(k))),
@@ -926,7 +1210,7 @@ impl Lowerer {
                 mu: false,
                 leaders: Some(kind),
             },
-        );
+        )?;
         Ok(())
     }
 
@@ -934,7 +1218,7 @@ impl Lowerer {
     fn st_show_box(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
         let n = self.eng.scan_register_file(lx)? as u16;
         self.eng.note_mouth(lx);
-        self.st_sync(out);
+        self.st_sync(out)?;
         let context = self.eng.error_context(lx).replace('\n', "");
         let online = self.eng.intpars.get(crate::intpar::TRACING_ONLINE) > 0;
         let ops = match online {
@@ -1005,4 +1289,217 @@ fn assigns_box_locally(cmds: &[Cmd]) -> bool {
         } => assigns_box_locally(then_branch) || assigns_box_locally(else_branch),
         _ => false,
     })
+}
+
+/// §1090's commands: in vertical mode each begins a paragraph and is read
+/// again inside it (letters and `\chardef` characters are the main loop's).
+fn begins_paragraph(name: &str) -> bool {
+    matches!(
+        name,
+        "char"
+            | "unhbox"
+            | "unhcopy"
+            | "vrule"
+            | "accent"
+            | "discretionary"
+            | "-"
+            | "hskip"
+            | "hfil"
+            | "hfill"
+            | "hss"
+            | "hfilneg"
+            | "valign"
+            | "noboundary"
+            | " "
+            | "indent"
+            | "noindent"
+    )
+}
+
+/// §1094's commands: in horizontal mode each ends the paragraph first
+/// (`head_for_vmode`, §1095).
+fn ends_paragraph(name: &str) -> bool {
+    matches!(
+        name,
+        "end" | "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" | "hrule" | "unvbox" | "unvcopy" | "halign"
+    )
+}
+
+impl Lowerer {
+    /// Turn the outer list over to the stomach: see [`Lowerer::with_list_path`].
+    pub(super) fn st_enable_paragraphs(&mut self) {
+        self.st.paragraphs = true;
+        if let Some(outer) = self.st.nest.first_mut() {
+            *outer = CMode::Vertical;
+        }
+    }
+}
+
+impl Lowerer {
+    /// §577's `scan_font_ident`: a font identifier, `\font` (the current
+    /// font), or a family member; anything else is `Missing font identifier`,
+    /// read again, and `\nullfont`.
+    fn st_scan_font_ident(&mut self, lx: &mut Lexer) -> R<u16> {
+        let (t, p) = loop {
+            let Some((t, p)) = self.eng.next_unexpandable(lx)? else {
+                return Ok(0);
+            };
+            if !t.is_space() {
+                break (t, p);
+            }
+        };
+        if let Token::Cs(n) = t {
+            if let Some(Meaning::Font(f)) = self.eng.meanings.get(&n) {
+                return Ok(*f);
+            }
+            let size = match p.unwrap_or(n).name() {
+                "font" => return Ok(self.eng.cur_font),
+                "nullfont" => return Ok(0),
+                "textfont" => Some(0),
+                "scriptfont" => Some(1),
+                "scriptscriptfont" => Some(2),
+                _ => None,
+            };
+            if let Some(size) = size {
+                let fam = self.eng.scan_number_file(lx)?;
+                return Ok(self.eng.fam_fonts[size][(fam & 15) as usize]);
+            }
+        }
+        lx.back_input(&[t]);
+        self.eng.report(lx, "Missing font identifier");
+        Ok(0)
+    }
+
+    /// §578's `find_font_dimen`: `\fontdimen n f`, as the font and the
+    /// parameter number. Writing past the last parameter of the font loaded
+    /// last makes room for it; past any other font's is §579's error.
+    fn st_find_font_dimen(&mut self, lx: &mut Lexer, writing: bool) -> R<(u16, u16)> {
+        let n = self.eng.scan_number_file(lx)?;
+        let f = self.st_scan_font_ident(lx)?;
+        let last = self.eng.fonts.fonts.len().saturating_sub(1) as u16;
+        let have = self.eng.fonts.get(f).params.len() as i64;
+        let fits = n > 0 && (n <= have || (writing && f == last && f != 0));
+        if !fits {
+            let esc = self.eng.esc().to_string();
+            let id = self.eng.fonts.get(f).id_text.clone();
+            self.eng.report(
+                lx,
+                &format!("Font {esc}{id} has only {have} fontdimen parameters"),
+            );
+            return Ok((0, 1));
+        }
+        if n > have {
+            if let Some(font) = self.eng.fonts.get_mut(f) {
+                font.params.resize(n as usize, 0);
+            }
+        }
+        Ok((f, n as u16))
+    }
+}
+
+impl Lowerer {
+    /// `\number`, `\romannumeral` and `\the` of a register, met in a list.
+    ///
+    /// They expand to characters (§465, §470), and when the lowerer knows the
+    /// register's value the characters are put back to be read as any others
+    /// are. When only the program knows it -- `\folio` in an output routine,
+    /// whose `\pageno` changes every page -- the characters are made when the
+    /// program runs ([`ListOp::Converted`]). Anything else is left to the
+    /// expander.
+    fn st_converted(&mut self, lx: &mut Lexer, name: &str, out: &mut Vec<Cmd>) -> R<bool> {
+        use crate::compiler::{is_glue_slot, is_mu_slot, DIMEN_BASE};
+        let (form, values): (u8, [Num; 4]) = match name {
+            "the" => {
+                let Some(t) = lx.next_token(&self.eng.cats) else {
+                    return Ok(false);
+                };
+                let Token::Cs(n) = t else {
+                    lx.push_back(&[t]);
+                    return Ok(false);
+                };
+                let Some((slot, _)) = self.eng.register_slot(lx, n, false)? else {
+                    lx.push_back(&[t]);
+                    return Ok(false);
+                };
+                let internal_int = Internal::of_name(n.name()).is_some_and(|i| !i.is_dimen());
+                if is_glue_slot(slot) {
+                    let form = if is_mu_slot(slot) { 4 } else { 3 };
+                    (
+                        form,
+                        [
+                            Num::Count(slot),
+                            Num::Count(slot + 1),
+                            Num::Count(slot + 2),
+                            Num::Count(slot + 3),
+                        ],
+                    )
+                } else if slot < DIMEN_BASE || internal_int {
+                    (0, [Num::Count(slot), lit(0), lit(0), lit(0)])
+                } else {
+                    (2, [Num::Count(slot), lit(0), lit(0), lit(0)])
+                }
+            }
+            _ => {
+                let Some(v) = self.peek_int_register(lx, false)? else {
+                    return Ok(false);
+                };
+                let form = if name == "romannumeral" { 1 } else { 0 };
+                (form, [v, lit(0), lit(0), lit(0)])
+            }
+        };
+        let known: Option<Vec<i64>> = values.iter().map(|v| self.eng.known.num(v)).collect();
+        if let Some(k) = known {
+            // Known now: the characters, read next as the mouth would read them.
+            let text = match form {
+                0 => k[0].to_string(),
+                1 => crate::expand::roman_int(k[0]),
+                2 => format!("{}pt", crate::dimen::print_scaled(k[0])),
+                _ => crate::glue::print_glue_in(
+                    if form == 4 { "mu" } else { "pt" },
+                    k[0],
+                    k[1],
+                    k[3] / 4,
+                    k[2],
+                    k[3] % 4,
+                ),
+            };
+            let toks: Vec<Token> = text
+                .chars()
+                .map(|c| match c {
+                    ' ' => Token::Char(' ', Cat::Space),
+                    c => Token::Char(c, Cat::Other),
+                })
+                .collect();
+            lx.push_back(&toks);
+            return Ok(true);
+        }
+        if self.st_mode().vertical() {
+            self.st_new_graf(lx, true, out)?;
+        }
+        let f = self.eng.cur_font;
+        self.st_emit(out, ListOp::Converted { f, form, values })?;
+        Ok(true)
+    }
+}
+
+fn lit(v: i64) -> Num {
+    Num::Literal(v)
+}
+
+impl Lowerer {
+    /// Lower a format's source -- plain.tex -- the way INITEX reads it before
+    /// `\dump`: everything it defines and assigns is kept for the document,
+    /// and what it printed is dropped, as a preloaded format prints nothing.
+    pub fn preload_format(&mut self, src: &str) -> R<()> {
+        let out = self.lower_located(src);
+        self.reports.clear();
+        self.reported = false;
+        match out {
+            Ok(cmds) => {
+                super::state_only(&cmds, &mut self.prologue);
+                Ok(())
+            }
+            Err((e, _)) => Err(e),
+        }
+    }
 }

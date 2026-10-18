@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">276</div>
+            <div class="stat-val">281</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -424,6 +424,12 @@
             <tr><td><code>\noindent</code></td><td>In horizontal mode, nothing (§1093). Starting a paragraph with it in vertical mode needs the paragraph builder, which the list path does not have yet.</td><td><pre>\hbox{\noindent x}</pre></td></tr>
             <tr><td><code>\noboundary</code></td><td>Cancel the font's boundary character on that side of the next or previous run of characters (§1034, §1038), so a boundary ligature or kern is not made.</td><td><pre>\hbox{\noboundary ab}</pre></td></tr>
             <tr><td><code>\prevgraf</code></td><td>The number of lines in the most recent paragraph of the nearest enclosing vertical list (§422), read and assigned (§1244).</td><td><pre>\prevgraf=2</pre></td></tr>
+            <tr><td><code>\fontdimen</code></td><td>Font parameter N of a font (tex.web §558, §578): read as a dimension, and assigned globally (§1253). Writing past the last parameter of the font loaded last makes room for it; past any other font's is <code>Font ... has only N fontdimen parameters</code>.</td><td><pre>\fontdimen2\tenrm=4pt
+\message{\the\fontdimen6\tenrm}</pre></td></tr>
+            <tr><td><code>\hyphenchar</code></td><td>The character a font hyphenates with (§1253): <code>\-</code> puts it in a discretionary and the main loop follows each one it sets with an empty discretionary. -1 turns both off.</td><td><pre>\hyphenchar\tentt=-1</pre></td></tr>
+            <tr><td><code>\skewchar</code></td><td>The character whose kerns position a font's math accents (§1253).</td><td><pre>\skewchar\teni='177</pre></td></tr>
+            <tr><td><code>\patterns</code></td><td>Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. hyphen.tex is read this way by plain.tex.</td><td><pre>\patterns{.ach4 .ad4der}</pre></td></tr>
+            <tr><td><code>\hyphenation</code></td><td>Words with their hyphens written in (§934), which the second pass takes over the patterns.</td><td><pre>\hyphenation{man-u-script}</pre></td></tr>
           </tbody>
         </table>
       </section>

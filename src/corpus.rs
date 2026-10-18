@@ -874,6 +874,36 @@ pub const CORPUS: &[Entry] = &[
         "The number of lines in the most recent paragraph of the nearest enclosing vertical list (\u{a7}422), read and assigned (\u{a7}1244).",
         "\\prevgraf=2",
     ),
+    (
+        "\\fontdimen",
+        "Boxes",
+        "Font parameter N of a font (tex.web \u{a7}558, \u{a7}578): read as a dimension, and assigned globally (\u{a7}1253). Writing past the last parameter of the font loaded last makes room for it; past any other font's is `Font ... has only N fontdimen parameters`.",
+        "\\fontdimen2\\tenrm=4pt\n\\message{\\the\\fontdimen6\\tenrm}",
+    ),
+    (
+        "\\hyphenchar",
+        "Boxes",
+        "The character a font hyphenates with (\u{a7}1253): `\\-` puts it in a discretionary and the main loop follows each one it sets with an empty discretionary. -1 turns both off.",
+        "\\hyphenchar\\tentt=-1",
+    ),
+    (
+        "\\skewchar",
+        "Boxes",
+        "The character whose kerns position a font's math accents (\u{a7}1253).",
+        "\\skewchar\\teni='177",
+    ),
+    (
+        "\\patterns",
+        "Boxes",
+        "Liang hyphenation patterns (\u{a7}960), the characters between the braces, for the paragraph builder's second pass. hyphen.tex is read this way by plain.tex.",
+        "\\patterns{.ach4 .ad4der}",
+    ),
+    (
+        "\\hyphenation",
+        "Boxes",
+        "Words with their hyphens written in (\u{a7}934), which the second pass takes over the patterns.",
+        "\\hyphenation{man-u-script}",
+    ),
     // ══ Intercepts — intercepts.rs, expand::weave_advice ══════════════════
     (
         "\\intercept",

@@ -138,6 +138,29 @@ pub enum ListOp<N = Num> {
     /// §1253: `\hyphenchar f=` and `\skewchar f=`.
     SetHyphenChar { f: u16, value: N },
     SetSkewChar { f: u16, value: N },
+    /// `new_graf` (§1091): open a paragraph, indented or not.
+    NewGraf(bool),
+    /// `end_graf` (§1096): break the paragraph and go back to the vertical
+    /// list.
+    EndGraf,
+    /// `indent_in_hmode` (§1093).
+    Indent,
+    /// §1094's `if mode>0 then build_page`, after `\par` in vertical mode.
+    BuildPage,
+    /// `\end` (§1054): ship what is left until `its_all_over`.
+    End,
+    /// Whether `\output` is non-empty, and the routine to run: the index of
+    /// the program's sub-chunk the lowerer compiled it into, or -1.
+    OutputRoutine(i64),
+    /// The characters `\number`, `\romannumeral` or `\the` makes of a
+    /// register only the program holds (§465, §470), set in font `f` as the main
+    /// loop sets characters: `form` 0 is a number, 1 roman numerals, 2 a
+    /// dimension, 3 a glue (all four values), 4 a math glue.
+    Converted { f: u16, form: u8, values: [N; 4] },
+    /// §960 and §934: `\patterns{...}` and `\hyphenation{...}`, as the text that
+    /// was between the braces, for the hyphenation pass to read.
+    Patterns(String),
+    Hyphenation(String),
 }
 
 /// One argument as the compiler pushes it.
@@ -231,6 +254,15 @@ impl<N> ListOp<N> {
             ListOp::SetFontDimen { .. } => 28,
             ListOp::SetHyphenChar { .. } => 29,
             ListOp::SetSkewChar { .. } => 30,
+            ListOp::NewGraf(_) => 31,
+            ListOp::EndGraf => 32,
+            ListOp::Indent => 33,
+            ListOp::BuildPage => 34,
+            ListOp::End => 35,
+            ListOp::OutputRoutine(_) => 36,
+            ListOp::Converted { .. } => 37,
+            ListOp::Patterns(_) => 38,
+            ListOp::Hyphenation(_) => 39,
         }
     }
 
@@ -360,7 +392,9 @@ impl<N> ListOp<N> {
             }
             ListOp::Unpackage { n, copy } => f(Arg::Int(i64::from(*n) * 2 + i64::from(*copy))),
             ListOp::DeleteLast(r) => f(Arg::Int(removed_code(*r))),
-            ListOp::Mark(text) => f(Arg::Str(text)),
+            ListOp::Mark(text) | ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
+                f(Arg::Str(text))
+            }
             ListOp::Hyphen(font) => f(Arg::Int(i64::from(*font))),
             ListOp::EndDiscList(k) => f(Arg::Int(i64::from(*k))),
             ListOp::BeginInsert(n) => f(Arg::Int(i64::from(*n))),
@@ -388,11 +422,24 @@ impl<N> ListOp<N> {
                 f(Arg::Int(i64::from(*font)));
                 f(Arg::Num(value));
             }
+            ListOp::NewGraf(indent) => f(Arg::Int(i64::from(*indent))),
+            ListOp::OutputRoutine(k) => f(Arg::Int(*k)),
+            ListOp::Converted { f: font, form, values } => {
+                f(Arg::Int(i64::from(*font)));
+                f(Arg::Int(i64::from(*form)));
+                for v in values {
+                    f(Arg::Num(v));
+                }
+            }
             ListOp::ItalicCorrection
             | ListOp::BeginDiscretionary
             | ListOp::EndBox
             | ListOp::GroupBegin
-            | ListOp::GroupEnd => {}
+            | ListOp::GroupEnd
+            | ListOp::EndGraf
+            | ListOp::Indent
+            | ListOp::BuildPage
+            | ListOp::End => {}
         }
     }
 }
@@ -599,6 +646,19 @@ impl ListOp<i64> {
             30 => ListOp::SetSkewChar {
                 f: r.u16(),
                 value: r.int(),
+            },
+            31 => ListOp::NewGraf(r.int() == 1),
+            32 => ListOp::EndGraf,
+            33 => ListOp::Indent,
+            34 => ListOp::BuildPage,
+            35 => ListOp::End,
+            36 => ListOp::OutputRoutine(r.int()),
+            38 => ListOp::Patterns(r.string()),
+            39 => ListOp::Hyphenation(r.string()),
+            37 => ListOp::Converted {
+                f: r.u16(),
+                form: u8::try_from(r.int()).unwrap_or(0),
+                values: [r.int(), r.int(), r.int(), r.int()],
             },
             _ => return None,
         })

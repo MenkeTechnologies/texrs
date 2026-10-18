@@ -150,3 +150,279 @@ impl crate::node::show::FontIds for Stomach {
         self.font(f).id_text.clone()
     }
 }
+
+/// The page builder's half of the run (§980-§1028), over `crate::page`.
+#[derive(Default)]
+pub struct Pages {
+    builder: Option<crate::page::PageBuilder>,
+    /// §1025 has fired and the output routine has not run yet.
+    pub output_pending: bool,
+    /// `\end` is waiting for §1054's `its_all_over`.
+    pub end_requested: bool,
+    /// Whether `\output` is non-empty: the program says so before every
+    /// action that can build the page.
+    pub has_output_routine: bool,
+}
+
+impl Stomach {
+    fn builder(&mut self) -> &mut crate::page::PageBuilder {
+        let b = self
+            .pages
+            .builder
+            .get_or_insert_with(|| crate::page::PageBuilder::new(crate::page::PageParams::default()));
+        b
+    }
+
+    /// Read §980's frozen-at-first-box parameters as they stand now; the
+    /// builder freezes them itself when the page gets its first box.
+    fn refresh_page_params(&mut self, e: &dyn super::Eqtb) {
+        let tol = self.tolerances(e);
+        let has = self.pages.has_output_routine;
+        let holding = self.int_par("holdinginserts");
+        let dead = self.int_par("maxdeadcycles");
+        let p = crate::page::PageParams {
+            vsize: super::dimen_par(e, "vsize"),
+            max_depth: super::dimen_par(e, "maxdepth"),
+            top_skip: super::glue_par(e, "topskip"),
+            split_top_skip: super::glue_par(e, "splittopskip"),
+            split_max_depth: super::dimen_par(e, "splitmaxdepth"),
+            holding_inserts: holding,
+            max_dead_cycles: dead,
+            tolerances: tol,
+            inserts: self.insert_classes(e),
+        };
+        let b = self.builder();
+        b.params = p;
+        b.has_output_routine = has;
+    }
+
+    /// §981: the registers of every insertion class the contributions or the
+    /// page hold, read from `\count n`, `\dimen n` and `\skip n`.
+    fn insert_classes(
+        &self,
+        e: &dyn super::Eqtb,
+    ) -> std::collections::BTreeMap<u8, crate::page::InsertClass> {
+        let mut classes = std::collections::BTreeMap::new();
+        for node in self.nest[0].list.iter() {
+            if let crate::node::Node::Ins(ins) = node {
+                let n = ins.number;
+                classes.entry(n).or_insert_with(|| crate::page::InsertClass {
+                    count: e.slot(i64::from(n)),
+                    dimen: e.slot(crate::compiler::DIMEN_BASE + i64::from(n)),
+                    skip: super::glue_at(
+                        e,
+                        crate::compiler::SKIP_BASE + i64::from(n) * crate::compiler::SKIP_STRIDE,
+                    ),
+                });
+            }
+        }
+        if let Some(b) = &self.pages.builder {
+            for (n, c) in &b.params.inserts {
+                classes.entry(*n).or_insert(*c);
+            }
+        }
+        classes
+    }
+
+    /// §994's `build_page`: move the outer list onto the page, and ship or
+    /// hand to `\output` what the builder fires.
+    pub fn build_page(&mut self, e: &dyn super::Eqtb) {
+        if self.output_active() {
+            return;
+        }
+        crate::node::hooks::buildpage_filter("");
+        self.refresh_page_params(e);
+        let contributions = std::mem::take(&mut self.nest[0].list);
+        // The insertion boxes are the document's registers; the builder
+        // reads and writes them through its own table while it runs.
+        self.lend_insertion_boxes();
+        let fired = self.builder().contribute(contributions);
+        self.handle_fired(fired);
+    }
+
+    fn lend_insertion_boxes(&mut self) {
+        let classes: Vec<u8> = self
+            .pages
+            .builder
+            .as_ref()
+            .map(|b| b.params.inserts.keys().copied().collect())
+            .unwrap_or_default();
+        for n in classes {
+            let value = self.box_register(u16::from(n)).cloned();
+            let b = self.builder();
+            match value {
+                Some(v) => {
+                    b.boxes.insert(n, v);
+                }
+                None => {
+                    b.boxes.remove(&n);
+                }
+            }
+        }
+    }
+
+    /// The builder's boxes back into the registers: `\box255` and every
+    /// insertion class (§1017-§1022 assign them directly, as `box(n):=`).
+    fn take_back_boxes(&mut self) {
+        let Some(b) = self.pages.builder.as_mut() else {
+            return;
+        };
+        let boxes = std::mem::take(&mut b.boxes);
+        let classes: Vec<u8> = b.params.inserts.keys().copied().collect();
+        for n in classes {
+            if !boxes.contains_key(&n) {
+                self.set_box(u16::from(n), None, true);
+            }
+        }
+        for (n, v) in boxes {
+            self.set_box(u16::from(n), Some(v), true);
+        }
+    }
+
+    fn handle_fired(&mut self, fired: Vec<crate::page::Fired>) {
+        self.take_back_boxes();
+        self.mirror_page();
+        for f in fired {
+            match f {
+                crate::page::Fired::ShipOut(page) => {
+                    self.set_box(255, None, true);
+                    self.ship_out_box(page);
+                }
+                crate::page::Fired::Output {
+                    output_penalty,
+                    dead_cycles,
+                    ..
+                } => {
+                    // §1025: the routine runs with `\box255` full, on a list
+                    // of its own.
+                    self.output.output_penalty = output_penalty;
+                    self.output.dead_cycles = dead_cycles;
+                    let mut l = super::ListState::new(
+                        super::Mode::InternalVertical,
+                        super::Opened::Output,
+                    );
+                    l.mode_line = -self.line;
+                    self.nest.push(l);
+                    self.group_begin();
+                    self.pages.output_pending = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// §1026: the output routine has ended; what it left on its list goes
+    /// back in front of the contributions, and the builder looks again.
+    pub fn end_output(&mut self, e: &dyn super::Eqtb) {
+        if self.mode() == super::Mode::Horizontal {
+            self.end_graf(e);
+        }
+        self.group_end();
+        if !matches!(self.cur().opened, super::Opened::Output) {
+            return;
+        }
+        // §1028.
+        if self.box_register(255).is_some() {
+            self.say(Said::Error("Output routine didn't use all of \\box255".into()));
+            self.set_box(255, None, true);
+        }
+        let Some(l) = self.pop_list() else {
+            return;
+        };
+        self.pages.output_pending = false;
+        self.output.insert_penalties = 0;
+        self.refresh_page_params(e);
+        self.lend_insertion_boxes();
+        let fired = self.builder().resume_output(l.list);
+        self.handle_fired(fired);
+    }
+
+    /// §1054's `its_all_over`, after `\end`: true when there is nothing left
+    /// to ship; otherwise the residue is pushed out with `\hbox to\hsize{}
+    /// \vfill\penalty-'10000000000` and the page built again.
+    pub fn its_all_over(&mut self, e: &dyn super::Eqtb) -> bool {
+        let page_empty = self
+            .pages
+            .builder
+            .as_ref()
+            .is_none_or(|b| b.current_page().is_empty() && !b.contributions_pending());
+        if page_empty && self.nest[0].list.is_empty() && self.output.dead_cycles == 0 {
+            return true;
+        }
+        let hsize = super::dimen_par(e, "hsize");
+        self.tail_append(crate::node::Node::Box(BoxNode {
+            width: hsize,
+            ..BoxNode::null()
+        }));
+        self.tail_append(crate::node::Node::Glue(crate::node::GlueNode::new(
+            crate::box_::fill::fill(),
+        )));
+        self.tail_append(crate::node::Node::Penalty(-0o10000000000));
+        self.build_page(e);
+        false
+    }
+
+    /// The page builder's readable values into [`Output`], for the mirror.
+    fn mirror_page(&mut self) {
+        let Some(b) = self.pages.builder.as_ref() else {
+            return;
+        };
+        use crate::page::PageDimen;
+        let out = &mut self.output;
+        out.page_goal = b.page_so_far(PageDimen::Goal);
+        out.page_total = b.page_so_far(PageDimen::Total);
+        for o in 0..4 {
+            out.page_stretch[o] = b.page_so_far(PageDimen::Stretch(o));
+        }
+        out.page_shrink = b.page_so_far(PageDimen::Shrink);
+        out.page_depth = b.page_so_far(PageDimen::Depth);
+        out.insert_penalties = b.insert_penalties();
+        out.last_penalty = b.last_penalty;
+        out.last_kern = b.last_kern;
+        out.last_glue = b.last_glue;
+    }
+}
+
+impl Stomach {
+    /// The DVI file of the pages shipped (§617-§643), as tex writes it; `None`
+    /// when no page was shipped, for which tex writes no file (§642).
+    pub fn dvi(&self) -> Option<Vec<u8>> {
+        if self.output.pages.is_empty() {
+            return None;
+        }
+        // §617: the comment is stamped from `\year`, `\month`, `\day` and
+        // `\time` as the run left them.
+        let time = self.int_par("time");
+        let comment = format!(
+            " TeX output {}.{:02}.{:02}:{:02}{:02}",
+            self.int_par("year"),
+            self.int_par("month"),
+            self.int_par("day"),
+            time / 60,
+            time % 60
+        );
+        let fonts = self
+            .fonts
+            .iter()
+            .enumerate()
+            .map(|(f, font)| match f {
+                0 => None,
+                _ => Some(crate::dvi::out::FontDef {
+                    checksum: font.checksum,
+                    size: font.size as i32,
+                    design_size: font.design_size as i32,
+                    area: String::new(),
+                    name: font.name.clone(),
+                }),
+            })
+            .collect();
+        let mag = self.int_par("mag") as i32;
+        let mut out = crate::dvi::out::Out::new(&comment, mag, fonts);
+        for p in &self.output.pages {
+            crate::shipout::ship_out(&mut out, &p.page, p.counts, p.h_offset, p.v_offset);
+        }
+        out.max_v = self.output.max_v as i32;
+        out.max_h = self.output.max_h as i32;
+        Some(out.finish())
+    }
+}

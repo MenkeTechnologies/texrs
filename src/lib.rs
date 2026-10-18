@@ -65,6 +65,7 @@ pub mod otf;
 pub mod pack;
 pub mod page;
 pub mod parallel;
+pub mod parbreak;
 pub mod params;
 pub mod parity;
 pub mod pdf;
@@ -694,6 +695,40 @@ pub fn run_dvi_cached(
         .and_then(|s| s.to_str())
         .unwrap_or("cmr10");
     Ok(crate::typeset::to_dvi(&text, &font, name, layout))
+}
+
+/// Run `src` on the list path -- paragraphs, the page builder and
+/// `\output` all in the stomach (`crate::stomach`) -- and hand back the
+/// message stream and the stomach it left, with its shipped pages and the
+/// fonts they are set in.
+pub fn run_list_path(src: &str) -> Result<(String, crate::stomach::Stomach), TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let mut lowerer = crate::lower::Lowerer::new()
+        .tex_errors(true)
+        .with_list_path();
+    let cmds = lowerer.lower(&src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    Ok((without_marks(&msgs.join(" ")), crate::stomach::run::take()))
+}
+
+/// What `tex FILE` does: plain.tex as the preloaded format, then the
+/// document, on the list path -- and the DVI file the shipped pages make
+/// (`None` when none was shipped), with the message stream.
+pub fn run_tex_dvi(src: &str) -> Result<(String, Option<Vec<u8>>), TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let plain = crate::kpse::locate("plain.tex")
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .ok_or_else(|| TexError("plain.tex not found".into()))?;
+    let mut lowerer = crate::lower::Lowerer::new()
+        .tex_errors(true)
+        .with_list_path();
+    lowerer.preload_format(&plain)?;
+    let cmds = lowerer.lower(&src)?;
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    let stomach = crate::stomach::run::take();
+    Ok((without_marks(&msgs.join(" ")), stomach.dvi()))
 }
 
 pub fn run_dvi(

@@ -26,6 +26,8 @@
 //! `.xdv` should say what it is rather than fail as if the file were damaged,
 //! but their operands are XeTeX's business and texrs will never emit them.
 
+pub mod out;
+
 use std::path::Path;
 
 /// One thing a DVI file says.

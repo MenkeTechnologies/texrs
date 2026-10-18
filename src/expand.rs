@@ -225,6 +225,9 @@ enum Save {
     /// The current font (§230's `cur_font_loc`) as it stood before a
     /// group selected another.
     Font(u16),
+    /// One math family entry (§230's `math_font_base`): the size (text,
+    /// script, scriptscript), the family, and the font it held.
+    FamFont(u8, u8, u16),
 }
 
 impl Save {
@@ -242,6 +245,7 @@ impl Save {
             (Save::Count(a, _), Save::Count(b, _)) => a == b,
             (Save::Meaning(a, _), Save::Meaning(b, _)) => a == b,
             (Save::Font(_), Save::Font(_)) => true,
+            (Save::FamFont(s, f, _), Save::FamFont(t, g, _)) => s == t && f == g,
             _ => false,
         }
     }
@@ -372,6 +376,9 @@ pub struct Engine {
     /// The current font (§230's `cur_font_loc`), an internal font number;
     /// `\nullfont` (0) until a font identifier is selected (§232).
     pub cur_font: u16,
+    /// The math families (§230's `math_font_base`): `\textfont`, `\scriptfont`
+    /// and `\scriptscriptfont` of each of the sixteen, `\nullfont` until assigned.
+    pub fam_fonts: [[u16; 16]; 3],
     /// Errors REPORTED rather than raised, in the order they happened.
     ///
     /// `tex.web` §82's `error` prints the message and carries on; only a few
@@ -584,6 +591,7 @@ impl Engine {
             font_units: None,
             fonts: crate::stomach::font::Table::new(),
             cur_font: 0,
+            fam_fonts: [[0; 16]; 3],
             errors: Vec::new(),
             backend: crate::backend::Backend::default(),
             recover: false,
@@ -729,6 +737,7 @@ impl Engine {
                 },
                 Save::Intercepts(old) => self.intercepts = old,
                 Save::Font(f) => self.cur_font = f,
+                Save::FamFont(s, fam, f) => self.fam_fonts[s as usize][fam as usize] = f,
                 // Already collected above; it is a token to insert, not a
                 // value to put back.
                 Save::AfterGroup(_) => {}
@@ -1302,6 +1311,15 @@ impl Engine {
         let old = self.cur_font;
         self.save_as(Save::Font(old), self.global_defs_applied(global));
         self.cur_font = f;
+    }
+
+    /// §1234's `def_family`: `\textfont`, `\scriptfont` or `\scriptscriptfont`
+    /// (`size` 0, 1, 2) of family `fam` is font `f`, scoped by the group.
+    pub fn define_family(&mut self, size: u8, fam: u8, f: u16, global: bool) {
+        let (s, k) = (size.min(2) as usize, (fam & 15) as usize);
+        let old = self.fam_fonts[s][k];
+        self.save_as(Save::FamFont(s as u8, k as u8, old), self.global_defs_applied(global));
+        self.fam_fonts[s][k] = f;
     }
 
     fn set_meaning(&mut self, name: CsId, m: Meaning) {
@@ -3032,7 +3050,16 @@ impl Engine {
             }
         };
         if family {
-            self.scan_stream_number(lx, pending_only)?;
+            let size = match tok {
+                Token::Cs(n) => match self.primitive_meaning(n).name() {
+                    "textfont" => 0,
+                    "scriptfont" => 1,
+                    _ => 2,
+                },
+                Token::Char(..) => 0,
+            };
+            let fam = self.scan_stream_number(lx, pending_only)?;
+            font = self.fam_fonts[size][(fam & 15) as usize];
         }
         Ok(self.fonts.describe(font))
     }

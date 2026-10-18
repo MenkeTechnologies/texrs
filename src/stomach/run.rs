@@ -79,18 +79,106 @@ pub fn b_list(vm: &mut VM, argc: u8) -> Value {
     let Some(op) = ListOp::decode(code, &args) else {
         return Value::Int(0);
     };
+    // The output routine is the program's own sub-chunk: keep it where the
+    // page builder can run it.
+    if let ListOp::OutputRoutine(k) = op {
+        let chunk = usize::try_from(k)
+            .ok()
+            .and_then(|k| vm.chunk.sub_chunks.get(k))
+            .map(|c| std::rc::Rc::new(c.clone()));
+        let has = chunk.is_some();
+        OUTPUT.with(|o| *o.borrow_mut() = chunk);
+        STOMACH.with(|s| s.borrow_mut().pages.has_output_routine = has);
+        return Value::Int(0);
+    }
     let line = current_line(vm);
+    step(vm, |s, e| {
+        s.line = line;
+        s.refresh(e);
+        s.apply(op, e);
+    });
+    drive(vm);
+    Value::Int(0)
+}
+
+thread_local! {
+    /// The output routine (§230's `output_routine`), compiled.
+    static OUTPUT: RefCell<Option<std::rc::Rc<fusevm::Chunk>>> = const { RefCell::new(None) };
+}
+
+/// Run `f` on the stomach with the VM's slots, then write back what a
+/// document can read and print what the stomach said.
+fn step(vm: &mut VM, f: impl FnOnce(&mut Stomach, &dyn Eqtb)) {
     let said = STOMACH.with(|s| {
         let mut s = s.borrow_mut();
-        s.line = line;
-        s.refresh(&Slots(vm));
-        s.apply(op, &Slots(vm));
+        f(&mut s, &Slots(vm));
         super::Mirror::flush(&mut s, &mut SlotsMut(vm));
         std::mem::take(&mut s.said)
     });
     let online = STOMACH.with(|s| s.borrow().int_par("tracingonline") > 0);
     crate::runtime::tell(said, online);
-    Value::Int(0)
+}
+
+/// What follows an action: §994's `build_page` when it asked for one, the
+/// output routine when the builder fired it (§1025-§1026), and §1054's
+/// `its_all_over` loop after `\end`, in that order until none is wanted.
+fn drive(vm: &mut VM) {
+    loop {
+        let (pending, build, end) = STOMACH.with(|s| {
+            let s = s.borrow();
+            // Inside the output routine `\end` waits: §1054 runs on the page's own
+            // list, after the routine has given it back.
+            let end = s.pages.end_requested && !s.output_active();
+            (s.pages.output_pending, s.build_page_wanted, end)
+        });
+        if pending {
+            run_output(vm);
+            step(vm, |s, e| s.end_output(e));
+            continue;
+        }
+        if build {
+            step(vm, |s, e| {
+                s.take_build_page();
+                s.build_page(e);
+            });
+            continue;
+        }
+        if end {
+            step(vm, |s, e| {
+                if s.its_all_over(e) {
+                    s.pages.end_requested = false;
+                }
+            });
+            continue;
+        }
+        return;
+    }
+}
+
+/// Run the output routine on a VM of its own, over the same registers: the
+/// slot file goes in, and comes back out with what the routine assigned.
+///
+/// A routine that is not set is §1023's default, which the builder has
+/// already carried out by shipping `\box255`; this is reached only when one
+/// is.
+fn run_output(vm: &mut VM) {
+    let Some(chunk) = OUTPUT.with(|o| o.borrow().clone()) else {
+        STOMACH.with(|s| s.borrow_mut().pages.output_pending = false);
+        return;
+    };
+    let mut inner = VM::new((*chunk).clone());
+    crate::runtime::register_message_builtins(&mut inner);
+    let total = crate::compiler::TOTAL_SLOTS;
+    for slot in 0..total {
+        inner.set_slot(slot, vm.get_slot(slot));
+    }
+    // The page is the routine's to ship; the builder is suspended while it
+    // runs (`output_active`), so nothing below fires it again.
+    STOMACH.with(|s| s.borrow_mut().pages.output_pending = false);
+    let _ = inner.run();
+    for slot in 0..total {
+        vm.set_slot(slot, inner.get_slot(slot));
+    }
 }
 
 /// `ops::LIST_SHOWBOX`: append §1296's `\box n=` display to the message
@@ -255,6 +343,51 @@ impl Stomach {
             ListOp::SetSkewChar { f, value } => {
                 if let Some(font) = self.fonts.get_mut(f as usize) {
                     font.skew_char = value;
+                }
+            }
+            ListOp::NewGraf(indented) => self.new_graf(indented, e),
+            ListOp::EndGraf => self.end_graf(e),
+            ListOp::Indent => self.indent_in_hmode(e),
+            ListOp::BuildPage => self.want_build_page(),
+            ListOp::End => self.pages.end_requested = true,
+            // Kept by `b_list` before it reaches here.
+            ListOp::OutputRoutine(_) => {}
+            ListOp::Patterns(text) => {
+                self.hyphenation_source
+                    .push_str(&format!("\\patterns{{{text}}}\n"));
+                self.hyphenator = None;
+            }
+            ListOp::Hyphenation(text) => {
+                self.hyphenation_source
+                    .push_str(&format!("\\hyphenation{{{text}}}\n"));
+                self.hyphenator = None;
+            }
+            ListOp::Converted { f, form, values } => {
+                let text = match form {
+                    0 => values[0].to_string(),
+                    1 => crate::expand::roman_int(values[0]),
+                    2 => format!("{}pt", crate::dimen::print_scaled(values[0])),
+                    _ => crate::glue::print_glue_in(
+                        if form == 4 { "mu" } else { "pt" },
+                        values[0],
+                        values[1],
+                        values[3] / 4,
+                        values[2],
+                        values[3] % 4,
+                    ),
+                };
+                // §465: `\the` gives category-12 characters and category-10
+                // spaces, so a space here is an interword space.
+                let space_skip = super::glue_par(e, "spaceskip");
+                let xspace_skip = super::glue_par(e, "xspaceskip");
+                for (i, run) in text.split(' ').enumerate() {
+                    if i > 0 {
+                        self.app_space(f as usize, space_skip, xspace_skip, false);
+                    }
+                    let chars: Vec<char> = run.chars().collect();
+                    if !chars.is_empty() {
+                        self.chars(f as usize, &chars, false, false);
+                    }
                 }
             }
         }

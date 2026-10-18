@@ -375,6 +375,14 @@ impl Lowerer {
         self
     }
 
+    /// Build the page's own list too: paragraphs (§1091-§1096), the page
+    /// builder (§994) and `\output`, as the node path of `--dvi` needs. Off
+    /// otherwise, where the outer list's text goes to the string path.
+    pub fn with_list_path(mut self) -> Self {
+        self.st_enable_paragraphs();
+        self
+    }
+
     /// Read every formula with the math parser and set none of it, keeping only
     /// the labels and equation numbers it carries: what the `.aux` pass needs
     /// (`src/latex/aux.rs`), which has no text stream to set them in.
@@ -1007,7 +1015,7 @@ impl Lowerer {
                     // A character in a list the stomach builds (`stomach`).
                     Token::Char(c, cat) if self.st_takes(*cat) => {
                         let (c, cat) = (*c, *cat);
-                        self.st_char(c, cat, &mut out)?;
+                        self.st_char(lx, c, cat, &mut out)?;
                     }
                     Token::Char(_, Cat::AlignTab) if self.text_output => {
                         let boundary = match self.table_depth > 0 {
@@ -5653,7 +5661,8 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::Arith(..)
             | Cmd::ErrorSite(_)
             | Cmd::KeepGlobal { .. }
-            | Cmd::List(_) => out.push(cmd.clone()),
+            | Cmd::List(_)
+            | Cmd::OutputRoutine(_) => out.push(cmd.clone()),
             Cmd::Group { saves, keeps, body } => out.push(Cmd::Group {
                 saves: saves.clone(),
                 keeps: keeps.clone(),
@@ -5844,7 +5853,8 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::TranscriptNotice { .. }
                 // The stomach's slots are not saved by a group (see
                 // `crate::compiler::is_stomach_slot`).
-                | Cmd::List(_) => {}
+                | Cmd::List(_)
+                | Cmd::OutputRoutine(_) => {}
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);

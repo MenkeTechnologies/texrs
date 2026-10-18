@@ -125,6 +125,17 @@ impl LineShape {
         }
     }
 
+    /// `last_special_line` (§847): the lines up to it may differ; every line
+    /// after it is `second_width` wide.
+    pub fn last_special_line(&self) -> usize {
+        self.last_special_line
+    }
+
+    /// `second_width` (§847).
+    pub fn second_width(&self) -> Scaled {
+        self.second.1
+    }
+
     /// §890: the indentation and width of line number `cur_line`, counting
     /// from 1.
     pub fn line(&self, cur_line: usize) -> (Scaled, Scaled) {
@@ -149,6 +160,10 @@ pub struct ParParams {
     pub penalties: ParPenalties,
     pub baselines: Baselines,
     pub tolerances: Tolerances,
+    /// `prev_graf` of the enclosing list: the paragraph's first line is
+    /// number `prev_graf+1` (§877), which is what `\hangafter` and
+    /// `\parshape` count from.
+    pub prev_graf: usize,
 }
 
 impl ParParams {
@@ -157,6 +172,7 @@ impl ParParams {
     pub fn plain(hsize: Scaled) -> ParParams {
         ParParams {
             shape: LineShape::fixed(hsize),
+            prev_graf: 0,
             skips: Skips::default(),
             penalties: ParPenalties::latex(),
             baselines: Baselines::plain(),
@@ -176,6 +192,8 @@ pub struct Paragraph {
     pub reports: Vec<Option<Report>>,
     /// `\badness` after each line (§646).
     pub badness: Vec<i64>,
+    /// Where each line's box is in `list`, so a report can name the box.
+    pub lines: Vec<usize>,
 }
 
 /// `post_line_break` (§877-§890): cut the paragraph at the chosen breakpoints,
@@ -202,13 +220,14 @@ pub fn post_line_break(
         list: Vec::new(),
         reports: Vec::with_capacity(total),
         badness: Vec::with_capacity(total),
+        lines: Vec::with_capacity(total),
     };
     // §888: what the break left over becomes the front of the next line.
     let mut pending: Vec<Node> = Vec::new();
     let mut pos = 0usize;
 
     for (i, &brk) in breaks.iter().enumerate() {
-        let cur_line = i + 1;
+        let cur_line = params.prev_graf + i + 1;
         let brk = brk.min(nodes.len());
         let mut line: Vec<Node> = std::mem::take(&mut pending);
         for slot in nodes.iter_mut().take(brk).skip(pos) {
@@ -303,6 +322,7 @@ pub fn post_line_break(
 
         // §888: the box, then everything the packager took out of it.
         append_to_vlist(&mut out.list, just_box, prev_depth, params.baselines);
+        out.lines.push(out.list.len() - 1);
         out.list.append(&mut adjust);
 
         // §890: the penalty between this line and the next.

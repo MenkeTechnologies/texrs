@@ -296,6 +296,10 @@ pub enum Cmd {
     /// A list action: one of `main_control`'s cases, dispatched while
     /// lowering and carried out by `crate::stomach` when the program runs.
     List(list::ListOp),
+    /// `\output` as the page builder will run it (§1025): the routine,
+    /// lowered as one group, compiled into a sub-chunk of its own; `None`
+    /// for an empty `\output`, which is §1023's default.
+    OutputRoutine(Option<Vec<Cmd>>),
 }
 
 /// The command stream as an indented tree, for `--dump-ast`.
@@ -318,6 +322,11 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             Cmd::RustCompile(_) => out.push_str(&format!("{pad}RustCompile <block>\n")),
             Cmd::Line(n) => out.push_str(&format!("{pad}Line {n}\n")),
             Cmd::List(op) => out.push_str(&format!("{pad}List {op:?}\n")),
+            Cmd::OutputRoutine(None) => out.push_str(&format!("{pad}OutputRoutine none\n")),
+            Cmd::OutputRoutine(Some(body)) => {
+                out.push_str(&format!("{pad}OutputRoutine\n"));
+                render_into(body, depth + 1, out);
+            }
             Cmd::Color { rgb, body } => {
                 let (r, g, b) = rgb;
                 out.push_str(&format!("{pad}Color rgb {r} {g} {b}\n"));

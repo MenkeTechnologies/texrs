@@ -270,6 +270,26 @@ impl Compiler {
                 self.b.emit(Op::SetSlot(slot(*reg)), self.line);
             }
             Cmd::List(op) => self.list_op(op)?,
+            // The routine runs on a VM of its own over the same slot file
+            // (`crate::stomach::run`), so it is a sub-chunk that starts from
+            // the registers it is given rather than from INITEX's zeros.
+            Cmd::OutputRoutine(body) => {
+                let k = match body {
+                    Some(body) => {
+                        let mut sub = Compiler {
+                            b: ChunkBuilder::new(),
+                            debug: false,
+                            line: self.line,
+                            strings: rustc_hash::FxHashMap::default(),
+                        };
+                        sub.b.set_builtin_argc_is_arity(true);
+                        sub.block(body)?;
+                        i64::from(self.b.add_sub_chunk(sub.b.build()))
+                    }
+                    None => -1,
+                };
+                self.list_op(&crate::ir::list::ListOp::OutputRoutine(k))?;
+            }
             Cmd::Text(t) => {
                 let k = self.str_const(t)?;
                 self.b.emit(Op::LoadConst(k), self.line);

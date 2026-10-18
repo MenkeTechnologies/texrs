@@ -25,14 +25,22 @@ pub struct Known {
     /// Every change, with what it replaced, so a group or a conditional arm
     /// can put the state back without cloning the table.
     trail: Vec<(i64, Option<Option<i64>>)>,
+    /// Know nothing at all, for code that runs at a time the lowerer cannot
+    /// place: the output routine, which the page builder fires.
+    opaque: bool,
 }
 
 impl Known {
+    /// Know nothing (or know again), returning which it was.
+    pub fn set_opaque(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.opaque, on)
+    }
+
     /// The value of `slot`, if it is known.
     pub fn get(&self, slot: i64) -> Option<i64> {
         // The stomach writes its slots while the program runs
         // (`crate::stomach::Mirror`), so nothing here can know them.
-        if crate::compiler::is_stomach_slot(slot) {
+        if self.opaque || crate::compiler::is_stomach_slot(slot) {
             return None;
         }
         match self.map.get(&slot) {
@@ -155,6 +163,13 @@ impl Known {
             }
             // A group puts its registers back itself, where it is lowered.
             Cmd::Group { .. } => {}
+            // The output routine runs whenever the page builder fires it, so
+            // what it assigns is not known after any point of the document.
+            Cmd::OutputRoutine(Some(body)) => {
+                for reg in crate::lower::assigned_counts(body) {
+                    self.set(reg, None);
+                }
+            }
             // Which arm runs, and how often, is the run's.
             Cmd::IfNum { .. } | Cmd::IfOdd { .. } | Cmd::Loop { .. } => {
                 for reg in crate::lower::assigned_counts(std::slice::from_ref(cmd)) {

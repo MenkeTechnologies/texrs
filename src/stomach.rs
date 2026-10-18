@@ -35,6 +35,7 @@ use crate::node::{BoxNode, Node, Scaled, IGNORE_DEPTH};
 pub mod build;
 pub mod font;
 pub mod output;
+pub mod par;
 pub mod run;
 
 pub use font::Font;
@@ -226,6 +227,13 @@ pub struct Stomach {
     pub leader_box: Option<Node>,
     /// The page builder, the shipped pages, and the output routine's state.
     pub output: output::Output,
+    /// The page builder (§980-§1028).
+    pub pages: output::Pages,
+    /// The `\patterns` and `\hyphenation` the document gave (§934, §960), as
+    /// the source `crate::linebreak::Hyphenator` reads, and the hyphenator
+    /// built from them when the hyphenation pass first needs it.
+    pub hyphenation_source: String,
+    pub hyphenator: Option<std::rc::Rc<crate::linebreak::Hyphenator>>,
     /// Registers whose slots are stale, for [`Mirror`].
     dirty: Vec<u16>,
     /// What the stomach has to say, in order, for the run to print: see
@@ -272,6 +280,9 @@ impl Stomach {
             last_badness: 0,
             leader_box: None,
             output: output::Output::default(),
+            pages: output::Pages::default(),
+            hyphenation_source: String::new(),
+            hyphenator: None,
             dirty: Vec::new(),
             said: Vec::new(),
             build_page_wanted: false,

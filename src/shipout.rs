@@ -31,6 +31,70 @@
 //! word space that lands at the end of a line.
 
 use crate::dvi::Writer;
+
+/// What `hlist_out` and `vlist_out` write into: tex's own DVI output
+/// (`crate::dvi::out::Out`, §597-§615 with its movement optimisation) or the
+/// plain `crate::dvi::Writer` the string path uses.
+pub trait Sink {
+    /// `dvi_offset+dvi_ptr`: where the next byte goes.
+    fn here(&self) -> usize;
+    /// `push`, returning `here()` after it (§619's `save_loc`).
+    fn push(&mut self) -> usize;
+    /// §601's `dvi_pop(l)`.
+    fn pop(&mut self, save_loc: usize);
+    /// §615's `prune_movements(l)`.
+    fn prune(&mut self, save_loc: usize);
+    fn right(&mut self, w: i32);
+    fn down(&mut self, w: i32);
+    /// §621: select internal font `f`.
+    fn font(&mut self, f: usize);
+    fn set_char(&mut self, code: u32, width: i32);
+    fn rule(&mut self, height: i32, width: i32, set: bool);
+    fn special(&mut self, text: &str);
+    fn begin_page(&mut self, counts: [i32; 10]);
+    fn end_page(&mut self);
+    /// §619's `if cur_s>max_push then max_push:=cur_s`.
+    fn note_push(&mut self, depth: i32);
+}
+
+impl Sink for Writer {
+    fn here(&self) -> usize {
+        0
+    }
+    fn push(&mut self) -> usize {
+        Writer::push(self);
+        0
+    }
+    fn pop(&mut self, _save_loc: usize) {
+        Writer::pop(self)
+    }
+    fn prune(&mut self, _save_loc: usize) {}
+    fn right(&mut self, w: i32) {
+        Writer::right(self, w)
+    }
+    fn down(&mut self, w: i32) {
+        Writer::down(self, w)
+    }
+    fn font(&mut self, f: usize) {
+        Writer::font(self, f as u32)
+    }
+    fn set_char(&mut self, code: u32, width: i32) {
+        Writer::set_char(self, code, width)
+    }
+    fn rule(&mut self, height: i32, width: i32, set: bool) {
+        Writer::rule(self, height, width, set)
+    }
+    fn special(&mut self, text: &str) {
+        Writer::special(self, text)
+    }
+    fn begin_page(&mut self, counts: [i32; 10]) {
+        Writer::begin_page(self, counts)
+    }
+    fn end_page(&mut self) {
+        Writer::end_page(self)
+    }
+    fn note_push(&mut self, _depth: i32) {}
+}
 use crate::glue::{Glue, Order};
 use crate::node::{BoxNode, CharNode, GlueSign, LeaderKind, Node, RuleNode, Scaled};
 
@@ -53,8 +117,8 @@ fn vet_glue(x: f64) -> f64 {
 ///
 /// One of these lives for one page. `cur_s` is the depth of nesting, which is
 /// exactly the depth of `push` commands in the output (§615).
-pub struct Shipper<'a> {
-    w: &'a mut Writer,
+pub struct Shipper<'a, W: Sink> {
+    w: &'a mut W,
     /// §617: "a DVI reader program thinks we are here".
     dvi_h: Scaled,
     dvi_v: Scaled,
@@ -82,8 +146,8 @@ pub struct Shipper<'a> {
 /// one the first time a character in it is drawn; the callers here know the
 /// whole chain up front and define it before the first page, which produces
 /// the same file with the definitions in a different place.
-pub fn ship_out(
-    w: &mut Writer,
+pub fn ship_out<W: Sink>(
+    w: &mut W,
     page: &BoxNode,
     counts: [i32; 10],
     h_offset: Scaled,
@@ -111,7 +175,7 @@ pub fn ship_out(
     ship.w.end_page();
 }
 
-impl Shipper<'_> {
+impl<W: Sink> Shipper<'_, W> {
     /// §616's `synch_h`: write the horizontal movement that has been decided
     /// but not yet put in the file.
     fn synch_h(&mut self) {
@@ -132,7 +196,7 @@ impl Shipper<'_> {
     /// §620's `@<Change font dvi_f to f@>`.
     fn synch_font(&mut self, f: usize) {
         if self.dvi_f != Some(f) {
-            self.w.font(f as u32);
+            self.w.font(f);
             self.dvi_f = Some(f);
         }
     }
@@ -165,6 +229,8 @@ impl Shipper<'_> {
         if self.cur_s > 0 {
             self.w.push();
         }
+        self.w.note_push(self.cur_s);
+        let save_loc = self.w.here();
         let base_line = self.cur_v;
         let left_edge = self.cur_h;
 
@@ -263,8 +329,9 @@ impl Shipper<'_> {
             i += 1;
         }
 
+        self.w.prune(save_loc);
         if self.cur_s > 0 {
-            self.w.pop();
+            self.w.pop(save_loc);
         }
         self.cur_s -= 1;
     }
@@ -378,6 +445,8 @@ impl Shipper<'_> {
         if self.cur_s > 0 {
             self.w.push();
         }
+        self.w.note_push(self.cur_s);
+        let save_loc = self.w.here();
         let left_edge = self.cur_h;
         // §629: a vlist's reference point is its BASELINE, and its contents
         // start `height` above it.
@@ -456,8 +525,9 @@ impl Shipper<'_> {
             self.cur_v += rule_ht;
         }
 
+        self.w.prune(save_loc);
         if self.cur_s > 0 {
-            self.w.pop();
+            self.w.pop(save_loc);
         }
         self.cur_s -= 1;
     }
