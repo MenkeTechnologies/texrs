@@ -1634,3 +1634,27 @@ fn tex_catcodetable_switches_the_table_the_mouth_reads_with() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn getcatcode_and_setcatcode_reach_the_table_they_name() {
+    // ltexlib's argument rules: a table number before the character names a
+    // catcode table, `"global"` comes first, and `tex.catcode[c]` is the
+    // current table. A code set in a table that is not current is saved for
+    // the group and restored into that same table.
+    let body = "\\savecatcodetable 7 \
+        \\directlua{tex.setcatcode(7, 65, 12) tex.setcatcode('global', 9, 66, 3) \
+        local a = tex.getcatcode(7, 65) .. tex.getcatcode(65) .. tex.getcatcode(9, 66) \
+        .. tex.getcatcode(9, 67) .. tex.catcode[65] local ok, e = pcall(tex.setcatcode, 65, 16) \
+        tex.sprint(string.char(92) .. 'message{[' .. a .. ' ' .. e .. ']}')}\
+        {\\directlua{tex.setcatcode(7, 66, 12)}}\\catcodetable7 \
+        \\message{[\\the\\catcode65/\\the\\catcode66]}\\catcodetable0 ";
+    let want = "[121131211 incorrect character value 16 for tex.setcatcode()] [12/11]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

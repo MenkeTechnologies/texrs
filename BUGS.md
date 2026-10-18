@@ -445,11 +445,9 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `tex.spacefactor`, `tex.prevgraf`, `tex.pagegoal`, `tex.deadcycles`,
   `tex.insertpenalties`, `tex.lastpenalty` and the other `last` items, the
   direction parameters (`tex.bodydir`, `tex.pagedir`, ...) -- refuse where
-  luatex answers. `tex.getcatcode` and `tex.setcatcode` read and set the
-  current catcode table whatever table they are given.
-- **`\catcode` from Lua past code 255** is set straight into the table and
-  not saved for the enclosing group: the engine's `\catcode` reads a code of
-  0..255. `tex.setmathcode` refuses a family past 15 or a character past 255
+  luatex answers.
+- **A catcode past 255 set from Lua is dropped,** and reads 12: the
+  engine's catcode tables hold codes 0..255. `tex.setmathcode` refuses a family past 15 or a character past 255
   (`\Umathcode`).
 - **`node.direct` and `node` accept each other's nodes**, where luatex
   wants a userdata on the one and an integer on the other.

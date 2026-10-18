@@ -191,13 +191,6 @@ fn get_item(lua: &Lua, name: &str) -> mlua::Result<Option<Value>> {
     }))
 }
 
-/// The six character-code tables, by LuaTeX's names.
-#[derive(Clone, Copy)]
-enum Code {
-    Cat,
-    Table(crate::charcodes::Table),
-}
-
 /// Install everything above into `tex`.
 pub(super) fn install(
     lua: &Lua,
@@ -309,16 +302,83 @@ pub(super) fn install(
     )?;
     tex.set_metatable(Some(mt))?;
 
-    // The character-code tables: `getcatcode([cattable,] c)`,
-    // `setcatcode(["global",] [cattable,] c, v)`, and `tex.catcode[c]`. texrs
-    // has one catcode table, so a table argument is read and dropped.
+    // `getcatcode([cattable,] c)` and `setcatcode(["global",] [cattable,] c,
+    // v)`, ltexlib.c's argument rules: a table number is read only where
+    // luatex reads one, so `tex.catcode[c]` (the table itself first) is the
+    // current table.
+    let getcat = lua.create_function(|_, args: Variadic<Value>| {
+        let n = args.len();
+        let Some(c) = args.last().and_then(|v| v.as_integer()) else {
+            return Err(mlua::Error::runtime(
+                "bad argument to 'getcatcode' (number expected)",
+            ));
+        };
+        check_char_range(c, "getcatcode", 65536 * 17)?;
+        let table = match n >= 2 {
+            true => args[n - 2].as_integer(),
+            false => None,
+        };
+        ctx::with("catcode", |eng, _| {
+            Ok(eng.cat_code_in(table.unwrap_or(eng.cat_table), c as u32))
+        })
+    })?;
+    let setcat = lua.create_function(|_, args: Variadic<Value>| {
+        let n = args.len();
+        let mut f = 0;
+        if n > 1 && matches!(args[0], Value::Table(_)) {
+            f += 1;
+        }
+        let mut global = false;
+        if n > 2
+            && matches!(&args[f], Value::String(s) if s.to_str().is_ok_and(|s| &*s == "global"))
+        {
+            global = true;
+            f += 1;
+        }
+        let int = |i: usize, what: &str| {
+            args.get(i).and_then(|v| v.as_integer()).ok_or_else(|| {
+                mlua::Error::runtime(format!("bad argument to 'setcatcode' ({what} expected)"))
+            })
+        };
+        let table = match n - f == 3 {
+            true => Some(int(n - 3, "number")?),
+            false => None,
+        };
+        let c = int(n.wrapping_sub(2), "number")?;
+        check_char_range(c, "setcatcode", 65536 * 17)?;
+        let v = int(n - 1, "number")?;
+        check_char_range(v, "setcatcode", 16)?;
+        ctx::with("catcode", |eng, _| {
+            let table = table.unwrap_or(eng.cat_table);
+            match table == eng.cat_table && c <= 255 {
+                // The current table below 256 is the engine's own `\catcode`.
+                true => assign(eng, global, &format!("{c}={v} "), |eng, lx| {
+                    eng.compile_time_catcode(lx)
+                }),
+                false => {
+                    eng.assign_cat_code_in(table, c as u32, v, global);
+                    Ok(())
+                }
+            }
+        })
+    })?;
+    tex.set("getcatcode", getcat.clone())?;
+    tex.set("setcatcode", setcat.clone())?;
+    let t = lua.create_table()?;
+    let mt = lua.create_table()?;
+    mt.set("__index", getcat)?;
+    mt.set("__newindex", setcat)?;
+    t.set_metatable(Some(mt))?;
+    tex.set("catcode", t)?;
+
+    // The other character-code tables: `getlccode(c)`, `setlccode(["global",]
+    // c, v)`, and `tex.lccode[c]`.
     for (name, code) in [
-        ("catcode", Code::Cat),
-        ("lccode", Code::Table(T::Lower)),
-        ("uccode", Code::Table(T::Upper)),
-        ("sfcode", Code::Table(T::Space)),
-        ("mathcode", Code::Table(T::Math)),
-        ("delcode", Code::Table(T::Delimiter)),
+        ("lccode", T::Lower),
+        ("uccode", T::Upper),
+        ("sfcode", T::Space),
+        ("mathcode", T::Math),
+        ("delcode", T::Delimiter),
     ] {
         let getter = lua.create_function(move |_, args: Variadic<Value>| {
             let Some(c) = args.last().and_then(|v| v.as_integer()) else {
@@ -328,12 +388,7 @@ pub(super) fn install(
             };
             let ch = char::from_u32(c as u32)
                 .ok_or_else(|| mlua::Error::runtime("invalid character code"))?;
-            ctx::with(name, |eng, _| {
-                Ok(match code {
-                    Code::Cat => eng.cats.get(ch) as i64,
-                    Code::Table(t) => eng.charcodes.get(t, ch),
-                })
-            })
+            ctx::with(name, |eng, _| Ok(eng.charcodes.get(code, ch)))
         })?;
         let setter = lua.create_function(move |_, args: Variadic<Value>| {
             let (global, args) = global_prefix(&args, 2);
@@ -348,22 +403,9 @@ pub(super) fn install(
             };
             ctx::with(name, |eng, _| {
                 let text = format!("{c}={v} ");
-                match code {
-                    Code::Cat if c > 255 => {
-                        // The engine's `\catcode` reads a code of 0..255, so a
-                        // wider character is set straight into the table.
-                        let ch = char::from_u32(c as u32)
-                            .ok_or_else(|| mlua::Error::runtime("invalid character code"))?;
-                        let cat = crate::catcode::cat_from_i64(v)
-                            .ok_or_else(|| mlua::Error::runtime("invalid catcode"))?;
-                        eng.cats.set(ch, cat);
-                        Ok(())
-                    }
-                    Code::Cat => assign(eng, global, &text, |eng, lx| eng.compile_time_catcode(lx)),
-                    Code::Table(t) => assign(eng, global, &text, |eng, lx| {
-                        eng.compile_time_charcode(lx, t)
-                    }),
-                }
+                assign(eng, global, &text, |eng, lx| {
+                    eng.compile_time_charcode(lx, code)
+                })
             })
         })?;
         tex.set(format!("get{name}"), getter.clone())?;
@@ -538,6 +580,16 @@ fn badness(t: i64, s: i64) -> i64 {
         INF_BAD
     } else {
         (r * r * r + 0x20000) / 0x40000
+    }
+}
+
+/// ltexlib.c's `check_char_range`.
+fn check_char_range(j: i64, name: &str, lim: i64) -> mlua::Result<()> {
+    match (0..lim).contains(&j) {
+        true => Ok(()),
+        false => Err(mlua::Error::runtime(format!(
+            "incorrect character value {j} for tex.{name}()"
+        ))),
     }
 }
 
