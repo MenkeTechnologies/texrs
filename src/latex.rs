@@ -25,8 +25,10 @@
 //!    through the engine, and REPORTS by name every package that would not go
 //!    through and the control sequence that stopped it.
 //!  * [`counters`] allocates a `\count` register per counter the document
-//!    declares, because `\newcount`'s allocator needs to freeze a number into a
-//!    name and this engine's `\edef` freezes nothing.
+//!    declares. It predates the frontend following register values
+//!    (`crate::known`), when `\newcount`'s allocator could not freeze a number
+//!    into a name; the stand-in kernel still relies on it, and the real
+//!    `latex.ltx` (run with `-ini`) allocates for itself.
 //!  * [`allocate`] does the same for `\newcount` itself and its eleven
 //!    relatives, for the same reason: the allocator's whole job is to freeze
 //!    the next free register number into a name.

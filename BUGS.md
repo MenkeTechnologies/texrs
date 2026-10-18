@@ -100,6 +100,72 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
   and not the box conditionals' or the mode conditionals' run-time branches,
   which the stomach builds. `\showifs` is not implemented.
 
+## LaTeX, loaded the way lualatex loads it
+
+Documents are still read with the stand-in kernel (`src/latex/prelude.tex`
+and `src/latex/kernel.tex`); the real one is being brought up beside it with
+`texrs -ini -progname=lualatex latex.ltx`, the file `lualatex.ini` inputs.
+It now reads TeX Live 2026's `latex.ltx` through the e-TeX and LuaTeX
+checks, `texsys.cfg` and its `.aux` probe, the register allocator (registers
+258-263 and the pools past 255), the catcode tables and the UnicodeData.txt
+pass, and `require("ltluatex")`, and stops in `expl3.ltx`, on Lua that is
+workstream C's:
+
+- `expl3.lua:91` calls `tex.runtoks`, which runs TeX code to completion from
+  inside a Lua call -- a nested main control, which this engine, expanding
+  while it lowers, has to provide from the lowerer.
+- `expl3.lua:256` calls `token.create(1, char_given)`: the second argument
+  is a COMMAND code, not a catcode, and makes a `\chardef`-like token.
+
+Past those two (stood in for by hand to look further, not committed) the
+next stop is `luatexbase.new_luafunction`'s register name
+`e@alloc@luafunction@count`. `lualatex.ini` itself also runs
+`luatexconfig.tex`, whose `\everyjob` registers callbacks through
+`callback.register`.
+
+What each class and package does today, on the default path, measured by
+`bash scripts/package-status.sh --write` (a document `\documentclass{article}
+\usepackage{X}\begin{document}x\end{document}`, through `texrs --pdf` and
+`lualatex`, both PDFs through `pdftotext`; "loads" is whether texrs reported
+the package refused):
+
+<!-- package-status:begin -->
+6 of 27 load; 27 of 27 runs complete; 25 of 27 set the same text as lualatex.
+
+| item | loads | run completes | text vs lualatex | what refused it |
+|---|---|---|---|---|
+| `article` (class) | yes | yes | same |  |
+| `report` (class) | no | yes | same | texrs: package report is not loadable: Runaway argument?{\AtEndOfPackage {\renewcommand \@openbib@code {\advance \leftma |
+| `book` (class) | yes | yes | differs |  |
+| `amsmath` | no | yes | same | texrs: package amsmath needs \@ifpackagewith |
+| `amssymb` | yes | yes | same |  |
+| `amsthm` | no | yes | same | texrs: package amsthm is not loadable: Runaway argument?{! Paragraph ended before \@newenv@optdef was complete.<to be re |
+| `graphicx` | yes | yes | differs |  |
+| `xcolor` | no | yes | same | texrs: package xcolor needs \cs_new_protected:Npn |
+| `hyperref` | no | yes | same | texrs: package hyperref is not loadable: Lua syntax error: [\directlua]:1: unexpected symbol near '\' |
+| `geometry` | no | yes | same | texrs: package geometry is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read ag |
+| `fontspec` | no | yes | same | texrs: package fontspec needs \e@alloc@attribute@count |
+| `unicode-math` | no | yes | same | texrs: package unicode-math needs \e@alloc@attribute@count |
+| `babel` | no | yes | same | texrs: package babel needs \e@alloc@attribute@count |
+| `polyglossia` | no | yes | same | texrs: package polyglossia is not loadable: Missing number, found \insc@unt |
+| `enumitem` | yes | yes | same |  |
+| `booktabs` | yes | yes | same |  |
+| `longtable` | no | yes | same | texrs: package longtable is not loadable: Illegal parameter number in definition of \ds@pausing.<to be read again>       |
+| `array` | no | yes | same | texrs: package array needs \cs_new_protected:Npn |
+| `tabularx` | no | yes | same | texrs: package tabularx needs \cs_new_protected:Npn |
+| `caption` | no | yes | same | texrs: package caption is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read aga |
+| `fancyhdr` | no | yes | same | texrs: package fancyhdr needs \e@alloc@attribute@count |
+| `microtype` | no | yes | same | texrs: package microtype is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read a |
+| `csquotes` | no | yes | same | texrs: package csquotes is not loadable: Missing number, found \insc@unt |
+| `biblatex` | no | yes | same | texrs: package biblatex is not loadable: Extra \else.l.203 \else           Lua syntax error: [\directlua]:1: unexpected  |
+| `listings` | no | yes | same | texrs: package listings is not loadable: Illegal parameter number in definition of \ds@warn.<to be read again>           |
+| `tikz` | no | yes | same | texrs: package tikz needs \pgfutil@format@is@latextrue |
+| `expl3` | no | yes | same | texrs: package expl3 needs \e@alloc@attribute@count |
+<!-- package-status:end -->
+
+`biblatex` needs `biber`, which this measurement never runs: a document's
+citations stay unresolved under both engines until it does.
+
 ## Not implemented
 
 - **`tex.web`'s stomach.** Both outputs break a paragraph as §813-§890 does —

@@ -632,13 +632,28 @@ machinery, footnotes, captions and the bibliography are ported. `\documentclass`
 and `\usepackage` are no longer silently consumed: the file is found with
 `kpsewhich` and its load is attempted, and a package that will not go through is
 reported by name with the control sequence that stopped it — `texrs: package
-xcolor is not loadable: Unsupported \edef body`. Eleven files load all the way
-through — `minimal.cls`, and `ifthen`, `textcomp`, `inputenc`, `keyval`,
-`upquote`, `multirow`, `float`, `footnote`, `fontenc` and `lmodern` — and a
-package's own `\RequirePackage`s are followed, so `keyval` is read before the
-`graphicx` that asks for it. `article.cls` is read to its last line and
-stops one token into it, in `\@floatplacement` — the ninth reason it has
-stopped on, each visible only from the one before (BUGS.md lists all nine).
+xcolor needs \cs_new_protected:Npn` — and a package's own `\RequirePackage`s
+are followed, so `keyval` is read before the `graphicx` that asks for it. Which
+of the classes and packages real documents use load, and whether the page they
+set says what lualatex's says, is a table `scripts/package-status.sh` measures
+and writes into BUGS.md ("LaTeX, loaded the way lualatex loads it").
+
+The genuine kernel is the way out of the stand-in, and `texrs -ini
+-progname=lualatex latex.ltx` is how far it has got: TeX Live 2026's own
+`latex.ltx`, found with kpsewhich, read through its e-TeX and LuaTeX
+checks, the texsys probe, the allocator and every register it `\countdef`s
+past 255, LuaTeX's catcode tables and the UnicodeData.txt pass that gives
+every letter its category, `ltluatex.lua`, and into `expl3.ltx`, which stops
+on Lua the engine has not got yet (BUGS.md has the list, in the order the
+kernel reaches it). What made that possible is that the frontend now follows
+every register's value as the program assigns it (`src/known.rs`), and the
+expander reads that table: a conditional over registers is decided where the
+mouth reaches it, as §498 decides it, an `\edef` freezes `\the\count`,
+`\the\dimen` and `\the\skip`, and a register only the run knows (a
+`\rustcall`'s) is the one case still decided at run time. Run as a LuaTeX —
+`-progname=luatex`, `lualatex` or `luahbtex`, or any LaTeX document — texrs
+has LuaTeX's 65536 registers of each kind, its attribute registers, and a
+category code for every Unicode character; plain `-ini` keeps TeX82's 256.
 `10\p@` reads as `10.0pt`, whether the factor is written out or arrives from a
 macro (`\def\x{10}\dimen0=\x\p@`), in plain TeX and in a LaTeX preamble, as
 luatex and lualatex read it: §453's `<factor><internal unit>` is implemented,
