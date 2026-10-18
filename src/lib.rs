@@ -739,6 +739,72 @@ pub fn run_tex_dvi(src: &str) -> Result<(String, Option<Vec<u8>>), TexError> {
     Ok((without_marks(&msgs.join(" ")), stomach.dvi()))
 }
 
+/// What `luatex FILE` does with a plain document: plain.tex as the format,
+/// the document on the list path, and each shipped page drawn as LuaTeX's
+/// backend draws it (`crate::pdfship::document`) -- with the message stream,
+/// and `None` when no page was shipped. The page is `\pagewidth` by
+/// `\pageheight` with the reference point at `\pdfvariable horigin` and
+/// `vorigin`, and where the document set none of them, `luatex.fmt`'s:
+/// 8.5in by 11in, an inch in from the top left.
+pub fn run_tex_pdf(src: &str) -> Result<(String, Option<Vec<u8>>), TexError> {
+    let src = crate::rust_ffi::desugar(src);
+    let plain = crate::kpse::locate("plain.tex")
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .ok_or_else(|| TexError("plain.tex not found".into()))?;
+    let mut lowerer = crate::lower::Lowerer::new()
+        .tex_errors(true)
+        .with_list_path();
+    lowerer.preload_format(&plain)?;
+    let cmds = lowerer.lower(&src)?;
+    let prepared = {
+        let eng = &mut lowerer.eng;
+        let mut b = std::mem::take(&mut eng.backend);
+        let prepared = b.take(eng);
+        eng.backend = b;
+        prepared
+    };
+    // luatex.fmt's `luatexconfig.tex`: letter paper, and LuaTeX's own one-inch
+    // reference point.
+    let dimen = |name: &str, default: crate::node::Scaled| {
+        crate::params::register_slot(name)
+            .and_then(|s| lowerer.eng.known.get(s))
+            .filter(|v| *v != 0)
+            .unwrap_or(default)
+    };
+    let frame = crate::pdfship::PageFrame {
+        width: dimen("pagewidth", 40_258_437),
+        height: dimen("pageheight", 52_099_153),
+        h_origin: dimen("pdfvariable horigin", crate::backend::format_default("horigin")),
+        v_origin: dimen("pdfvariable vorigin", crate::backend::format_default("vorigin")),
+    };
+    let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
+    let msgs = crate::runtime::run(chunk).map_err(TexError)?;
+    let stomach = crate::stomach::run::take();
+    let messages = without_marks(&msgs.join(" "));
+    if stomach.output.pages.is_empty() {
+        return Ok((messages, None));
+    }
+    let fonts: Vec<crate::pdfship::ShipFont> = stomach
+        .fonts
+        .iter()
+        .map(|f| crate::pdfship::ShipFont {
+            tfm_name: f.name.clone(),
+            size: f.size,
+            widths: (0..=255u8)
+                .map(|c| f.metrics(char::from(c)).map(|m| m.width))
+                .collect(),
+        })
+        .collect();
+    let pages: Vec<(crate::node::BoxNode, crate::node::Scaled, crate::node::Scaled)> = stomach
+        .output
+        .pages
+        .iter()
+        .map(|p| (p.page.clone(), p.h_offset, p.v_offset))
+        .collect();
+    let pdf = crate::pdfship::document(&pages, frame, &fonts, prepared);
+    Ok((messages, Some(pdf)))
+}
+
 pub fn run_dvi(
     src: &str,
     font_path: &std::path::Path,

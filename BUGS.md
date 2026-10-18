@@ -213,6 +213,14 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
   expands is taken as it was defined at the last such place. A LaTeX document
   still takes the string path described next.
 
+  `--pdf` of a plain document still takes the string path too. The list
+  path's pages drawn by LuaTeX's backend (`texrs::run_tex_pdf`, with
+  `luatex.fmt`'s page size and reference point) match luatex's file on every
+  document of `tests/pdf_cases` in pages, text and lines, differing only in
+  the font programs; `--pdf` is not switched to it because it preloads
+  plain.tex, which changes documents written for INITEX, as the Lua tests
+  are.
+
   `tex.web`'s own machinery underneath is ported: §108's integer badness and
   §644-§679's `hpack`/`vpack` with order-of-infinity glue setting
   (`src/pack.rs`), the boxes a document can nest (`src/box_.rs`), §877-§890's
