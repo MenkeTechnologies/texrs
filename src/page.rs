@@ -1060,12 +1060,9 @@ impl PageBuilder {
         self.least_page_cost = AWFUL_BAD;
 
         // §1012: `\firstmark` falls back to `\topmark` when the page had no
-        // marks of its own.
+        // marks of its own; a page with nothing before it has no `\topmark`.
         if self.first_mark.is_none() {
             self.first_mark = self.top_mark.clone();
-        }
-        if self.top_mark.is_none() {
-            self.top_mark = self.first_mark.clone();
         }
 
         if self.has_output_routine && self.dead_cycles < self.params.max_dead_cycles {
@@ -1637,10 +1634,8 @@ mod tests {
         // The first page carried A and B.
         assert_eq!(builder.first_mark.as_deref(), Some("A"));
         assert_eq!(builder.bot_mark.as_deref(), Some("B"));
-        // Nothing preceded it, so `\topmark` is empty in tex; here it falls
-        // back to the first mark rather than being a different kind of
-        // nothing.
-        assert_eq!(builder.top_mark.as_deref(), Some("A"));
+        // Nothing preceded it, so `\topmark` is empty (§1012).
+        assert_eq!(builder.top_mark.as_deref(), None);
 
         // §1012: on the NEXT page, `\topmark` is what `\botmark` was --
         // which is exactly how a running head names the section a page
