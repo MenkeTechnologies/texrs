@@ -19,7 +19,7 @@ use super::font::{CharDim, MathFont, MathFonts, TEXT_SIZE};
 use super::noad::*;
 use crate::glue::Glue;
 use crate::node::{BoxNode, CharNode, GlueNode, Node, RuleNode};
-use crate::pack::{hpack, vpack, Spec, Tolerances, NATURAL};
+use crate::pack::{hlist_height_depth, hpack, vpack, Spec, Tolerances, NATURAL};
 
 /// `half(x)` (§100), which is not `x/2`: an odd number rounds AWAY from zero
 /// upward, and half of every shift in this file is computed with it.
@@ -259,35 +259,40 @@ impl<'a> Converter<'a> {
     /// `clean_box(p,s)` (§720): a noad field, boxed in a given style, with a
     /// `shift_amount` of zero.
     fn clean_box(&mut self, field: &Field, style: Style) -> BoxNode {
-        // §720: `mlist_penalties := false` for the whole of a recursive
-        // conversion. A formula cannot break inside a subscript, a numerator
-        // or anything else that is about to be packed into one box.
-        let penalties = std::mem::replace(&mut self.penalties, false);
-        let q: Vec<Node> = match field {
+        match field {
             // §720's `sub_box` case: the box goes to `found` as it stands,
             // shift and all. It is NOT simply handed back -- a box with a
             // shift is repackaged below, which is what turns `\sum`'s
             // centring on the axis into height and depth the limits above it
             // can be measured against.
-            Field::Box(b) => vec![Node::Box(b.as_ref().clone())],
+            Field::Box(b) => Self::found(vec![Node::Box(b.as_ref().clone())]),
             Field::Char(c) => {
-                let save = self.style;
-                let list =
-                    self.convert(&[Noad::Atom(Atom::new(Class::Ord, Field::Char(*c)))], style);
-                self.set_style(save);
-                list
+                self.clean_list(&[Noad::Atom(Atom::new(Class::Ord, Field::Char(*c)))], style)
             }
-            Field::List(l) => {
-                let save = self.style;
-                let list = self.convert(l, style);
-                self.set_style(save);
-                list
-            }
-            Field::Literal(c) => vec![self.literal_node(*c, size_of(style))],
-            Field::Empty => Vec::new(),
-        };
-        // §720's `found`: a list that is already ONE unshifted box is clean as
-        // it stands, and anything else is packaged.
+            Field::List(l) => self.clean_list(l, style),
+            Field::Literal(c) => Self::found(vec![self.literal_node(*c, size_of(style))]),
+            Field::Empty => Self::found(Vec::new()),
+        }
+    }
+
+    /// [`Self::clean_box`] of a field holding the mlist `list`, for a caller
+    /// that has the list and not such a field: a fraction's numerator and
+    /// denominator, a root's index.
+    fn clean_list(&mut self, list: &[Noad], style: Style) -> BoxNode {
+        // §720: `mlist_penalties := false` for the whole of a recursive
+        // conversion. A formula cannot break inside a subscript, a numerator
+        // or anything else that is about to be packed into one box.
+        let penalties = std::mem::replace(&mut self.penalties, false);
+        let save = self.style;
+        let q = self.convert(list, style);
+        self.set_style(save);
+        self.penalties = penalties;
+        Self::found(q)
+    }
+
+    /// §720's `found`: a list that is already ONE unshifted box is clean as
+    /// it stands, and anything else is packaged.
+    fn found(q: Vec<Node>) -> BoxNode {
         let mut x = match <[Node; 1]>::try_from(q) {
             Ok([Node::Box(b)]) if b.shift_amount == 0 => b,
             Ok(one) => hpack(one.into(), NATURAL, Tolerances::plain(), None).node,
@@ -299,7 +304,6 @@ impl<'a> Converter<'a> {
         if x.list.len() == 2 && x.list[0].is_char() && matches!(x.list[1], Node::Kern { .. }) {
             x.list.truncate(1);
         }
-        self.penalties = penalties;
         x
     }
 
@@ -517,7 +521,7 @@ impl<'a> Converter<'a> {
             Field::Box(b) => b.as_ref().clone(),
             _ => return,
         };
-        let mut root = self.clean_box(&Field::List(index.to_vec()), SCRIPT_SCRIPT_STYLE);
+        let mut root = self.clean_list(index, SCRIPT_SCRIPT_STYLE);
         // `\dimen@\ht\z@ \advance\dimen@-\dp\z@`, then `\raise.6\dimen@`.
         // §453 reads `.6` as a coefficient in $2^{16}$ths -- `round_decimals`
         // of one digit 6 is 39322 -- and multiplies with `xn_over_d` (§455).
@@ -613,9 +617,10 @@ impl<'a> Converter<'a> {
         let mut y = self.char_box(acc.accent.fam, self.size, c);
         y.shift_amount = s + half(w - y.width);
         y.width = 0;
-        let list = vec![Node::Box(y), kern(-delta), Node::Box(x.clone())];
+        let x_width = x.width;
+        let list = vec![Node::Box(y), kern(-delta), Node::Box(x)];
         let mut y = vpack(list, NATURAL, Tolerances::plain()).node;
-        y.width = x.width;
+        y.width = x_width;
         // §740: an accent that ends up shorter than what it accents does not
         // shrink the nucleus; the box keeps the nucleus's own height.
         if y.height < h {
@@ -653,8 +658,8 @@ impl<'a> Converter<'a> {
     fn make_fraction(&mut self, f: &Fraction) -> Vec<Node> {
         let thickness = f.thickness.unwrap_or_else(|| self.default_rule_thickness());
         // §744: equal-width numerator and denominator, and the default shifts.
-        let mut x = self.clean_box(&Field::List(f.numerator.clone()), num_style(self.style));
-        let mut z = self.clean_box(&Field::List(f.denominator.clone()), denom_style(self.style));
+        let mut x = self.clean_list(&f.numerator, num_style(self.style));
+        let mut z = self.clean_list(&f.denominator, denom_style(self.style));
         match x.width < z.width {
             true => x = self.rebox(x, z.width),
             false => z = self.rebox(z, x.width),
@@ -702,11 +707,12 @@ impl<'a> Converter<'a> {
         let height = shift_up + x.height;
         let depth = z.depth + shift_down;
         let width = x.width;
-        let mut list: Vec<Node> = vec![Node::Box(x.clone())];
+        let x_depth = x.depth;
+        let mut list: Vec<Node> = vec![Node::Box(x)];
         match thickness == 0 {
-            true => list.push(kern((shift_up - x.depth) - (z.height - shift_down))),
+            true => list.push(kern((shift_up - x_depth) - (z.height - shift_down))),
             false => {
-                list.push(kern((shift_up - x.depth) - (self.axis_height() + delta)));
+                list.push(kern((shift_up - x_depth) - (self.axis_height() + delta)));
                 list.push(self.fraction_rule(thickness));
                 list.push(kern((self.axis_height() - delta) - (z.height - shift_down)));
             }
@@ -785,7 +791,7 @@ impl<'a> Converter<'a> {
         let mut list: Vec<Node> = Vec::new();
         // §751: the kerns above and below, and what they add to the box.
         if a.supscr.is_empty() {
-            list.push(Node::Box(y.clone()));
+            list.push(Node::Box(y));
         } else {
             let mut shift_up = self.fonts.big_op_spacing3(self.size) - x.depth;
             let floor = self.fonts.big_op_spacing1(self.size);
@@ -794,9 +800,9 @@ impl<'a> Converter<'a> {
             }
             height += self.fonts.big_op_spacing5(self.size) + x.height + x.depth + shift_up;
             list.push(kern(self.fonts.big_op_spacing5(self.size)));
-            list.push(Node::Box(x.clone()));
+            list.push(Node::Box(x));
             list.push(kern(shift_up));
-            list.push(Node::Box(y.clone()));
+            list.push(Node::Box(y));
         }
         if !a.subscr.is_empty() {
             let mut shift_down = self.fonts.big_op_spacing4(self.size) - z.height;
@@ -806,7 +812,7 @@ impl<'a> Converter<'a> {
             }
             depth += self.fonts.big_op_spacing5(self.size) + z.height + z.depth + shift_down;
             list.push(kern(shift_down));
-            list.push(Node::Box(z.clone()));
+            list.push(Node::Box(z));
             list.push(kern(self.fonts.big_op_spacing5(self.size)));
         }
         let v = BoxNode {
@@ -898,13 +904,13 @@ impl<'a> Converter<'a> {
         // italic correction is still a character node -- and an empty hlist is
         // measured, which is what gives `${}^2$` its shift.
         if !hlist.first().map(|n| n.is_char()).unwrap_or(false) {
-            let z = hpack(hlist.clone(), NATURAL, Tolerances::plain(), None).node;
+            let (height, depth) = hlist_height_depth(hlist);
             let t = match self.style < SCRIPT_STYLE {
                 true => 1,
                 false => 2,
             };
-            shift_up = z.height - self.fonts.sup_drop(t);
-            shift_down = z.depth + self.fonts.sub_drop(t);
+            shift_up = height - self.fonts.sup_drop(t);
+            shift_down = depth + self.fonts.sub_drop(t);
         }
         let x = if a.supscr.is_empty() {
             // §757: a subscript on its own must not rise above four fifths of
@@ -1004,9 +1010,10 @@ impl<'a> Converter<'a> {
         // §731 REWRITES the list it is walking: a `choice_node` becomes a
         // style node followed by whichever of its four mlists the current
         // style names, and the rest of the list follows that. So the pass runs
-        // over a working copy that can be spliced rather than over the
-        // caller's slice.
-        let mut work: Vec<Noad> = mlist.to_vec();
+        // over the caller's slice until it meets one, and over a working copy
+        // that can be spliced from then on: a formula without `\mathchoice` is
+        // never copied.
+        let mut work: std::borrow::Cow<[Noad]> = std::borrow::Cow::Borrowed(mlist);
         let mut items: Vec<Translated> = Vec::with_capacity(work.len());
         let mut r_index: Option<usize> = None;
         let mut r_type = RType::Class(Class::Op);
@@ -1041,7 +1048,7 @@ impl<'a> Converter<'a> {
                     };
                     let mut replacement = vec![Noad::Style(self.style)];
                     replacement.extend(chosen);
-                    work.splice(at..=at, replacement);
+                    work.to_mut().splice(at..=at, replacement);
                     continue;
                 }
                 Noad::Glue(w) => {
@@ -1112,9 +1119,11 @@ impl<'a> Converter<'a> {
                 }
             }
 
-            let item = work[at].clone();
-            let next = work.get(at + 1).cloned();
-            let (hlist, delimiter) = match &item {
+            // The make_* procedures that rewrite a field (§734-§749) work on a
+            // copy of their noad; nothing else copies one.
+            let item = &work[at];
+            let next = work.get(at + 1);
+            let (hlist, delimiter) = match item {
                 Noad::Left(d) | Noad::Right(d) => (Vec::new(), Some(*d)),
                 Noad::Fraction(f) => (self.make_fraction(f), None),
                 Noad::Radical(r) => {
@@ -1123,59 +1132,53 @@ impl<'a> Converter<'a> {
                     // plain.tex's `\root`, which is `\sqrt[n]{x}`: the index
                     // goes on AFTER the radical exists, because it is placed
                     // by the radical's own height.
-                    if let Some(index) = r.index.clone() {
+                    if let Some(index) = r.index.take() {
                         self.make_root(&mut r, &index);
                     }
-                    (self.nucleus_and_scripts(&r.nucleus, 0, next.as_ref()), None)
+                    (self.nucleus_and_scripts(&r.nucleus, 0, next), None)
                 }
                 Noad::Over(a) => {
                     let mut a = a.clone();
                     self.make_over(&mut a);
-                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
+                    (self.nucleus_and_scripts(&a, 0, next), None)
                 }
                 Noad::Under(a) => {
                     let mut a = a.clone();
                     self.make_under(&mut a);
-                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
+                    (self.nucleus_and_scripts(&a, 0, next), None)
                 }
                 // §733: `accent_noad: make_math_accent(q)`.
                 Noad::Accent(acc) => {
                     let mut acc = acc.clone();
                     self.make_math_accent(&mut acc);
-                    (self.nucleus_and_scripts(&acc.atom, 0, next.as_ref()), None)
+                    (self.nucleus_and_scripts(&acc.atom, 0, next), None)
                 }
                 // §733: `vcenter_noad: make_vcenter(q)`.
                 Noad::VCenter(a) => {
                     let mut a = a.clone();
                     self.make_vcenter(&mut a);
-                    (self.nucleus_and_scripts(&a, 0, next.as_ref()), None)
+                    (self.nucleus_and_scripts(&a, 0, next), None)
                 }
-                Noad::Atom(a) => {
+                // §733: an Op is the one class with a procedure of its own;
+                // `make_ord`'s kerns run inside `nucleus_and_scripts`, and Open
+                // and Inner have nothing done to them.
+                Noad::Atom(a) if a.class() == Class::Op => {
                     let mut a = a.clone();
-                    let mut delta = 0;
-                    let mut built = None;
-                    // §733: an Op is the one class with a procedure of its
-                    // own; `make_ord`'s kerns run inside `nucleus_and_scripts`
-                    // below, and Open and Inner have nothing done to them.
-                    if a.class() == Class::Op {
-                        let (d, limits_box) = self.make_op(&mut a);
-                        delta = d;
-                        built = limits_box;
-                    }
-                    match built {
-                        Some(b) => (b, None),
-                        None => (self.nucleus_and_scripts(&a, delta, next.as_ref()), None),
+                    match self.make_op(&mut a) {
+                        (_, Some(limits_box)) => (limits_box, None),
+                        (delta, None) => (self.nucleus_and_scripts(&a, delta, next), None),
                     }
                 }
+                Noad::Atom(a) => (self.nucleus_and_scripts(a, 0, next), None),
                 _ => (Vec::new(), None),
             };
 
             // §727: `check_dimensions` -- the tallest and deepest so far, for
             // the `\left` and `\right` the second pass will size.
             if delimiter.is_none() {
-                let z = hpack(hlist.clone(), NATURAL, Tolerances::plain(), None).node;
-                max_h = max_h.max(z.height);
-                max_d = max_d.max(z.depth);
+                let (height, depth) = hlist_height_depth(&hlist);
+                max_h = max_h.max(height);
+                max_d = max_d.max(depth);
             }
             r_index = Some(items.len());
             r_type = class;
@@ -1275,7 +1278,7 @@ impl<'a> Converter<'a> {
     /// spacing of §764 arrives.
     fn second_pass(
         &mut self,
-        items: Vec<Translated>,
+        mut items: Vec<Translated>,
         style: Style,
         max_h: Scaled,
         max_d: Scaled,
@@ -1283,26 +1286,31 @@ impl<'a> Converter<'a> {
         let mut out: Vec<Node> = Vec::new();
         let mut r_type: Option<Class> = None;
         self.set_style(style);
-        for (at, item) in items.iter().enumerate() {
+        // Each hlist is moved out as it is reached; the look ahead below reads
+        // only the item after, which is still whole.
+        for at in 0..items.len() {
+            let item = &mut items[at];
+            let hlist = std::mem::take(&mut item.hlist);
+            let (class, delimiter, penalty) = (item.class, item.delimiter, item.penalty);
             if let Some(s) = item.style {
                 self.set_style(s);
                 continue;
             }
-            let Some(class) = item.class else {
-                out.extend(item.hlist.iter().cloned());
+            let Some(class) = class else {
+                out.extend(hlist);
                 continue;
             };
             // §761: a `left_noad` or a `right_noad` becomes an Open or a
             // Close, and its delimiter is grown to fit the formula.
-            let (t, hlist) = match (class, item.delimiter) {
+            let (t, hlist) = match (class, delimiter) {
                 (RType::Left, Some(d)) => {
                     (Class::Open, self.make_left_right(d, style, max_d, max_h))
                 }
                 (RType::Right, Some(d)) => {
                     (Class::Close, self.make_left_right(d, style, max_d, max_h))
                 }
-                (RType::Class(c), _) => (c, item.hlist.clone()),
-                _ => (Class::Ord, item.hlist.clone()),
+                (RType::Class(c), _) => (c, hlist),
+                _ => (Class::Ord, hlist),
             };
             if let Some(r) = r_type {
                 if let Some(g) = self.inter_element(r, t) {
@@ -1314,7 +1322,7 @@ impl<'a> Converter<'a> {
             // formula can break there and nowhere else -- but never before the
             // end of the formula, and never in front of a Rel, which would put
             // the break where the relation's own penalty already offers one.
-            if self.penalties && item.penalty < INF_PENALTY {
+            if self.penalties && penalty < INF_PENALTY {
                 // §767 reads `type(link(q))` -- the node immediately after,
                 // whatever it is -- and inserts nothing when the formula ends
                 // there, when a penalty node already stands there, or when a
@@ -1322,7 +1330,7 @@ impl<'a> Converter<'a> {
                 if let Some(following) = items.get(at + 1) {
                     let already = matches!(following.hlist.as_slice(), [Node::Penalty(_)]);
                     if !already && following.class != Some(RType::Class(Class::Rel)) {
-                        out.push(Node::Penalty(item.penalty));
+                        out.push(Node::Penalty(penalty));
                     }
                 }
             }

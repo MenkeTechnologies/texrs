@@ -148,10 +148,11 @@ pub fn rows(
                 .enumerate()
                 .map(|(j, cell)| {
                     let empty = columns.get(j).map(|c| c.empty_ord).unwrap_or(false);
-                    let mut list = Vec::with_capacity(cell.len() + 1);
-                    if empty {
-                        list.push(Noad::Atom(Atom::new(Class::Ord, Field::List(Vec::new()))));
+                    if !empty {
+                        return mlist::set(fonts, cell, style);
                     }
+                    let mut list = Vec::with_capacity(cell.len() + 1);
+                    list.push(Noad::Atom(Atom::new(Class::Ord, Field::List(Vec::new()))));
                     list.extend(cell.iter().cloned());
                     mlist::set(fonts, &list, style)
                 })
@@ -170,8 +171,9 @@ pub fn rows(
         })
         .collect();
     entries
-        .iter()
+        .into_iter()
         .map(|row| {
+            let mut row = row.into_iter();
             let mut list: Vec<Node> = Vec::new();
             for (j, width) in widths.iter().enumerate() {
                 let column = columns.get(j).copied().unwrap_or(Column {
@@ -185,7 +187,7 @@ pub fn rows(
                         explicit: true,
                     });
                 }
-                let entry = row.get(j).cloned().unwrap_or_else(BoxNode::null);
+                let entry = row.next().unwrap_or_else(BoxNode::null);
                 list.push(Node::Box(in_column(entry, *width, column.align)));
             }
             hpack(list, NATURAL, Tolerances::plain(), None).node

@@ -202,49 +202,48 @@ pub fn hpack(
     let mut stretch = Totals::default();
     let mut shrink = Totals::default();
 
-    let mut kept: Vec<Node> = Vec::with_capacity(list.len());
-    let mut adjust = adjust;
-    for node in list {
-        match &node {
-            // §654: a character contributes its own three dimensions.
-            Node::Char(c) | Node::Ligature(c) => {
-                x += c.width;
-                h = h.max(c.height);
-                d = d.max(c.depth);
-            }
-            // §653: a box or rule, with the shift applied to height and depth.
-            Node::Box(_) | Node::Rule(_) => {
-                let (w, bh, bd) = box_dimensions(&node);
-                x += w;
-                let s = node.shift_amount();
-                h = h.max(bh - s);
-                d = d.max(bd + s);
-            }
-            // §655: moved to the adjustment list, if there is one.
-            Node::Ins(_) | Node::Mark(_) | Node::Adjust(_) => {
-                if let Some(tail) = adjust.as_deref_mut() {
-                    transfer_to_adjustment(node, tail);
-                    continue;
+    // §655: with an adjustment list, insertions, marks and `\vadjust`
+    // material move to it, in order, and are not in the box; they lend it
+    // no dimensions either way. Without one, the box keeps the list as given.
+    let kept: Vec<Node> = match adjust {
+        Some(tail) => {
+            let mut kept = Vec::with_capacity(list.len());
+            for node in list {
+                match node {
+                    Node::Ins(_) | Node::Mark(_) | Node::Adjust(_) => {
+                        transfer_to_adjustment(node, tail)
+                    }
+                    _ => kept.push(node),
                 }
             }
-            // §656: glue adds its natural width and its two stretchabilities,
-            // and leaders lend the box their own height and depth.
+            kept
+        }
+        None => list,
+    };
+    // §653-§656: the height and depth are [`hlist_extent`]'s; the width and the
+    // glue totals are gathered here.
+    for node in &kept {
+        if let Some((above, below)) = hlist_extent(node) {
+            h = h.max(above);
+            d = d.max(below);
+        }
+        match node {
+            // §654 and §653: a character's, a box's or a rule's own width.
+            Node::Char(c) | Node::Ligature(c) => x += c.width,
+            Node::Box(_) | Node::Rule(_) => x += box_dimensions(node).0,
+            // §656: glue adds its natural width and its two stretchabilities.
             Node::Glue(g) => {
                 x += g.spec.natural;
                 stretch.add(g.spec.stretch, g.spec.stretch_order);
                 shrink.add(g.spec.shrink, g.spec.shrink_order);
-                if let (true, Some(leader)) = (g.kind.is_leaders(), &g.leader) {
-                    let (_, lh, ld) = box_dimensions(leader);
-                    h = h.max(lh);
-                    d = d.max(ld);
-                }
             }
             // §651: a kern and a math node contribute width and nothing else.
             Node::Kern { width, .. } | Node::Math(width) => x += *width,
             // §651's `othercases do_nothing`.
             Node::Disc(_) | Node::Whatsit(_) | Node::Penalty(_) => {}
+            // §655: kept only when there is no adjustment list.
+            Node::Ins(_) | Node::Mark(_) | Node::Adjust(_) => {}
         }
-        kept.push(node);
     }
 
     r.height = h;
@@ -347,6 +346,40 @@ pub fn vtop(mut packed: Packed) -> Packed {
 /// highly negative number" that loses every `max` it takes part in. Passing it
 /// through unchanged is the port; special-casing it would change what an
 /// `\hrule` inside an `\hbox` does.
+/// How far `node` reaches above and below the baseline of the hlist it is
+/// in: what §653, §654 and §656 add to an hbox's height and depth -- a
+/// character's own, a box's or a rule's moved by its shift, a leader box's.
+/// Nothing else in an hlist reaches either way.
+fn hlist_extent(node: &Node) -> Option<(Scaled, Scaled)> {
+    match node {
+        Node::Char(c) | Node::Ligature(c) => Some((c.height, c.depth)),
+        Node::Box(_) | Node::Rule(_) => {
+            let (_, height, depth) = box_dimensions(node);
+            let s = node.shift_amount();
+            Some((height - s, depth + s))
+        }
+        Node::Glue(g) => match (g.kind.is_leaders(), &g.leader) {
+            (true, Some(leader)) => {
+                let (_, height, depth) = box_dimensions(leader);
+                Some((height, depth))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The height and depth [`hpack`] gives `list` at its natural width, without
+/// packing it: for a caller that only measures, as §727's
+/// `check_dimensions` and §756's script shifts do.
+pub fn hlist_height_depth(list: &[Node]) -> (Scaled, Scaled) {
+    list.iter()
+        .filter_map(hlist_extent)
+        .fold((0, 0), |(h, d), (above, below)| {
+            (h.max(above), d.max(below))
+        })
+}
+
 fn box_dimensions(node: &Node) -> (Scaled, Scaled, Scaled) {
     match node {
         Node::Box(b) => (b.width, b.height, b.depth),

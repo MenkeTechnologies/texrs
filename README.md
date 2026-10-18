@@ -1077,6 +1077,28 @@ diagnostics, so there is no message order for the overlap to change. Measured
 1510 ms to 1317 ms at 8 and 1304 ms to 1245 ms at the default. PDF and DVI are
 byte-identical to the previous build at 1, 2 and 8 threads.
 
+The workers' own cost was then the limit: setting a formula spent about half
+its time copying and freeing. `mlist_to_hlist` copied every list it converted
+(and, recursing, every sublist again), copied each noad and the one after it
+to look at them, packed a copy of each noad's hlist only to read its height and
+depth, and copied every hlist once more in the second pass. Now a list is
+copied only when a `\mathchoice` in it is spliced, a noad only when a make_*
+procedure rewrites one of its fields, heights and depths are measured off the
+list in place, the second pass moves each hlist out, `hpack` keeps the list it
+is given unless an adjustment list takes nodes out of it, and a spec's numbers
+are spelled without `core::fmt`. Measured 2026-10-17 (load averages 14 to 37,
+medians of 9 interleaved runs, PDF): setting the 35,000-formula document's
+formulas went from 377 ms to 143 ms of CPU on one thread and from 720 ms to
+295 ms summed over the workers at 8; the lowerer's wait for the last batches
+at the join went from 22 ms to under 1 ms. Wall went from 1660 ms to 1402 ms at
+one thread and 488 ms to 443 ms at 8; on the mixed document from 2307 ms to
+2081 ms at one thread and unchanged at 8 (694 against 695 ms), and on a LaTeX
+document with few formulas from 1011 ms to 950 ms at one thread and unchanged
+at 8 (307 against 313 ms).
+At 8 threads lowering itself and the page drawing after it are what the wall
+waits on now, not the formulas. PDF, DVI, stdout and stderr are byte-identical
+to the previous build at 1 and 8 threads.
+
 **DVI pages.** On the `--dvi` path a page is its own lines and its number, so
 each page's box is built and its `bop`..`eop` commands are encoded by a writer
 of its own, in parallel; the pages are then appended in order, which is where

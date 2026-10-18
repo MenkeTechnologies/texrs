@@ -341,17 +341,49 @@ fn script_into(out: &mut String, superscript: bool, spell: impl FnOnce(&mut Stri
 /// spelling and back: `g` is a glyph and `r` a rule, and the three numbers in
 /// front are the formula's own width, height and depth.
 pub fn encode(s: &Setting) -> String {
-    use std::fmt::Write;
-    // Each piece is written straight into the spec. Writing to a `String`
-    // cannot fail, so the `fmt::Result` is dropped.
-    let mut out = format!("{};{};{}", s.width, s.height, s.depth);
+    // Room for what a typical piece spells, so the spec is rarely regrown.
+    let mut out = String::with_capacity(24 + 32 * (s.glyphs.len() + s.rules.len()));
+    push_numbers(&mut out, "", &[s.width, s.height, s.depth], ';');
     for g in &s.glyphs {
-        let _ = write!(out, ";g{},{},{},{}", g.x, g.y, g.size, g.ch as u32);
+        let ch = Scaled::from(u32::from(g.ch));
+        push_numbers(&mut out, ";g", &[g.x, g.y, g.size, ch], ',');
     }
     for r in &s.rules {
-        let _ = write!(out, ";r{},{},{},{}", r.x, r.y, r.width, r.height);
+        push_numbers(&mut out, ";r", &[r.x, r.y, r.width, r.height], ',');
     }
     out
+}
+
+/// `lead`, then `numbers` in decimal with `between` between them: one piece
+/// of an [`encode`]d spec.
+fn push_numbers(out: &mut String, lead: &str, numbers: &[Scaled], between: char) {
+    out.push_str(lead);
+    for (at, n) in numbers.iter().enumerate() {
+        if at > 0 {
+            out.push(between);
+        }
+        push_decimal(out, *n);
+    }
+}
+
+/// `n` in decimal, as `{}` spells it, without `core::fmt`'s machinery: a
+/// formula-heavy document spells millions of these.
+fn push_decimal(out: &mut String, n: Scaled) {
+    if n < 0 {
+        out.push('-');
+    }
+    let mut digits = [0u8; 20];
+    let mut at = digits.len();
+    let mut rest = n.unsigned_abs();
+    loop {
+        at -= 1;
+        digits[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    out.extend(digits[at..].iter().map(|&d| char::from(d)));
 }
 
 /// The other half of [`encode`].
@@ -412,6 +444,34 @@ mod tests {
             }],
         };
         assert_eq!(decode(&encode(&s)).as_ref(), Some(&s));
+    }
+
+    /// The spec spells its numbers by hand; it must spell them as `{}` does,
+    /// at the edges of the range and at every change in the digit count.
+    #[test]
+    fn a_number_is_spelled_as_display_spells_it() {
+        let mut values = vec![
+            0,
+            1,
+            -1,
+            9,
+            10,
+            -10,
+            65536,
+            -65536,
+            Scaled::MAX,
+            Scaled::MIN,
+        ];
+        let mut power: Scaled = 1;
+        while let Some(next) = power.checked_mul(10) {
+            values.extend([power - 1, power, -power, -(power - 1)]);
+            power = next;
+        }
+        for n in values {
+            let mut spelled = String::new();
+            push_decimal(&mut spelled, n);
+            assert_eq!(spelled, n.to_string());
+        }
     }
 
     /// The spec travels inside a marker, so it may hold no character the
