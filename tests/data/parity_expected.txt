@@ -156,6 +156,8 @@ BUILT
 1.0pt plus 1.0fill minus 2.0pt 0.0pt plus 2.0fill minus 1.0filll 0.0pt plus 3.0pt 144.54pt
 #==# finished_backed_up_level_ends.tex
 ! Undefined control sequence.l.7 \message{[\the\count1]\undefinedx                                     }[3]! Undefined control sequence.l.8 \count2=4 \undefinedw                         ! Undefined control sequence.l.9 \message{[\the\count1 ]\undefinedv                                      }[3] )(see the transcript file for additional information
+#==# font_identifiers.tex
+[cmr10][select font cmr10] [cmr10 at 12.0pt][select font cmr10 at 12.0pt] [cmr10 at 12.0pt] [cmr10] [cmr10 at 12.0pt] [cmr10] [select font cmr10 at 12.0pt]
 #==# fontname_nullfont.tex
 nullfont! Missing font identifier.<to be read again>                    al.8 \message{\fontname a                        }nullfonta! Missing font identifier.<to be read again>                    \relax l.9 \message{\fontname\relax                            }nullfont\relax  [nullfont] macro:->nullfont )(see the transcript file for additional information
 #==# futurelet_peeks_without_consuming.tex

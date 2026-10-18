@@ -1,0 +1,11 @@
+% \font (tex.web 1257-1260): an identifier names its font, \fontname writes
+% the file and the size when it is not the design size (472), \meaning writes
+% `select font' (1261), and selecting one is an assignment a group undoes.
+\catcode`\{=1 \catcode`\}=2
+\font\tenrm=cmr10 \message{[\fontname\tenrm][\meaning\tenrm]}
+\font\big=cmr10 scaled 1200 \message{[\fontname\big][\meaning\big]}
+\font\twelve=cmr10 at 12pt \message{[\fontname\twelve]}
+\tenrm\message{[\fontname\font]}
+{\big\message{[\fontname\font]}}\message{[\fontname\font]}
+\let\x=\big \message{[\meaning\x]}
+\end

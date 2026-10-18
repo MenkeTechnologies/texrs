@@ -2717,10 +2717,12 @@ impl Engine {
     /// §577's `scan_font_ident` and §472's `font_name_code`: the name of the font
     /// the next non-blank, non-call token identifies.
     ///
-    /// texrs loads no font, so the only identifiers are `\nullfont`, `\font` (the
-    /// current font, which is `\nullfont`) and the three family tables, whose
-    /// every entry is `\nullfont` until a `\font` fills one. Anything else is
-    /// `Missing font identifier`, read again, and `\nullfont` used.
+    /// The identifiers are `\nullfont`, `\font` (the current font), a name
+    /// `\font` defined (§1257), and the three family tables, whose entries are
+    /// `\nullfont` until a `\textfont` assignment fills one -- which texrs does
+    /// not make yet. Anything else is `Missing font identifier`, read again,
+    /// and `\nullfont` used. The answer is §472's: the file name, and ` at
+    /// Xpt` when the font is not at its design size.
     pub fn fontname_text(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
         let tok = loop {
             let Some(t) = self.take(lx, pending_only) else {
@@ -2732,9 +2734,20 @@ impl Engine {
                 t => break t,
             }
         };
+        let mut font = 0u16;
         let family = match tok {
+            Token::Cs(n) if matches!(self.meanings.get(&n), Some(Meaning::Font(_))) => {
+                if let Some(Meaning::Font(f)) = self.meanings.get(&n) {
+                    font = *f;
+                }
+                false
+            }
             Token::Cs(n) => match self.primitive_meaning(n).name() {
-                "nullfont" | "font" => false,
+                "font" => {
+                    font = self.cur_font;
+                    false
+                }
+                "nullfont" => false,
                 "textfont" | "scriptfont" | "scriptscriptfont" => true,
                 _ => {
                     lx.back_input(&[tok]);
@@ -2751,7 +2764,7 @@ impl Engine {
         if family {
             self.scan_stream_number(lx, pending_only)?;
         }
-        Ok("nullfont".to_string())
+        Ok(self.fonts.describe(font))
     }
 
     /// The slot a register reference names, reading the register number after
