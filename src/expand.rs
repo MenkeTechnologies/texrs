@@ -410,6 +410,10 @@ pub struct Engine {
     /// valid (textcodes.c's `catcode_heads`), by number; the current one is
     /// `cats`, and is not here.
     cat_tables: FxHashMap<i64, CatTable>,
+    /// Tables in `cat_tables` that only a code assigned from Lua made
+    /// (`set_cat_code` on a missing table), which `\catcodetable` may not
+    /// switch to: textcodes.c leaves `catcode_valid` unset for them.
+    unset_cat_tables: std::collections::HashSet<i64>,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -590,6 +594,7 @@ impl Engine {
             last_cs_name: None,
             cat_table: 0,
             cat_tables: FxHashMap::default(),
+            unset_cat_tables: std::collections::HashSet::new(),
             after_group_tokens: Vec::new(),
             after_assignment: None,
         }
@@ -7213,8 +7218,46 @@ impl Engine {
     }
 
     /// Whether `\catcodetable` may switch to table `h` (`valid_catcode_table`).
-    fn valid_cat_table(&self, h: i64) -> bool {
-        h == self.cat_table || self.cat_tables.contains_key(&h)
+    pub fn valid_cat_table(&self, h: i64) -> bool {
+        h == self.cat_table || (self.cat_tables.contains_key(&h) && !self.unset_cat_tables.contains(&h))
+    }
+
+    /// textcodes.c's `get_cat_code(h, c)`: the code `c` has in table `h`. A
+    /// table nothing has made answers `CATCODEDEFAULT`, 12, as it does there.
+    pub fn cat_code_in(&self, table: i64, c: u32) -> i64 {
+        let c = char::from_u32(c).unwrap_or('\0');
+        let cat = match table == self.cat_table {
+            true => self.cats.get(c),
+            false => match self.cat_tables.get(&table) {
+                Some(t) => t.get(c),
+                None => Cat::Other,
+            },
+        };
+        cat as i64
+    }
+
+    /// textcodes.c's `set_cat_code(h, c, v, level)`: assign in table `h`,
+    /// saved for the group (or not, `global`) as `\catcode` is, making the
+    /// table -- every code 12, and not yet one `\catcodetable` may select --
+    /// when nothing has made it. A code outside 0..15 is not assigned.
+    pub fn assign_cat_code_in(&mut self, table: i64, c: u32, v: i64, global: bool) {
+        let (Some(c), Some(cat)) = (char::from_u32(c), cat_from_i64(v)) else {
+            return;
+        };
+        if table == self.cat_table {
+            self.save_as(Save::Cat(table, c, self.cats.get(c)), self.global_defs_applied(global));
+            self.cats.set(c, cat);
+            return;
+        }
+        if !self.cat_tables.contains_key(&table) {
+            self.cat_tables.insert(table, CatTable::all_other());
+            self.unset_cat_tables.insert(table);
+        }
+        let old = self.cat_tables[&table].get(c);
+        self.save_as(Save::Cat(table, c, old), self.global_defs_applied(global));
+        if let Some(t) = self.cat_tables.get_mut(&table) {
+            t.set(c, cat);
+        }
     }
 
     /// `\catcodetable=n` (maincontrol.c's `assign_internal_value`): a switch to
@@ -7248,6 +7291,7 @@ impl Engine {
             false => self.cats.clone(),
         };
         self.cat_tables.insert(n, table);
+        self.unset_cat_tables.remove(&n);
         Ok(())
     }
 }
@@ -7258,5 +7302,31 @@ impl Engine {
     /// what decides the few places luatex prints differently from tex.
     pub fn is_luatex(&self) -> bool {
         self.register_limit > 255
+    }
+}
+
+#[cfg(test)]
+mod cat_table_tests {
+    use super::*;
+
+    #[test]
+    fn a_code_set_in_another_table_is_restored_there_and_does_not_validate_it() {
+        let mut eng = Engine::new();
+        // Table 4 does not exist: it reads 12 everywhere, as textcodes.c's
+        // CATCODEDEFAULT, and assigning in it makes it without making it valid.
+        assert_eq!(eng.cat_code_in(4, u32::from('a')), 12);
+        eng.compile_time_begin_group(GroupKind::Simple, 1);
+        eng.assign_cat_code_in(4, u32::from('a'), 11, false);
+        assert_eq!(eng.cat_code_in(4, u32::from('a')), 11);
+        assert!(!eng.valid_cat_table(4));
+        // The current table is untouched by it.
+        assert_eq!(eng.cat_code_in(0, u32::from('{')), 12);
+        eng.compile_time_end_group().unwrap();
+        assert_eq!(eng.cat_code_in(4, u32::from('a')), 12);
+        // A global one survives the group.
+        eng.compile_time_begin_group(GroupKind::Simple, 1);
+        eng.assign_cat_code_in(0, u32::from('{'), 1, true);
+        eng.compile_time_end_group().unwrap();
+        assert_eq!(eng.cat_code_in(0, u32::from('{')), 1);
     }
 }

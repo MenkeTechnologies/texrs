@@ -149,6 +149,14 @@ impl CatTable {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    /// The table textcodes.c's `set_cat_code` makes for a table nothing has
+    /// made yet: every code `CATCODEDEFAULT`, which is 12.
+    pub fn all_other() -> Self {
+        let mut t = Self::new();
+        t.codes = [Cat::Other; 256];
+        t
+    }
+
     /// Take a generation past `other`'s: a table switched in by
     /// `\catcodetable` must not look like one the mouth already read ahead
     /// under, whatever its own count says.
