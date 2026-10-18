@@ -1,0 +1,13 @@
+% Formulas in a paragraph and displays between paragraphs (tex.web 1138-1206):
+% \eqno and \leqno, a number pushed to a line of its own by a formula too wide
+% to share it, and a display after \noindent.
+\hsize=200pt
+We have $x^2+y^2=z^2$ for the sides of a right triangle, and the
+equation $$a^2+b^2=c^2 \eqno(1)$$ holds. Also $$\int_0^1 f(x)\,dx=F(1)-F(0)\leqno(2)$$
+and a display with no number
+$$\sum_{k=1}^n k = {n(n+1)\over2}$$
+followed by more text that runs on long enough to wrap onto another line or two, with
+$\alpha+\beta$ inline once more and a very wide formula
+$$x_1+x_2+x_3+x_4+x_5+x_6+x_7+x_8+x_9+x_{10}+x_{11}+x_{12}+x_{13}+x_{14}+x_{15}+x_{16}\eqno(3)$$
+\noindent$$y=mx+b$$
+\bye

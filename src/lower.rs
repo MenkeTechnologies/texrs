@@ -19,6 +19,7 @@ use crate::token::{CsId, Token};
 
 type R<T> = Result<T, TexError>;
 
+mod math;
 mod stomach;
 
 pub struct Lowerer {
@@ -891,7 +892,10 @@ impl Lowerer {
                     }
                 }
             }
-            let tok = match self.eng.halted {
+            // A formula's closing `$` and a `\right` end the block that was
+            // lowering it, as a `}` ends a group's (`stomach`).
+            let ended = std::mem::take(&mut self.st.end_block);
+            let tok = match self.eng.halted || ended {
                 true => None,
                 false => lx.next_token(&self.eng.cats),
             };
@@ -925,6 +929,10 @@ impl Lowerer {
                 },
                 _ => tok,
             };
+            // Where the stomach builds the lists, a `\let` copy of a character
+            // is that character to `main_control` (its `cur_cmd` is the
+            // category): `\bgroup` opens a group as `{` does.
+            let tok = self.st_implicit(tok);
             // §1211: the token after a prefix is judged before it is acted on.
             if self.eng.recover && self.eng.prefix_gate(lx, &tok) {
                 continue;
@@ -957,6 +965,13 @@ impl Lowerer {
             // nothing; see `crate::math::pass_over_math`.
             if self.formulas_passed_over && crate::math::pass_over_math(&mut self.eng, lx, &tok)? {
                 continue;
+            }
+            // `$`, and the characters math mode gives cases of their own
+            // (`stomach`).
+            if let Token::Char(c, cat) = tok {
+                if self.st_math_token(lx, c, cat, &mut out)? {
+                    continue;
+                }
             }
             let Token::Cs(name) = &tok else {
                 // Braces group the macro table while lowering, so a `\def`
@@ -1003,14 +1018,18 @@ impl Lowerer {
                             out.push(Cmd::Group { saves, keeps, body });
                         }
                     }
-                    // §1069: a `}` with no group open, or with a `\begingroup`'s
-                    // innermost, closes nothing; it is reported and dropped.
+                    // §1069: a `}` with no group open, or with a `\begingroup`'s,
+                    // a formula's or a `\left`'s innermost, closes nothing; it
+                    // is reported and dropped (§1069's `extra_right_brace`).
                     Token::Char(_, Cat::EndGroup)
-                        if self.eng.innermost_group() != Some(GroupKind::Simple) =>
+                        if !self.eng.innermost_group().is_some_and(GroupKind::closed_by_brace) =>
                     {
+                        let esc = self.eng.esc().to_string();
                         let msg = match self.eng.innermost_group() {
                             None => "Too many }'s".to_string(),
-                            Some(_) => format!("Extra }}, or forgotten {}endgroup", self.eng.esc()),
+                            Some(GroupKind::MathShift) => "Extra }, or forgotten $".to_string(),
+                            Some(GroupKind::MathLeft) => format!("Extra }}, or forgotten {esc}right"),
+                            Some(_) => format!("Extra }}, or forgotten {esc}endgroup"),
                         };
                         self.eng.report(lx, &msg);
                     }

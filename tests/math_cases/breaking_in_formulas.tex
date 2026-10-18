@@ -1,0 +1,9 @@
+% A paragraph broken inside and between formulas (tex.web 766-767, 866):
+% \binoppenalty and \relpenalty make the breaks, \mathsurround is kept at
+% the formula's edges, and nothing is hyphenated inside one.
+\hsize=150pt \mathsurround=1pt
+The sum $a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t$ is broken where a binary
+operator allows it, and so is $x=y=z=w=v=u=t=s=r=q=p=o=n=m=l=k$ at the
+relations. Hyphenation applies to the surrounding words, internationalization
+for instance, but never to $information+transformation$ inside a formula.
+\bye

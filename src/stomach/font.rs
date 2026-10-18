@@ -171,6 +171,12 @@ impl Font {
         }
     }
 
+    /// The metric file, which a math font reads its tags and ligature/kern
+    /// program from; `None` for `\nullfont` and a font made from metrics.
+    pub fn tfm(&self) -> Option<&std::sync::Arc<Tfm>> {
+        self.tfm.as_ref()
+    }
+
     /// `\fontdimen n` (§558), numbered from one.
     pub fn param(&self, n: usize) -> Scaled {
         n.checked_sub(1)
@@ -680,6 +686,14 @@ impl Stomach {
 
     /// `\/` (§1113): the italic correction of the character at the tail.
     pub fn italic_correction(&mut self) {
+        // §1112: `mmode+ital_corr: tail_append(new_kern(0))`.
+        if self.in_math() {
+            self.tail_append(Node::Kern {
+                width: 0,
+                explicit: false,
+            });
+            return;
+        }
         let Some(last) = self.cur().list.last() else {
             return;
         };

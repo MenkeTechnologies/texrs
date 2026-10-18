@@ -105,7 +105,7 @@ impl Stomach {
         self.group_begin();
         let mode = match kind {
             BoxKind::H => Mode::RestrictedHorizontal,
-            BoxKind::V | BoxKind::Top => Mode::InternalVertical,
+            BoxKind::V | BoxKind::Top | BoxKind::VCenter => Mode::InternalVertical,
         };
         let mut l = ListState::new(
             mode,
@@ -150,12 +150,18 @@ impl Stomach {
             BoxKind::H => self.hpack_filtered(l.list, spec, tol),
             BoxKind::V => vpackage(l.list, spec, max_depth, tol),
             BoxKind::Top => vtop(vpackage(l.list, spec, max_depth, tol)),
+            // §1168: `vpack`, which keeps any depth.
+            BoxKind::VCenter => vpackage(l.list, spec, crate::node::MAX_DIMEN, tol),
         };
         self.last_badness = packed.badness;
         if let Some(r) = packed.report {
             self.box_report(&r, kind != BoxKind::H, &packed.node);
         }
         let mut b = packed.node;
+        if kind == BoxKind::VCenter {
+            self.vcenter_noad(b);
+            return;
+        }
         b.subtype = crate::node::BOX_BOX;
         self.box_end(Some(b), context);
     }
@@ -237,10 +243,8 @@ impl Stomach {
                         self.cur_mut().space_factor = 1000;
                         self.tail_append(Node::Box(b));
                     }
-                    // A box in a formula is an `ord_noad` holding it; the
-                    // formula machinery is the math lowering's, so the box
-                    // goes in as the box.
-                    Kind::M => self.tail_append(Node::Box(b)),
+                    // A box in a formula is the nucleus of an `ord_noad`.
+                    Kind::M => self.box_noad(b),
                 }
             }
             // §1077.

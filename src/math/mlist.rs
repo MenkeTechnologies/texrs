@@ -1081,14 +1081,53 @@ impl<'a> Converter<'a> {
                 }
                 // `math_kern(p,cur_mu)` (§717): the same conversion for a
                 // `\mkern`.
+                // `subtype(p):=explicit` once converted.
                 Noad::MuKern(w) => {
-                    let w = self.mu_mult(*w);
-                    items.push(Translated::plain(kern(w)));
+                    let width = self.mu_mult(*w);
+                    items.push(Translated::plain(Node::Kern {
+                        width,
+                        explicit: true,
+                    }));
                     at += 1;
                     continue;
                 }
                 Noad::Node(n) => {
-                    let n = n.clone();
+                    let mut n = n.clone();
+                    match &mut n {
+                        // §730: a rule counts towards what a `\left` grows to.
+                        Node::Rule(r) => {
+                            max_h = max_h.max(r.height);
+                            max_d = max_d.max(r.depth);
+                        }
+                        // §732: an `\mskip` becomes ordinary glue at this size,
+                        // and a `\nonscript` deletes the glue or kern after it
+                        // when the size is not the text size.
+                        Node::Glue(g) if g.source == GlueSource::MuGlue => {
+                            let s = g.spec;
+                            g.spec = self.math_glue(&MuGlue {
+                                natural: s.natural,
+                                stretch: s.stretch,
+                                shrink: s.shrink,
+                                stretch_order: s.stretch_order,
+                                shrink_order: s.shrink_order,
+                            });
+                            g.source = GlueSource::Normal;
+                        }
+                        Node::Glue(g)
+                            if g.source == GlueSource::CondMath
+                                && self.size != super::font::TEXT_SIZE =>
+                        {
+                            let next_is_space = matches!(
+                                work.get(at + 1),
+                                Some(Noad::Node(Node::Glue(_) | Node::Kern { .. }))
+                                    | Some(Noad::MuGlue(_) | Noad::MuKern(_) | Noad::Glue(_) | Noad::Kern(_))
+                            );
+                            if next_is_space {
+                                work.to_mut().remove(at + 1);
+                            }
+                        }
+                        _ => {}
+                    }
                     items.push(Translated::plain(n));
                     at += 1;
                     continue;

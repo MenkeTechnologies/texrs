@@ -15,9 +15,10 @@
 //! `main_f:=cur_font`, an `eqtb` entry the expander scopes). What it leaves to
 //! the program is every value a register holds.
 //!
-//! The outer vertical list is not built here yet: the paragraph builder
-//! (§1091-§1096) is not on this path, so a character at the outer level still
-//! goes where it went before, and [`State::paragraphs`] is off.
+//! The outer vertical list is built here when [`State::paragraphs`] is on
+//! (a plain document, `Lowerer::with_list_path`); otherwise a character at the
+//! outer level goes to the string path. Math mode's own cases are in
+//! `math.rs` beside this file.
 
 use super::{Lowerer, R};
 use crate::catcode::Cat;
@@ -43,15 +44,23 @@ pub(super) enum CMode {
     Horizontal,
     /// `-hmode`: an `\hbox`, or one of a discretionary's lists.
     RestrictedHorizontal,
+    /// `-mmode`: a formula in text, a subformula, or an equation number.
+    Math,
+    /// `mmode`: a displayed formula.
+    DisplayMath,
 }
 
 impl CMode {
-    fn horizontal(self) -> bool {
+    pub(super) fn horizontal(self) -> bool {
         matches!(self, CMode::Horizontal | CMode::RestrictedHorizontal)
     }
 
-    fn vertical(self) -> bool {
+    pub(super) fn vertical(self) -> bool {
         matches!(self, CMode::Unmanaged | CMode::Vertical | CMode::InternalVertical)
+    }
+
+    pub(super) fn math(self) -> bool {
+        matches!(self, CMode::Math | CMode::DisplayMath)
     }
 }
 
@@ -63,7 +72,7 @@ pub(super) struct State {
     pub enabled: bool,
     /// Whether the outer list is built here (§1091's paragraphs onwards).
     pub paragraphs: bool,
-    nest: Vec<CMode>,
+    pub(super) nest: Vec<CMode>,
     /// The integer parameters and space factor codes the program has been
     /// told, so each list action carries only what changed.
     synced: Vec<i64>,
@@ -73,7 +82,7 @@ pub(super) struct State {
     /// Whether the last command lowered was a run of characters that the
     /// next character may extend: §1038's lookahead ends at the first token
     /// that is not a character.
-    run_open: bool,
+    pub(super) run_open: bool,
     /// A `\noboundary` (§1045) waiting for the run it affects.
     no_boundary: bool,
     /// The `\output` token list the program was last given, compiled.
@@ -84,6 +93,9 @@ pub(super) struct State {
     /// Whether the output routine is being lowered, which no list action
     /// inside it may start again.
     lowering_output: bool,
+    /// Set by the command that ends the block being lowered without a `}`:
+    /// a formula's closing `$` (§1193) and `\right` (§1191).
+    pub(super) end_block: bool,
 }
 
 impl Default for State {
@@ -100,33 +112,79 @@ impl Default for State {
             lowered_output: None,
             page_has_content: false,
             lowering_output: false,
+            end_block: false,
         }
     }
 }
 
 /// A list command's right brace, waiting at the end of its body.
-enum Closer {
-    /// §1086's `package`.
-    Box,
+pub(super) enum Closer {
+    /// §1086's `package`, for a box opened in a group of this kind (and
+    /// §1168's `vcenter_group`).
+    Box(GroupKind),
     /// §1100's `insert_group`.
     Insert,
     /// §1119's `build_discretionary` for list `k`.
     Disc(u8),
+    /// §1186's `math_group`: a subformula in braces.
+    Math,
+    /// §1174's `build_choices`, for one of `\mathchoice`'s lists.
+    Choice,
+}
+
+impl Closer {
+    /// The group §1083, §1099, §1117, §1153 and §1172 open for it.
+    fn group(&self) -> GroupKind {
+        match self {
+            Closer::Box(kind) => *kind,
+            Closer::Insert => GroupKind::Insert,
+            Closer::Disc(_) => GroupKind::Disc,
+            Closer::Math => GroupKind::Math,
+            Closer::Choice => GroupKind::MathChoice,
+        }
+    }
 }
 
 impl Lowerer {
-    fn st_mode(&self) -> CMode {
+    pub(super) fn st_mode(&self) -> CMode {
         *self.st.nest.last().unwrap_or(&CMode::Unmanaged)
     }
 
+    /// Open a level of the semantic nest the lowerer follows.
+    pub(super) fn st_push(&mut self, mode: CMode) {
+        self.st.nest.push(mode);
+        self.st_mode_changed();
+    }
+
+    /// Close one.
+    pub(super) fn st_pop(&mut self) {
+        self.st.nest.pop();
+        self.st_mode_changed();
+    }
+
+    /// Tell the expander the mode, for the mode conditionals (§501).
+    fn st_mode_changed(&mut self) {
+        use crate::expand::ModeKind;
+        self.eng.list_mode = match self.st_mode() {
+            _ if !self.st.enabled => None,
+            CMode::Unmanaged => None,
+            CMode::Vertical => Some((ModeKind::Vertical, false)),
+            CMode::InternalVertical => Some((ModeKind::Vertical, true)),
+            CMode::Horizontal => Some((ModeKind::Horizontal, false)),
+            CMode::RestrictedHorizontal => Some((ModeKind::Horizontal, true)),
+            CMode::Math => Some((ModeKind::Math, true)),
+            CMode::DisplayMath => Some((ModeKind::Math, false)),
+        };
+    }
+
     /// Whether list commands are lowered here at the current level.
-    fn st_managed(&self) -> bool {
+    pub(super) fn st_managed(&self) -> bool {
         self.st.enabled && (self.st.paragraphs || self.st_mode() != CMode::Unmanaged)
     }
 
     /// Emit a list action, with whatever the program has not been told yet
     /// in front of it.
-    fn st_emit(&mut self, out: &mut Vec<Cmd>, op: ListOp) -> R<()> {
+    pub(super) fn st_emit(&mut self, out: &mut Vec<Cmd>, op: ListOp) -> R<()> {
         self.st_sync_values(out);
         // The output routine is lowered where the page builder may next fire
         // it, which is after an action that can build the page (§1076,
@@ -142,6 +200,8 @@ impl Lowerer {
                 | ListOp::EndBox
                 | ListOp::Fetch { .. }
                 | ListOp::EndInsert { .. }
+                | ListOp::InitMath { display: true, .. }
+                | ListOp::ResumeAfterDisplay
         );
         // A box, a rule or a paragraph on the page's own list is what lets
         // the builder fire (§1000-§1001).
@@ -204,8 +264,8 @@ impl Lowerer {
         self.st.lowering_output = true;
         let blind = self.eng.known.set_opaque(true);
         let open = std::mem::take(&mut self.st.run_open);
-        self.eng.compile_time_begin_group(GroupKind::Simple, 0);
-        self.st.nest.push(CMode::InternalVertical);
+        self.eng.compile_time_begin_group(GroupKind::Output, 0);
+        self.st_push(CMode::InternalVertical);
         let mark = self.globals.len();
         let known_mark = self.eng.known.mark();
         let mut body = Vec::new();
@@ -214,9 +274,9 @@ impl Lowerer {
             self.st_end_graf(&mut body)?;
         }
         while self.st.nest.len() > 1 && self.st_mode() != CMode::InternalVertical {
-            self.st.nest.pop();
+            self.st_pop();
         }
-        self.st.nest.pop();
+        self.st_pop();
         let ended = self.eng.compile_time_end_group();
         self.st.run_open = open;
         self.eng.known.set_opaque(blind);
@@ -246,9 +306,9 @@ impl Lowerer {
 
     /// §1091's `new_graf` as the lowerer follows it: the paragraph opens,
     /// and `\everypar` is read next.
-    fn st_new_graf(&mut self, lx: &mut Lexer, indented: bool, out: &mut Vec<Cmd>) -> R<()> {
+    pub(super) fn st_new_graf(&mut self, lx: &mut Lexer, indented: bool, out: &mut Vec<Cmd>) -> R<()> {
         self.st_emit(out, ListOp::NewGraf(indented))?;
-        self.st.nest.push(CMode::Horizontal);
+        self.st_push(CMode::Horizontal);
         if let Some(reg) = crate::params::toks_register("everypar") {
             if let Some(toks) = self.eng.toks.get(&reg).cloned() {
                 lx.push_back(&toks);
@@ -264,7 +324,7 @@ impl Lowerer {
             return Ok(());
         }
         self.st_emit(out, ListOp::EndGraf)?;
-        self.st.nest.pop();
+        self.st_pop();
         self.st_normal_paragraph(out);
         Ok(())
     }
@@ -351,6 +411,22 @@ impl Lowerer {
             }
             _ => None,
         })
+    }
+
+    /// A `\let` copy of a character, as the character `main_control`
+    /// dispatches on (§1045 reads `cur_cmd`, which is the category), where
+    /// the stomach builds the lists; any other token as it is.
+    pub(super) fn st_implicit(&self, t: Token) -> Token {
+        if !self.st_managed() {
+            return t;
+        }
+        match t {
+            Token::Cs(n) => match self.eng.meanings.get(&n) {
+                Some(Meaning::Char(c, cat)) => Token::Char(*c, *cat),
+                _ => t,
+            },
+            _ => t,
+        }
     }
 
     /// Whether a character token of category `cat` is this file's to lower.
@@ -470,6 +546,17 @@ impl Lowerer {
                 let code = *code;
                 self.st.run_open = was_open;
                 return self.st_char_code(lx, code, out).map(|_| true);
+            }
+        }
+        // §1046-§1047 and the cases of §1045 that only math mode has.
+        if self.st_math() {
+            if insert_dollar_sign(name.name()) {
+                lx.push_back(&[Token::Char('$', Cat::MathShift), Token::Cs(name)]);
+                self.eng.report(lx, "Missing $ inserted");
+                return Ok(true);
+            }
+            if self.st_math_command(lx, name, out)? {
+                return Ok(true);
             }
         }
         let managed = self.st_managed();
@@ -634,7 +721,7 @@ impl Lowerer {
                 lx.push_back(&[Token::Cs(name)]);
                 self.st_scan_box(lx, Context::Shift(Num::Literal(0)), out)?;
             }
-            "raise" | "lower" if managed && mode.horizontal() => {
+            "raise" | "lower" if managed && (mode.horizontal() || mode.math()) => {
                 let d = self.dimen_number(lx, false)?;
                 let shift = match name.name() {
                     "raise" => negate(d)?,
@@ -660,8 +747,8 @@ impl Lowerer {
                 self.st_scan_box(lx, Context::Leaders(kind), out)?;
                 self.st_leader_glue(lx, kind, out)?;
             }
-            "hskip" | "hfil" | "hfill" | "hss" | "hfilneg" if managed && mode.horizontal() => {
-                let spec = self.st_glue_spec(lx, name.name())?;
+            "hskip" | "hfil" | "hfill" | "hss" | "hfilneg" if managed && (mode.horizontal() || mode.math()) => {
+                let spec = self.st_glue_spec(lx, name.name(), false)?;
                 self.st_emit(
                     out,
                     ListOp::Glue {
@@ -672,7 +759,7 @@ impl Lowerer {
                 )?;
             }
             "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" if managed && mode.vertical() => {
-                let spec = self.st_glue_spec(lx, name.name())?;
+                let spec = self.st_glue_spec(lx, name.name(), false)?;
                 self.st_emit(
                     out,
                     ListOp::Glue {
@@ -702,7 +789,7 @@ impl Lowerer {
                 let op = self.st_rule(lx, false, false)?;
                 self.st_emit(out, op)?;
             }
-            "vrule" if managed && mode.horizontal() => {
+            "vrule" if managed && (mode.horizontal() || mode.math()) => {
                 let op = self.st_rule(lx, true, false)?;
                 self.st_emit(out, op)?;
             }
@@ -720,12 +807,14 @@ impl Lowerer {
                 self.st.run_open = was_open;
                 return self.st_converted(lx, name.name(), out);
             }
-            "/" if managed && mode.horizontal() => self.st_emit(out, ListOp::ItalicCorrection)?,
-            "-" if managed && mode.horizontal() => {
+            "/" if managed && (mode.horizontal() || mode.math()) => {
+                self.st_emit(out, ListOp::ItalicCorrection)?
+            }
+            "-" if managed && (mode.horizontal() || mode.math()) => {
                 let f = self.eng.cur_font;
                 self.st_emit(out, ListOp::Hyphen(f))?;
             }
-            "discretionary" if managed && mode.horizontal() => {
+            "discretionary" if managed && (mode.horizontal() || mode.math()) => {
                 self.st_emit(out, ListOp::BeginDiscretionary)?;
                 for k in 0..3u8 {
                     self.st_list_body(lx, CMode::RestrictedHorizontal, Closer::Disc(k), out)?;
@@ -747,13 +836,16 @@ impl Lowerer {
                 self.st_emit(out, ListOp::BeginInsert(n))?;
                 self.st_list_body(lx, CMode::InternalVertical, Closer::Insert, out)?;
             }
-            "vadjust" if managed && mode.horizontal() => {
+            "vadjust" if managed && (mode.horizontal() || mode.math()) => {
                 self.st_emit(out, ListOp::BeginInsert(255))?;
                 self.st_list_body(lx, CMode::InternalVertical, Closer::Insert, out)?;
             }
             // §1093: an empty box `\parindent` wide.
-            "indent" if managed && mode.horizontal() => self.st_emit(out, ListOp::Indent)?,
-            "noindent" if managed && mode.horizontal() => {}
+            "indent" if managed && (mode.horizontal() || mode.math()) => {
+                self.st_emit(out, ListOp::Indent)?
+            }
+            "noindent" if managed && (mode.horizontal() || mode.math()) => {}
+            "noboundary" if managed && mode.math() => {}
             "noboundary" if managed && mode.horizontal() => {
                 // §1045: before a run it cancels the left boundary; after
                 // one, §1038 drops the right.
@@ -776,7 +868,7 @@ impl Lowerer {
                 self.st.run_open = was_open;
                 self.st_char_code(lx, code, out)?;
             }
-            " " if managed && mode.horizontal() => {
+            " " if managed && (mode.horizontal() || mode.math()) => {
                 let f = self.eng.cur_font;
                 self.st_emit(out, ListOp::Space { f, normal: true })?;
             }
@@ -960,7 +1052,7 @@ impl Lowerer {
 
     /// The glue of `\hskip`, `\hfil` and their kin (§1058-§1060), as the
     /// four slots a glue register holds.
-    fn st_glue_spec(&mut self, lx: &mut Lexer, name: &str) -> R<[Num; 4]> {
+    pub(super) fn st_glue_spec(&mut self, lx: &mut Lexer, name: &str, mu: bool) -> R<[Num; 4]> {
         use crate::box_::fill;
         let fixed = match name {
             "hfil" | "vfil" => Some(fill::fil()),
@@ -977,7 +1069,7 @@ impl Lowerer {
                 Num::Literal(g.stretch_order * 4 + g.shrink_order),
             ]);
         }
-        if let Some((from, negative)) = self.peek_glue_register(lx, false)? {
+        if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
             return Ok([
                 super::signed(negative, from),
                 super::signed(negative, from + 1),
@@ -985,7 +1077,10 @@ impl Lowerer {
                 Num::Count(from + 3),
             ]);
         }
-        let g = self.eng.scan_glue_parts(lx)?;
+        let g = match mu {
+            true => self.eng.scan_muglue_parts(lx)?,
+            false => self.eng.scan_glue_parts(lx)?,
+        };
         Ok([
             super::scaled_num(g.natural),
             super::scaled_num(g.stretch),
@@ -1019,7 +1114,7 @@ impl Lowerer {
 
     /// The next token that is not a space or `\relax`, expanded (§404's "Get
     /// the next non-blank non-relax non-call token").
-    fn st_next_non_blank(&mut self, lx: &mut Lexer) -> R<Option<(Token, Option<CsId>)>> {
+    pub(super) fn st_next_non_blank(&mut self, lx: &mut Lexer) -> R<Option<(Token, Option<CsId>)>> {
         loop {
             let Some((t, p)) = self.eng.next_unexpandable(lx)? else {
                 return Ok(None);
@@ -1087,7 +1182,7 @@ impl Lowerer {
 
     /// §1083: `\hbox`, `\vbox` or `\vtop`, its spec, its group, its list and
     /// its `}` (§1085-§1086).
-    fn st_begin_box(
+    pub(super) fn st_begin_box(
         &mut self,
         lx: &mut Lexer,
         kind: BoxKind,
@@ -1102,6 +1197,7 @@ impl Lowerer {
         } else {
             (false, Num::Literal(0))
         };
+        let moved = matches!(context, Context::Shift(_));
         self.st_emit(
             out,
             ListOp::BeginBox {
@@ -1115,13 +1211,24 @@ impl Lowerer {
             BoxKind::H => CMode::RestrictedHorizontal,
             _ => CMode::InternalVertical,
         };
-        self.st_list_body(lx, mode, Closer::Box, out)
+        // §1083: an `\hbox` moved or appended in vertical mode is an adjusted
+        // one, whose `\vadjust` and `\insert` material migrates out (§1076).
+        let group = match kind {
+            BoxKind::H if self.st_mode().vertical() && moved => {
+                GroupKind::AdjustedHbox
+            }
+            BoxKind::H => GroupKind::Hbox,
+            BoxKind::V => GroupKind::Vbox,
+            BoxKind::Top => GroupKind::Vtop,
+            BoxKind::VCenter => GroupKind::VCenter,
+        };
+        self.st_list_body(lx, mode, Closer::Box(group), out)
     }
 
     /// The braces of a list command: `scan_left_brace` (§403), the group
     /// (§274), the `\everyhbox`/`\everyvbox` §1083 inserts, the body in its
     /// mode, and what the `}` does (§1085, §1100, §1119).
-    fn st_list_body(
+    pub(super) fn st_list_body(
         &mut self,
         lx: &mut Lexer,
         mode: CMode,
@@ -1129,7 +1236,7 @@ impl Lowerer {
         out: &mut Vec<Cmd>,
     ) -> R<()> {
         // §403: the left brace, skipping spaces and `\relax`.
-        match self.st_next_non_blank(lx)? {
+        match self.st_next_non_blank(lx)?.map(|(t, p)| (self.st_implicit(t), p)) {
             Some((Token::Char(_, Cat::BeginGroup), _)) => {}
             other => {
                 if let Some((t, _)) = other {
@@ -1139,8 +1246,8 @@ impl Lowerer {
             }
         }
         let every = match (&closer, mode) {
-            (Closer::Box, CMode::RestrictedHorizontal) => crate::params::toks_register("everyhbox"),
-            (Closer::Box, CMode::InternalVertical) => crate::params::toks_register("everyvbox"),
+            (Closer::Box(_), CMode::RestrictedHorizontal) => crate::params::toks_register("everyhbox"),
+            (Closer::Box(_), CMode::InternalVertical) => crate::params::toks_register("everyvbox"),
             _ => None,
         };
         if let Some(reg) = every {
@@ -1148,10 +1255,8 @@ impl Lowerer {
                 lx.push_back(&toks);
             }
         }
-        // A box's group closes on `}` as §1085 has it, which is the simple
-        // group's rule here (`lower.rs` checks `innermost_group`).
-        self.eng.compile_time_begin_group(GroupKind::Simple, lx.line());
-        self.st.nest.push(mode);
+        self.eng.compile_time_begin_group(closer.group(), lx.line());
+        self.st_push(mode);
         self.st.run_open = false;
         let mark = self.globals.len();
         let known_mark = self.eng.known.mark();
@@ -1166,7 +1271,7 @@ impl Lowerer {
         // `unsave`, so they are read inside the group.
         let dimen = |name: &str| Num::Count(crate::params::register_slot(name).unwrap_or(0));
         match closer {
-            Closer::Box => body.push(Cmd::List(ListOp::BoxMaxDepth(dimen("boxmaxdepth")))),
+            Closer::Box(_) => body.push(Cmd::List(ListOp::BoxMaxDepth(dimen("boxmaxdepth")))),
             Closer::Insert => {
                 let s = crate::params::register_slot("splittopskip").unwrap_or(0);
                 let floating = crate::intpar::index("floatingpenalty")
@@ -1182,9 +1287,9 @@ impl Lowerer {
                     floating_penalty: Num::Literal(floating),
                 }));
             }
-            Closer::Disc(_) => {}
+            Closer::Disc(_) | Closer::Math | Closer::Choice => {}
         }
-        self.st.nest.pop();
+        self.st_pop();
         self.eng.compile_time_end_group()?;
         let after = self.eng.take_after_group();
         lx.push_back(&after);
@@ -1192,15 +1297,15 @@ impl Lowerer {
         self.known_after_group(known_mark, &saves, &keeps);
         // The insertion's own `}` is inside its body: §1100 packages before
         // the group's registers come back.
-        let insert = matches!(closer, Closer::Insert);
         out.push(Cmd::Group { saves, keeps, body });
         self.st_sync(out)?;
         match closer {
-            Closer::Box => out.push(Cmd::List(ListOp::EndBox)),
+            Closer::Box(_) => out.push(Cmd::List(ListOp::EndBox)),
             Closer::Disc(k) => out.push(Cmd::List(ListOp::EndDiscList(k))),
+            Closer::Math => out.push(Cmd::List(ListOp::EndMathGroup)),
+            Closer::Choice => out.push(Cmd::List(ListOp::EndChoiceList)),
             Closer::Insert => {}
         }
-        let _ = insert;
         Ok(())
     }
 
@@ -1229,7 +1334,7 @@ impl Lowerer {
             self.eng.report(lx, "Leaders not followed by proper glue");
             return Ok(());
         }
-        let spec = self.st_glue_spec(lx, &prim)?;
+        let spec = self.st_glue_spec(lx, &prim, false)?;
         self.st_emit(
             out,
             ListOp::Glue {
@@ -1343,6 +1448,16 @@ fn begins_paragraph(name: &str) -> bool {
     )
 }
 
+/// §1046's `insert_dollar_sign`: a command of vertical mode met in a
+/// formula, before which `$` is inserted.
+fn insert_dollar_sign(name: &str) -> bool {
+    matches!(
+        name,
+        "par" | "end" | "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" | "hrule" | "unvbox"
+            | "unvcopy" | "moveleft" | "moveright" | "dump"
+    )
+}
+
 /// §1094's commands: in horizontal mode each ends the paragraph first
 /// (`head_for_vmode`, §1095).
 fn ends_paragraph(name: &str) -> bool {
@@ -1359,6 +1474,7 @@ impl Lowerer {
         if let Some(outer) = self.st.nest.first_mut() {
             *outer = CMode::Vertical;
         }
+        self.st_mode_changed();
     }
 }
 

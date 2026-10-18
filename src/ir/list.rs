@@ -161,6 +161,62 @@ pub enum ListOp<N = Num> {
     /// was between the braces, for the hyphenation pass to read.
     Patterns(String),
     Hyphenation(String),
+    /// `init_math` (§1138): `$` in horizontal mode, and `$$` (`display`) in
+    /// unrestricted horizontal mode; `font` is the current font, whose quad
+    /// §1146 reads.
+    InitMath { display: bool, font: u16 },
+    /// `start_eq_no` (§1142): `\eqno`, or `\leqno` (`true`), in a display.
+    EqNo(bool),
+    /// `set_math_char(c)` (§1155) for a math code below `"8000`.
+    MathChar(N),
+    /// The end of `scan_math` (§1151): the field the action before chose
+    /// becomes math code `c`'s character.
+    MathFieldChar(N),
+    /// `tail_append(new_noad)` (§1150, §1158): an Ord .. Inner noad (class
+    /// 0 .. 7), an Under (8) or an Over (9), whose nucleus is scanned next.
+    Noad(u8),
+    /// `sub_sup` (§1176): the superscript (`true`) or the subscript of the
+    /// tail, or of a new empty noad, is scanned next.
+    SubSup(bool),
+    /// `math_limit_switch` (§1159): 0 `\displaylimits`, 1 `\limits`, 2
+    /// `\nolimits`.
+    Limits(u8),
+    /// `math_radical` (§1163), with its 27-bit delimiter code.
+    Radical(N),
+    /// `math_ac` (§1165), with its 15-bit math code.
+    MathAccent(N),
+    /// §1153: a subformula in braces fills the field chosen before.
+    BeginMathGroup,
+    /// §1186: its `}`, after the group has ended.
+    EndMathGroup,
+    /// `append_choices` (§1172).
+    BeginChoice,
+    /// `build_choices` (§1174): the `}` of one of the four lists.
+    EndChoiceList,
+    /// §1171: `\displaystyle` .. `\scriptscriptstyle`, as §688's style
+    /// numbers.
+    MathStyle(u8),
+    /// §1171's `\nonscript`.
+    NonScript,
+    /// `math_fraction` (§1181): `code` is §1178's (`above_code` .. plus
+    /// `delimited_code`), with `\above`'s thickness and the two delimiter
+    /// codes `scan_delimiter` read (§1160), zero where there are none.
+    Fraction {
+        code: u8,
+        thickness: N,
+        left: N,
+        right: N,
+    },
+    /// `math_left_right` (§1191): `\left` or `\right` (`true`) with its
+    /// 24-bit delimiter code.
+    LeftRight { right: bool, delim: N },
+    /// `after_math` (§1194), at a closing `$` or `$$`: the family fonts
+    /// `fam_fnt` holds then, sixteen per size (text, script, scriptscript).
+    EndMath(Vec<u16>),
+    /// `resume_after_display` (§1200), once the display's group has ended.
+    ResumeAfterDisplay,
+    /// `\mkern` (§1061 with `mu_glue`).
+    MuKern(N),
 }
 
 /// One argument as the compiler pushes it.
@@ -182,6 +238,7 @@ fn kind_code(k: BoxKind) -> i64 {
         BoxKind::H => 0,
         BoxKind::V => 1,
         BoxKind::Top => 2,
+        BoxKind::VCenter => 3,
     }
 }
 
@@ -263,6 +320,26 @@ impl<N> ListOp<N> {
             ListOp::Converted { .. } => 37,
             ListOp::Patterns(_) => 38,
             ListOp::Hyphenation(_) => 39,
+            ListOp::InitMath { .. } => 40,
+            ListOp::EqNo(_) => 41,
+            ListOp::MathChar(_) => 42,
+            ListOp::MathFieldChar(_) => 43,
+            ListOp::Noad(_) => 44,
+            ListOp::SubSup(_) => 45,
+            ListOp::Limits(_) => 46,
+            ListOp::Radical(_) => 47,
+            ListOp::MathAccent(_) => 48,
+            ListOp::BeginMathGroup => 49,
+            ListOp::EndMathGroup => 50,
+            ListOp::BeginChoice => 51,
+            ListOp::EndChoiceList => 52,
+            ListOp::MathStyle(_) => 53,
+            ListOp::NonScript => 54,
+            ListOp::Fraction { .. } => 55,
+            ListOp::LeftRight { .. } => 56,
+            ListOp::EndMath(_) => 57,
+            ListOp::ResumeAfterDisplay => 58,
+            ListOp::MuKern(_) => 59,
         }
     }
 
@@ -342,7 +419,38 @@ impl<N> ListOp<N> {
             | ListOp::BoxMaxDepth(n)
             | ListOp::SetPrevDepth(n)
             | ListOp::SetSpaceFactor(n)
-            | ListOp::SetPrevGraf(n) => f(Arg::Num(n)),
+            | ListOp::SetPrevGraf(n)
+            | ListOp::MathChar(n)
+            | ListOp::MathFieldChar(n)
+            | ListOp::Radical(n)
+            | ListOp::MathAccent(n)
+            | ListOp::MuKern(n) => f(Arg::Num(n)),
+            ListOp::InitMath { display, font } => {
+                f(Arg::Int(i64::from(*display)));
+                f(Arg::Int(i64::from(*font)));
+            }
+            ListOp::EqNo(b) | ListOp::SubSup(b) => f(Arg::Int(i64::from(*b))),
+            ListOp::Noad(k) | ListOp::Limits(k) | ListOp::MathStyle(k) => f(Arg::Int(i64::from(*k))),
+            ListOp::Fraction {
+                code,
+                thickness,
+                left,
+                right,
+            } => {
+                f(Arg::Int(i64::from(*code)));
+                f(Arg::Num(thickness));
+                f(Arg::Num(left));
+                f(Arg::Num(right));
+            }
+            ListOp::LeftRight { right, delim } => {
+                f(Arg::Int(i64::from(*right)));
+                f(Arg::Num(delim));
+            }
+            ListOp::EndMath(fams) => {
+                for &g in fams {
+                    f(Arg::Int(i64::from(g)));
+                }
+            }
             ListOp::Rule {
                 vrule,
                 width,
@@ -439,7 +547,13 @@ impl<N> ListOp<N> {
             | ListOp::EndGraf
             | ListOp::Indent
             | ListOp::BuildPage
-            | ListOp::End => {}
+            | ListOp::End
+            | ListOp::BeginMathGroup
+            | ListOp::EndMathGroup
+            | ListOp::BeginChoice
+            | ListOp::EndChoiceList
+            | ListOp::NonScript
+            | ListOp::ResumeAfterDisplay => {}
         }
     }
 }
@@ -567,6 +681,7 @@ impl ListOp<i64> {
                 let kind = match k / 2 {
                     1 => BoxKind::V,
                     2 => BoxKind::Top,
+                    3 => BoxKind::VCenter,
                     _ => BoxKind::H,
                 };
                 ListOp::BeginBox {
@@ -660,6 +775,43 @@ impl ListOp<i64> {
                 form: u8::try_from(r.int()).unwrap_or(0),
                 values: [r.int(), r.int(), r.int(), r.int()],
             },
+            40 => ListOp::InitMath {
+                display: r.int() == 1,
+                font: r.u16(),
+            },
+            41 => ListOp::EqNo(r.int() == 1),
+            42 => ListOp::MathChar(r.int()),
+            43 => ListOp::MathFieldChar(r.int()),
+            44 => ListOp::Noad(u8::try_from(r.int()).unwrap_or(0)),
+            45 => ListOp::SubSup(r.int() == 1),
+            46 => ListOp::Limits(u8::try_from(r.int()).unwrap_or(0)),
+            47 => ListOp::Radical(r.int()),
+            48 => ListOp::MathAccent(r.int()),
+            49 => ListOp::BeginMathGroup,
+            50 => ListOp::EndMathGroup,
+            51 => ListOp::BeginChoice,
+            52 => ListOp::EndChoiceList,
+            53 => ListOp::MathStyle(u8::try_from(r.int()).unwrap_or(2)),
+            54 => ListOp::NonScript,
+            55 => ListOp::Fraction {
+                code: u8::try_from(r.int()).unwrap_or(1),
+                thickness: r.int(),
+                left: r.int(),
+                right: r.int(),
+            },
+            56 => ListOp::LeftRight {
+                right: r.int() == 1,
+                delim: r.int(),
+            },
+            57 => {
+                let mut fams = Vec::new();
+                while r.rest() > 0 {
+                    fams.push(r.u16());
+                }
+                ListOp::EndMath(fams)
+            }
+            58 => ListOp::ResumeAfterDisplay,
+            59 => ListOp::MuKern(r.int()),
             _ => return None,
         })
     }
@@ -785,6 +937,31 @@ mod tests {
                 },
             ),
             (ListOp::Unpackage { n: 9, copy: true }, ListOp::Unpackage { n: 9, copy: true }),
+            (
+                ListOp::Fraction {
+                    code: 4,
+                    thickness: l(26214),
+                    left: l(0x028300),
+                    right: l(0x029301),
+                },
+                ListOp::Fraction {
+                    code: 4,
+                    thickness: 26214,
+                    left: 0x028300,
+                    right: 0x029301,
+                },
+            ),
+            (ListOp::EndMath(vec![0, 7, 3]), ListOp::EndMath(vec![0, 7, 3])),
+            (
+                ListOp::LeftRight {
+                    right: true,
+                    delim: l(0x161302),
+                },
+                ListOp::LeftRight {
+                    right: true,
+                    delim: 0x161302,
+                },
+            ),
         ];
         for (op, want) in ops {
             assert_eq!(ListOp::decode(op.code(), &pushed(&op)), Some(want));

@@ -35,6 +35,7 @@ use crate::node::{BoxNode, Node, Scaled, IGNORE_DEPTH};
 pub mod build;
 pub mod font;
 pub mod hyph;
+pub mod math;
 pub mod output;
 pub mod par;
 pub mod run;
@@ -101,6 +102,14 @@ pub struct ListState {
     /// What closes this list: the box under construction and how it was
     /// asked for, or the insertion or paragraph it is.
     pub opened: Opened,
+    /// The mlist of a math mode (§1136): `link(head)`..`tail` when the list
+    /// is a formula's, where [`ListState::list`] stays empty.
+    pub mlist: Vec<crate::math::noad::Noad>,
+    /// `incompleat_noad` (§1178): a fraction waiting for its denominator.
+    pub incompleat: Option<crate::math::noad::Fraction>,
+    /// A display's equation number, boxed by §1194 when its `\eqno` part
+    /// ended, and whether it was `\leqno`.
+    pub eq_no: Option<(BoxNode, bool)>,
 }
 
 impl ListState {
@@ -113,6 +122,9 @@ impl ListState {
             prev_graf: 0,
             mode_line: 0,
             opened,
+            mlist: Vec::new(),
+            incompleat: None,
+            eq_no: None,
         }
     }
 }
@@ -136,6 +148,20 @@ pub enum Opened {
     Insert(u16),
     /// The output routine (§1025).
     Output,
+    /// A formula, `$` to `$` (§1139) or `$$` to `$$` (§1145): a display
+    /// carries §1145's dimensions, and the formula an `\eqno` or `\leqno`
+    /// opened (§1142) is `eqno: Some(leqno)`.
+    MathShift {
+        display: Option<math::Display>,
+        eqno: Option<bool>,
+    },
+    /// A subformula in braces (§1153), and the field of the enclosing list's
+    /// tail it fills.
+    MathGroup(math::Target),
+    /// `\left` .. `\right` (§1191).
+    MathLeft,
+    /// One of `\mathchoice`'s four lists (§1172).
+    MathChoice(u8),
 }
 
 /// `\hbox`, `\vbox` or `\vtop` (§1083's `k`).
@@ -144,6 +170,8 @@ pub enum BoxKind {
     H,
     V,
     Top,
+    /// `\vcenter` (§1167), which becomes a noad rather than a box.
+    VCenter,
 }
 
 /// §1071's box context: where a finished box goes.
@@ -262,6 +290,16 @@ pub struct Stomach {
     /// `\hoffset` and `\voffset`, which §640 adds to every page.
     pub h_offset: Scaled,
     pub v_offset: Scaled,
+    /// The field of the tail noad `scan_math` fills next (§1151).
+    pub math_target: Option<math::Target>,
+    /// `just_box` (§814): the last line `post_line_break` made, which §1146
+    /// measures when a display interrupts its paragraph.
+    pub just_box: Option<BoxNode>,
+    /// Slots an action assigned that are not mirrors of anything else:
+    /// §1145's `\predisplaysize`, `\displaywidth`, `\displayindent`.
+    pub slot_writes: Vec<(i64, i64)>,
+    /// The `exten` table of each font a formula has been set from (§544).
+    pub math_exten: rustc_hash::FxHashMap<usize, Vec<[u8; 4]>>,
 }
 
 impl Default for Stomach {
@@ -301,6 +339,10 @@ impl Stomach {
             pack_begin_line: 0,
             h_offset: 0,
             v_offset: 0,
+            math_target: None,
+            just_box: None,
+            slot_writes: Vec::new(),
+            math_exten: rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -317,9 +359,14 @@ impl Stomach {
         self.cur().mode
     }
 
-    /// `tail_append` (§214).
+    /// `tail_append` (§214). In math mode the node goes into the mlist,
+    /// among the noads (§730).
     pub fn tail_append(&mut self, node: Node) {
-        self.cur_mut().list.push(node);
+        let cur = self.cur_mut();
+        match cur.mode.kind() {
+            Kind::M => cur.mlist.push(crate::math::noad::Noad::Node(node)),
+            _ => cur.list.push(node),
+        }
     }
 
     /// An integer parameter by its §236 name.
@@ -689,6 +736,9 @@ impl Mirror {
         out.set(Internal::SpaceFactor.slot(), cur.space_factor);
         out.set(Internal::PrevGraf.slot(), s.prev_graf());
         s.output.mirror(out);
+        for (slot, value) in std::mem::take(&mut s.slot_writes) {
+            out.set(slot, value);
+        }
     }
 }
 

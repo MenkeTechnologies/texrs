@@ -390,6 +390,31 @@ impl Stomach {
                     }
                 }
             }
+            ListOp::InitMath { display, font } => self.init_math(display, font as usize, e),
+            ListOp::EqNo(leqno) => self.start_eq_no(leqno),
+            ListOp::MathChar(c) => self.set_math_char(c),
+            ListOp::MathFieldChar(c) => self.math_field_char(c),
+            ListOp::Noad(k) => self.new_noad(k),
+            ListOp::SubSup(sup) => self.sub_sup(sup),
+            ListOp::Limits(c) => self.math_limit_switch(c),
+            ListOp::Radical(c) => self.math_radical(c),
+            ListOp::MathAccent(c) => self.math_ac(c),
+            ListOp::BeginMathGroup => self.begin_math_group(),
+            ListOp::EndMathGroup => self.end_math_group(),
+            ListOp::BeginChoice => self.append_choices(),
+            ListOp::EndChoiceList => self.build_choices(),
+            ListOp::MathStyle(s) => self.math_style(s),
+            ListOp::NonScript => self.non_script(),
+            ListOp::Fraction {
+                code,
+                thickness,
+                left,
+                right,
+            } => self.math_fraction(code, thickness, left, right),
+            ListOp::LeftRight { right, delim } => self.math_left_right(right, delim),
+            ListOp::EndMath(fams) => self.after_math(&fams, e),
+            ListOp::ResumeAfterDisplay => self.resume_after_display(),
+            ListOp::MuKern(w) => self.append_mu_kern(w),
         }
     }
 

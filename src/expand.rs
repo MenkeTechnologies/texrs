@@ -173,13 +173,108 @@ pub struct GlueParts {
     pub shrink_order: i64,
 }
 
-/// What opened a group (`tex.web` §269): a brace, or `\begingroup`.
+/// `abs(mode)` (§211): the kind of list being built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeKind {
+    Vertical,
+    Horizontal,
+    Math,
+}
+
+/// What opened a group (`tex.web` §269's group codes).
+///
+/// The expander opens the simple and semi-simple ones; the lowerer opens the
+/// rest where a box, an insertion, a discretionary, the output routine or a
+/// formula begins its group (`src/lower/stomach.rs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroupKind {
-    /// §269's `simple_group`, opened by `{`.
+    /// `simple_group`, opened by `{`.
     Simple,
-    /// §269's `semi_simple_group`, opened by `\begingroup`.
+    /// `hbox_group`: an `\hbox{` outside vertical mode, or one being set.
+    Hbox,
+    /// `adjusted_hbox_group`: an `\hbox{` in vertical mode (§1083).
+    AdjustedHbox,
+    /// `vbox_group`.
+    Vbox,
+    /// `vtop_group`.
+    Vtop,
+    /// `align_group`.
+    Align,
+    /// `no_align_group`.
+    NoAlign,
+    /// `output_group`: the `\output` routine (§1025).
+    Output,
+    /// `math_group`: a `{` subformula, a script or a nucleus (§1153).
+    Math,
+    /// `disc_group`: one of `\discretionary`'s three lists (§1117).
+    Disc,
+    /// `insert_group`: `\insert` or `\vadjust` (§1099).
+    Insert,
+    /// `vcenter_group` (§1167).
+    VCenter,
+    /// `math_choice_group`: one of `\mathchoice`'s four lists (§1172).
+    MathChoice,
+    /// `semi_simple_group`, opened by `\begingroup`.
     SemiSimple,
+    /// `math_shift_group`: a formula, `$` to `$` (§1139).
+    MathShift,
+    /// `math_left_group`: `\left` to `\right` (§1191).
+    MathLeft,
+}
+
+impl GroupKind {
+    /// The group code, as `\currentgrouptype` gives it (§269).
+    pub fn code(self) -> i64 {
+        match self {
+            GroupKind::Simple => 1,
+            GroupKind::Hbox => 2,
+            GroupKind::AdjustedHbox => 3,
+            GroupKind::Vbox => 4,
+            GroupKind::Vtop => 5,
+            GroupKind::Align => 6,
+            GroupKind::NoAlign => 7,
+            GroupKind::Output => 8,
+            GroupKind::Math => 9,
+            GroupKind::Disc => 10,
+            GroupKind::Insert => 11,
+            GroupKind::VCenter => 12,
+            GroupKind::MathChoice => 13,
+            GroupKind::SemiSimple => 14,
+            GroupKind::MathShift => 15,
+            GroupKind::MathLeft => 16,
+        }
+    }
+
+    /// etex.ch's `print_group`, without the level and the line.
+    pub fn name(self) -> &'static str {
+        match self {
+            GroupKind::Simple => "simple",
+            GroupKind::Hbox => "hbox",
+            GroupKind::AdjustedHbox => "adjusted hbox",
+            GroupKind::Vbox => "vbox",
+            GroupKind::Vtop => "vtop",
+            GroupKind::Align => "align",
+            GroupKind::NoAlign => "no align",
+            GroupKind::Output => "output",
+            GroupKind::Math => "math",
+            GroupKind::Disc => "disc",
+            GroupKind::Insert => "insert",
+            GroupKind::VCenter => "vcenter",
+            GroupKind::MathChoice => "math choice",
+            GroupKind::SemiSimple => "semi simple",
+            GroupKind::MathShift => "math shift",
+            GroupKind::MathLeft => "math left",
+        }
+    }
+
+    /// Whether a `}` closes it (§1068): all but `\begingroup`'s, a formula's
+    /// and `\left`'s, for which §1069 reports the `}` instead.
+    pub fn closed_by_brace(self) -> bool {
+        !matches!(
+            self,
+            GroupKind::SemiSimple | GroupKind::MathShift | GroupKind::MathLeft
+        )
+    }
 }
 
 /// `\the` or `\number` of a register, read where a quantity is scanned; see
@@ -403,6 +498,11 @@ pub struct Engine {
     /// The math families (§230's `math_font_base`): `\textfont`, `\scriptfont`
     /// and `\scriptscriptfont` of each of the sixteen, `\nullfont` until assigned.
     pub fam_fonts: [[u16; 16]; 3],
+    /// The mode (§211) the lowerer follows the semantic nest in, for
+    /// `\ifvmode`, `\ifhmode`, `\ifmmode` and `\ifinner` (§501): the kind of
+    /// list and whether it is the inner variant. `None` where the lowerer
+    /// does not build the lists (a LaTeX document).
+    pub list_mode: Option<(ModeKind, bool)>,
     /// Errors REPORTED rather than raised, in the order they happened.
     ///
     /// `tex.web` §82's `error` prints the message and carries on; only a few
@@ -621,6 +721,7 @@ impl Engine {
             fonts: crate::stomach::font::Table::new(),
             cur_font: 0,
             fam_fonts: [[0; 16]; 3],
+            list_mode: None,
             errors: Vec::new(),
             backend: crate::backend::Backend::default(),
             recover: false,
@@ -708,10 +809,7 @@ impl Engine {
         if self.intpar_named("tracinggroups") <= 0 {
             return;
         }
-        let what = match kind {
-            GroupKind::Simple => "simple",
-            GroupKind::SemiSimple => "semi simple",
-        };
+        let what = kind.name();
         let (verb, at) = match leaving {
             true => ("leaving", "entered at line"),
             false => ("entering", "at line"),
@@ -1257,10 +1355,16 @@ impl Engine {
             .enumerate()
             .rev()
         {
-            let (what, opener) = match kind {
-                GroupKind::Simple => ("simple", "{".to_string()),
-                GroupKind::SemiSimple => ("semi simple", format!("{}begingroup", self.esc())),
+            // etex.ch reconstructs a box's or a formula's opening text (its
+            // spec, the `\setbox`); that is not kept here, so a group other
+            // than these shows the token that opened it.
+            let opener = match kind {
+                GroupKind::SemiSimple => format!("{}begingroup", self.esc()),
+                GroupKind::MathShift => "$".to_string(),
+                GroupKind::MathLeft => format!("{}left", self.esc()),
+                _ => "{".to_string(),
             };
+            let what = kind.name();
             listing.push_str(&format!(
                 "### {what} group (level {}) entered at line {line} ({opener})",
                 level + 1
@@ -2289,6 +2393,17 @@ impl Engine {
                 let n = self.scan_number(lx, pending_only)?;
                 self.end_test();
                 return self.do_ifcase(lx, n, pending_only, line);
+            }
+            // §501: the mode the lowerer is following; `\ifinner` is
+            // `mode<0`.
+            "ifvmode" | "ifhmode" | "ifmmode" | "ifinner" if self.list_mode.is_some() => {
+                let (kind, inner) = self.list_mode.unwrap_or((ModeKind::Vertical, false));
+                match name {
+                    "ifvmode" => kind == ModeKind::Vertical,
+                    "ifhmode" => kind == ModeKind::Horizontal,
+                    "ifmmode" => kind == ModeKind::Math,
+                    _ => inner,
+                }
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
@@ -4472,6 +4587,12 @@ impl Engine {
         }
     }
 
+    /// Read dimensions in math units (`mu`) from now on, or stop; the old
+    /// setting is returned. `\mkern`'s width is §1061's `scan_dimen(mu,..)`.
+    pub fn set_mu_units(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.mu_units, on)
+    }
+
     /// The same, in MATH units: `\muskip0=3mu plus 1mu minus 2mu`.
     ///
     /// One scanner, one mode flag. `tex.web` §461's `scan_glue(mu_val)` is
@@ -5013,9 +5134,8 @@ impl Engine {
     /// value is known while lowering: the version numbers, which luatex 1.24.0
     /// gives as `\eTeXversion` 2, `\eTeXminorversion` 2 and `\luatexversion`
     /// 124 (measured), and etex.ch's `\currentgrouplevel` (`cur_level -
-    /// level_one`) and `\currentgrouptype` (`cur_group`: 1 for a brace group,
-    /// 14 for `\begingroup`, 0 outside every group). A box or alignment
-    /// group is the stomach's and opens none of these frames.
+    /// level_one`) and `\currentgrouptype` (`cur_group`, §269's code, 0 outside
+    /// every group).
     fn last_item_value(&self, primitive: &str) -> Option<i64> {
         match primitive {
             "eTeXversion" => Some(2),
@@ -5027,11 +5147,7 @@ impl Engine {
                 Some(self.current_if(primitive))
             }
             "currentgrouplevel" => Some(self.group_level() as i64),
-            "currentgrouptype" => Some(match self.innermost_group() {
-                None => 0,
-                Some(GroupKind::Simple) => 1,
-                Some(GroupKind::SemiSimple) => 14,
-            }),
+            "currentgrouptype" => Some(self.innermost_group().map_or(0, GroupKind::code)),
             // The backend's last items (`crate::backend`): what the last
             // `\saveimageresource` and `\saveboxresource` numbered.
             "lastsavedimageresourceindex" => Some(i64::from(self.backend.last_image)),
