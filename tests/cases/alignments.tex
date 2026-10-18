@@ -1,0 +1,18 @@
+% \halign and \valign (tex.web 768-812) as \showbox shows them: column
+% widths from the widest entry, \tabskip from the preamble, \noalign,
+% \omit, \span and plain.tex's \multispan, periodic preambles (&&) from
+% the first column and from a later one, plain.tex's \matrix, \pmatrix,
+% \cases, the cedilla built with \ooalign, a \valign, and \settabs with \+.
+\showboxdepth=20 \showboxbreadth=1000 \tracingonline1
+\setbox0\vbox{\halign{#\hfil&\hfil#\cr a&bb\cr ccc&d\cr}}\showbox0
+\setbox0\vbox{\tabskip=2pt plus 1fil\halign to 100pt{#&\tabskip=3pt#\cr x&y\cr\noalign{\kern2pt}\omit z&w\cr}}\showbox0
+\setbox0\vbox{\halign{#&#&#\cr a\span b&c\cr \multispan2 long entry&c\cr}}\showbox0
+\setbox0\vbox{\halign{&[#]\cr a&b&c&d\cr}}\showbox0
+\setbox0\vbox{\halign{x#&&y#&z#\cr a&b&c&d&e\cr}}\showbox0
+\setbox0\hbox{$\matrix{a&b\cr c&d\cr}$}\showbox0
+\setbox0\hbox{$\pmatrix{1&0\cr 0&1\cr}$}\showbox0
+\setbox0\hbox{$f(x)=\cases{0&if $x<0$\cr 1&otherwise\cr}$}\showbox0
+\setbox0\hbox{\c c \c C}\showbox0
+\setbox0\hbox{\valign{\hbox{#}\vfil\cr a\cr b\cr}}\showbox0
+\setbox0\vbox{\settabs 3\columns \+one&two&three\cr \+a&b\cr}\showbox0
+\end
