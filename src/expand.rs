@@ -378,6 +378,12 @@ pub struct Engine {
     /// in batch mode nothing does. A run starts in nonstop mode, which is what
     /// the harnesses run luatex in.
     pub interaction: i64,
+    /// luatex's `is_in_csname`: how many `\csname`s are reading their names,
+    /// which `\ifincsname` asks.
+    in_csname: u32,
+    /// luatex's `last_cs_name`: what the last `\csname`, `\begincsname` or
+    /// `\ifcsname` looked up, for `\lastnamedcs`. `None` is `null_cs`.
+    last_cs_name: Option<CsId>,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -483,6 +489,15 @@ const ASSIGNMENTS: &[&str] = &[
 
 const CONDITIONALS: &[&str] = &[
     "if",
+    // LuaTeX's (conditional.c): the absolute-value comparisons, whether a
+    // `\csname` is being read, whether a name still means its primitive, and
+    // `\ifcondition`, which expands to nothing and is a conditional only to
+    // the skipper.
+    "ifabsnum",
+    "ifabsdim",
+    "ifincsname",
+    "ifprimitive",
+    "ifcondition",
     "ifcat",
     "ifnum",
     "ifdim",
@@ -539,6 +554,8 @@ impl Engine {
             error_count: 0,
             halted: false,
             interaction: 1,
+            in_csname: 0,
+            last_cs_name: None,
             after_group_tokens: Vec::new(),
             after_assignment: None,
         }
@@ -1504,6 +1521,9 @@ impl Engine {
                 self.advice_marker(name.name());
                 Ok(true)
             }
+            // luatex's expand.c: "An experiment" -- `\ifcondition` read where
+            // it expands is nothing at all; skipped text counts it as an `\if`.
+            "ifcondition" => Ok(true),
             n if CONDITIONALS.contains(&n) => {
                 self.do_conditional(lx, n, pending_only)?;
                 Ok(true)
@@ -1663,13 +1683,26 @@ impl Engine {
             "csname" => {
                 let built = self.read_csname(lx, pending_only)?;
                 // An undefined \csname name becomes \relax, per tex.web §372.
-                let id = CsId::intern(&built);
-                self.meanings
-                    .entry(id)
-                    .or_insert_with(|| Meaning::Primitive(CsId::intern("relax")));
+                let id = self.named_cs(&built, true).expect("\\csname always makes one");
                 // §372's `back_input`: an error in what reads it shows the
                 // name as `<recently read>`.
                 lx.back_input(&[Token::Cs(id)]);
+                Ok(true)
+            }
+            // luatex's `manufacture_csname(1)`: `\csname` that does not define
+            // what it does not find, which then expands to nothing.
+            "begincsname" => {
+                let built = self.read_csname(lx, pending_only)?;
+                if let Some(id) = self.named_cs(&built, false).filter(|_| !built.is_empty()) {
+                    lx.back_input(&[Token::Cs(id)]);
+                }
+                Ok(true)
+            }
+            // `inject_last_tested_cs`: the name the last of them looked up.
+            "lastnamedcs" => {
+                if let Some(id) = self.last_cs_name {
+                    lx.back_input(&[Token::Cs(id)]);
+                }
                 Ok(true)
             }
             _ => Ok(false),
@@ -1775,6 +1808,34 @@ impl Engine {
                     _ => a == b,
                 }
             }
+            // conditional.c's `if_abs_num_code` and `if_abs_dim_code`: each
+            // side is negated if it is negative before the comparison.
+            "ifabsnum" | "ifabsdim" => {
+                let dimen = name == "ifabsdim";
+                let a = match dimen {
+                    true => self.scan_dimen(lx, pending_only)?,
+                    false => self.scan_number(lx, pending_only)?,
+                };
+                let rel = self.read_relation(lx, pending_only, name)?;
+                let b = match dimen {
+                    true => self.scan_dimen(lx, pending_only)?,
+                    false => self.scan_number(lx, pending_only)?,
+                };
+                match rel {
+                    '<' => a.abs() < b.abs(),
+                    '>' => a.abs() > b.abs(),
+                    _ => a.abs() == b.abs(),
+                }
+            }
+            // `is_in_csname`: true while a `\csname`, `\ifcsname` or
+            // `\begincsname` is reading its name.
+            "ifincsname" => self.in_csname > 0,
+            // `if_primitive_code`: the next token, unexpanded, is a control
+            // sequence whose meaning is still the primitive of its name.
+            "ifprimitive" => match self.take(lx, pending_only) {
+                Some(Token::Cs(n)) => self.means_its_primitive(n),
+                _ => false,
+            },
             "ifodd" => self.scan_number(lx, pending_only)? % 2 != 0,
             "ifdefined" => {
                 let t = self.take(lx, pending_only);
@@ -1793,7 +1854,7 @@ impl Engine {
             // etex's is: both test `eq_type(cur_cs) <> undefined_cs`.
             "ifcsname" => {
                 let built = self.read_csname(lx, pending_only)?;
-                !self.is_undefined(CsId::intern(&built))
+                self.named_cs(&built, false).is_some()
             }
             "ifx" => {
                 let a = self.take(lx, pending_only);
@@ -5808,6 +5869,13 @@ impl Engine {
     /// else unexpandable is `Missing \endcsname inserted`, the token put back
     /// to be read again, and the name ends there.
     fn read_csname(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
+        self.in_csname += 1;
+        let name = self.read_csname_inner(lx, pending_only);
+        self.in_csname -= 1;
+        name
+    }
+
+    fn read_csname_inner(&mut self, lx: &mut Lexer, pending_only: bool) -> R<String> {
         let mut name = String::new();
         loop {
             let Some(t) = self.take(lx, pending_only) else {
@@ -6670,5 +6738,69 @@ impl Engine {
     /// The integer parameter `name` (`crate::intpar::NAMES`), by name.
     pub fn intpar_named(&self, name: &str) -> i64 {
         crate::intpar::index(name).map_or(0, |i| self.intpars.get(i))
+    }
+}
+
+impl Engine {
+    /// Whether `name` is a primitive that still means itself: what
+    /// `\ifprimitive` asks (conditional.c compares `cur_cmd` and `cur_chr`
+    /// with the primitive's own).
+    pub fn means_its_primitive(&self, name: CsId) -> bool {
+        let primitive = crate::primitives::is_primitive(name.name())
+            || crate::intpar::index(name.name()).is_some()
+            || crate::primitives::luatex_command(name.name()).is_some();
+        primitive
+            && match self.meanings.get(&name) {
+                None => true,
+                Some(Meaning::Primitive(p)) => *p == name,
+                Some(_) => false,
+            }
+    }
+}
+
+impl Engine {
+    /// Whether a `\csname` is reading its name now (`\ifincsname`).
+    pub fn in_csname(&self) -> bool {
+        self.in_csname > 0
+    }
+}
+
+/// The control sequence luatex's `id_lookup` answers for a name it does not
+/// find (`undefined_control_sequence`), which `\lastnamedcs` puts back after
+/// an `\ifcsname` or `\begincsname` that found nothing. The NUL keeps any
+/// document from spelling it, so it is never defined.
+pub const UNDEFINED_CS: &str = "\u{0}undefined";
+
+impl Engine {
+    /// The control sequence a `\csname` (`defines`) or a `\begincsname` and
+    /// `\ifcsname` built from `built`, recorded as `last_cs_name`.
+    ///
+    /// `\csname` makes the name `\relax` if it means nothing (§372) and always
+    /// answers it. The other two look it up without entering it, and answer it
+    /// only if it is defined. An empty name is luatex's `null_cs`, which none
+    /// of them records and `\begincsname` never puts back.
+    pub fn named_cs(&mut self, built: &str, defines: bool) -> Option<CsId> {
+        let id = CsId::intern(built);
+        if defines {
+            self.define_if_undefined(built);
+            self.last_cs_name = (!built.is_empty()).then_some(id);
+            return Some(id);
+        }
+        // `null_cs` is a control sequence like any other to `\ifcsname`
+        // (`\csname\endcsname` can be `\let`), but is never recorded.
+        if built.is_empty() {
+            self.last_cs_name = None;
+            return (!self.is_undefined(id)).then_some(id);
+        }
+        match self.is_undefined(id) {
+            false => {
+                self.last_cs_name = Some(id);
+                Some(id)
+            }
+            true => {
+                self.last_cs_name = Some(CsId::intern(UNDEFINED_CS));
+                None
+            }
+        }
     }
 }

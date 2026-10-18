@@ -303,6 +303,11 @@ than none.
   `\suppresslongerror` lets a `\par` into a macro argument, and `\hoffset` and
   `\pageleftoffset` set each other an inch apart. What the stomach and the
   backend make of the rest is theirs.
+- LuaTeX's conditionals `\ifabsnum`, `\ifabsdim`, `\ifincsname`, `\ifprimitive`
+  and `\ifcondition`, decided in running text, in an `\edef` and in a
+  `\message`, and over a register the run holds; `\begincsname` and
+  `\lastnamedcs` wherever they expand; `\immediateassignment` and
+  `\immediateassigned` in running text.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

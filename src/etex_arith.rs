@@ -35,6 +35,9 @@ pub enum Op {
     Scale,
     /// The range check `scan_expr` makes on every factor it reads.
     Check,
+    /// The magnitude, which `\ifabsnum` and `\ifabsdim` compare
+    /// (conditional.c negates a negative side).
+    Abs,
 }
 
 impl Op {
@@ -43,7 +46,7 @@ impl Op {
     }
 
     pub fn from_code(code: i64) -> Option<Op> {
-        [Op::Add, Op::Sub, Op::Mul, Op::Div, Op::Scale, Op::Check]
+        [Op::Add, Op::Sub, Op::Mul, Op::Div, Op::Scale, Op::Check, Op::Abs]
             .into_iter()
             .find(|op| op.code() == code)
     }
@@ -62,6 +65,7 @@ pub fn apply(op: Op, max: i64, args: &[i64]) -> i64 {
         Op::Div => quotient(arg(0), arg(1)),
         Op::Scale => fract(arg(0), arg(1), arg(2), max),
         Op::Check => (arg(0).abs() <= max).then_some(arg(0)),
+        Op::Abs => Some(arg(0).abs()),
     };
     v.unwrap_or(ERROR)
 }

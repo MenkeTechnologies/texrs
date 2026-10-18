@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">254</div>
+            <div class="stat-val">262</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -247,6 +247,9 @@
             <tr><td><code>\Uchar</code></td><td>The character with the given code: <code>\Uchar65</code> is <code>A</code>. A LuaTeX primitive, and the one that reaches past 255 -- texrs reads characters rather than bytes, so it carries the whole range.</td><td><pre>\message{\Uchar65\Uchar97}   % =&gt; Aa</pre></td></tr>
             <tr><td><code>\expanded</code></td><td>Expand the group's contents completely, here and now, and put the result back. Inside an <code>\edef</code> it is the wrapper coming off, since everything there expands anyway; in running text it forces the expansion a macro would otherwise have deferred. An eTeX primitive.</td><td><pre>\message{\expanded{\body}}</pre></td></tr>
             <tr><td><code>\unexpanded</code></td><td>The opposite: the group's tokens are used as they stand. Inside an <code>\edef</code> they survive as TOKENS, so a macro among them is called when the body runs rather than when it is defined -- which is where this and <code>\expanded</code> part company. In a message the two render alike, by the token-list rule. An eTeX primitive.</td><td><pre>\edef\keep{\unexpanded{\later}}</pre></td></tr>
+            <tr><td><code>\lastnamedcs</code></td><td>The control sequence the last <code>\csname</code>, <code>\begincsname</code> or <code>\ifcsname</code> looked up, put back where this stands -- so a name built once can be used again without building it twice. After a lookup that found nothing it is an undefined control sequence; after an empty name, or before any, it is nothing. A LuaTeX primitive.</td><td><pre>\ifcsname foo\endcsname \expandafter\show\lastnamedcs \fi</pre></td></tr>
+            <tr><td><code>\immediateassignment</code></td><td>Carry out the assignment that follows even while expanding. Where the lowerer reads a file the assignment runs where it stands anyway, so in running text the prefix simply vanishes; in an <code>\edef</code> or <code>\message</code> body it is not carried out. A LuaTeX primitive.</td><td><pre>\immediateassignment\count1=5</pre></td></tr>
+            <tr><td><code>\immediateassigned</code></td><td>The same for every assignment in a braced text; the braces open no group. In running text the text simply runs. A LuaTeX primitive.</td><td><pre>\immediateassigned{\count1=5 \def\x{X}}</pre></td></tr>
             <tr><td><code>\begincsname</code></td><td><code>\csname</code> that does not define what it does not find: an unknown name expands to nothing, where <code>\csname</code> would make it <code>\relax</code> and leave it defined ever after. A LuaTeX primitive, and the one that makes "is this defined?" answerable without changing the answer.</td><td><pre>\begincsname maybe\endcsname</pre></td></tr>
           </tbody>
         </table>
@@ -294,6 +297,11 @@
 \def\foo{F}
 \ifcsname foo\endcsname \message{[YES]}\else \message{[NO]}\fi   % =&gt; [YES]
 \ifcsname nope\endcsname \message{[YES]}\else \message{[NO]}\fi  % =&gt; [NO], twice over</pre></td></tr>
+            <tr><td><code>\ifabsnum</code></td><td><code>\ifnum</code> on the magnitudes: each side is made positive before the comparison, so <code>\ifabsnum -5&gt;3</code> is true. A LuaTeX primitive.</td><td><pre>\ifabsnum &lt;number&gt;&lt;relation&gt;&lt;number&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifabsdim</code></td><td><code>\ifdim</code> on the magnitudes, as <code>\ifabsnum</code> is to <code>\ifnum</code>. A LuaTeX primitive.</td><td><pre>\ifabsdim -2pt&lt;1pt \message{no}\else\message{yes}\fi   % =&gt; yes</pre></td></tr>
+            <tr><td><code>\ifincsname</code></td><td>True while a <code>\csname</code>, <code>\ifcsname</code> or <code>\begincsname</code> is reading its name, so a macro can tell it is being expanded into one. A LuaTeX primitive.</td><td><pre>\csname\ifincsname in\else out\fi\endcsname   % names \in</pre></td></tr>
+            <tr><td><code>\ifprimitive</code></td><td>Is the next token, unexpanded, a primitive that still means itself? A <code>\let</code> copy under another name is not, and neither is a primitive's name once something has redefined it. A LuaTeX primitive.</td><td><pre>\ifprimitive\relax \message{untouched}\fi</pre></td></tr>
+            <tr><td><code>\ifcondition</code></td><td>Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written <code>\ifcondition\mytest</code> and still nest. A LuaTeX primitive.</td><td><pre>\ifcondition\ifnum1=1 \message{yes}\fi</pre></td></tr>
             <tr><td><code>\unless</code></td><td>Negate the conditional that follows: <code>\unless\ifnum 1&gt;2 A\else B\fi</code> runs A. An eTeX primitive. A negated conditional is the same conditional with its arms exchanged, which is how it is lowered.</td><td><pre>\unless\ifnum \count0&gt;2 few\else many\fi</pre></td></tr>
           </tbody>
         </table>

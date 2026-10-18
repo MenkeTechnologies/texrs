@@ -1,6 +1,8 @@
 # Frozen output of luatex, written by `cargo run --bin primitive-census -- --freeze`.
 # One block per case in tests/luatex_cases; tests/luatex_primitives.rs replays
 # these with no TeX installed.
+#==# begincsname.tex
+[A][][N] [macro:->A||\relax ] [4] [N]
 #==# csstring.tex
 [relax][a][a][\relax]
 #==# detokenize.tex
@@ -27,10 +29,16 @@
 [Y][N][Y] [Y][N][N]
 #==# ifdefined_edges.tex
 [ Y][N] [Y][Y][Y] [N][N][N] [Y]
+#==# immediate_assignments.tex
+[5] [7][X] [0]
 #==# interaction_errors.tex
 a! Bad interaction mode (7).l.3 \message{a}\interactionmode=7                                   \message{b}bc)(see the transcript file for additional information
 #==# interaction_modes.tex
 [1][2] a[1][2][1] nonstop [1]
+#==# lastnamedcs.tex
+[the character ] [Amacro:->A] [undefined] [undefined] [\a] [\csname\endcsname ] []
+#==# luatex_conditionals.tex
+[Y][Y][N] Y Y [Y] [\Y ][N] [Y] good [N][Y][N] [N]
 #==# luatex_dimen_glue_toks_parameters.tex
 [0.0pt][0.0pt][1.00374pt][72.27pt][72.27pt][72.27pt][72.27pt][0.0pt][] [597.50787pt][845.04684pt][39158276] [2.0pt] [1.00374pt] [1.0pt plus 2.0fil] [\relax ##][\pagewidth] wide
 #==# luatex_integer_parameters.tex

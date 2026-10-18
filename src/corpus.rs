@@ -493,6 +493,36 @@ pub const CORPUS: &[Entry] = &[
         "Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered \u{2014} which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web \u{a7}372) and so changes the answer for every later ask. Decided while lowering, in running text and inside a `\\message` body alike, because the macro table is a frontend fact. LaTeX's `\\@ifundefined` is built on this.",
         "\\ifcsname <characters>\\endcsname <true>\\else <false>\\fi\n\\def\\foo{F}\n\\ifcsname foo\\endcsname \\message{[YES]}\\else \\message{[NO]}\\fi   % => [YES]\n\\ifcsname nope\\endcsname \\message{[YES]}\\else \\message{[NO]}\\fi  % => [NO], twice over",
     ),
+    (
+        "\\ifabsnum",
+        "Conditionals",
+        "`\\ifnum` on the magnitudes: each side is made positive before the comparison, so `\\ifabsnum -5>3` is true. A LuaTeX primitive.",
+        "\\ifabsnum <number><relation><number> <true>\\else <false>\\fi",
+    ),
+    (
+        "\\ifabsdim",
+        "Conditionals",
+        "`\\ifdim` on the magnitudes, as `\\ifabsnum` is to `\\ifnum`. A LuaTeX primitive.",
+        "\\ifabsdim -2pt<1pt \\message{no}\\else\\message{yes}\\fi   % => yes",
+    ),
+    (
+        "\\ifincsname",
+        "Conditionals",
+        "True while a `\\csname`, `\\ifcsname` or `\\begincsname` is reading its name, so a macro can tell it is being expanded into one. A LuaTeX primitive.",
+        "\\csname\\ifincsname in\\else out\\fi\\endcsname   % names \\in",
+    ),
+    (
+        "\\ifprimitive",
+        "Conditionals",
+        "Is the next token, unexpanded, a primitive that still means itself? A `\\let` copy under another name is not, and neither is a primitive's name once something has redefined it. A LuaTeX primitive.",
+        "\\ifprimitive\\relax \\message{untouched}\\fi",
+    ),
+    (
+        "\\ifcondition",
+        "Conditionals",
+        "Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written `\\ifcondition\\mytest` and still nest. A LuaTeX primitive.",
+        "\\ifcondition\\ifnum1=1 \\message{yes}\\fi",
+    ),
     // ══ Registers — compiler::COUNT_SLOTS, expand::do_arith ════════════════
     (
         "\\count",
@@ -1024,6 +1054,24 @@ pub const CORPUS: &[Entry] = &[
         "Expansion",
         "The opposite: the group's tokens are used as they stand. Inside an `\\edef` they survive as TOKENS, so a macro among them is called when the body runs rather than when it is defined -- which is where this and `\\expanded` part company. In a message the two render alike, by the token-list rule. An eTeX primitive.",
         "\\edef\\keep{\\unexpanded{\\later}}",
+    ),
+    (
+        "\\lastnamedcs",
+        "Expansion",
+        "The control sequence the last `\\csname`, `\\begincsname` or `\\ifcsname` looked up, put back where this stands -- so a name built once can be used again without building it twice. After a lookup that found nothing it is an undefined control sequence; after an empty name, or before any, it is nothing. A LuaTeX primitive.",
+        "\\ifcsname foo\\endcsname \\expandafter\\show\\lastnamedcs \\fi",
+    ),
+    (
+        "\\immediateassignment",
+        "Expansion",
+        "Carry out the assignment that follows even while expanding. Where the lowerer reads a file the assignment runs where it stands anyway, so in running text the prefix simply vanishes; in an `\\edef` or `\\message` body it is not carried out. A LuaTeX primitive.",
+        "\\immediateassignment\\count1=5",
+    ),
+    (
+        "\\immediateassigned",
+        "Expansion",
+        "The same for every assignment in a braced text; the braces open no group. In running text the text simply runs. A LuaTeX primitive.",
+        "\\immediateassigned{\\count1=5 \\def\\x{X}}",
     ),
     (
         "\\begincsname",

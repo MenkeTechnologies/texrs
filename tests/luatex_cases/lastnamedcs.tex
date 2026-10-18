@@ -1,0 +1,11 @@
+% primitives: lastnamedcs begincsname csname ifcsname
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{A}
+\message{[\expandafter\meaning\lastnamedcs]}
+\message{[\csname a\endcsname\expandafter\meaning\lastnamedcs]}
+\message{[\ifcsname zz\endcsname\fi\expandafter\meaning\lastnamedcs]}
+\message{[\begincsname zz\endcsname\expandafter\meaning\lastnamedcs]}
+\message{[\ifcsname a\endcsname\fi\expandafter\string\lastnamedcs]}
+\message{[\csname\endcsname\expandafter\string\lastnamedcs]}
+\message{[\expandafter\string\lastnamedcs]}
+\end

@@ -1464,6 +1464,16 @@ impl Lowerer {
                 // the text is known now; it reaches the terminal the way a
                 // report does, in front of whatever is printed next.
                 "showtokens" => self.eng.show_tokens(lx)?,
+                // LuaTeX's `\immediateassignment` runs the assignment after it
+                // while expanding, and `\immediateassigned` the assignments in
+                // its braces (maincontrol.c). Where the lowerer reads the file
+                // they run where they stand anyway: the prefix vanishes, and the
+                // braces come off without opening a group.
+                "immediateassignment" => {}
+                "immediateassigned" => {
+                    let text = self.eng.scan_general_text(lx)?;
+                    lx.push_back(&text);
+                }
                 "showgroups" => self.eng.show_groups(lx),
                 "show" => {
                     let Some(tok) = lx.next_token(&self.eng.cats) else {
@@ -1618,17 +1628,18 @@ impl Lowerer {
                         parts.push(MsgOp::Discard(call));
                     }
                 }
-                "ifnum" => {
+                "ifnum" | "ifabsnum" => {
                     // `\unless` belongs to this conditional, so it is taken
                     // before the test can expand a conditional of its own.
                     let negated = self.eng.take_unless();
-                    let left = self.number(lx)?;
-                    let rel = match self.eng.read_relation_file(lx, "ifnum")? {
+                    let abs = name.name() == "ifabsnum";
+                    let left = magnitude(abs, self.number(lx)?);
+                    let rel = match self.eng.read_relation_file(lx, name.name())? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
-                    let right = self.number(lx)?;
+                    let right = magnitude(abs, self.number(lx)?);
                     // §498 decides the test when the mouth reaches it. When
                     // every register it reads has a value the lowerer has
                     // followed (`crate::known`), that is now, and only the arm
@@ -1654,15 +1665,16 @@ impl Lowerer {
                 // the comparison and differs only in the scanner), and a
                 // dimension is an integer in a slot -- so it lowers to the same
                 // real branch rather than being recognised and skipped.
-                "ifdim" => {
+                "ifdim" | "ifabsdim" => {
                     let negated = self.eng.take_unless();
-                    let left = self.dimen_number(lx, false)?;
-                    let rel = match self.eng.read_relation_file(lx, "ifdim")? {
+                    let abs = name.name() == "ifabsdim";
+                    let left = magnitude(abs, self.dimen_number(lx, false)?);
+                    let rel = match self.eng.read_relation_file(lx, name.name())? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
-                    let right = self.dimen_number(lx, false)?;
+                    let right = magnitude(abs, self.dimen_number(lx, false)?);
                     // Decided now when both dimensions are known; see `\ifnum`.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         self.eng.enter_decided_file(lx, truth != negated)?;
@@ -4576,17 +4588,19 @@ impl Lowerer {
                 // `\relax`.
                 "begincsname" => {
                     let built = self.eng.read_csname_pending(work)?;
-                    let id = crate::token::CsId::intern(&built);
-                    if self.eng.meanings.contains_key(&id) {
+                    if let Some(id) = self.eng.named_cs(&built, false).filter(|_| !built.is_empty()) {
                         work.push_back(&[Token::Cs(id)]);
                     }
+                }
+                "lastnamedcs" => {
+                    self.eng.expand_pending(work, n)?;
                 }
                 "csname" => {
                     // The name is built from text and macros, all compile-time.
                     let built = self.eng.read_csname_pending(work)?;
                     // §372: a name with no meaning is made \relax.
-                    self.eng.define_if_undefined(&built);
-                    work.push_back(&[Token::cs(&built)]);
+                    let id = self.eng.named_cs(&built, true).expect("\\csname always makes one");
+                    work.push_back(&[Token::Cs(id)]);
                 }
                 "expandafter" => {
                     let Some(held) = work.pending.pop() else {
@@ -4646,6 +4660,21 @@ impl Lowerer {
                     let taken = n.name() == "iftrue";
                     self.open_decided(work, taken, &mut decided)?;
                 }
+                // LuaTeX's: no `\csname` is reading a name in a message, a
+                // name means its primitive or does not, and `\ifcondition`
+                // is nothing where it is expanded.
+                "ifincsname" => {
+                    let inside = self.eng.in_csname();
+                    self.open_decided(work, inside, &mut decided)?;
+                }
+                "ifprimitive" => {
+                    let truth = match work.pending.pop() {
+                        Some(Token::Cs(cs)) => self.eng.means_its_primitive(cs),
+                        _ => false,
+                    };
+                    self.open_decided(work, truth, &mut decided)?;
+                }
+                "ifcondition" => {}
                 "ifx" => {
                     let a = work.pending.pop();
                     let b = work.pending.pop();
@@ -4701,8 +4730,7 @@ impl Lowerer {
                         }
                         "ifcsname" => {
                             let built = self.eng.read_csname_pending(work)?;
-                            let id = crate::token::CsId::intern(&built);
-                            !self.eng.is_undefined(id)
+                            self.eng.named_cs(&built, false).is_some()
                         }
                         "ifdefined" => {
                             let t = work.pending.pop();
@@ -4715,14 +4743,15 @@ impl Lowerer {
                     };
                     self.open_decided(work, truth, &mut decided)?;
                 }
-                "ifnum" => {
-                    let left = self.msg_number(work)?;
-                    let rel = match self.eng.read_relation_pending(work, "ifnum")? {
+                "ifnum" | "ifabsnum" => {
+                    let abs = n.name() == "ifabsnum";
+                    let left = magnitude(abs, self.msg_number(work)?);
+                    let rel = match self.eng.read_relation_pending(work, n.name())? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
-                    let right = self.msg_number(work)?;
+                    let right = magnitude(abs, self.msg_number(work)?);
                     // Two known values are a frontend fact: decide here, as
                     // §498 does, so only the arm taken is lowered. Lowering both
                     // made `\def\r#1{\ifnum#1>0 \r{0}\fi}` unbounded
@@ -4743,14 +4772,15 @@ impl Lowerer {
                 }
                 // The same comparison over dimensions; see the `\ifdim` arm in
                 // the file-level dispatch.
-                "ifdim" => {
-                    let left = self.dimen_number(work, true)?;
-                    let rel = match self.eng.read_relation_pending(work, "ifdim")? {
+                "ifdim" | "ifabsdim" => {
+                    let abs = n.name() == "ifabsdim";
+                    let left = magnitude(abs, self.dimen_number(work, true)?);
+                    let rel = match self.eng.read_relation_pending(work, n.name())? {
                         '<' => Rel::Less,
                         '>' => Rel::Greater,
                         _ => Rel::Equal,
                     };
-                    let right = self.dimen_number(work, true)?;
+                    let right = magnitude(abs, self.dimen_number(work, true)?);
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         self.open_decided(work, truth, &mut decided)?;
                         continue;
@@ -5834,5 +5864,13 @@ fn expr_level_of(primitive: &str) -> Option<ExprLevel> {
         "numexpr" => Some(ExprLevel::Int),
         "dimexpr" => Some(ExprLevel::Dimen),
         _ => None,
+    }
+}
+
+/// `n`, or its magnitude for `\ifabsnum` and `\ifabsdim`.
+fn magnitude(abs: bool, n: Num) -> Num {
+    match abs {
+        true => step(crate::etex_arith::Op::Abs, 0, vec![n]),
+        false => n,
     }
 }

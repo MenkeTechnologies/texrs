@@ -1,0 +1,6 @@
+% primitives: immediateassignment immediateassigned
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\count1=0 \immediateassignment\count1=5 \message{[\the\count1]}
+\immediateassigned{\count2=7 \def\x{X}}\message{[\the\count2][\x]}
+{\immediateassigned{\count3=1 }}\message{[\the\count3]}
+\end

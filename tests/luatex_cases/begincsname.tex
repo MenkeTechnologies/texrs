@@ -1,0 +1,8 @@
+% primitives: begincsname
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{A}
+\message{[\begincsname a\endcsname][\begincsname zz\endcsname][\ifdefined\zz Y\else N\fi]}
+\edef\b{\begincsname a\endcsname|\begincsname zz\endcsname|\expandafter\noexpand\begincsname relax\endcsname}
+\message{[\meaning\b]}
+\def\n{\count1=4 }\begincsname n\endcsname\message{[\the\count1]}\message{[\ifdefined\zz Y\else N\fi]}
+\end

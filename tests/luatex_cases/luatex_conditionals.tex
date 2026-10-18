@@ -1,0 +1,12 @@
+% primitives: ifabsnum ifabsdim ifincsname ifprimitive ifcondition
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\message{[\ifabsnum -5>3 Y\else N\fi][\ifabsnum 2=-2 Y\else N\fi][\ifabsdim -2pt<1pt Y\else N\fi]}
+\ifabsnum -5>3 \message{Y}\else\message{N}\fi
+\count1=-7 \ifabsnum\count1>6 \message{Y}\else\message{N}\fi
+\message{[\ifabsnum\count1>6 Y\else N\fi]}
+\message{[\csname\ifincsname Y\else N\fi\endcsname][\ifincsname Y\else N\fi]}
+\message{[\ifcondition\ifnum1=1 Y\else N\fi]}
+\iffalse \ifcondition\else\fi \message{bad}\else\message{good}\fi
+\def\relax{x}\message{[\ifprimitive\relax Y\else N\fi][\ifprimitive\par Y\else N\fi][\ifprimitive\undefined Y\else N\fi]}
+\let\p\par\message{[\ifprimitive\p Y\else N\fi]}
+\end
