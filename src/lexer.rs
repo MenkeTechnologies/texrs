@@ -264,6 +264,10 @@ pub struct Lexer {
     /// `\everyeof` for a pseudo file, `None` once inserted and for a file that
     /// is not one.
     eof_tokens: Option<Vec<Token>>,
+    /// Whether the characters are a FILE's, whose lines LuaTeX's
+    /// `process_input_buffer` callback sees before they are read
+    /// (`crate::input_hooks`); a token list or a pseudo file is not one.
+    file_lines: bool,
 }
 
 /// A source a pseudo file suspended, as it stood: everything that says where
@@ -284,6 +288,24 @@ struct Suspended {
 }
 
 impl Lexer {
+    /// Say that these characters are a file's: each line goes through LuaTeX's
+    /// `process_input_buffer` callback, when there is one, as it is reached.
+    pub fn mark_as_file(&mut self) {
+        self.file_lines = true;
+    }
+
+    /// `process_input_buffer` on the line that starts at `pos`, its end left
+    /// off as luatex hands it over; what the callback returns takes its place.
+    fn process_line(&mut self) {
+        let end = (self.pos..self.chars.len())
+            .find(|&i| self.terminator_at(i).is_some())
+            .unwrap_or(self.chars.len());
+        let line: String = self.chars[self.pos..end].iter().collect();
+        if let Some(new) = crate::input_hooks::process_input_buffer(&line) {
+            self.chars.splice(self.pos..end, new.chars());
+        }
+    }
+
     /// etex.ch's `pseudo_start`: read `text` as a file in front of everything
     /// else, its lines ended as a file's are (`\endlinechar` appended, trailing
     /// spaces gone), tokenised as it is read so a `\catcode` in it changes what
@@ -365,6 +387,7 @@ impl Lexer {
             levels: Vec::new(),
             suspended: Vec::new(),
             eof_tokens: None,
+            file_lines: false,
         }
     }
 
@@ -445,6 +468,7 @@ impl Lexer {
             levels: Vec::new(),
             suspended: Vec::new(),
             eof_tokens: None,
+            file_lines: false,
         }
     }
 
@@ -943,6 +967,21 @@ impl Lexer {
                 };
             };
             if self.line_end.is_none() {
+                // A line of a file is about to be read: LuaTeX's
+                // `process_input_buffer` sees it first. Read-ahead lexed it
+                // as it was, so a run with the callback reads as it goes.
+                if self.file_lines
+                    && self.suspended.is_empty()
+                    && crate::input_hooks::has_process_input_buffer()
+                {
+                    self.ahead = None;
+                    self.ahead_disabled = true;
+                    self.process_line();
+                    // The line is the callback's now; it is ended as the
+                    // document's lines are, and read from its start.
+                    self.line_end = Some(cats.end_line_char());
+                    continue;
+                }
                 self.line_end = Some(cats.end_line_char());
             }
             // The end of a line in the FILE: `\endlinechar` stands in for it.

@@ -62,6 +62,8 @@ pub struct Lowerer {
     /// The conditional whose arms [`Self::arms`] reads next: its name, its
     /// `\unless`, and the line it began on.
     next_arms: Option<(&'static str, bool, u32)>,
+    /// Whether `lower_located` is reading the document itself (see `lower`).
+    reading_document: bool,
     /// Errors the expander REPORTED rather than raised, waiting to be written
     /// into the message stream in front of whatever is printed next.
     ///
@@ -310,6 +312,7 @@ impl Lowerer {
             prologue: Vec::new(),
             reports: Vec::new(),
             next_arms: None,
+            reading_document: false,
             reported: false,
             end_notes: Vec::new(),
             fonts: crate::typeset::Families::default(),
@@ -406,7 +409,11 @@ impl Lowerer {
 
     /// Compile a whole source to a command stream.
     pub fn lower(&mut self, src: &str) -> R<Vec<Cmd>> {
+        // The document is a file, whose lines LuaTeX's `process_input_buffer`
+        // sees; a preloaded preamble is not.
+        self.reading_document = true;
         let lowered = self.lower_located(src);
+        self.reading_document = false;
         // Whatever the feed has not handed on by now, the page builder breaks.
         self.feed = None;
         let mut cmds = lowered.map_err(|(e, _line)| e)?;
@@ -476,6 +483,9 @@ impl Lowerer {
     /// than threaded through every `?` in the expander.
     pub fn lower_located(&mut self, src: &str) -> Result<Vec<Cmd>, (TexError, u32)> {
         let mut lx = Lexer::new(src);
+        if self.reading_document {
+            lx.mark_as_file();
+        }
         match self.block(&mut lx, None) {
             Ok(mut cmds) => {
                 self.eng.note_mouth(&lx);
@@ -1596,10 +1606,22 @@ impl Lowerer {
                     let n = self.eng.scan_stream_number(lx, false)?;
                     self.eng.skip_equals_file(lx)?;
                     let name = self.scan_file_name(lx)?;
-                    let text = self
-                        .locate_written(&name)
-                        .or_else(|| Self::locate_input(&name))
-                        .map(|(_, src)| src);
+                    // `find_read_file` with id n+1, then `open_read_file`.
+                    let text = match crate::input_hooks::find_read_file(n as i64 + 1, &name) {
+                        Some(None) => None,
+                        Some(Some(file)) => {
+                            crate::input_hooks::open_read_file(&file).or_else(|| {
+                                self.locate_written(&file)
+                                    .or_else(|| Self::locate_input(&file))
+                                    .map(|(_, src)| src)
+                            })
+                        }
+                        None => crate::input_hooks::open_read_file(&name).or_else(|| {
+                            self.locate_written(&name)
+                                .or_else(|| Self::locate_input(&name))
+                                .map(|(_, src)| src)
+                        }),
+                    };
                     self.eng.open_read_stream(n, text);
                 }
                 "closein" => {
@@ -5487,6 +5509,21 @@ impl Lowerer {
                 "TeX capacity exceeded, sorry [text input levels={MAX_LEVELS}]"
             )));
         }
+        // LuaTeX's `find_read_file` (id 0) and `open_read_file` callbacks,
+        // when the Lua side has installed them (`crate::input_hooks`).
+        let found = match crate::input_hooks::find_read_file(0, name) {
+            Some(Some(file)) => file,
+            Some(None) => return Err(TexError(format!("I can't find file `{name}'"))),
+            None => name.to_string(),
+        };
+        let name = found.as_str();
+        if let Some(text) = crate::input_hooks::open_read_file(name) {
+            let shown = match name.starts_with('/') || name.starts_with("./") {
+                true => name.to_string(),
+                false => format!("./{name}"),
+            };
+            return Ok((shown, crate::latex::load::without_trailing_endinput(text)));
+        }
         match self
             .locate_written(name)
             .or_else(|| Self::locate_input(name))
@@ -5556,6 +5593,11 @@ impl Lowerer {
     /// `\input` file can also print.
     fn input_pass(&mut self, src: &str) -> R<Vec<Cmd>> {
         let mut lx = Lexer::new(src);
+        // A file the document inputs; one a preloaded format inputs was
+        // dumped in luatex, and no callback saw it then.
+        if self.reading_document {
+            lx.mark_as_file();
+        }
         self.block(&mut lx, None)
     }
 

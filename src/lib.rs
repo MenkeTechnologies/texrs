@@ -44,6 +44,7 @@ pub mod glue;
 pub mod glyf;
 pub mod image;
 pub mod include;
+pub mod input_hooks;
 pub mod intercepts;
 pub mod intpar;
 pub mod io;

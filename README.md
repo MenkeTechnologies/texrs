@@ -327,6 +327,10 @@ than none.
   the lowerer decided and for the arms of one the run decides alike.
 - `\scantokens` and `\scantextokens`: the text read again as a file, a line at a
   time under the category codes in force, with `\everyeof` at its end.
+- The engine's call points for LuaTeX's input callbacks (`src/input_hooks.rs`):
+  `find_read_file` and `open_read_file` where `\input` and `\openin` open a file,
+  and `process_input_buffer` on each line of the document and the files it
+  inputs as the mouth reaches it, without its line end.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).
