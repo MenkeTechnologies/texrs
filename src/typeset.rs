@@ -6956,11 +6956,25 @@ fn image_remeasured(line: String, layout: &Layout, images: &Images) -> String {
 /// not a word in a line, so it owns its own lines rather than running into the
 /// prose either side of it -- exactly as a heading does (`lower::push_heading`).
 ///
-/// The height is measured here with [`crate::tikz::parse_document`] against no
+/// The height is measured with [`crate::tikz::parse_document`] against no
 /// font at all, because the lowerer has none to size node text by. `to_pdf`
 /// measures it again through the document's own face and rewrites this
-/// number; nothing between the two reads it.
+/// number before the page is fitted; the contents and `\pageref` passes,
+/// which fit pages earlier, read it as written here.
 pub fn picture_mark(options: &str, body: &str) -> String {
+    picture_paragraph(&picture_spec(options, body))
+}
+
+/// A picture paragraph whose span holds `spec`: what [`picture_spec`] makes,
+/// or the slot the lowerer writes while the picture is measured on the pool
+/// (`math::Formulas::picture`), which comes to the same text once filled.
+pub fn picture_paragraph(spec: &str) -> String {
+    format!("\n\n{PICTURE}{spec}{PICTURE}\n\n")
+}
+
+/// What a picture span holds between its two [`PICTURE`]s: the height
+/// measured against no font, and the source. See [`picture_mark`].
+pub fn picture_spec(options: &str, body: &str) -> String {
     let picture = crate::tikz::parse_document(
         options,
         body,
@@ -6968,13 +6982,20 @@ pub fn picture_mark(options: &str, body: &str) -> String {
         &crate::tikz::Estimate,
     );
     let (_, height) = picture.extent();
-    format!("\n\n{}\n\n", picture_span(height, options, body))
+    picture_contents(height, options, body)
 }
 
 /// One picture span: the height it reserves and the source it was read from.
 fn picture_span(height: f64, options: &str, body: &str) -> String {
     format!(
-        "{PICTURE}{height};{}:{}{PICTURE}",
+        "{PICTURE}{}{PICTURE}",
+        picture_contents(height, options, body)
+    )
+}
+
+fn picture_contents(height: f64, options: &str, body: &str) -> String {
+    format!(
+        "{height};{}:{}",
         base64(options.as_bytes()),
         base64(body.as_bytes())
     )

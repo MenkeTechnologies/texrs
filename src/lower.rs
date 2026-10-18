@@ -158,7 +158,8 @@ pub struct Lowerer {
     /// counted, so the recursion's use of the Rust stack can be bounded in
     /// bytes as well as in levels. See [`LOWER_STACK_BUDGET`].
     stack_base: usize,
-    /// The formulas read so far and not yet seen set; see [`crate::math::Formulas`].
+    /// The formulas and pictures read so far and not yet seen set or
+    /// measured; see [`crate::math::Formulas`].
     formulas: crate::math::Formulas,
     /// Where the document's finished paragraphs go while the rest of it is
     /// still being lowered, when a page builder is breaking them as they come:
@@ -3062,8 +3063,11 @@ impl Lowerer {
             )));
         };
         if self.text_output {
+            // Measuring the picture is parsing it: left in a slot, done on
+            // the pool and filled in document order with the formulas.
             let (options, body) = environment_option(&body);
-            self.push_text(out, &crate::typeset::picture_mark(options, body));
+            let slot = self.formulas.picture(options, body);
+            self.push_text(out, &crate::typeset::picture_paragraph(&slot));
         }
         Ok(())
     }

@@ -683,7 +683,7 @@ fn emit(
             push_setting(out, &slot(index, at), &spelled, display);
         }
     }
-    deferred.push(Deferred {
+    deferred.push(Deferred::Formula(UnsetFormula {
         formula: f,
         numbers: numbers.into_iter().map(|(row, n, _)| (row, n)).collect(),
         left,
@@ -692,7 +692,35 @@ fn emit(
         display,
         environment,
         measure,
-    });
+    }));
+}
+
+/// Work the lowerer writes a slot for and leaves to be done off its thread:
+/// what fills each slot is fixed by what this holds, so it comes out the same
+/// whichever thread does it and whenever.
+pub enum Deferred {
+    Formula(UnsetFormula),
+    /// A `tikzpicture`'s span, which holds the height the picture reserves
+    /// and so needs the picture parsed (`typeset::picture_spec`). The parse
+    /// reads the picture's own options and body, the predefined colours and
+    /// `tikz::Estimate` -- nothing the lowerer holds or goes on to change --
+    /// so the source is all there is to capture.
+    Picture {
+        options: String,
+        body: String,
+    },
+}
+
+impl Deferred {
+    /// What fills each of its slots, in the order they were written.
+    fn specs(&self) -> Vec<String> {
+        match self {
+            Deferred::Formula(formula) => formula.specs(),
+            Deferred::Picture { options, body } => {
+                vec![crate::typeset::picture_spec(options, body)]
+            }
+        }
+    }
 }
 
 /// A formula read while the document was lowered and not yet set.
@@ -707,7 +735,7 @@ fn emit(
 /// (§1204's equation number). Nothing the lowerer does reads a spec back, so
 /// the settings are made after lowering, on the pool when there are enough
 /// of them, and written into their slots by [`Formulas::fill`].
-pub struct Deferred {
+pub struct UnsetFormula {
     formula: parse::Formula,
     /// The numbered rows, each with the mlist set beside it, and whether at
     /// the left: fixed where the formula was read, so the setting is the
@@ -721,7 +749,7 @@ pub struct Deferred {
     measure: f64,
 }
 
-impl Deferred {
+impl UnsetFormula {
     /// The encoded spec of each row, in the order [`emit`] wrote the slots.
     fn specs(&self) -> Vec<String> {
         let f = &self.formula;
@@ -741,9 +769,10 @@ impl Deferred {
     }
 }
 
-/// How many formulas go to a worker at a time. A document with fewer is set
-/// on the calling thread, at the join, as is the part-batch at the end of
-/// any document: handing out a handful costs more than setting them.
+/// How many formulas (and pictures) go to a worker at a time. A document with
+/// fewer is set on the calling thread, at the join, as is the part-batch at
+/// the end of any document: handing out a handful costs more than setting
+/// them.
 const BATCH: usize = 32;
 
 /// One batch's settings: the encoded spec of each row of each formula in it.
@@ -800,6 +829,9 @@ impl SettingsTable {
 /// fontdimens, so there are no diagnostics whose order the overlap could
 /// change. A panic in a worker is carried back and raised at the join, as a
 /// parallel iterator would raise it.
+///
+/// A picture's span is deferred the same way and through the same batches:
+/// see [`Formulas::picture`]. Its parse reports nothing either.
 #[derive(Default)]
 pub struct Formulas {
     /// Read and not yet handed to a worker; the first is formula
@@ -826,6 +858,20 @@ impl Formulas {
     /// The index the next formula's slot names.
     fn next_index(&self) -> usize {
         self.read
+    }
+
+    /// Leave a picture's span to be measured off the lowering thread, and
+    /// return the slot to write in its place: see
+    /// [`crate::typeset::picture_paragraph`]. Measuring one is parsing its
+    /// whole body, which on a document dense with drawings was a third of
+    /// lowering.
+    pub fn picture(&mut self, options: &str, body: &str) -> String {
+        let index = self.next_index();
+        self.push(Deferred::Picture {
+            options: options.to_string(),
+            body: body.to_string(),
+        });
+        slot(index, 0)
     }
 
     fn push(&mut self, d: Deferred) {
@@ -914,11 +960,35 @@ pub(crate) fn receive<T>(rx: &std::sync::mpsc::Receiver<T>) -> T {
     }
 }
 
-/// What opens a slot inside a formula's marker spec. An encoded spec starts
-/// with the width, a digit or a minus sign, so `#` there is never a setting.
-const SLOT: &str = "\u{1}M#";
+/// What a slot starts with, written where a spec would stand: right after a
+/// formula marker's opening ([`FORMULA_OPENING`]) or a picture span's
+/// ([`crate::typeset::PICTURE`]). An encoded formula spec starts with its
+/// width and a picture's with its height -- a digit or a minus sign either
+/// way -- so `#` in either place is never a spec.
+const SLOT: char = '#';
 
-/// The slot for row `row` of the `index`-th deferred formula.
+/// What a formula marker opens with, ahead of its spec.
+const FORMULA_OPENING: &str = "\u{1}M";
+
+/// The first slot in `t` from byte `from` on: where its opening starts, and
+/// where its `#` is. A `#` anywhere else is the document's own.
+fn next_slot(t: &str, from: usize) -> Option<(usize, usize)> {
+    let mut at = from;
+    while let Some(found) = t[at..].find(SLOT) {
+        let hash = at + found;
+        let before = &t[..hash];
+        if before.ends_with(FORMULA_OPENING) {
+            return Some((hash - FORMULA_OPENING.len(), hash));
+        }
+        if before.ends_with(crate::typeset::PICTURE) {
+            return Some((hash - crate::typeset::PICTURE.len_utf8(), hash));
+        }
+        at = hash + SLOT.len_utf8();
+    }
+    None
+}
+
+/// The slot for row `row` of the `index`-th deferred formula or picture.
 fn slot(index: usize, row: usize) -> String {
     format!("#{index}.{row}")
 }
@@ -952,7 +1022,7 @@ fn fill_cmds<'s>(cmds: &mut [Cmd], specs: &SpecOf<'s>) {
 }
 
 /// Replace each slot in `t` with the spec it names. Text that only looks like
-/// a slot -- an index no formula has -- is left as it was.
+/// a slot -- an index nothing deferred has -- is left as it was.
 fn fill_text<'s>(t: &mut String, specs: &SpecOf<'s>) {
     if t.contains(SLOT) {
         *t = filled(t, specs);
@@ -963,24 +1033,24 @@ fn fill_text<'s>(t: &mut String, specs: &SpecOf<'s>) {
 /// writes it into a command.
 pub fn filled<'s>(t: &str, specs: &SpecOf<'s>) -> String {
     let mut out = String::with_capacity(t.len() * 2);
-    let mut rest = t;
-    while let Some(at) = rest.find(SLOT) {
-        // Keep `\u{1}M`, drop the `#`.
-        out.push_str(&rest[..at + SLOT.len() - 1]);
-        let after = &rest[at + SLOT.len()..];
-        let (named, end) = slot_named(after);
+    let mut from = 0;
+    while let Some((_, hash)) = next_slot(t, from) {
+        // Keep the opening, drop the `#`.
+        out.push_str(&t[from..hash]);
+        let name = hash + SLOT.len_utf8();
+        let (named, end) = slot_named(&t[name..]);
         match named.and_then(|(i, r)| specs(i, r)) {
             Some(spec) => {
                 out.push_str(spec);
-                rest = &after[end..];
+                from = name + end;
             }
             None => {
-                out.push('#');
-                rest = after;
+                out.push(SLOT);
+                from = name;
             }
         }
     }
-    out.push_str(rest);
+    out.push_str(&t[from..]);
     out
 }
 
@@ -988,21 +1058,24 @@ pub fn filled<'s>(t: &str, specs: &SpecOf<'s>) -> String {
 /// far [`filled`] writes what the join will. `None` when it has every one.
 pub fn first_unsettled<'s>(t: &str, specs: &SpecOf<'s>) -> Option<usize> {
     let mut from = 0;
-    while let Some(at) = t[from..].find(SLOT) {
-        let opens = from + at;
-        let (named, end) = slot_named(&t[opens + SLOT.len()..]);
+    while let Some((opens, hash)) = next_slot(t, from) {
+        let name = hash + SLOT.len_utf8();
+        let (named, end) = slot_named(&t[name..]);
         if named.and_then(|(i, r)| specs(i, r)).is_none() {
             return Some(opens);
         }
-        from = opens + SLOT.len() + end;
+        from = name + end;
     }
     None
 }
 
-/// The formula and row a slot names, read from just after its opening, and
-/// where the name ends.
+/// The index and row a slot names, read from just after its `#`, and where
+/// the name ends: at the formula marker's `\u{2}`, or the picture span's
+/// closing [`crate::typeset::PICTURE`].
 fn slot_named(after: &str) -> (Option<(usize, usize)>, usize) {
-    let end = after.find('\u{2}').unwrap_or(after.len());
+    let end = after
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(after.len());
     let named = after[..end]
         .split_once('.')
         .and_then(|(i, r)| Some((i.parse::<usize>().ok()?, r.parse::<usize>().ok()?)));

@@ -1060,6 +1060,30 @@ A picture's marker is also decoded through a lookup table rather than a search
 of the base64 alphabet, which had been about a quarter of a drawing-heavy
 document's serial time.
 
+A TikZ picture's marker carries the height it reserves, measured by parsing the
+whole picture against no font, and that parse was a third of lowering on the
+mixed document below and two thirds on the drawing one. The height is still
+needed (the contents and `\pageref` passes fit pages from it before pictures
+are remeasured), but the parse reads only the picture's own options and body,
+so the lowerer now writes the span with a slot and hands the source to the
+batches formulas go in (see **Formulas** below): one index space, the same
+32-item threshold, the same part-batch at the join and the same fill in
+document order, including the page builder's early breaking. With fewer than
+32 formulas and pictures together, or at one thread, everything is measured on
+the lowering thread at the end. Measured 2026-10-17
+(release build, 18-core aarch64 macOS, load averages 12 to 21, medians of 15
+interleaved PDF runs; lowering-thread CPU from a separately instrumented build,
+medians of 5):
+
+| document | wall at 1 thread | wall at 8 | lowering-thread CPU at 8 | of it, pictures |
+|---|---|---|---|---|
+| mixed text, pictures, formulas | 2232 → 2226 ms | 724 → 634 ms | 230 → 159 ms | 81 → 4 ms |
+| 6,000 pictures | 795 → 741 ms | 313 → 262 ms | 107 → 44 ms | 70 → 3 ms |
+| LaTeX text and formulas, no pictures | 1027 → 1000 ms | 313 → 317 ms | 96 → 97 ms | none |
+
+PDF, DVI, stdout and stderr are byte-identical to the previous build at 1 and
+8 threads on every benchmark document.
+
 **Formulas.** A formula is READ while the document is lowered, because reading
 it expands macros against the engine and consumes the input, but it is no longer
 SET there. The lowerer writes the formula's marker with a slot where the
