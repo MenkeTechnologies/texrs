@@ -25,6 +25,9 @@ fn dispatched() -> BTreeSet<String> {
     for src in [
         include_str!("../src/expand.rs"),
         include_str!("../src/lower.rs"),
+        // The list commands -- `\hbox`, `\kern`, `\setbox` -- are dispatched
+        // on the mode they meet, in the stomach's half of the lowerer.
+        include_str!("../src/lower/stomach.rs"),
     ] {
         for line in src.lines() {
             let line = line.trim();
@@ -48,7 +51,9 @@ fn dispatched() -> BTreeSet<String> {
             if !is_arm {
                 continue;
             }
+            // A guard (`"kern" if managed =>`) is not part of the name.
             let head = line.split("=>").next().unwrap_or(line);
+            let head = head.split(" if ").next().unwrap_or(head);
             for part in head.split('|') {
                 let part = part.trim().trim_end_matches(',');
                 let Some(inner) = part.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
