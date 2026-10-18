@@ -1764,7 +1764,6 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.number(lx)?);
-                    self.eng.end_test();
                     // §498 decides the test when the mouth reaches it. When
                     // every register it reads has a value the lowerer has
                     // followed (`crate::known`), that is now, and only the arm
@@ -1777,6 +1776,7 @@ impl Lowerer {
                             .enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
+                    self.eng.end_test();
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     self.next_arms = Some((if abs { "ifabsnum" } else { "ifnum" }, negated, line));
@@ -1805,7 +1805,6 @@ impl Lowerer {
                         _ => Rel::Equal,
                     };
                     let right = magnitude(abs, self.dimen_number(lx, false)?);
-                    self.eng.end_test();
                     // Decided now when both dimensions are known; see `\ifnum`.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         let opened_by = (if abs { "ifabsdim" } else { "ifdim" }, negated, line);
@@ -1813,6 +1812,7 @@ impl Lowerer {
                             .enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
+                    self.eng.end_test();
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     self.next_arms = Some((if abs { "ifabsdim" } else { "ifdim" }, negated, line));
@@ -1836,7 +1836,6 @@ impl Lowerer {
                     self.eng.begin_test();
                     let line = lx.line();
                     let selector = self.number(lx);
-                    self.eng.end_test();
                     (line, selector?)
                 } {
                     // A selector whose value is known -- a constant, or a
@@ -1846,6 +1845,7 @@ impl Lowerer {
                         self.eng.ifcase_file(lx, n, line)?
                     }
                     (_, value) => {
+                        self.eng.end_test();
                         self.flush_reports(&mut out);
                         let branches = self.case_arms(lx)?;
                         out.extend(case_chain_cmds(value, branches));
@@ -1856,7 +1856,6 @@ impl Lowerer {
                     let line = lx.line();
                     self.eng.begin_test();
                     let value = self.number(lx);
-                    self.eng.end_test();
                     let value = value?;
                     if let Some(v) = self.eng.known.num(&value) {
                         self.eng.enter_decided_file(
@@ -1866,6 +1865,7 @@ impl Lowerer {
                         )?;
                         continue;
                     }
+                    self.eng.end_test();
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
                     self.next_arms = Some(("ifodd", negated, line));
@@ -1995,7 +1995,7 @@ impl Lowerer {
                     let global = self
                         .eng
                         .global_defs_applied(name.name() == "xdef" || prefix);
-                    let snapshots = self.edef_snapshot(lx, global)?;
+                    let snapshots = self.edef(lx, global)?;
                     out.extend(snapshots);
                 }
                 // `\begingroup` is a group in tex.web's sense (§1063's
@@ -2144,6 +2144,17 @@ impl Lowerer {
                     let code = *code;
                     self.push_char_code(&mut out, code)?;
                 }
+                // §1221's `\let\x=<character>`: the name is that character's
+                // command and code wherever it is executed -- an implicit space
+                // (expl3's `\exp_stop_f:`), an implicit brace (`\bgroup`), a
+                // letter. In running text it is the character itself.
+                _ if matches!(self.eng.meanings.get(&name), Some(Meaning::Char(..))) => {
+                    let Some(Meaning::Char(c, cat)) = self.eng.meanings.get(&name) else {
+                        unreachable!("just matched");
+                    };
+                    let char_token = Token::Char(*c, *cat);
+                    lx.push_back(&[char_token]);
+                }
                 other => {
                     // TeX's loop idiom -- a macro whose last act is to call
                     // itself under a test -- becomes a real loop rather than an
@@ -2256,124 +2267,19 @@ impl Lowerer {
         }
     }
 
-    /// `\edef`, §1218 with §366's expansion of the body as it is read.
-    ///
-    /// The body is expanded the whole way NOW, over the registers
-    /// `crate::known` has followed, which is what tex does. Only a body that
-    /// reads a register whose value the run alone has (a `\rustcall`'s) falls
-    /// back on a snapshot: the register is copied into a scratch one at this
-    /// point in the program and the macro is defined to read THAT, so a later
-    /// use sees the frozen value rather than the live one.
-    fn edef_snapshot(&mut self, lx: &mut Lexer, global: bool) -> R<Vec<Cmd>> {
+    /// `\edef` and `\xdef`: §1218, with the body read by §473's
+    /// `scan_toks(true, true)` -- expanded AS it is read, over the registers
+    /// `crate::known` has followed. See `Engine::read_edef_body`.
+    fn edef(&mut self, lx: &mut Lexer, global: bool) -> R<Vec<Cmd>> {
         let name = self.eng.get_r_token(lx, false)?;
-        // The parameter text and body, exactly as `\def` reads them. `\edef`
-        // differs from `\def` only in WHEN the body is expanded; dropping the
-        // parameters here left `\edef\pair#1,#2.{…}` matching nothing and its
-        // delimiters landing in the output (found by `parity-fuzz`), and the
-        // numbering checks are the same ones.
-        let (params, raw, hash_brace) = self.eng.read_def_parts(lx, name)?;
-        // `\edef` expands its body NOW, which is the whole difference from
-        // `\def`. `tex.web` §366 expands it the WHOLE way while reading it, so
-        // a conditional in it is decided now and `\the` becomes §478's
-        // characters. The registers it reads are the ones `crate::known` has
-        // followed, so that is what happens first, as in tex.
-        let mark = self.eng.report_mark();
-        match self.eng.expand_edef_body(&raw) {
-            Ok(mut frozen) => {
-                frozen.extend(hash_brace);
-                self.eng
-                    .define_macro_with_params(name, params, frozen, global)?;
-                return Ok(Vec::new());
-            }
-            Err(_) => {
-                self.eng.drain_diagnostics(mark);
-            }
-        }
-        // The fallback, for a body that reads a register only the run has
-        // (`\rustcall`): expand only the macro calls, so `\the\count<n>`
-        // reaches the walk below as tokens and can be snapshotted into a
-        // scratch register.
-        let body = self.eng.expand_macros_only(&raw)?;
-        // Find `\the\count<n>` in the body; anything else stays literal.
-        let mut work = Lexer::new("");
-        work.push_back(&body);
-        let mut new_body: Vec<Token> = Vec::new();
-        // One snapshot per `\the` in the body: each copies the register it
-        // reads into a scratch one, at the point the `\edef` stands.
-        let mut snapshots = Vec::new();
-        while let Some(t) = work.pending.pop() {
-            match &t {
-                // §367: the token after `\noexpand` goes into the body as
-                // itself, and the marker does not.
-                Token::Cs(n) if n.name() == "noexpand" => {
-                    if let Some(next) = work.pending.pop() {
-                        new_body.push(next);
-                    }
-                }
-                Token::Cs(n) if n.name() == "the" => {
-                    // §478 writes a count as digits and a dimension as `3.0pt`;
-                    // the scratch register is of the same kind, so `\the` of
-                    // it writes the frozen value the way tex froze it.
-                    let next = work.pending.pop();
-                    // A quantity the stomach holds -- plain.tex's `\footnote`
-                    // freezes `\the\spacefactor` -- is read from the slot it
-                    // is mirrored in, into a scratch register of its kind.
-                    let internal = match &next {
-                        Some(Token::Cs(w)) => crate::stomach::Internal::of_name(w.name()),
-                        None | Some(_) => None,
-                    };
-                    if let Some(i) = internal {
-                        let (file, kind) = match i.is_dimen() {
-                            true => (crate::compiler::DIMEN_BASE, "dimen"),
-                            false => (0, "count"),
-                        };
-                        let scratch = self.next_scratch;
-                        self.next_scratch -= 1;
-                        snapshots.push(Cmd::SetCount(file + scratch, Num::Count(i.slot())));
-                        new_body.push(Token::cs("the"));
-                        new_body.push(Token::cs(kind));
-                        for ch in scratch.to_string().chars() {
-                            new_body.push(Token::Char(ch, Cat::Other));
-                        }
-                        continue;
-                    }
-                    let (file, kind) = match next {
-                        Some(Token::Cs(w)) if w.name() == "count" => (0, "count"),
-                        Some(Token::Cs(w)) if w.name() == "dimen" => {
-                            (crate::compiler::DIMEN_BASE, "dimen")
-                        }
-                        // Name the quantity rather than the construct: a
-                        // report saying only `Unsupported \edef body' left
-                        // every reader bisecting a .sty to find out which
-                        // `\the' it meant.
-                        other => {
-                            return Err(TexError(format!(
-                                "Unsupported \\edef body: \\the{}",
-                                match other {
-                                    Some(Token::Cs(w)) => format!("\\{}", w.name()),
-                                    Some(t) => t.to_text(self.eng.esc()),
-                                    None => String::new(),
-                                }
-                            )))
-                        }
-                    };
-                    let reg = self.eng.scan_number_pending(&mut work)?;
-                    let scratch = self.next_scratch;
-                    self.next_scratch -= 1;
-                    snapshots.push(Cmd::SetCount(file + scratch, Num::Count(file + reg)));
-                    new_body.push(Token::cs("the"));
-                    new_body.push(Token::cs(kind));
-                    for ch in scratch.to_string().chars() {
-                        new_body.push(Token::Char(ch, Cat::Other));
-                    }
-                }
-                other => new_body.push(*other),
-            }
-        }
-        new_body.extend(hash_brace);
-        self.eng
-            .define_macro_with_params(name, params, new_body, global)?;
-        Ok(snapshots)
+        let mut frozen = crate::expand::Frozen {
+            next_scratch: self.next_scratch,
+            snapshots: Vec::new(),
+        };
+        let (params, body) = self.eng.read_edef_parts(lx, name, &mut frozen)?;
+        self.next_scratch = frozen.next_scratch;
+        self.eng.define_macro_with_params(name, params, body, global)?;
+        Ok(frozen.snapshots)
     }
 
     /// The `\else` and `\fi` arms of a conditional, each lowered.
@@ -6052,8 +5958,11 @@ impl Lowerer {
     #[inline(never)]
     fn known_after_group(&mut self, mark: usize, saves: &[i64], keeps: &[(i64, u16)]) {
         self.eng.known.undo_to(mark, Some(saves));
+        // §283: a register the group assigned `\global`ly is left with what
+        // its last global assignment made it, which `crate::known` followed.
         for (reg, _) in keeps {
-            self.eng.known.set(*reg, None);
+            let v = self.eng.known.global_value(*reg);
+            self.eng.known.set(*reg, v);
         }
     }
 

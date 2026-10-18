@@ -25,6 +25,10 @@ pub struct Known {
     /// Every change, with what it replaced, so a group or a conditional arm
     /// can put the state back without cloning the table.
     trail: Vec<(i64, Option<Option<i64>>)>,
+    /// The value each register's last `\global` assignment left (§283): what
+    /// a group that assigned it globally leaves behind when it ends, however
+    /// a later local assignment in the group changed it.
+    globals: rustc_hash::FxHashMap<i64, Option<i64>>,
     /// Know nothing at all, for code that runs at a time the lowerer cannot
     /// place: the output routine, which the page builder fires.
     opaque: bool,
@@ -78,6 +82,13 @@ impl Known {
     pub fn clear(&mut self) {
         self.map.clear();
         self.trail.clear();
+        self.globals.clear();
+    }
+
+    /// What register `slot`'s last `\global` assignment left, if one was
+    /// followed.
+    pub fn global_value(&self, slot: i64) -> Option<i64> {
+        self.globals.get(&slot).copied().flatten()
     }
 
     /// The known count registers that are not zero, in register order -- what
@@ -163,6 +174,12 @@ impl Known {
             }
             // A group puts its registers back itself, where it is lowered.
             Cmd::Group { .. } => {}
+            // Just after a `\global` assignment: its value is the one the
+            // groups around it leave.
+            Cmd::KeepGlobal { reg, .. } => {
+                let v = self.get(*reg);
+                self.globals.insert(*reg, v);
+            }
             // The output routine runs whenever the page builder fires it, so
             // what it assigns is not known after any point of the document.
             Cmd::OutputRoutine(Some(body)) => {

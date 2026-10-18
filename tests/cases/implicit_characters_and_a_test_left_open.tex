@@ -1,0 +1,16 @@
+% An implicit character is executed as the character it stands for (§1031
+% looks at cur_cmd, not at how the token was spelled), and a conditional
+% opened while another's operands are read sits on the condition stack
+% above it (§498): \x's \ifx is entered while \if reads its second operand,
+% which is then the space after `aa'. \edef reads its body expanding as it
+% goes (§473), so both forms agree.
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\let\bgroup={ \let\egroup=}
+\count1=1 \bgroup\count1=5 \egroup
+\message{[\the\count1]}
+\def\x{\ifx aa b\else c\fi}
+\edef\e{\if b\x Y\else N\fi}\message{[\meaning\e]}
+\if b\x \message{Y}\else\message{N}\fi
+\def\y{\ifx ab b\else c\fi}
+\edef\f{\if c\y Y\else N\fi}\message{[\meaning\f]}
+\end

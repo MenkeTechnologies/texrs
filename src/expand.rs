@@ -1903,6 +1903,24 @@ impl Engine {
     /// was refused, which is exactly how a document says "take the other
     /// branch". §494's `pass_text` needs the same resolution to count a nested
     /// conditional it is skipping over.
+    /// The primitive a `\let` copy stands for, or the name itself.
+    pub fn unaliased(&self, name: CsId) -> CsId {
+        match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) => *p,
+            _ => name,
+        }
+    }
+
+    /// Whether `name` means the primitive `primitive` now: the primitive
+    /// itself, never redefined, or a `\let` copy of it.
+    pub fn means_primitive(&self, name: CsId, primitive: &str) -> bool {
+        match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) => p.name() == primitive,
+            None => name.name() == primitive,
+            Some(_) => false,
+        }
+    }
+
     pub fn primitive_meaning(&self, name: CsId) -> CsId {
         match self.meanings.get(&name) {
             Some(Meaning::Primitive(p)) if *p != name => *p,
@@ -2391,7 +2409,6 @@ impl Engine {
             }
             "ifcase" => {
                 let n = self.scan_number(lx, pending_only)?;
-                self.end_test();
                 return self.do_ifcase(lx, n, pending_only, line);
             }
             // §501: the mode the lowerer is following; `\ifinner` is
@@ -2407,7 +2424,6 @@ impl Engine {
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
-        self.end_test();
         let name = CONDITIONALS
             .iter()
             .find(|c| **c == name)
@@ -2417,16 +2433,53 @@ impl Engine {
     }
 
     /// §498's `push_cond` with `if_limit=if_code`: a conditional whose test is
-    /// being read. The lowerer reads the test of an `\ifnum` itself, and opens
-    /// and closes it through these too.
+    /// being read. It stays on the condition stack, BELOW any conditional
+    /// its test expanded and left open (expl3's `\if:w #4 \__..._base:N #2`
+    /// does, by design), and is decided in place there by `enter_decided`.
+    /// The lowerer reads the test of an `\ifnum` itself, and opens it through
+    /// this too.
     pub fn begin_test(&mut self) {
         self.conds.push(CondState::Testing);
     }
 
-    /// The test has been read; the conditional is decided next.
+    /// The test of the conditional most recently begun was read for a branch
+    /// the RUN takes (the lowerer's run-time `\ifnum`), so it leaves the
+    /// expander's stack; a message body's own conditionals do the same.
     pub fn end_test(&mut self) {
-        if let Some(at) = self.conds.iter().rposition(|c| matches!(c, CondState::Testing)) {
+        if let Some(at) = self.testing_at() {
             self.conds.remove(at);
+        }
+    }
+
+    /// Where the conditional whose test is being read sits.
+    fn testing_at(&self) -> Option<usize> {
+        self.conds.iter().rposition(|c| matches!(c, CondState::Testing))
+    }
+
+    /// Where the description of `conds[at]` goes in `cond_info`, which holds
+    /// one entry per decided conditional, in stack order, among the run-time
+    /// arms the lowerer is in.
+    fn info_slot(&self, at: usize) -> usize {
+        let k = self.conds[..at]
+            .iter()
+            .filter(|c| !matches!(c, CondState::Testing))
+            .count();
+        self.cond_info
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.3.is_none())
+            .nth(k)
+            .map_or(self.cond_info.len(), |(i, _)| i)
+    }
+
+    /// §498's `change_if_limit` on the conditional at `at`: decided, it is
+    /// now `state` (and described in `cond_info` from now on).
+    fn settle_cond(&mut self, at: usize, state: CondState, info: (&'static str, bool, u32)) {
+        let was_testing = matches!(self.conds[at], CondState::Testing);
+        self.conds[at] = state;
+        if was_testing {
+            let slot = self.info_slot(at);
+            self.cond_info.insert(slot, (info.0, info.1, info.2, None));
         }
     }
 
@@ -2449,22 +2502,42 @@ impl Engine {
         pending_only: bool,
         (name, negated, line): (&'static str, bool, u32),
     ) -> R<()> {
-        match truth {
-            true => self.open_cond(CondState::Taken, name, negated, line),
-            false => {
-                // Skip to `\else` (run that branch) or `\fi` (run nothing).
-                let hit_else = self.skip_to(lx, true, pending_only)?;
-                if hit_else {
-                    self.open_cond(CondState::Done, name, negated, line);
+        let info = (name, negated, line);
+        let at = match self.testing_at() {
+            Some(at) => at,
+            None => {
+                self.conds.push(CondState::Testing);
+                self.conds.len() - 1
+            }
+        };
+        if truth {
+            self.settle_cond(at, CondState::Taken, info);
+            return Ok(());
+        }
+        self.settle_cond(at, CondState::Done, info);
+        // §500's false test: skip, and at each `\else`, `\or` or `\fi` ask
+        // whose it is. Ours when ours is the innermost open conditional: an
+        // `\else` starts the text that runs, a `\fi` ends it all, an `\or`
+        // is `Extra`. One a conditional the test left open owns is passed
+        // over, its `\fi` closing it.
+        loop {
+            let stop = self.pass_text(lx, pending_only)?;
+            if self.conds.len() == at + 1 {
+                match stop {
+                    Stop::Else => return Ok(()),
+                    Stop::Fi => {
+                        self.close_cond();
+                        return Ok(());
+                    }
+                    Stop::Or => {
+                        let msg = format!("Extra {}or", self.esc());
+                        self.report(lx, &msg);
+                    }
                 }
+            } else if matches!(stop, Stop::Fi) {
+                self.close_cond();
             }
         }
-        Ok(())
-    }
-
-    fn open_cond(&mut self, state: CondState, name: &'static str, negated: bool, line: u32) {
-        self.conds.push(state);
-        self.cond_info.push((name, negated, line, None));
     }
 
     fn close_cond(&mut self) -> Option<CondState> {
@@ -2580,22 +2653,44 @@ impl Engine {
     /// `\or`, takes the `\else` branch rather than case 0 -- a negative n never
     /// reaches zero, so every `\or` is skipped until the `\else` stops it.
     fn do_ifcase(&mut self, lx: &mut Lexer, n: i64, pending_only: bool, line: u32) -> R<()> {
+        let info = ("ifcase", false, line);
+        let at = match self.testing_at() {
+            Some(at) => at,
+            None => {
+                self.conds.push(CondState::Testing);
+                self.conds.len() - 1
+            }
+        };
+        if n == 0 {
+            self.settle_cond(at, CondState::TakenCase, info);
+            return Ok(());
+        }
+        self.settle_cond(at, CondState::Done, info);
         let mut remaining = n;
         while remaining != 0 {
-            match self.pass_text(lx, pending_only)? {
+            let stop = self.pass_text(lx, pending_only)?;
+            // A boundary of a conditional the selector's scan left open is
+            // passed over, its `\fi` closing it (§509's `cond_ptr<>save_cond_ptr`).
+            if self.conds.len() != at + 1 {
+                if matches!(stop, Stop::Fi) {
+                    self.close_cond();
+                }
+                continue;
+            }
+            match stop {
                 // Another case boundary: one case skipped, keep counting.
                 Stop::Or => remaining -= 1,
                 // §509's `common_ending` with `cur_chr <> fi_code`: the else
                 // text runs and its `\fi` closes the conditional.
-                Stop::Else => {
-                    self.open_cond(CondState::Done, "ifcase", false, line);
+                Stop::Else => return Ok(()),
+                // The conditional ended before the case was reached.
+                Stop::Fi => {
+                    self.close_cond();
                     return Ok(());
                 }
-                // The conditional ended before the case was reached.
-                Stop::Fi => return Ok(()),
             }
         }
-        self.open_cond(CondState::TakenCase, "ifcase", false, line);
+        self.conds[at] = CondState::TakenCase;
         Ok(())
     }
 
@@ -3240,7 +3335,7 @@ impl Engine {
         use crate::dimen::ScannedDimen;
         // `\dimexpr ...\relax` stands where a dimension does.
         if let Some(t) = self.take(lx, pending_only) {
-            let is_expr = matches!(&t, Token::Cs(n) if n.name() == "dimexpr");
+            let is_expr = matches!(&t, Token::Cs(n) if self.unaliased(*n).name() == "dimexpr");
             lx.push_back(std::slice::from_ref(&t));
             if is_expr {
                 let _ = self.take(lx, pending_only);
@@ -4642,7 +4737,8 @@ impl Engine {
         let mu = self.mu_units;
         if let Some(t) = self.take(lx, false) {
             let is_expr = matches!(&t, Token::Cs(n)
-                if (mu && n.name() == "muexpr") || (!mu && n.name() == "glueexpr"));
+                if (mu && self.unaliased(*n).name() == "muexpr")
+                    || (!mu && self.unaliased(*n).name() == "glueexpr"));
             lx.push_back(std::slice::from_ref(&t));
             if is_expr {
                 let _ = self.take(lx, false);
@@ -5922,15 +6018,29 @@ impl Engine {
             // is absorbed, and reading for it is what reads the NEXT line when
             // the constant ends one (so that line keeps the old `\endlinechar`
             // in `\endlinechar=`\Q`).
-            match self.take(lx, pending_only) {
-                Some(t) if t.is_space() => {}
-                Some(t) => lx.back_input(std::slice::from_ref(&t)),
-                None => {}
+            //
+            // §442 reads it with `get_x_token`, so what follows the constant
+            // expands first: expl3's `\romannumeral-`0` runs the expansion
+            // behind it to its first unexpandable token, which is the whole
+            // of how its `f`-type arguments work.
+            loop {
+                match self.take(lx, pending_only) {
+                    Some(Token::Cs(n)) if self.digit_position_expands(lx, n, pending_only)? => {
+                        continue
+                    }
+                    Some(t) if t.is_space() => {}
+                    Some(t) => lx.back_input(std::slice::from_ref(&t)),
+                    None => {}
+                }
+                break;
             }
             return Ok(sign * code);
         }
         if let Token::Cs(name) = &cur {
-            let name = *name;
+            // A `\let` copy of a primitive is that primitive here (§1221):
+            // expl3 reads every number through `\__int_eval:w`, which is
+            // `\numexpr` under another name.
+            let name = self.unaliased(*name);
             // `\numexpr ...\relax` in numeric position.
             if name.name() == "numexpr" {
                 return Ok(sign * self.scan_expr(lx, pending_only, false)?);
@@ -6353,7 +6463,14 @@ impl Engine {
             };
             // §367: the token after `\noexpand` goes into the body as itself,
             // so `\edef\b{\noexpand\a}` defines a call of `\a`.
-            if name.name() == "noexpand" {
+            // A `\let` copy is the primitive it copies (expl3's `\exp_not:N`
+            // is `\noexpand`); a macro is never one of these.
+            let prim = match self.meanings.get(&name) {
+                Some(Meaning::Primitive(p)) => *p,
+                Some(_) => CsId::intern(""),
+                None => name,
+            };
+            if prim.name() == "noexpand" {
                 if let Some(next) = lx.pending.pop() {
                     out.push(next);
                 }
@@ -6362,22 +6479,28 @@ impl Engine {
             // `\unexpanded{...}` is the one thing that stops this pass: its
             // general text goes into the body AS TOKENS (etex.ch: in an \edef
             // the list `the_toks` makes is not expanded again), so a macro
-            // inside it is called when the body runs rather than now.
+            // inside it is called when the body runs rather than now. Like
+            // §478's list it goes in as it stands, so a parameter character in
+            // it is a character of the body and never starts a parameter:
+            // `as_body` writes it the way a stored body says that (luatex:
+            // `\edef\y{a\unexpanded{#}b}` is `macro:->a##b`). expl3 builds its
+            // `\c__char_..._tl` constants out of a catcode-6 `^^@` exactly so.
             // `\expanded` is the gullet's, in `try_expand`.
-            if self.primitive_meaning(name).name() == "unexpanded" {
+            if prim.name() == "unexpanded" {
                 let group = self.scan_general_text(&mut lx)?;
                 out.extend(group);
                 continue;
             }
             // §478's `the_toks`, which is what `\the` means inside an \edef:
             // the value as characters, not the reading it stands for.
-            if name.name() == "the" || name.name() == "number" {
+            if prim.name() == "the" || prim.name() == "number" {
+                let name = prim;
                 // §478's token-list arm produces TOKENS, and §366 puts them in
                 // the body without expanding them again. Characters would be a
                 // different macro: see `the_token_list`.
                 if name.name() == "the" {
                     if let Some(list) = self.the_token_list(&mut lx, true)? {
-                        out.extend(as_body(&list));
+                        out.extend(list);
                         continue;
                     }
                 }
@@ -6634,7 +6757,10 @@ impl Engine {
                 Token::Char(..) => None,
             };
             match (&t, expandable) {
-                (Token::Cs(n), _) if n.name() == "endcsname" => return Ok(name),
+                // §372 ends the name at the COMMAND `end_cs_name`, whatever it
+                // is spelt: expl3 ends every name with `\cs_end:`, a `\let`
+                // copy of `\endcsname`.
+                (Token::Cs(n), _) if self.means_primitive(*n, "endcsname") => return Ok(name),
                 (Token::Char(c, cat), _) if *cat != Cat::Active => name.push(*c),
                 (_, Some(id)) if self.try_expand(lx, id, pending_only)? => {}
                 // §372 reads with `get_x_token`, so `\the` and `\number` give
@@ -7265,6 +7391,190 @@ impl Engine {
     /// (§473, §476, §479), for the `\edef` the lowerer snapshots: the same
     /// numbering checks, the same recovery from a bad `#`, and the left brace
     /// of a trailing `#{` returned so the caller can end the body with it.
+    /// `\edef`'s parameter text and body (§473 with `xpand` true): the
+    /// parameter text as `\def` reads it, and the body EXPANDED AS IT IS
+    /// READ, never read whole first. That difference is what lets a body
+    /// hold `\unexpanded{... # ...}` or `\the\toks` over a list with a `#` in
+    /// it: §477 links such a list into the body as it stands, past §479's
+    /// check for a parameter number, so its `#` is a character of the body
+    /// (written `##`, as a stored body writes one). Read first and expanded
+    /// after, every one of those was `Illegal parameter number`. A `#` the
+    /// expansion produces any other way is §479's, followed by a digit
+    /// read with `get_x_token`.
+    pub fn read_edef_parts(
+        &mut self,
+        lx: &mut Lexer,
+        name: CsId,
+        frozen: &mut Frozen,
+    ) -> R<(Vec<Token>, Vec<Token>)> {
+        let (params, hash_brace) = self.scan_parameter_text(lx)?;
+        validate_params(&params)?;
+        let count = params
+            .iter()
+            .filter(|p| matches!(p, Token::Char(_, Cat::Param)))
+            .count() as u32;
+        let mut body = self.scan_toks_x(lx, Some((name, count)), frozen)?;
+        // §473: a parameter text that ended with `#{` appends that brace.
+        body.extend(hash_brace);
+        Ok((params, body))
+    }
+
+    /// `\the` of a quantity the stomach holds (`\spacefactor`, `\prevdepth`,
+    /// the rest of [`crate::stomach::Internal`]), which only the run knows:
+    /// the value is copied, where the `\edef` stands, into a scratch register
+    /// of its kind, and the body reads that register -- so it holds the value
+    /// of the moment, as §478's characters would. `None`, with nothing read,
+    /// for any other quantity.
+    fn freeze_internal(&mut self, lx: &mut Lexer, frozen: &mut Frozen) -> Option<Vec<Token>> {
+        let t = self.take(lx, false)?;
+        let internal = match &t {
+            Token::Cs(w) => crate::stomach::Internal::of_name(self.unaliased(*w).name()),
+            Token::Char(..) => None,
+        };
+        let Some(i) = internal else {
+            lx.back_input(&[t]);
+            return None;
+        };
+        let (file, kind) = match i.is_dimen() {
+            true => (crate::compiler::DIMEN_BASE, "dimen"),
+            false => (0, "count"),
+        };
+        let at = frozen.next_scratch;
+        frozen.next_scratch -= 1;
+        frozen
+            .snapshots
+            .push(crate::ir::Cmd::SetCount(file + at, crate::ir::Num::Count(i.slot())));
+        let mut toks = vec![Token::cs("the"), Token::cs(kind)];
+        toks.extend(str_toks(&at.to_string()));
+        Some(toks)
+    }
+
+    /// The loop of §473 with `xpand` true, after the left brace: `def` is the
+    /// macro being defined and its parameter count, when this is a body.
+    fn scan_toks_x(
+        &mut self,
+        lx: &mut Lexer,
+        def: Option<(CsId, u32)>,
+        frozen: &mut Frozen,
+    ) -> R<Vec<Token>> {
+        let as_written = |list: &[Token]| match def {
+            Some(_) => as_body(list),
+            None => list.to_vec(),
+        };
+        let mut depth = 1usize;
+        let mut out = Vec::new();
+        let mut steps = 0usize;
+        loop {
+            steps += 1;
+            if steps > 5_000_000 {
+                return Err(TexError("TeX capacity exceeded".into()));
+            }
+            let Some(t) = self.take(lx, false) else {
+                return Err(TexError("Runaway definition".into()));
+            };
+            // §477: expand what expands. A `\protected` macro does not.
+            let cs = match &t {
+                Token::Cs(n) => Some(*n),
+                Token::Char(c, Cat::Active) => Some(Self::active_cs(*c)),
+                Token::Char(..) => None,
+            };
+            if let Some(n) = cs {
+                if n.noexpand_origin().is_none() {
+                    let prim = match self.meanings.get(&n) {
+                        Some(Meaning::Primitive(p)) => *p,
+                        Some(_) => CsId::intern(""),
+                        None => n,
+                    };
+                    // §367: the token after `\noexpand` goes in as itself.
+                    if prim.name() == "noexpand" {
+                        if let Some(next) = self.take(lx, false) {
+                            out.push(unmarked(next));
+                        }
+                        continue;
+                    }
+                    // §477's `the` arm, `\unexpanded` with it (etex.ch): the
+                    // list goes in as it stands.
+                    if prim.name() == "unexpanded" {
+                        let group = self.scan_general_text(lx)?;
+                        out.extend(as_written(&group));
+                        continue;
+                    }
+                    if prim.name() == "the" {
+                        if let Some(list) = self.the_token_list(lx, false)? {
+                            out.extend(as_written(&list));
+                            continue;
+                        }
+                        if let Some(toks) = self.freeze_internal(lx, frozen) {
+                            out.extend(toks);
+                            continue;
+                        }
+                        let text = self.read_the(lx, false, false)?;
+                        out.extend(str_toks(&text));
+                        continue;
+                    }
+                    if prim.name() == "number" {
+                        let text = self.read_the(lx, true, false)?;
+                        out.extend(str_toks(&text));
+                        continue;
+                    }
+                    let protected = matches!(
+                        self.meanings.get(&n),
+                        Some(Meaning::Macro(m)) if m.protected
+                    );
+                    if !protected && self.try_expand(lx, n, false)? {
+                        continue;
+                    }
+                }
+                out.push(unmarked(t));
+                continue;
+            }
+            match &t {
+                Token::Char(_, Cat::BeginGroup) => depth += 1,
+                Token::Char(_, Cat::EndGroup) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(out);
+                    }
+                }
+                // §479: a parameter character is a parameter number or `##`,
+                // the next token read with `get_x_token`.
+                Token::Char(_, Cat::Param) if def.is_some() => {
+                    let (name, count) = def.expect("just matched");
+                    let next = loop {
+                        let Some(next) = self.take(lx, false) else {
+                            return Err(TexError("Runaway definition".into()));
+                        };
+                        match next {
+                            Token::Cs(m) if self.try_expand(lx, m, false)? => continue,
+                            next => break next,
+                        }
+                    };
+                    let legal = match next {
+                        Token::Char(_, Cat::Param) => true,
+                        Token::Char(c, _) => c.to_digit(10).is_some_and(|d| d >= 1 && d <= count),
+                        Token::Cs(_) => false,
+                    };
+                    out.push(t);
+                    match legal {
+                        true => out.push(next),
+                        false => {
+                            lx.back_input(&[next]);
+                            let msg = format!(
+                                "Illegal parameter number in definition of {}",
+                                self.sprint_cs(name)
+                            );
+                            self.report(lx, &msg);
+                            out.push(t);
+                        }
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(t);
+        }
+    }
+
     pub fn read_def_parts(
         &mut self,
         lx: &mut Lexer,
@@ -7552,6 +7862,14 @@ fn validate_params(params: &[Token]) -> R<()> {
 static LUATEX_REGISTERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Make every engine built after this LuaTeX-ranged, or TeX82-ranged again.
+/// What an `\edef` body that reads a quantity only the run has leaves for
+/// the lowerer: the copies into scratch registers (counting down from
+/// `next_scratch`) that must run where the `\edef` stands.
+pub struct Frozen {
+    pub next_scratch: i64,
+    pub snapshots: Vec<crate::ir::Cmd>,
+}
+
 pub fn set_luatex_registers(on: bool) {
     LUATEX_REGISTERS.store(on, std::sync::atomic::Ordering::Relaxed);
 }
