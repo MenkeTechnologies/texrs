@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">188</div>
+            <div class="stat-val">203</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -171,6 +171,20 @@
 \def\a#1{x#1}\show\a   % =&gt; &gt; \a=macro:#1-&gt;x#1.</pre></td></tr>
             <tr><td><code>\showthe</code></td><td>Print what <code>\the</code> would make of an internal quantity (tex.web §1297): <code>&gt; </code>, the value as §465 writes it — a count as digits, a dimension as <code>3.5pt</code>, a glue with its stretch and shrink, a token list with each <code>#</code> doubled — and a period, followed by the context an error shows, as <code>\show</code> does. A register's value is the run's, so it is read when the run reaches the <code>\showthe</code>.</td><td><pre>\showthe&lt;internal quantity&gt;
 \count1=5 \showthe\count1   % =&gt; &gt; 5.</pre></td></tr>
+            <tr><td><code>\showtokens</code></td><td>Print a token list as <code>\show</code> prints a macro's body: <code>&gt; </code>, the general text with each <code>#</code> doubled and a space after a control word, a period, and the context. The text is read as <code>\detokenize</code> reads it, expanding up to the brace, so <code>\showtokens\expandafter{\x}</code> shows <code>\x</code>'s replacement. An eTeX primitive.</td><td><pre>\showtokens{&lt;general text&gt;}
+\showtokens{\a b #}   % =&gt; &gt; \a b ##.</pre></td></tr>
+            <tr><td><code>\interactionmode</code></td><td>The interaction mode as an integer -- 0 batch, 1 nonstop, 2 scroll, 3 errorstop -- read where a number is scanned and assigned like a parameter, though always globally. A value outside 0..3 is <code>! Bad interaction mode</code> and is ignored. An eTeX primitive.</td><td><pre>\interactionmode=&lt;number&gt;
+\message{\the\interactionmode}   % =&gt; 1 under -interaction=nonstopmode</pre></td></tr>
+            <tr><td><code>\batchmode</code></td><td>From here on nothing reaches the terminal: messages and error reports alike are withheld, and a run that reported anything still ends pointing to the transcript. Global, and like the other three it ends the terminal line, so what is printed next starts one of its own (tex.web §1264).</td><td><pre>\batchmode\message{not shown}\nonstopmode</pre></td></tr>
+            <tr><td><code>\nonstopmode</code></td><td>Report errors and carry on without stopping; what a run starts in under the parity harnesses. Global, and it ends the terminal line.</td><td><pre>\nonstopmode</pre></td></tr>
+            <tr><td><code>\scrollmode</code></td><td>The same as <code>\nonstopmode</code> here, since texrs never stops to ask; <code>\interactionmode</code> reads 2.</td><td><pre>\scrollmode</pre></td></tr>
+            <tr><td><code>\errorstopmode</code></td><td>The same as <code>\nonstopmode</code> here, since texrs never stops to ask; <code>\interactionmode</code> reads 3.</td><td><pre>\errorstopmode</pre></td></tr>
+            <tr><td><code>\eTeXversion</code></td><td>e-TeX's major version, a read-only integer: 2, as luatex reports it. <code>\eTeXminorversion</code> is the minor one.</td><td><pre>\message{\the\eTeXversion}   % =&gt; 2</pre></td></tr>
+            <tr><td><code>\eTeXminorversion</code></td><td>e-TeX's minor version, a read-only integer: 2, as luatex reports it.</td><td><pre>\message{\the\eTeXminorversion}   % =&gt; 2</pre></td></tr>
+            <tr><td><code>\eTeXrevision</code></td><td>e-TeX's revision as characters: <code>.2</code>, as luatex expands it.</td><td><pre>\message{\eTeXrevision}   % =&gt; .2</pre></td></tr>
+            <tr><td><code>\eTeXVersion</code></td><td>e-TeX's version as characters: <code>2.2</code>, as luatex expands it.</td><td><pre>\message{\eTeXVersion}   % =&gt; 2.2</pre></td></tr>
+            <tr><td><code>\luatexversion</code></td><td>LuaTeX's version as a read-only integer, the one packages test to find the engine: 124, for the luatex 1.24.0 texrs is measured against.</td><td><pre>\ifnum\luatexversion&gt;100 \message{new enough}\fi</pre></td></tr>
+            <tr><td><code>\luatexrevision</code></td><td>LuaTeX's revision as characters: <code>0</code>.</td><td><pre>\message{\luatexrevision}   % =&gt; 0</pre></td></tr>
             <tr><td><code>\inputlineno</code></td><td>The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and <code>\the</code> and <code>\number</code> write it.</td><td><pre>\inputlineno
 \message{\the\inputlineno}   % =&gt; the line this is on</pre></td></tr>
             <tr><td><code>\meaning</code></td><td>What a token MEANS, as characters (tex.web §296's print_meaning). A macro reads back as <code>macro:</code> then its parameter text, <code>-&gt;</code> and its body, with <code>\long</code>, <code>\outer</code> and <code>\protected</code> run together in front; a <code>\chardef</code> constant reads back as <code>\char"41</code>; a register name reads back as the register it stands for; a character carries the NAME of its category, so <code>\meaning A</code> is <code>the letter A</code>. A name nothing has defined is <code>undefined</code>. Expandable, like <code>\string</code>, so it works inside a <code>\message</code>.</td><td><pre>\meaning&lt;token&gt;
@@ -356,6 +370,9 @@
             <tr><td><code>\afterassignment</code></td><td>Hold the next token until the following ASSIGNMENT has finished (tex.web §1269). One only: a second <code>\afterassignment</code> before the assignment replaces the first. A <code>\message</code> is not an assignment and neither is a group, so the token waits for the next <code>\def</code>, <code>\let</code>, register write or arithmetic and is inserted after it.</td><td><pre>\afterassignment&lt;token&gt;
 \def\m{\message{DONE}}
 \afterassignment\m \count1=5   % =&gt; DONE, with \count1 already 5</pre></td></tr>
+            <tr><td><code>\currentgrouplevel</code></td><td>How many groups are open, a read-only integer: 0 outside every group. An eTeX primitive.</td><td><pre>{\message{\the\currentgrouplevel}}   % =&gt; 1</pre></td></tr>
+            <tr><td><code>\currentgrouptype</code></td><td>What opened the innermost group, as eTeX numbers it: 0 outside every group, 1 for a brace, 14 for <code>\begingroup</code>.</td><td><pre>\begingroup\message{\the\currentgrouptype}\endgroup   % =&gt; 14</pre></td></tr>
+            <tr><td><code>\showgroups</code></td><td>List the open groups, innermost first, each with its level, the line it was entered on and what opened it -- <code>### simple group (level 1) entered at line 3 ({)</code> -- then <code>### bottom level</code>, followed by <code>! OK</code> and the context. The listing reaches the terminal only under a positive <code>\tracingonline</code>; otherwise <code>! OK (see the transcript file)</code> says where it went. An eTeX primitive.</td><td><pre>{\tracingonline=1 \showgroups}</pre></td></tr>
           </tbody>
         </table>
       </section>

@@ -1,0 +1,9 @@
+% primitives: interactionmode batchmode nonstopmode scrollmode errorstopmode
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\interactionmode]}\scrollmode\message{[\the\interactionmode]}
+\message{a}\interactionmode=1 \message{[\the\interactionmode]}
+{\interactionmode=2 }\message{[\the\interactionmode]}
+\batchmode\message{hidden}\nonstopmode\message{[\the\interactionmode]}
+\ifnum\interactionmode=1 \message{nonstop}\fi
+\count1=\interactionmode \message{[\the\count1]}
+\end

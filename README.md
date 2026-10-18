@@ -291,6 +291,11 @@ than none.
   register operands read when the program runs, in an assignment, a
   conditional and a `\message` alike. `\glueexpr` and `\muexpr` over glue
   written out.
+- e-TeX's and LuaTeX's version numbers and strings (`\eTeXversion`, `\eTeXrevision`,
+  `\luatexversion`, `\luatexrevision`, ...), `\currentgrouplevel` and
+  `\currentgrouptype`, `\showtokens`, `\showgroups`, and the four interaction
+  modes with `\interactionmode`: global, ending the terminal line, and batch mode
+  withholding what the lowerer would print.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

@@ -18,3 +18,9 @@ expr_overflow.tex  Every report and value agrees with luatex; the stream ends
 glueexpr.tex       `\the\glueexpr' and `\the\muexpr' are refused
 #                  (`Unsupported \the'): only \numexpr and \dimexpr have an
 #                  expression the run evaluates.
+interaction_errors.tex
+#                  The reports and the mode agree with luatex; the stream ends
+#                  with the closing paren end_closes_the_file.tex describes.
+show_tokens_and_groups.tex
+#                  Every listing and report agrees with luatex; the stream ends
+#                  with the closing paren end_closes_the_file.tex describes.

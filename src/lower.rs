@@ -558,10 +558,38 @@ impl Lowerer {
     /// in whichever arm was lowered first and were lost when the run took the
     /// other; tex printed them while it scanned the test, before either arm.
     fn flush_reports(&mut self, out: &mut Vec<Cmd>) {
+        if self.eng.interaction == 0 {
+            return self.withhold_reports(out);
+        }
         let held = self.take_reports();
         if !held.is_empty() {
             out.push(Cmd::Reports(held));
         }
+    }
+
+    /// Batch mode's terminal: the reports waiting to be printed are not, but
+    /// a run that had them still ends with §1335's pointer to the transcript.
+    fn withhold_reports(&mut self, out: &mut Vec<Cmd>) {
+        let errors = self
+            .take_reports()
+            .iter()
+            .any(|op| !matches!(op, MsgOp::Report(r) if r.starts_with(crate::expand::DIAGNOSTIC)));
+        if errors {
+            out.push(Cmd::Reports(vec![MsgOp::Report(
+                crate::expand::WARNING_ISSUED.to_string(),
+            )]));
+        }
+    }
+
+    /// §1264's `new_interaction`: `print_ln`, so whatever is printed next
+    /// starts a line of its own, and the mode. What batch mode held back from
+    /// the terminal is not printed when it ends.
+    fn new_interaction(&mut self, out: &mut Vec<Cmd>, mode: i64) {
+        if self.eng.interaction == 0 {
+            self.withhold_reports(out);
+        }
+        out.push(Cmd::Write(Vec::new()));
+        self.eng.interaction = mode;
     }
 
     /// Hold a report the lowerer built from pieces, behind whatever the
@@ -832,7 +860,7 @@ impl Lowerer {
                         // A group scopes the macro table AND the registers it
                         // writes; the latter is run-time state, so the body is
                         // lowered and wrapped in save/restore.
-                        self.eng.compile_time_begin_group(GroupKind::Simple);
+                        self.eng.compile_time_begin_group(GroupKind::Simple, lx.line());
                         let mark = self.globals.len();
                         let known_mark = self.eng.known.mark();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
@@ -1366,6 +1394,8 @@ impl Lowerer {
                 // and prints what it means. The meaning is a frontend fact, so
                 // the text is known now; it reaches the terminal the way a
                 // report does, in front of whatever is printed next.
+                "showtokens" => self.eng.show_tokens(lx)?,
+                "showgroups" => self.eng.show_groups(lx),
                 "show" => {
                     let Some(tok) = lx.next_token(&self.eng.cats) else {
                         return Err(TexError("File ended while scanning \\show".into()));
@@ -1393,6 +1423,25 @@ impl Lowerer {
                 // an error's (`! ` and the text), and §82's `error` follows
                 // with its `.` and the context. In nonstop mode the help goes to
                 // the log alone, so the terminal shows nothing more.
+                // §1264's `new_interaction` (luatex's maincontrol.c): `print_ln`,
+                // then the mode. Global whatever group it is in, and a prefix
+                // is allowed. `\interactionmode=n` is the same for a mode in
+                // range, and `Bad interaction mode` otherwise.
+                "batchmode" | "nonstopmode" | "scrollmode" | "errorstopmode" => {
+                    let mode = ["batchmode", "nonstopmode", "scrollmode", "errorstopmode"]
+                        .iter()
+                        .position(|m| *m == name.name())
+                        .expect("one of the four just matched");
+                    self.new_interaction(&mut out, mode as i64);
+                }
+                "interactionmode" => {
+                    self.eng.skip_equals_file(lx)?;
+                    let mode = self.eng.scan_number_file(lx)?;
+                    match (0..=3).contains(&mode) {
+                        true => self.new_interaction(&mut out, mode),
+                        false => self.eng.report(lx, &format!("Bad interaction mode ({mode})")),
+                    }
+                }
                 "errmessage" => {
                     let parts = self.message_parts(lx)?;
                     self.eng.note_mouth(lx);
@@ -1412,9 +1461,14 @@ impl Lowerer {
                     let parts = crate::ir::printed_ops(parts, nl);
                     // Anything reported so far is printed HERE, in front of the
                     // message and with nothing between them: see `reports`.
-                    let mut ops = self.take_reports();
-                    ops.extend(parts);
-                    out.push(Cmd::Message(ops));
+                    // In batch mode the terminal gets none of it (§75).
+                    if self.eng.interaction == 0 {
+                        self.withhold_reports(&mut out);
+                    } else {
+                        let mut ops = self.take_reports();
+                        ops.extend(parts);
+                        out.push(Cmd::Message(ops));
+                    }
                 }
                 // §1275: `\openin` closes the stream and opens it again on the
                 // file the name finds -- `.tex` supplied as `\input` supplies it
@@ -1723,7 +1777,7 @@ impl Lowerer {
                 // the two group forms disagreed: `{\count0=2}` restored and
                 // `\begingroup\count0=2\endgroup` did not.
                 "begingroup" => {
-                    self.eng.compile_time_begin_group(GroupKind::SemiSimple);
+                    self.eng.compile_time_begin_group(GroupKind::SemiSimple, lx.line());
                     let mark = self.globals.len();
                     let known_mark = self.eng.known.mark();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
@@ -4403,6 +4457,9 @@ impl Lowerer {
                 }
                 // `\jobname` is expandable: the job's name, as text.
                 "jobname" => text.push_str(&crate::lua::jobname()),
+                n if crate::expand::constant_text(n).is_some() => {
+                    text.push_str(crate::expand::constant_text(n).expect("just matched"))
+                }
                 // `\meaning` is expandable, so it reaches a message body as
                 // readily as running text: what §296 would print for the next
                 // token, as characters.

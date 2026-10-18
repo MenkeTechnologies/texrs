@@ -16,6 +16,7 @@
 //! cargo run --bin primitive-census -- --bugs    # and into BUGS.md
 //! cargo run --bin primitive-census -- --freeze  # record luatex's case output
 //! cargo run --bin primitive-census -- --table   # write src/luatex_primitives.rs
+//! cargo run --bin primitive-census -- --one f.tex # both streams for one file
 //! ```
 //! `scripts/primitive-census.sh` runs the last two.
 
@@ -87,6 +88,17 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // `--one FILE`: both engines' streams for one file, for working on a case.
+    if let Some(at) = args.iter().position(|a| a == "--one") {
+        let Some(src) = args.get(at + 1).and_then(|f| std::fs::read_to_string(f).ok()) else {
+            eprintln!("primitive-census: --one needs a readable file");
+            return ExitCode::from(2);
+        };
+        let (want, got) = (oracle::reference(&program, &src), subject(&src));
+        println!("luatex: {want}\ntexrs : {got}\n{}", if want == got { "SAME" } else { "DIFFERS" });
+        return ExitCode::SUCCESS;
+    }
 
     // The cases, and what each engine prints for them.
     let cases = texrs::parity::cases_in(&repo.join("tests/luatex_cases"));

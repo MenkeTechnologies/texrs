@@ -25,11 +25,19 @@
 [Y][N][Y] [Y][N][N]
 #==# ifdefined_edges.tex
 [ Y][N] [Y][Y][Y] [N][N][N] [Y]
+#==# interaction_errors.tex
+a! Bad interaction mode (7).l.3 \message{a}\interactionmode=7                                   \message{b}bc)(see the transcript file for additional information
+#==# interaction_modes.tex
+[1][2] a[1][2][1] nonstop [1]
 #==# numexpr.tex
 [7][9][4] [-4][48][14]
 #==# protected.tex
 [\protected macro:->P][macro:->\p Q] [\protected\long macro:#1->S]
+#==# show_tokens_and_groups.tex
+x> \a b ##.l.4 \message{x}\showtokens{\a b #}                                  \message{y}y> A.l.5 \showtokens\expandafter{\a}                               ! OK (see the transcript file).l.6 {\begingroup\showgroups                           \endgroup}### semi simple group (level 2) entered at line 8 (\begingroup)### simple group (level 1) entered at line 8 ({)### bottom level! OK.l.9 \showgroups               \endgroup}### bottom level! OK.l.10 \showgroups                )(see the transcript file for additional information
 #==# unexpanded.tex
 [macro:->A\a \b B] [macro:->\a B]
 #==# unless.tex
 [Y][N][N]
+#==# versions_and_groups.tex
+[2][.2][124][0][2][2.2] [macro:->.2/124] new [0] [1][1] [2][14] [4] [0]

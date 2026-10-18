@@ -1,0 +1,11 @@
+% primitives: showtokens showgroups
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\a{A}
+\message{x}\showtokens{\a b #}\message{y}
+\showtokens\expandafter{\a}
+{\begingroup\showgroups\endgroup}
+\tracingonline=1
+{\begingroup
+\showgroups\endgroup}
+\showgroups
+\end

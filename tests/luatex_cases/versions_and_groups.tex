@@ -1,0 +1,9 @@
+% primitives: eTeXversion eTeXrevision eTeXminorversion eTeXVersion luatexversion luatexrevision currentgrouplevel currentgrouptype
+\catcode`\{=1 \catcode`\}=2
+\message{[\the\eTeXversion][\eTeXrevision][\the\luatexversion][\luatexrevision][\the\eTeXminorversion][\eTeXVersion]}
+\edef\v{\eTeXrevision/\number\luatexversion}\message{[\meaning\v]}
+\ifnum\luatexversion>100 \message{new}\else\message{old}\fi
+\message{[\the\currentgrouplevel]}{\message{[\the\currentgrouplevel][\the\currentgrouptype]}\begingroup
+\message{[\the\currentgrouplevel][\the\currentgrouptype]}{{\count1=\currentgrouplevel\message{[\the\count1]}}}\endgroup}
+\message{[\number\currentgrouptype]}
+\end

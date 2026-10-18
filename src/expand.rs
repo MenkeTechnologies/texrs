@@ -275,6 +275,9 @@ pub struct Engine {
     /// What opened each of `groups`, innermost last: §269's `cur_group`, which
     /// decides what a `}` or an `\endgroup` that does not match it is.
     group_kinds: Vec<GroupKind>,
+    /// The line each of `groups` was entered on, for etex.ch's `\showgroups`
+    /// (`saved(-1)`, the `line` when the group began).
+    group_lines: Vec<u32>,
     /// Open conditionals, so `\else`/`\fi` know what they close.
     conds: Vec<CondState>,
     /// Set by `\global`, cleared by the assignment it prefixes.
@@ -357,6 +360,11 @@ pub struct Engine {
     pub error_count: u32,
     /// Whether that limit was reached and the run has stopped.
     pub halted: bool,
+    /// §73's `interaction`: 0 batch, 1 nonstop, 2 scroll, 3 errorstop. texrs
+    /// never stops to ask, so the four differ in what reaches the terminal:
+    /// in batch mode nothing does. A run starts in nonstop mode, which is what
+    /// the harnesses run luatex in.
+    pub interaction: i64,
 }
 
 /// An advice body between the two depth markers, so a call inside it is not
@@ -496,6 +504,7 @@ impl Engine {
             mag_set: 0,
             groups: Vec::new(),
             group_kinds: Vec::new(),
+            group_lines: Vec::new(),
             conds: Vec::new(),
             charcodes: crate::charcodes::CharCodes::default(),
             toks: std::collections::HashMap::new(),
@@ -514,6 +523,7 @@ impl Engine {
             recover: false,
             error_count: 0,
             halted: false,
+            interaction: 1,
             after_group_tokens: Vec::new(),
             after_assignment: None,
         }
@@ -531,9 +541,10 @@ impl Engine {
 
     // ── grouping ─────────────────────────────────────────────────────────
 
-    fn begin_group(&mut self, kind: GroupKind) {
+    fn begin_group(&mut self, kind: GroupKind, line: u32) {
         self.groups.push(Vec::new());
         self.group_kinds.push(kind);
+        self.group_lines.push(line);
     }
 
     /// What opened the innermost open group, or `None` at §269's
@@ -568,6 +579,7 @@ impl Engine {
             return Err(TexError("Too many }'s".into()));
         };
         self.group_kinds.pop();
+        self.group_lines.pop();
         // §282: the tokens `\aftergroup` held come out in the order they were
         // given, AFTER the group's own restores. Collected before the undo pass
         // so the reverse walk below does not reverse them too, and buffered
@@ -1008,6 +1020,62 @@ impl Engine {
         self.tally_error();
     }
 
+    /// e-TeX's `\showtokens` (etex.ch, `show_tokens` in §1293's
+    /// `show_whatever`): `> `, the general text as §295 shows a token list,
+    /// `.`, and the context, as `\show` reports.
+    pub fn show_tokens(&mut self, lx: &mut Lexer) -> R<()> {
+        let text = self.scan_general_text(lx)?;
+        self.note_mouth(lx);
+        let shown = format!("> {}.", self.tokens_shown(&text));
+        let context = self.error_context(lx);
+        self.errors.push(format!("{shown}{}", context.replace('\n', "")));
+        self.tally_error();
+        Ok(())
+    }
+
+    /// e-TeX's `\showgroups`: etex.ch's `show_save_groups` as a diagnostic,
+    /// then §1298's `! OK`. Each open group, innermost first, as `### simple
+    /// group (level 1) entered at line 3 ({)`, then `### bottom level`. Only
+    /// the two groups the expander opens are here; a box, alignment or math
+    /// group is the stomach's.
+    pub fn show_groups(&mut self, lx: &Lexer) {
+        let mut listing = String::new();
+        for (level, (kind, line)) in self
+            .group_kinds
+            .iter()
+            .zip(&self.group_lines)
+            .enumerate()
+            .rev()
+        {
+            let (what, opener) = match kind {
+                GroupKind::Simple => ("simple", "{".to_string()),
+                GroupKind::SemiSimple => ("semi simple", format!("{}begingroup", self.esc())),
+            };
+            listing.push_str(&format!(
+                "### {what} group (level {}) entered at line {line} ({opener})",
+                level + 1
+            ));
+        }
+        listing.push_str("### bottom level");
+        self.show_whatever_ok(lx, &listing);
+    }
+
+    /// The end §1298 gives `\showbox`, `\showlists` and e-TeX's `\showgroups`
+    /// and `\showifs`: the listing is a diagnostic (§245), then `! OK` with
+    /// the context -- and ` (see the transcript file)` when the listing went
+    /// to the log alone. It is not counted as an error (`decr(error_count)`).
+    fn show_whatever_ok(&mut self, lx: &Lexer, listing: &str) {
+        self.note_mouth(lx);
+        self.diagnostic(listing);
+        let pointer = match self.intpars.get(crate::intpar::TRACING_ONLINE) > 0 {
+            true => "",
+            false => " (see the transcript file)",
+        };
+        let context = self.error_context(lx);
+        self.errors
+            .push(format!("! OK{pointer}.{}", context.replace('\n', "")));
+    }
+
     /// §82: every error counts, and the hundredth ends the run.
     fn tally_error(&mut self) {
         self.error_count += 1;
@@ -1236,7 +1304,7 @@ impl Engine {
     fn step(&mut self, lx: &mut Lexer, tok: Token) -> R<bool> {
         match &tok {
             Token::Char(_, Cat::BeginGroup) => {
-                self.begin_group(GroupKind::Simple);
+                self.begin_group(GroupKind::Simple, lx.line());
                 return Ok(false);
             }
             Token::Char(_, Cat::EndGroup) => {
@@ -1296,7 +1364,7 @@ impl Engine {
                 self.global = false;
                 return out;
             }
-            "begingroup" => self.begin_group(GroupKind::SemiSimple),
+            "begingroup" => self.begin_group(GroupKind::SemiSimple, lx.line()),
             "endgroup" => {
                 self.end_group()?;
                 let after = self.take_after_group();
@@ -1500,6 +1568,12 @@ impl Engine {
             "fontname" => {
                 let name = self.fontname_text(lx, pending_only)?;
                 lx.push_back(&str_toks(&name));
+                Ok(true)
+            }
+            // The version strings e-TeX and LuaTeX expand to (`convert`
+            // commands), as category-12 characters.
+            n if constant_text(n).is_some() => {
+                lx.push_back(&str_toks(constant_text(n).expect("just matched")));
                 Ok(true)
             }
             "jobname" => {
@@ -4224,6 +4298,29 @@ impl Engine {
         }
     }
 
+    /// The read-only integers of e-TeX and LuaTeX (`last_item` commands) whose
+    /// value is known while lowering: the version numbers, which luatex 1.24.0
+    /// gives as `\eTeXversion` 2, `\eTeXminorversion` 2 and `\luatexversion`
+    /// 124 (measured), and etex.ch's `\currentgrouplevel` (`cur_level -
+    /// level_one`) and `\currentgrouptype` (`cur_group`: 1 for a brace group,
+    /// 14 for `\begingroup`, 0 outside every group). A box or alignment
+    /// group is the stomach's and opens none of these frames.
+    fn last_item_value(&self, primitive: &str) -> Option<i64> {
+        match primitive {
+            "eTeXversion" => Some(2),
+            "eTeXminorversion" => Some(2),
+            "luatexversion" => Some(124),
+            "interactionmode" => Some(self.interaction),
+            "currentgrouplevel" => Some(self.group_level() as i64),
+            "currentgrouptype" => Some(match self.innermost_group() {
+                None => 0,
+                Some(GroupKind::Simple) => 1,
+                Some(GroupKind::SemiSimple) => 14,
+            }),
+            _ => None,
+        }
+    }
+
     pub fn numeric_cs(&self, name: CsId) -> Option<NumericCs> {
         match self.meanings.get(&name) {
             Some(Meaning::CharDef(v) | Meaning::MathCharDef(v)) => Some(NumericCs::Value(*v)),
@@ -4232,6 +4329,12 @@ impl Engine {
             // read-only integer: the line it was read on.
             None if name.name() == "inputlineno" => {
                 Some(NumericCs::Value(i64::from(self.input_line)))
+            }
+            None if self.last_item_value(name.name()).is_some() => {
+                self.last_item_value(name.name()).map(NumericCs::Value)
+            }
+            Some(Meaning::Primitive(p)) if self.last_item_value(p.name()).is_some() => {
+                self.last_item_value(p.name()).map(NumericCs::Value)
             }
             // A dimension or glue parameter (§247, §224) is a register, by
             // its own name or by a `\let` copy of it.
@@ -5982,8 +6085,8 @@ impl Engine {
         }
         Err(TexError("Runaway \\intercept: missing {".into()))
     }
-    pub fn compile_time_begin_group(&mut self, kind: GroupKind) {
-        self.begin_group(kind);
+    pub fn compile_time_begin_group(&mut self, kind: GroupKind, line: u32) {
+        self.begin_group(kind, line);
     }
     pub fn compile_time_end_group(&mut self) -> R<()> {
         self.end_group()
@@ -6453,4 +6556,16 @@ pub fn str_toks(text: &str) -> Vec<Token> {
             c => Token::Char(c, Cat::Other),
         })
         .collect()
+}
+
+/// What e-TeX's and LuaTeX's version `convert` commands expand to, measured
+/// against luatex 1.24.0: `\eTeXrevision` is `.2`, `\eTeXVersion` is `2.2`
+/// and `\luatexrevision` is `0`.
+pub fn constant_text(primitive: &str) -> Option<&'static str> {
+    match primitive {
+        "eTeXrevision" => Some(".2"),
+        "eTeXVersion" => Some("2.2"),
+        "luatexrevision" => Some("0"),
+        _ => None,
+    }
 }

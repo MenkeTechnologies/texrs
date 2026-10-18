@@ -138,6 +138,78 @@ pub const CORPUS: &[Entry] = &[
         "\\showthe<internal quantity>\n\\count1=5 \\showthe\\count1   % => > 5.",
     ),
     (
+        "\\showtokens",
+        "Expansion",
+        "Print a token list as `\\show` prints a macro's body: `> `, the general text with each `#` doubled and a space after a control word, a period, and the context. The text is read as `\\detokenize` reads it, expanding up to the brace, so `\\showtokens\\expandafter{\\x}` shows `\\x`'s replacement. An eTeX primitive.",
+        "\\showtokens{<general text>}\n\\showtokens{\\a b #}   % => > \\a b ##.",
+    ),
+    (
+        "\\interactionmode",
+        "Expansion",
+        "The interaction mode as an integer -- 0 batch, 1 nonstop, 2 scroll, 3 errorstop -- read where a number is scanned and assigned like a parameter, though always globally. A value outside 0..3 is `! Bad interaction mode` and is ignored. An eTeX primitive.",
+        "\\interactionmode=<number>\n\\message{\\the\\interactionmode}   % => 1 under -interaction=nonstopmode",
+    ),
+    (
+        "\\batchmode",
+        "Expansion",
+        "From here on nothing reaches the terminal: messages and error reports alike are withheld, and a run that reported anything still ends pointing to the transcript. Global, and like the other three it ends the terminal line, so what is printed next starts one of its own (tex.web \u{a7}1264).",
+        "\\batchmode\\message{not shown}\\nonstopmode",
+    ),
+    (
+        "\\nonstopmode",
+        "Expansion",
+        "Report errors and carry on without stopping; what a run starts in under the parity harnesses. Global, and it ends the terminal line.",
+        "\\nonstopmode",
+    ),
+    (
+        "\\scrollmode",
+        "Expansion",
+        "The same as `\\nonstopmode` here, since texrs never stops to ask; `\\interactionmode` reads 2.",
+        "\\scrollmode",
+    ),
+    (
+        "\\errorstopmode",
+        "Expansion",
+        "The same as `\\nonstopmode` here, since texrs never stops to ask; `\\interactionmode` reads 3.",
+        "\\errorstopmode",
+    ),
+    (
+        "\\eTeXversion",
+        "Expansion",
+        "e-TeX's major version, a read-only integer: 2, as luatex reports it. `\\eTeXminorversion` is the minor one.",
+        "\\message{\\the\\eTeXversion}   % => 2",
+    ),
+    (
+        "\\eTeXminorversion",
+        "Expansion",
+        "e-TeX's minor version, a read-only integer: 2, as luatex reports it.",
+        "\\message{\\the\\eTeXminorversion}   % => 2",
+    ),
+    (
+        "\\eTeXrevision",
+        "Expansion",
+        "e-TeX's revision as characters: `.2`, as luatex expands it.",
+        "\\message{\\eTeXrevision}   % => .2",
+    ),
+    (
+        "\\eTeXVersion",
+        "Expansion",
+        "e-TeX's version as characters: `2.2`, as luatex expands it.",
+        "\\message{\\eTeXVersion}   % => 2.2",
+    ),
+    (
+        "\\luatexversion",
+        "Expansion",
+        "LuaTeX's version as a read-only integer, the one packages test to find the engine: 124, for the luatex 1.24.0 texrs is measured against.",
+        "\\ifnum\\luatexversion>100 \\message{new enough}\\fi",
+    ),
+    (
+        "\\luatexrevision",
+        "Expansion",
+        "LuaTeX's revision as characters: `0`.",
+        "\\message{\\luatexrevision}   % => 0",
+    ),
+    (
         "\\inputlineno",
         "Expansion",
         "The line of the current file the token was read on, as a read-only integer: it stands wherever a number is scanned, and `\\the` and `\\number` write it.",
@@ -755,6 +827,24 @@ pub const CORPUS: &[Entry] = &[
         "Grouping",
         "Hold the next token until the following ASSIGNMENT has finished (tex.web \u{a7}1269). One only: a second `\\afterassignment` before the assignment replaces the first. A `\\message` is not an assignment and neither is a group, so the token waits for the next `\\def`, `\\let`, register write or arithmetic and is inserted after it.",
         "\\afterassignment<token>\n\\def\\m{\\message{DONE}}\n\\afterassignment\\m \\count1=5   % => DONE, with \\count1 already 5",
+    ),
+    (
+        "\\currentgrouplevel",
+        "Grouping",
+        "How many groups are open, a read-only integer: 0 outside every group. An eTeX primitive.",
+        "{\\message{\\the\\currentgrouplevel}}   % => 1",
+    ),
+    (
+        "\\currentgrouptype",
+        "Grouping",
+        "What opened the innermost group, as eTeX numbers it: 0 outside every group, 1 for a brace, 14 for `\\begingroup`.",
+        "\\begingroup\\message{\\the\\currentgrouptype}\\endgroup   % => 14",
+    ),
+    (
+        "\\showgroups",
+        "Grouping",
+        "List the open groups, innermost first, each with its level, the line it was entered on and what opened it -- `### simple group (level 1) entered at line 3 ({)` -- then `### bottom level`, followed by `! OK` and the context. The listing reaches the terminal only under a positive `\\tracingonline`; otherwise `! OK (see the transcript file)` says where it went. An eTeX primitive.",
+        "{\\tracingonline=1 \\showgroups}",
     ),
     // ══ LaTeX — latex.rs, expand::do_newcommand ════════════════════════════
     (
