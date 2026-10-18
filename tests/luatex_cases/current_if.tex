@@ -1,0 +1,14 @@
+% primitives: currentiflevel currentiftype currentifbranch
+\catcode`\{=1 \catcode`\}=2
+\message{[\if aa\the\currentiftype\fi][\ifcat aa\the\currentiftype\fi][\ifnum1=1 \the\currentiftype\fi][\ifdim1pt=1pt \the\currentiftype\fi][\ifodd1 \the\currentiftype\fi]}
+\message{[\ifx aa\the\currentiftype\fi][\ifeof1 \the\currentiftype\fi][\iftrue\the\currentiftype\fi][\iffalse\else\the\currentiftype\fi][\ifdefined\relax\the\currentiftype\fi]}
+\message{[\ifcsname relax\endcsname\the\currentiftype\fi][\ifabsnum1=1 \the\currentiftype\fi][\ifabsdim1pt=1pt \the\currentiftype\fi][\ifincsname\else\the\currentiftype\fi][\ifprimitive\relax\the\currentiftype\fi]}
+\message{[\the\currentiflevel][\iftrue\iftrue\the\currentiflevel\fi\fi][\the\currentifbranch][\iftrue\the\currentifbranch\fi][\iffalse\else\the\currentifbranch\fi][\unless\ifx ab\the\currentiftype\fi]}
+\count1=\inputlineno \ifodd\count1 \count2=1 \else \count2=2 \fi
+\ifnum\count2>0 \count3=\currentiflevel \count4=\currentiftype \count5=\currentifbranch \else \count3=9 \fi
+\message{[\the\count3][\the\count4][\the\count5]}
+\unless\ifnum\count2>5 \count3=\currentiftype \count4=\currentifbranch\fi
+\message{[\the\count3][\the\count4]}
+\iftrue\ifnum\count2>5 \else\count3=\currentiflevel \count4=\currentifbranch\fi\fi
+\message{[\the\count3][\the\count4][\the\currentiflevel]}
+\end

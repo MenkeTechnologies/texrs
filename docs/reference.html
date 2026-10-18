@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">281</div>
+            <div class="stat-val">284</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -306,6 +306,9 @@
             <tr><td><code>\ifincsname</code></td><td>True while a <code>\csname</code>, <code>\ifcsname</code> or <code>\begincsname</code> is reading its name, so a macro can tell it is being expanded into one. A LuaTeX primitive.</td><td><pre>\csname\ifincsname in\else out\fi\endcsname   % names \in</pre></td></tr>
             <tr><td><code>\ifprimitive</code></td><td>Is the next token, unexpanded, a primitive that still means itself? A <code>\let</code> copy under another name is not, and neither is a primitive's name once something has redefined it. A LuaTeX primitive.</td><td><pre>\ifprimitive\relax \message{untouched}\fi</pre></td></tr>
             <tr><td><code>\ifcondition</code></td><td>Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written <code>\ifcondition\mytest</code> and still nest. A LuaTeX primitive.</td><td><pre>\ifcondition\ifnum1=1 \message{yes}\fi</pre></td></tr>
+            <tr><td><code>\currentiflevel</code></td><td>How many conditionals are open where it is read, a read-only integer -- a conditional whose text is running, whether the lowerer decided it or the run will. The one whose test is being read does not count yet. An eTeX primitive.</td><td><pre>\iftrue\iftrue \count1=\currentiflevel \fi\fi   % \count1 is 2</pre></td></tr>
+            <tr><td><code>\currentiftype</code></td><td>Which conditional is innermost, in luatex's numbering: <code>\if</code> 1, <code>\ifnum</code> 3, <code>\ifx</code> 13, <code>\iftrue</code> 15, <code>\ifcase</code> 17, <code>\ifdefined</code> 18, <code>\ifcsname</code> 19, <code>\ifabsnum</code> 23 and so on, negative under <code>\unless</code>, 0 outside every one. An eTeX primitive.</td><td><pre>\unless\ifx ab \message{\the\currentiftype}\fi   % =&gt; -13</pre></td></tr>
+            <tr><td><code>\currentifbranch</code></td><td>Which text of the innermost conditional is running: 1 the true text, -1 the <code>\else</code> text, 0 outside every conditional. An eTeX primitive.</td><td><pre>\iffalse\else \message{\the\currentifbranch}\fi   % =&gt; -1</pre></td></tr>
             <tr><td><code>\unless</code></td><td>Negate the conditional that follows: <code>\unless\ifnum 1&gt;2 A\else B\fi</code> runs A. An eTeX primitive. A negated conditional is the same conditional with its arms exchanged, which is how it is lowered.</td><td><pre>\unless\ifnum \count0&gt;2 few\else many\fi</pre></td></tr>
           </tbody>
         </table>

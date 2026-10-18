@@ -59,6 +59,9 @@ pub struct Lowerer {
     /// The register writes a preloaded preamble made, waiting to be put in
     /// front of the document's own commands. See [`Lowerer::preload`].
     prologue: Vec<Cmd>,
+    /// The conditional whose arms [`Self::arms`] reads next: its name, its
+    /// `\unless`, and the line it began on.
+    next_arms: Option<(&'static str, bool, u32)>,
     /// Errors the expander REPORTED rather than raised, waiting to be written
     /// into the message stream in front of whatever is printed next.
     ///
@@ -306,6 +309,7 @@ impl Lowerer {
             next_keep_slot: crate::compiler::TOTAL_SLOTS,
             prologue: Vec::new(),
             reports: Vec::new(),
+            next_arms: None,
             reported: false,
             end_notes: Vec::new(),
             fonts: crate::typeset::Families::default(),
@@ -1697,11 +1701,13 @@ impl Lowerer {
                     // losing one won.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         let opened_by = (if abs { "ifabsnum" } else { "ifnum" }, negated, line);
-                        self.eng.enter_decided_file(lx, truth != negated, opened_by)?;
+                        self.eng
+                            .enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
+                    self.next_arms = Some((if abs { "ifabsnum" } else { "ifnum" }, negated, line));
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
                         left,
@@ -1729,11 +1735,13 @@ impl Lowerer {
                     // Decided now when both dimensions are known; see `\ifnum`.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
                         let opened_by = (if abs { "ifabsdim" } else { "ifdim" }, negated, line);
-                        self.eng.enter_decided_file(lx, truth != negated, opened_by)?;
+                        self.eng
+                            .enter_decided_file(lx, truth != negated, opened_by)?;
                         continue;
                     }
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
+                    self.next_arms = Some((if abs { "ifabsdim" } else { "ifdim" }, negated, line));
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfNum {
                         left,
@@ -1768,12 +1776,16 @@ impl Lowerer {
                     let line = lx.line();
                     let value = self.number(lx)?;
                     if let Some(v) = self.eng.known.num(&value) {
-                        self.eng
-                            .enter_decided_file(lx, (v % 2 != 0) != negated, ("ifodd", negated, line))?;
+                        self.eng.enter_decided_file(
+                            lx,
+                            (v % 2 != 0) != negated,
+                            ("ifodd", negated, line),
+                        )?;
                         continue;
                     }
                     self.eng.set_unless(negated);
                     self.flush_reports(&mut out);
+                    self.next_arms = Some(("ifodd", negated, line));
                     let (then_branch, else_branch) = self.arms(lx)?;
                     out.push(Cmd::IfOdd {
                         value,
@@ -3465,16 +3477,35 @@ impl Lowerer {
     #[inline(never)]
     fn arms(&mut self, lx: &mut Lexer) -> R<(Vec<Cmd>, Vec<Cmd>)> {
         let negated = self.eng.take_unless();
+        // Each arm is read with its conditional open, as tex runs it
+        // (`\currentiflevel` and its siblings); `next_arms` says which one.
+        let opened_by = self.next_arms.take();
+        let enter = |eng: &mut Engine, branch: i64| {
+            if let Some(o) = opened_by {
+                eng.enter_runtime_arm(o, branch);
+            }
+        };
+        let leave = |eng: &mut Engine| {
+            if opened_by.is_some() {
+                eng.leave_runtime_arm();
+            }
+        };
         // Each arm starts from what was known before the conditional; which one
         // runs is the run's, so what they assign is unknown afterwards.
         let known_mark = self.eng.known.mark();
-        let mut then_branch = self.block(lx, Some(&["else", "fi"]))?;
+        enter(&mut self.eng, 1);
+        let then = self.block(lx, Some(&["else", "fi"]));
+        leave(&mut self.eng);
+        let mut then_branch = then?;
         self.flush_reports(&mut then_branch);
         let mut else_branch = Vec::new();
         match lx.next_token(&self.eng.cats) {
             Some(Token::Cs(n)) if n.name() == "else" => {
                 self.eng.known.undo_to(known_mark, None);
-                else_branch = self.block(lx, Some(&["fi"]))?;
+                enter(&mut self.eng, -1);
+                let text = self.block(lx, Some(&["fi"]));
+                leave(&mut self.eng);
+                else_branch = text?;
                 self.flush_reports(&mut else_branch);
                 // Consume the `\fi`.
                 let _ = lx.next_token(&self.eng.cats);
@@ -4364,7 +4395,9 @@ impl Lowerer {
                 text.push_str(&t.to_text(self.eng.esc()));
                 continue;
             };
-            let n = *n;
+            // A `\let` copy of an expandable primitive is that primitive here,
+            // as `cur_cmd` is in tex: the arms below are by name.
+            let n = self.eng.expandable_alias(*n);
             // The brace that ended the body: nothing after it is the message's.
             if n.name() == crate::expand::MESSAGE_END {
                 break;
@@ -4766,35 +4799,35 @@ impl Lowerer {
                 }
                 "iftrue" | "iffalse" => {
                     let taken = n.name() == "iftrue";
-                    self.open_decided(work, taken, &mut decided)?;
+                    self.open_decided(work, n, taken, &mut decided)?;
                 }
                 // LuaTeX's: no `\csname` is reading a name in a message, a
                 // name means its primitive or does not, and `\ifcondition`
                 // is nothing where it is expanded.
                 "ifincsname" => {
                     let inside = self.eng.in_csname();
-                    self.open_decided(work, inside, &mut decided)?;
+                    self.open_decided(work, n, inside, &mut decided)?;
                 }
                 "ifprimitive" => {
                     let truth = match work.pending.pop() {
                         Some(Token::Cs(cs)) => self.eng.means_its_primitive(cs),
                         _ => false,
                     };
-                    self.open_decided(work, truth, &mut decided)?;
+                    self.open_decided(work, n, truth, &mut decided)?;
                 }
                 "ifcondition" => {}
                 "ifx" => {
                     let a = work.pending.pop();
                     let b = work.pending.pop();
                     let same = self.eng.meanings_equal_pub(a.as_ref(), b.as_ref());
-                    self.open_decided(work, same, &mut decided)?;
+                    self.open_decided(work, n, same, &mut decided)?;
                 }
                 // Character codes and categories are frontend facts too, so
                 // `\if` and `\ifcat` are decided here as `\ifx` is. They were
                 // not named, so a message printed the test and both arms.
                 "if" | "ifcat" => {
                     let same = self.eng.if_pending(work, n.name())?;
-                    self.open_decided(work, same, &mut decided)?;
+                    self.open_decided(work, n, same, &mut decided)?;
                 }
                 // Both ask the macro table a question, which is a FRONTEND
                 // fact -- so they are decided here, exactly as `\iftrue` and
@@ -4849,7 +4882,7 @@ impl Lowerer {
                             other == "ifvoid"
                         }
                     };
-                    self.open_decided(work, truth, &mut decided)?;
+                    self.open_decided(work, n, truth, &mut decided)?;
                 }
                 "ifnum" | "ifabsnum" => {
                     let abs = n.name() == "ifabsnum";
@@ -4865,7 +4898,7 @@ impl Lowerer {
                     // made `\def\r#1{\ifnum#1>0 \r{0}\fi}` unbounded
                     // for a call whose test is false.
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
-                        self.open_decided(work, truth, &mut decided)?;
+                        self.open_decided(work, n, truth, &mut decided)?;
                         continue;
                     }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
@@ -4890,7 +4923,7 @@ impl Lowerer {
                     };
                     let right = magnitude(abs, self.dimen_number(work, true)?);
                     if let Some(truth) = self.known_truth(&left, rel, &right) {
-                        self.open_decided(work, truth, &mut decided)?;
+                        self.open_decided(work, n, truth, &mut decided)?;
                         continue;
                     }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
@@ -4906,7 +4939,7 @@ impl Lowerer {
                 "ifodd" => {
                     let value = self.msg_number(work)?;
                     if let Some(v) = self.eng.known.num(&value) {
-                        self.open_decided(work, v % 2 != 0, &mut decided)?;
+                        self.open_decided(work, n, v % 2 != 0, &mut decided)?;
                         continue;
                     }
                     let (then_ops, else_ops) = self.msg_arms(work)?;
@@ -5053,10 +5086,22 @@ impl Lowerer {
     /// Enter a conditional decided while lowering, as §498 does: a true test
     /// runs on into its own text; a false one skips (§494, unexpanded) to the
     /// `\else`, whose text then runs, or past the `\fi`.
-    fn open_decided(&mut self, work: &mut Lexer, truth: bool, decided: &mut usize) -> R<()> {
-        let truth = truth != self.eng.take_unless();
+    fn open_decided(
+        &mut self,
+        work: &mut Lexer,
+        opener: CsId,
+        truth: bool,
+        decided: &mut usize,
+    ) -> R<()> {
+        let negated = self.eng.take_unless();
+        let truth = truth != negated;
         if truth || self.eng.skip_to_pending(work, true)? {
             *decided += 1;
+            // The conditional is open while its text runs (`\currentif...`).
+            let name = crate::expand::conditional_name(opener.name());
+            let branch = if truth { 1 } else { -1 };
+            self.eng
+                .enter_runtime_arm((name, negated, work.line()), branch);
         }
         Ok(())
     }
@@ -5068,6 +5113,7 @@ impl Lowerer {
             self.eng.skip_to_pending(work, false)?;
         }
         *decided -= 1;
+        self.eng.leave_runtime_arm();
         Ok(())
     }
 

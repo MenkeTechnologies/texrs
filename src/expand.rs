@@ -307,8 +307,11 @@ pub struct Engine {
     conds: Vec<CondState>,
     /// What opened each of `conds` and on which line (§489's `cur_if` and
     /// `if_line`), for §1335's `(\end occurred when \iftrue on line 2 was
-    /// incomplete)`: the primitive's name, and whether `\unless` negated it.
-    cond_info: Vec<(&'static str, bool, u32)>,
+    /// incomplete)` and e-TeX's `\currentif...`: the primitive's name,
+    /// whether `\unless` negated it, and -- for an arm of a conditional the
+    /// RUN decides, which the lowerer is reading and `conds` never holds --
+    /// which branch that arm is (1 or -1).
+    cond_info: Vec<(&'static str, bool, u32, Option<i64>)>,
     /// Set by `\global`, cleared by the assignment it prefixes.
     /// `\mathcode`, `\lccode`, `\uccode`, `\sfcode`, `\delcode`.
     pub charcodes: crate::charcodes::CharCodes,
@@ -2116,12 +2119,66 @@ impl Engine {
 
     fn open_cond(&mut self, state: CondState, name: &'static str, negated: bool, line: u32) {
         self.conds.push(state);
-        self.cond_info.push((name, negated, line));
+        self.cond_info.push((name, negated, line, None));
     }
 
     fn close_cond(&mut self) -> Option<CondState> {
-        self.cond_info.pop();
+        if let Some(at) = self.cond_info.iter().rposition(|c| c.3.is_none()) {
+            self.cond_info.remove(at);
+        }
         self.conds.pop()
+    }
+
+    /// The lowerer is reading branch `branch` (1 the true text, -1 the
+    /// `\else` text) of a conditional the run decides; until
+    /// [`Self::leave_runtime_arm`] it counts as open for `\currentiflevel` and
+    /// its siblings, as the conditional is open in tex while that text runs.
+    pub fn enter_runtime_arm(
+        &mut self,
+        (name, negated, line): (&'static str, bool, u32),
+        branch: i64,
+    ) {
+        self.cond_info.push((name, negated, line, Some(branch)));
+    }
+
+    pub fn leave_runtime_arm(&mut self) {
+        if let Some(at) = self.cond_info.iter().rposition(|c| c.3.is_some()) {
+            self.cond_info.remove(at);
+        }
+    }
+
+    /// e-TeX's `\currentiflevel`, `\currentiftype` and `\currentifbranch`
+    /// (etex.ch, luatex's numbering of the conditionals, measured): how many
+    /// conditionals are open; the innermost one's code, negative under
+    /// `\unless`; and whether its true text (1) or its `\else` text (-1) is
+    /// running. The test of a conditional is read before it is entered here,
+    /// so inside its own test the conditional does not count yet.
+    fn current_if(&self, what: &str) -> i64 {
+        let Some(&(name, negated, _, arm)) = self.cond_info.last() else {
+            return 0;
+        };
+        match what {
+            "currentiflevel" => self.cond_info.len() as i64,
+            "currentiftype" => {
+                let code = CONDITIONAL_CODES
+                    .iter()
+                    .position(|c| *c == Some(name))
+                    .map_or(0, |i| i as i64 + 1);
+                if negated {
+                    -code
+                } else {
+                    code
+                }
+            }
+            _ => match arm {
+                Some(branch) => branch,
+                None => match self.conds.last() {
+                    Some(CondState::Done) => -1,
+                    Some(_) => 1,
+                    None => 0,
+                },
+            },
+        }
     }
 
     /// §1335's note for each conditional `\end` found open, innermost first:
@@ -2133,7 +2190,7 @@ impl Engine {
             .iter()
             .rev()
             .enumerate()
-            .map(|(depth, (name, negated, line))| {
+            .map(|(depth, (name, negated, line, _))| {
                 // luatex 1.24.0 names only the innermost conditional; each
                 // outer one prints as `\if` (measured): its `final_cleanup`
                 // reads `cur_if` from the condition node's subtype, which does
@@ -2399,6 +2456,17 @@ impl Engine {
             Some(Meaning::Primitive(p)) => Self::expandable_primitive(p.name()),
             None => !self.is_primitive_name(name) || Self::expandable_primitive(name.name()),
             Some(_) => false,
+        }
+    }
+
+    /// The primitive `name` is a `\let` copy of, when that primitive expands;
+    /// `name` itself otherwise. A scanner that dispatches on names asks this
+    /// first, so `\let\foo\detokenize` makes `\foo` the primitive where it
+    /// expands, as tex's `cur_cmd` makes it.
+    pub fn expandable_alias(&self, name: CsId) -> CsId {
+        match self.meanings.get(&name) {
+            Some(Meaning::Primitive(p)) if *p != name && Self::expandable_primitive(p.name()) => *p,
+            _ => name,
         }
     }
 
@@ -4714,6 +4782,9 @@ impl Engine {
             "luatexversion" => Some(124),
             "interactionmode" => Some(self.interaction),
             "catcodetable" => Some(self.cat_table),
+            "currentiflevel" | "currentiftype" | "currentifbranch" => {
+                Some(self.current_if(primitive))
+            }
             "currentgrouplevel" => Some(self.group_level() as i64),
             "currentgrouptype" => Some(match self.innermost_group() {
                 None => 0,
@@ -5867,7 +5938,7 @@ impl Engine {
             }
             // An active character expands like a control sequence (§366).
             let name = match &t {
-                Token::Cs(name) => *name,
+                Token::Cs(name) => self.expandable_alias(*name),
                 Token::Char(c, Cat::Active) => Self::active_cs(*c),
                 _ => {
                     out.push(t);
@@ -5933,6 +6004,11 @@ impl Engine {
             if steps > 200_000 {
                 return Err(TexError("TeX capacity exceeded".into()));
             }
+            // A `\let` copy of an expandable primitive is that primitive.
+            let t = match t {
+                Token::Cs(n) => Token::Cs(self.expandable_alias(n)),
+                other => other,
+            };
             match &t {
                 // §367: a `\noexpand`ed token is printed, not expanded.
                 Token::Cs(name) if name.name() == "noexpand" => {
@@ -7360,4 +7436,47 @@ mod cat_table_tests {
         eng.compile_time_end_group().unwrap();
         assert_eq!(eng.cat_code_in(0, u32::from('{')), 1);
     }
+}
+
+/// luatex's conditionals in its order, `\currentiftype` being the position
+/// plus one: measured for each but `\iffontchar`, which lies between
+/// `\ifcsname` (19) and `\ifincsname` (21), and `\ifcondition`, which never
+/// stays open to be asked about.
+const CONDITIONAL_CODES: [Option<&str>; 25] = [
+    Some("if"),
+    Some("ifcat"),
+    Some("ifnum"),
+    Some("ifdim"),
+    Some("ifodd"),
+    Some("ifvmode"),
+    Some("ifhmode"),
+    Some("ifmmode"),
+    Some("ifinner"),
+    Some("ifvoid"),
+    Some("ifhbox"),
+    Some("ifvbox"),
+    Some("ifx"),
+    Some("ifeof"),
+    Some("iftrue"),
+    Some("iffalse"),
+    Some("ifcase"),
+    Some("ifdefined"),
+    Some("ifcsname"),
+    // `\iffontchar`, which texrs does not dispatch.
+    None,
+    Some("ifincsname"),
+    Some("ifprimitive"),
+    Some("ifabsnum"),
+    Some("ifabsdim"),
+    Some("ifcondition"),
+];
+
+/// The conditional `name` names, as the `'static` string the condition stack
+/// keeps (`CONDITIONALS`), or `if` for a name that is not one.
+pub fn conditional_name(name: &str) -> &'static str {
+    CONDITIONALS
+        .iter()
+        .find(|c| **c == name)
+        .copied()
+        .unwrap_or("if")
 }

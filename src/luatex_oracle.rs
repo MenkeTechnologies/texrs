@@ -199,7 +199,8 @@ pub fn command_table(program: &str) -> Result<Vec<(String, String, bool)>, Strin
             let (cmd, expandable, name) = (w.next()?, w.next()?, w.next()?);
             let name = name.strip_prefix('[')?;
             let name = &name[..name.rfind(']')?];
-            (cmd != "undefined_cs").then(|| (name.to_string(), cmd.to_string(), expandable == "true"))
+            (cmd != "undefined_cs")
+                .then(|| (name.to_string(), cmd.to_string(), expandable == "true"))
         })
         .collect();
     table.sort();

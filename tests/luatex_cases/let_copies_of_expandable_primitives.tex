@@ -1,0 +1,3 @@
+% primitives: let detokenize number expanded
+\catcode`\{=1 \catcode`\}=2
+\def\x{\relax}\let\foo\detokenize \message{[\foo{\x}]}\let\bar\number \message{[\bar 12 ]}\let\e\expanded\message{[\e{\x}]}\edef\y{\foo{\x}\bar 3 }\message{[\meaning\y]}\let\r\relax\message{[\r]}\end

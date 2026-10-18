@@ -323,6 +323,8 @@ than none.
   began on (§1335), and run as a LuaTeX (`-progname=luatex`, or any LaTeX
   document) ends as luatex does: the file's `)` against the last message, and
   the open groups listed.
+- `\currentiflevel`, `\currentiftype` and `\currentifbranch`, for a conditional
+  the lowerer decided and for the arms of one the run decides alike.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

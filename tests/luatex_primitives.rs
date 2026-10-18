@@ -53,7 +53,10 @@ fn every_case_is_frozen_and_names_what_it_exercises() {
          --freeze`: {unfrozen:?}"
     );
     let orphaned: Vec<&String> = recorded.difference(&cases).collect();
-    assert!(orphaned.is_empty(), "frozen block(s) for no case: {orphaned:?}");
+    assert!(
+        orphaned.is_empty(),
+        "frozen block(s) for no case: {orphaned:?}"
+    );
     // The census counts a primitive complete by this line; a case without one
     // is evidence about nothing it can name.
     for name in &cases {
@@ -64,7 +67,10 @@ fn every_case_is_frozen_and_names_what_it_exercises() {
         );
     }
     for gap in known() {
-        assert!(cases.contains(&gap), "luatex_known_gaps.txt names no case: {gap}");
+        assert!(
+            cases.contains(&gap),
+            "luatex_known_gaps.txt names no case: {gap}"
+        );
     }
 }
 
@@ -78,7 +84,9 @@ fn every_case_still_prints_what_luatex_printed() {
             .expect("a frozen case exists");
         let got = texrs::luatex_oracle::subject(&src);
         match (got == want, known.contains(&name)) {
-            (false, false) => regressions.push(format!("{name}\n  luatex: {want:?}\n  texrs : {got:?}")),
+            (false, false) => {
+                regressions.push(format!("{name}\n  luatex: {want:?}\n  texrs : {got:?}"))
+            }
             (true, true) => healed.push(name),
             _ => {}
         }

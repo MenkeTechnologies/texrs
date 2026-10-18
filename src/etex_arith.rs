@@ -46,9 +46,17 @@ impl Op {
     }
 
     pub fn from_code(code: i64) -> Option<Op> {
-        [Op::Add, Op::Sub, Op::Mul, Op::Div, Op::Scale, Op::Check, Op::Abs]
-            .into_iter()
-            .find(|op| op.code() == code)
+        [
+            Op::Add,
+            Op::Sub,
+            Op::Mul,
+            Op::Div,
+            Op::Scale,
+            Op::Check,
+            Op::Abs,
+        ]
+        .into_iter()
+        .find(|op| op.code() == code)
     }
 }
 

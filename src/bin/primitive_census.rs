@@ -91,12 +91,18 @@ fn main() -> ExitCode {
 
     // `--one FILE`: both engines' streams for one file, for working on a case.
     if let Some(at) = args.iter().position(|a| a == "--one") {
-        let Some(src) = args.get(at + 1).and_then(|f| std::fs::read_to_string(f).ok()) else {
+        let Some(src) = args
+            .get(at + 1)
+            .and_then(|f| std::fs::read_to_string(f).ok())
+        else {
             eprintln!("primitive-census: --one needs a readable file");
             return ExitCode::from(2);
         };
         let (want, got) = (oracle::reference(&program, &src), subject(&src));
-        println!("luatex: {want}\ntexrs : {got}\n{}", if want == got { "SAME" } else { "DIFFERS" });
+        println!(
+            "luatex: {want}\ntexrs : {got}\n{}",
+            if want == got { "SAME" } else { "DIFFERS" }
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -152,15 +158,14 @@ fn main() -> ExitCode {
             } else if n == 0 {
                 (Status::Partial, String::new())
             } else if passing < n {
-                (Status::Partial, format!("{} of {n} cases diverge", n - passing))
+                (
+                    Status::Partial,
+                    format!("{} of {n} cases diverge", n - passing),
+                )
             } else {
                 (Status::Complete, String::new())
             };
-            Row {
-                p,
-                status,
-                why,
-            }
+            Row { p, status, why }
         })
         .collect();
 
@@ -185,7 +190,8 @@ fn main() -> ExitCode {
         let written = oracle::command_table(&program)
             .map(|t| oracle::render_command_table(&t))
             .and_then(|text| {
-                std::fs::write(repo.join("src/luatex_primitives.rs"), text).map_err(|e| e.to_string())
+                std::fs::write(repo.join("src/luatex_primitives.rs"), text)
+                    .map_err(|e| e.to_string())
             });
         if let Err(e) = written {
             eprintln!("primitive-census: {e}");

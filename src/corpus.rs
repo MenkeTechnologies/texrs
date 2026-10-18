@@ -542,6 +542,24 @@ pub const CORPUS: &[Entry] = &[
         "Nothing at all where it is expanded, and a conditional to text that is being skipped, so a macro that stands for a test can be written `\\ifcondition\\mytest` and still nest. A LuaTeX primitive.",
         "\\ifcondition\\ifnum1=1 \\message{yes}\\fi",
     ),
+    (
+        "\\currentiflevel",
+        "Conditionals",
+        "How many conditionals are open where it is read, a read-only integer -- a conditional whose text is running, whether the lowerer decided it or the run will. The one whose test is being read does not count yet. An eTeX primitive.",
+        "\\iftrue\\iftrue \\count1=\\currentiflevel \\fi\\fi   % \\count1 is 2",
+    ),
+    (
+        "\\currentiftype",
+        "Conditionals",
+        "Which conditional is innermost, in luatex's numbering: `\\if` 1, `\\ifnum` 3, `\\ifx` 13, `\\iftrue` 15, `\\ifcase` 17, `\\ifdefined` 18, `\\ifcsname` 19, `\\ifabsnum` 23 and so on, negative under `\\unless`, 0 outside every one. An eTeX primitive.",
+        "\\unless\\ifx ab \\message{\\the\\currentiftype}\\fi   % => -13",
+    ),
+    (
+        "\\currentifbranch",
+        "Conditionals",
+        "Which text of the innermost conditional is running: 1 the true text, -1 the `\\else` text, 0 outside every conditional. An eTeX primitive.",
+        "\\iffalse\\else \\message{\\the\\currentifbranch}\\fi   % => -1",
+    ),
     // ══ Registers — compiler::COUNT_SLOTS, expand::do_arith ════════════════
     (
         "\\count",
