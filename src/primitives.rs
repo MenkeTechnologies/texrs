@@ -495,6 +495,7 @@ const EXPANDABLE: &[&str] = &[
     "input",
     "endinput",
     "scantokens",
+    "scantextokens",
     "expanded",
     "begincsname",
     "lastnamedcs",

@@ -11,3 +11,9 @@ edef_reads_general_text.tex
 glueexpr.tex       `\the\glueexpr' and `\the\muexpr' are refused
 #                  (`Unsupported \the'): only \numexpr and \dimexpr have an
 #                  expression the run evaluates.
+scantokens_file_end.tex
+#                  A pseudo file that ends inside a \message or \edef body is
+#                  `File ended while scanning ...' in luatex (check_outer_validity
+#                  at the file end, then a `}' inserted). The body's text is
+#                  tokenised whole there instead, so its end is not seen and
+#                  nothing is reported.

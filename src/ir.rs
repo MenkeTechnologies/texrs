@@ -69,7 +69,10 @@ pub enum Num {
     /// The end of an expression: its value, or zero and `report` -- `!
     /// Arithmetic overflow` with the context where the expression ended,
     /// taken while lowering -- if a step went out of range.
-    ExprEnd { value: Box<Num>, report: String },
+    ExprEnd {
+        value: Box<Num>,
+        report: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]

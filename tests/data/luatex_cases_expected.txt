@@ -61,6 +61,10 @@ a! Bad interaction mode (7).l.3 \message{a}\interactionmode=7                   
 [4801823] [-4736287] [65536] [1]
 #==# protected.tex
 [\protected macro:->P][macro:->\p Q] [\protected\long macro:#1->S]
+#==# scantokens.tex
+[AB] [11] [macro:->a\relax b ] [macro:->a\relax b] [c] l1 l2:2 [1] x eof y
+#==# scantokens_file_end.tex
+Runaway text?[c ! File ended while scanning text of \message.<inserted text>                 }l.3 \message{[\scantokens{c}                            ]}\message{d}[c ! Too many }'s.l.3 \message{[\scantokens{c}]}                              \message{d}dRunaway definition?->q ! File ended while scanning definition of \x.<inserted text>                 }l.4 \edef\x{\scantokens{q}                          }\message{[\meaning\x]}\end! Too many }'s.l.4 \edef\x{\scantokens{q}}                           \message{[\meaning\x]}\end[macro:->q ] [0])(see the transcript file for additional information)Output written on case.dvi (1 page, 132 bytes
 #==# show_tokens_and_groups.tex
 x> \a b ##.l.4 \message{x}\showtokens{\a b #}                                  \message{y}y> A.l.5 \showtokens\expandafter{\a}                               ! OK (see the transcript file).l.6 {\begingroup\showgroups                           \endgroup}### semi simple group (level 2) entered at line 8 (\begingroup)### simple group (level 1) entered at line 8 ({)### bottom level! OK.l.9 \showgroups               \endgroup}### bottom level! OK.l.10 \showgroups                )(see the transcript file for additional information
 #==# tracing_assigns.tex

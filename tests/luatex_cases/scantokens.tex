@@ -1,0 +1,10 @@
+% primitives: scantokens scantextokens everyeof
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\scantokens{\catcode`\@=11 \def\a@b{AB}\message{[\a@b]}}\message{[\the\catcode`\@]}
+\everyeof{\noexpand}\edef\x{\scantokens{a\relax b}}\message{[\meaning\x]}
+\edef\y{\scantextokens{a\relax b}}\message{[\meaning\y]}
+\everyeof{}\message{[\scantextokens{c}]}
+\newlinechar=`\| \scantokens{\message{l1}|\message{l2:\the\inputlineno}}
+\def\m{\message{[\the\inputlineno]}}\scantokens{\m}
+\everyeof{\message{eof}}\scantokens{\message{x}}\message{y}
+\end

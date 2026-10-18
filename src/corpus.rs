@@ -1123,6 +1123,18 @@ pub const CORPUS: &[Entry] = &[
         "\\edef\\keep{\\unexpanded{\\later}}",
     ),
     (
+        "\\scantokens",
+        "Expansion",
+        "Read a token list again as a file: written as `\\meaning` writes a body, cut into lines at the `\\newlinechar`, each line ended with the `\\endlinechar`, and tokenised as it is read -- so a `\\catcode` inside it changes the rest. `\\everyeof` is inserted at its end. An eTeX primitive.",
+        "\\scantokens{\\catcode`\\@=11 \\def\\a@b{AB}}",
+    ),
+    (
+        "\\scantextokens",
+        "Expansion",
+        "`\\scantokens` with no line end after the last line and nothing inserted at the end, so it can stand inside an `\\edef` without an `\\everyeof`. A LuaTeX primitive.",
+        "\\edef\\x{\\scantextokens{a\\relax b}}   % \\x is a\\relax b",
+    ),
+    (
         "\\lastnamedcs",
         "Expansion",
         "The control sequence the last `\\csname`, `\\begincsname` or `\\ifcsname` looked up, put back where this stands -- so a name built once can be used again without building it twice. After a lookup that found nothing it is an undefined control sequence; after an empty name, or before any, it is nothing. A LuaTeX primitive.",

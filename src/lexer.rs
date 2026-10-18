@@ -256,9 +256,82 @@ pub struct Lexer {
     /// what §325's `back_input` made and what a macro call made, each with
     /// the depth of `pending` it sits on. See [`Lexer::levels`].
     levels: Vec<Level>,
+    /// The files a pseudo file (etex.ch's `pseudo_start`, for `\scantokens`)
+    /// is being read on top of, innermost last: what the mouth goes back to
+    /// when it has read the pseudo file to its end.
+    suspended: Vec<Suspended>,
+    /// What the source being read inserts at its end before it closes: e-TeX's
+    /// `\everyeof` for a pseudo file, `None` once inserted and for a file that
+    /// is not one.
+    eof_tokens: Option<Vec<Token>>,
+}
+
+/// A source a pseudo file suspended, as it stood: everything that says where
+/// in its characters the mouth was, and the token lists that were in front of
+/// it -- those are read after the pseudo file, which is above them on tex's
+/// input stack.
+struct Suspended {
+    chars: Vec<char>,
+    pos: usize,
+    line_cache: (usize, u32),
+    state: State,
+    line_end: Option<Option<char>>,
+    decoded_at: Option<usize>,
+    spliced: Vec<usize>,
+    pending: Pending,
+    levels: Vec<Level>,
+    eof_tokens: Option<Vec<Token>>,
 }
 
 impl Lexer {
+    /// etex.ch's `pseudo_start`: read `text` as a file in front of everything
+    /// else, its lines ended as a file's are (`\endlinechar` appended, trailing
+    /// spaces gone), tokenised as it is read so a `\catcode` in it changes what
+    /// follows. At its end `eof` is inserted (`\everyeof`) and the mouth goes
+    /// back to what it was reading.
+    pub fn begin_pseudo_file(&mut self, text: &str, eof: Vec<Token>) {
+        self.ahead = None;
+        let parent = Suspended {
+            chars: std::mem::replace(&mut self.chars, text.chars().collect()),
+            pos: std::mem::replace(&mut self.pos, 0),
+            line_cache: self.line_cache.replace((0, 1)),
+            state: std::mem::replace(&mut self.state, State::NewLine),
+            line_end: self.line_end.take(),
+            decoded_at: self.decoded_at.take(),
+            spliced: std::mem::take(&mut self.spliced),
+            pending: std::mem::take(&mut self.pending),
+            levels: std::mem::take(&mut self.levels),
+            eof_tokens: self.eof_tokens.replace(eof),
+        };
+        self.suspended.push(parent);
+    }
+
+    /// At the end of the characters: a pseudo file's `\everyeof` first, then
+    /// the source it suspended. Whether there is anything more to read.
+    fn end_pseudo_file(&mut self) -> bool {
+        if let Some(eof) = self.eof_tokens.take() {
+            if !eof.is_empty() {
+                self.insert_input(&eof);
+                return true;
+            }
+        }
+        let Some(parent) = self.suspended.pop() else {
+            return false;
+        };
+        self.ahead = None;
+        self.chars = parent.chars;
+        self.pos = parent.pos;
+        self.line_cache.set(parent.line_cache);
+        self.state = parent.state;
+        self.line_end = parent.line_end;
+        self.decoded_at = parent.decoded_at;
+        self.spliced = parent.spliced;
+        self.pending = parent.pending;
+        self.levels = parent.levels;
+        self.eof_tokens = parent.eof_tokens;
+        true
+    }
+
     /// A mouth over an already-decoded slice of characters.
     ///
     /// The parallel pre-lexer hands each worker one line-aligned slice of the
@@ -290,6 +363,8 @@ impl Lexer {
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
             levels: Vec::new(),
+            suspended: Vec::new(),
+            eof_tokens: None,
         }
     }
 
@@ -368,6 +443,8 @@ impl Lexer {
             spliced: Vec::new(),
             invalid: std::cell::RefCell::new(Vec::new()),
             levels: Vec::new(),
+            suspended: Vec::new(),
+            eof_tokens: None,
         }
     }
 
@@ -859,7 +936,12 @@ impl Lexer {
             return Some(t);
         }
         loop {
-            let c = self.peek()?;
+            let Some(c) = self.peek() else {
+                return match self.end_pseudo_file() {
+                    true => self.next_token(cats),
+                    false => None,
+                };
+            };
             if self.line_end.is_none() {
                 self.line_end = Some(cats.end_line_char());
             }

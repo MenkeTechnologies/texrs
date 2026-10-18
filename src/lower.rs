@@ -953,7 +953,8 @@ impl Lowerer {
                         // A group scopes the macro table AND the registers it
                         // writes; the latter is run-time state, so the body is
                         // lowered and wrapped in save/restore.
-                        self.eng.compile_time_begin_group(GroupKind::Simple, lx.line());
+                        self.eng
+                            .compile_time_begin_group(GroupKind::Simple, lx.line());
                         let mark = self.globals.len();
                         let known_mark = self.eng.known.mark();
                         let mut body = self.block(lx, Some(&["\u{0}endgroup"]))?;
@@ -1553,7 +1554,9 @@ impl Lowerer {
                     let mode = self.eng.scan_number_file(lx)?;
                     match (0..=3).contains(&mode) {
                         true => self.new_interaction(&mut out, mode),
-                        false => self.eng.report(lx, &format!("Bad interaction mode ({mode})")),
+                        false => self
+                            .eng
+                            .report(lx, &format!("Bad interaction mode ({mode})")),
                     }
                 }
                 "errmessage" => {
@@ -1924,7 +1927,8 @@ impl Lowerer {
                 // the two group forms disagreed: `{\count0=2}` restored and
                 // `\begingroup\count0=2\endgroup` did not.
                 "begingroup" => {
-                    self.eng.compile_time_begin_group(GroupKind::SemiSimple, lx.line());
+                    self.eng
+                        .compile_time_begin_group(GroupKind::SemiSimple, lx.line());
                     let mark = self.globals.len();
                     let known_mark = self.eng.known.mark();
                     let mut body = self.block(lx, Some(&["endgroup"]))?;
@@ -3706,7 +3710,11 @@ impl Lowerer {
                 if let Some(level) = expr_level_of(self.eng.primitive_meaning(*n).name()) {
                     let e = self.expr(lx, pending, level)?;
                     return Ok(Some(match negative {
-                        true => step(crate::etex_arith::Op::Sub, crate::etex_arith::INFINITY, vec![Num::Literal(0), e]),
+                        true => step(
+                            crate::etex_arith::Op::Sub,
+                            crate::etex_arith::INFINITY,
+                            vec![Num::Literal(0), e],
+                        ),
                         false => e,
                     }));
                 }
@@ -4480,13 +4488,16 @@ impl Lowerer {
                             // e-TeX's `\numexpr` and `\dimexpr`: the value, written
                             // as an integer or as a dimension.
                             Some(Token::Cs(w))
-                                if expr_level_of(self.eng.primitive_meaning(w).name()).is_some() =>
+                                if expr_level_of(self.eng.primitive_meaning(w).name())
+                                    .is_some() =>
                             {
                                 let level = expr_level_of(self.eng.primitive_meaning(w).name())
                                     .expect("just matched");
                                 let e = self.expr(work, true, level)?;
                                 match (level, e) {
-                                    (ExprLevel::Int, Num::Literal(v)) => text.push_str(&v.to_string()),
+                                    (ExprLevel::Int, Num::Literal(v)) => {
+                                        text.push_str(&v.to_string())
+                                    }
                                     (ExprLevel::Dimen, Num::Literal(v)) => {
                                         text.push_str(&crate::dimen::print_scaled(v));
                                         text.push_str("pt");
@@ -4729,18 +4740,29 @@ impl Lowerer {
                 // `\relax`.
                 "begincsname" => {
                     let built = self.eng.read_csname_pending(work)?;
-                    if let Some(id) = self.eng.named_cs(&built, false).filter(|_| !built.is_empty()) {
+                    if let Some(id) = self
+                        .eng
+                        .named_cs(&built, false)
+                        .filter(|_| !built.is_empty())
+                    {
                         work.push_back(&[Token::Cs(id)]);
                     }
                 }
                 "lastnamedcs" => {
                     self.eng.expand_pending(work, n)?;
                 }
+                // Read again as a file; see the gullet's arm.
+                "scantokens" | "scantextokens" => {
+                    self.eng.expand_pending(work, n)?;
+                }
                 "csname" => {
                     // The name is built from text and macros, all compile-time.
                     let built = self.eng.read_csname_pending(work)?;
                     // §372: a name with no meaning is made \relax.
-                    let id = self.eng.named_cs(&built, true).expect("\\csname always makes one");
+                    let id = self
+                        .eng
+                        .named_cs(&built, true)
+                        .expect("\\csname always makes one");
                     work.push_back(&[Token::Cs(id)]);
                 }
                 "expandafter" => {
@@ -5214,7 +5236,11 @@ impl Lowerer {
                 Some(Op::Mul) => t = step(Op::Mul, max, vec![t, f]),
                 Some(Op::Div) => t = step(Op::Div, max, vec![t, f]),
                 Some(Op::Scale) => {
-                    t = step(Op::Scale, max, vec![t, std::mem::replace(&mut n, Num::Literal(0)), f])
+                    t = step(
+                        Op::Scale,
+                        max,
+                        vec![t, std::mem::replace(&mut n, Num::Literal(0)), f],
+                    )
                 }
                 Some(_) => unreachable!("a term waits only on *, / or a scale"),
             }
@@ -5641,15 +5667,18 @@ impl Lowerer {
         };
         let name = self.eng.register_name_pub(slot);
         if !global && old == new {
-            self.eng.diagnostic(&format!("{{reassigning {name}={}}}", shown(old)));
+            self.eng
+                .diagnostic(&format!("{{reassigning {name}={}}}", shown(old)));
             return;
         }
         let verb = match global {
             true => "globally changing",
             false => "changing",
         };
-        self.eng.diagnostic(&format!("{{{verb} {name}={}}}", shown(old)));
-        self.eng.diagnostic(&format!("{{into {name}={}}}", shown(new)));
+        self.eng
+            .diagnostic(&format!("{{{verb} {name}={}}}", shown(old)));
+        self.eng
+            .diagnostic(&format!("{{into {name}={}}}", shown(new)));
     }
 }
 

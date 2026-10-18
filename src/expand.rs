@@ -1165,7 +1165,8 @@ impl Engine {
         self.note_mouth(lx);
         let shown = format!("> {}.", self.tokens_shown(&text));
         let context = self.error_context(lx);
-        self.errors.push(format!("{shown}{}", context.replace('\n', "")));
+        self.errors
+            .push(format!("{shown}{}", context.replace('\n', "")));
         self.tally_error();
         Ok(())
     }
@@ -1857,10 +1858,48 @@ impl Engine {
             "csname" => {
                 let built = self.read_csname(lx, pending_only)?;
                 // An undefined \csname name becomes \relax, per tex.web §372.
-                let id = self.named_cs(&built, true).expect("\\csname always makes one");
+                let id = self
+                    .named_cs(&built, true)
+                    .expect("\\csname always makes one");
                 // §372's `back_input`: an error in what reads it shows the
                 // name as `<recently read>`.
                 lx.back_input(&[Token::Cs(id)]);
+                Ok(true)
+            }
+            // etex.ch's `\scantokens` (`pseudo_start`): the general text, written
+            // as §295's `show_token_list` writes it, split into lines at the
+            // `\newlinechar`, and read again as a file -- `\everyeof` at its
+            // end. luatex's `\scantextokens` is the same with no line end
+            // after the last line and nothing inserted at the end (measured).
+            //
+            // A context that reads only tokens already in hand -- an `\edef`
+            // or `\message` body -- executes nothing while it reads, so no
+            // `\catcode` can change under the text there and it is tokenised
+            // whole, with the category codes now.
+            "scantokens" | "scantextokens" => {
+                let file = name.name() == "scantokens";
+                let text = self.scan_general_text(lx)?;
+                let src = self.pseudo_file_text(&text, file);
+                let eof = match file {
+                    true => self
+                        .toks
+                        .get(&crate::params::toks_register("everyeof").unwrap_or(-1))
+                        .cloned()
+                        .unwrap_or_default(),
+                    false => Vec::new(),
+                };
+                match pending_only {
+                    false => lx.begin_pseudo_file(&src, eof),
+                    true => {
+                        let mut read = Lexer::new(&src);
+                        let mut toks = Vec::new();
+                        while let Some(t) = read.next_token(&self.cats) {
+                            toks.push(t);
+                        }
+                        toks.extend(eof);
+                        lx.push_back(&toks);
+                    }
+                }
                 Ok(true)
             }
             // luatex's `manufacture_csname(1)`: `\csname` that does not define
@@ -2089,7 +2128,11 @@ impl Engine {
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
-        let name = CONDITIONALS.iter().find(|c| **c == name).copied().unwrap_or("if");
+        let name = CONDITIONALS
+            .iter()
+            .find(|c| **c == name)
+            .copied()
+            .unwrap_or("if");
         self.enter_decided(lx, truth != negated, pending_only, (name, negated, line))
     }
 
@@ -3682,7 +3725,14 @@ impl Engine {
             return Ok(());
         }
         if trace {
-            self.trace_toks(if global { "globally changing" } else { "changing" }, reg);
+            self.trace_toks(
+                if global {
+                    "globally changing"
+                } else {
+                    "changing"
+                },
+                reg,
+            );
         }
         self.save(Save::Toks(reg, self.toks.get(&reg).cloned()));
         self.toks.insert(reg, value);
@@ -4212,15 +4262,13 @@ impl Engine {
                     s = None;
                     e = match r {
                         None => t,
-                        Some(add_or_sub) => {
-                            match arith::add_glue(e, t, add_or_sub == Op::Sub) {
-                                Some(g) => g,
-                                None => {
-                                    failed(false);
-                                    arith::glue_error()
-                                }
+                        Some(add_or_sub) => match arith::add_glue(e, t, add_or_sub == Op::Sub) {
+                            Some(g) => g,
+                            None => {
+                                failed(false);
+                                arith::glue_error()
                             }
-                        }
+                        },
                     };
                     r = o;
                 }
@@ -7326,7 +7374,8 @@ impl Engine {
 
     /// Whether `\catcodetable` may switch to table `h` (`valid_catcode_table`).
     pub fn valid_cat_table(&self, h: i64) -> bool {
-        h == self.cat_table || (self.cat_tables.contains_key(&h) && !self.unset_cat_tables.contains(&h))
+        h == self.cat_table
+            || (self.cat_tables.contains_key(&h) && !self.unset_cat_tables.contains(&h))
     }
 
     /// textcodes.c's `get_cat_code(h, c)`: the code `c` has in table `h`. A
@@ -7352,7 +7401,10 @@ impl Engine {
             return;
         };
         if table == self.cat_table {
-            self.save_as(Save::Cat(table, c, self.cats.get(c)), self.global_defs_applied(global));
+            self.save_as(
+                Save::Cat(table, c, self.cats.get(c)),
+                self.global_defs_applied(global),
+            );
             self.cats.set(c, cat);
             return;
         }
@@ -7479,4 +7531,25 @@ pub fn conditional_name(name: &str) -> &'static str {
         .find(|c| **c == name)
         .copied()
         .unwrap_or("if")
+}
+
+impl Engine {
+    /// The characters `\scantokens` reads as a file: `text` as §295 shows a
+    /// token list, cut into lines at the `\newlinechar` (etex.ch's
+    /// `pseudo_start`), each ended as a file's line is -- the last too, for
+    /// `\scantokens` (`file`), but not for `\scantextokens`.
+    fn pseudo_file_text(&self, text: &[Token], file: bool) -> String {
+        let shown = self.tokens_shown(text);
+        let nl = u32::try_from(self.intpars.get(crate::intpar::NEW_LINE_CHAR))
+            .ok()
+            .and_then(char::from_u32);
+        let mut src: String = match nl {
+            Some(nl) => shown.split(nl).collect::<Vec<_>>().join("\n"),
+            None => shown,
+        };
+        if file {
+            src.push('\n');
+        }
+        src
+    }
 }

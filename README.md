@@ -325,6 +325,8 @@ than none.
   the open groups listed.
 - `\currentiflevel`, `\currentiftype` and `\currentifbranch`, for a conditional
   the lowerer decided and for the arms of one the run decides alike.
+- `\scantokens` and `\scantextokens`: the text read again as a file, a line at a
+  time under the category codes in force, with `\everyeof` at its end.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

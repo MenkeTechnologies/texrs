@@ -669,7 +669,8 @@ impl Compiler {
                 self.b.emit(Op::LoadInt(op.code()), self.line);
                 self.b.emit(Op::LoadInt(*max), self.line);
                 let argc = u8::try_from(args.len() + 2).unwrap_or(u8::MAX);
-                self.b.emit(Op::CallBuiltin(ops::EXPR_STEP, argc), self.line);
+                self.b
+                    .emit(Op::CallBuiltin(ops::EXPR_STEP, argc), self.line);
             }
             Num::ExprEnd { value, report } => {
                 self.num(value)?;
@@ -717,8 +718,7 @@ pub const MUGLUEPAR_BASE: i64 = GLUEPAR_BASE + crate::params::ORDINARY_GLUE as i
 const MUGLUEPAR_END: i64 = MUGLUEPAR_BASE
     + (crate::params::GLUE_NAMES.len() - crate::params::ORDINARY_GLUE) as i64 * SKIP_STRIDE;
 /// Where LuaTeX's glue parameters start, four slots each.
-pub const LUAGLUEPAR_BASE: i64 =
-    LUADIMPAR_BASE + crate::params::LUATEX_DIMEN_NAMES.len() as i64;
+pub const LUAGLUEPAR_BASE: i64 = LUADIMPAR_BASE + crate::params::LUATEX_DIMEN_NAMES.len() as i64;
 /// One past the last of them.
 const LUAGLUEPAR_END: i64 =
     LUAGLUEPAR_BASE + crate::params::LUATEX_GLUE_NAMES.len() as i64 * SKIP_STRIDE;
