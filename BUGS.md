@@ -524,6 +524,13 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `filename`, and none of luatex's memory statistics.
 - **Token userdata:** `mode` of a macro and of a primitive, `id`, and `tok` of
   a control sequence are luatex memory addresses and are not reproduced.
+  `token.create(name)` of a name nothing has defined makes that control
+  sequence, where luatex answers its one `undefined_cs` token unless the name
+  is already in the hash (so `\let` to it is "Missing control sequence
+  inserted" there). `tex.runtoks` runs its tokens with the engine's nested
+  control (`Engine::local_control`): definitions, `\let`, the code tables and
+  internal integers take effect, and a `\count` assignment, `\message` or
+  typesetting there refuses by name.
 - **Internal quantities texrs does not hold** -- `tex.prevdepth`,
   `tex.spacefactor`, `tex.prevgraf`, `tex.pagegoal`, `tex.deadcycles`,
   `tex.insertpenalties`, `tex.lastpenalty` and the other `last` items, the

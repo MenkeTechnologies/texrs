@@ -477,7 +477,17 @@ fn read_group(eng: &mut Engine, lx: &mut Lexer) -> R<String> {
     // name stands for, such as iftex.sty's `\IFTEX@detokenize`.
     let expanded = eng.expand_edef_body(&toks)?;
     let escaped = apply_escapestring(eng, &expanded);
-    Ok(eng.tokens_text(&escaped))
+    // The chunk is the token list printed as `token_show` prints it, which
+    // doubles a macro parameter character: `#` of catcode 6 reaches Lua as
+    // `##`, in luatex as here.
+    let shown: Vec<Token> = escaped
+        .iter()
+        .flat_map(|t| match t {
+            Token::Char(_, Cat::Param) => vec![*t, *t],
+            _ => vec![*t],
+        })
+        .collect();
+    Ok(eng.tokens_text(&shown))
 }
 
 /// Apply `\luaescapestring{...}` where it stands inside a chunk.
@@ -1603,6 +1613,62 @@ fn tex_table(
     tex.set(
         "number",
         lua.create_function(|_, n: i64| Ok(n.to_string()))?,
+    )?;
+    // `tex.runtoks(f)` and `tex.runtoks(register)`: the tokens the function
+    // puts back (`token.put_next`, `tex.print`), or the register's list, run
+    // NOW by a nested main control (ltexlib.c `tex_run_toks`,
+    // `local_control`), and Lua resumes when they are used up. The nested
+    // control is the engine's (`Engine::local_control`): definitions, `\let`,
+    // the code tables and internal integers take effect, and what only the
+    // program could do refuses by name.
+    let b = Rc::clone(bridge);
+    tex.set(
+        "runtoks",
+        lua.create_function(
+            move |_, (what, _force, _grouped): (Value, Option<bool>, Option<bool>)| {
+                let stop = ctx::with("tex.runtoks", |_, lx| Ok(lx.pending.len()))?;
+                match what {
+                    Value::Function(f) => {
+                        let printed_before = b.borrow().prints.len();
+                        f.call::<()>(())?;
+                        let prints: Vec<Print> =
+                            b.borrow_mut().prints.drain(printed_before..).collect();
+                        ctx::with("tex.runtoks", |eng, lx| {
+                            let mut toks = Vec::new();
+                            for p in &prints {
+                                toks.extend(tokenize(&p.text, p.cats, p.line, &eng.cats));
+                            }
+                            lx.push_back(&toks);
+                            Ok(())
+                        })?;
+                    }
+                    Value::Integer(_) | Value::String(_) => {
+                        let reg = match &what {
+                            Value::Integer(n) => *n,
+                            Value::String(s) => {
+                                let name = s.to_str()?.to_string();
+                                b.borrow().toks_names.get(&name).copied().ok_or_else(|| {
+                                    mlua::Error::runtime(format!(
+                                        "tex.runtoks: no token register named {name}"
+                                    ))
+                                })?
+                            }
+                            _ => unreachable!(),
+                        };
+                        ctx::with("tex.runtoks", |eng, lx| {
+                            let list = eng.toks.get(&reg).cloned().unwrap_or_default();
+                            lx.push_back(&list);
+                            Ok(())
+                        })?;
+                    }
+                    _ => return Err(mlua::Error::runtime("invalid argument to tex.runtoks")),
+                }
+                ctx::with("tex.runtoks", |eng, lx| {
+                    eng.local_control(lx, stop)
+                        .map_err(|e| mlua::Error::runtime(e.0))
+                })
+            },
+        )?,
     )?;
     tex.set(
         "romannumeral",

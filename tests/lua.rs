@@ -1993,3 +1993,45 @@ fn token_create_makes_a_given_value_with_no_name_as_luatex_does() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn runtoks_runs_what_the_function_puts_back_and_a_register_before_lua_resumes() {
+    // ltexlib's `tex.runtoks`: the tokens a function puts back, or a token
+    // register's list, run by a nested main control before Lua carries on --
+    // so a definition made there is visible to the next line of Lua.
+    let body = "\\toks0={\\def\\baz{Z}}\\toksdef\\mytoks=5 \\mytoks={\\edef\\qux{Q\\baz}}\
+        \\directlua{local r = {} \
+          tex.runtoks(function() tex.print(string.char(92) .. 'gdef' .. string.char(92) .. 'bar{Y}' \
+            .. string.char(92) .. 'tolerance=123 ') end) \
+          r[#r + 1] = token.get_macro('bar') r[#r + 1] = tex.tolerance \
+          tex.runtoks(0) r[#r + 1] = token.get_macro('baz') \
+          tex.runtoks('mytoks') r[#r + 1] = token.get_macro('qux') \
+          tex.sprint(string.char(92) .. 'message{[' .. table.concat(r, ' ') .. ']}')}\
+        \\message{[\\meaning\\bar]}";
+    let want = "[Y 123 Z QZ] [macro:->Y]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}
+
+#[test]
+fn a_parameter_character_reaches_lua_doubled() {
+    // `\directlua`'s text is the token list as `token_show` prints it, which
+    // doubles a catcode-6 character: luatex 1.24.0 hands Lua `##` for `#`.
+    let body =
+        "\\catcode`\\#=6 \\directlua{tex.sprint(string.char(92) .. 'message{[' .. '#' .. ']}')}";
+    // `\message` doubles each of the two again.
+    assert_eq!(out(body), "[####]");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, "[####]", "the oracle");
+    assert_eq!(got, oracle);
+}
