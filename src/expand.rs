@@ -1928,6 +1928,12 @@ impl Engine {
         }
     }
 
+    /// §367's `expand` of one token, for a caller outside the expander:
+    /// whether `name` expanded (its expansion is then in front of the mouth).
+    pub fn expand_once(&mut self, lx: &mut Lexer, name: CsId) -> R<bool> {
+        self.try_expand(lx, name, false)
+    }
+
     /// Handle `name` if it is expandable, returning whether it was.
     ///
     /// This is the gullet. Both the executor and `expand_to_text` route through

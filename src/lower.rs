@@ -19,6 +19,7 @@ use crate::token::{CsId, Token};
 
 type R<T> = Result<T, TexError>;
 
+mod align;
 mod math;
 mod stomach;
 
@@ -932,6 +933,11 @@ impl Lowerer {
             // Where the stomach builds the lists, a `\let` copy of a character
             // is that character to `main_control` (its `cur_cmd` is the
             // category): `\bgroup` opens a group as `{` does.
+            // An alignment's entry ends at its `&` and `\cr` (`stomach`),
+            // which counts explicit braces before `\bgroup` becomes one.
+            if self.st_align_token(lx, &tok, &mut out)? {
+                continue;
+            }
             let tok = self.st_implicit(tok);
             // §1211: the token after a prefix is judged before it is acted on.
             if self.eng.recover && self.eng.prefix_gate(lx, &tok) {
@@ -1275,7 +1281,13 @@ impl Lowerer {
             if matches!(self.eng.meanings.get(&name), Some(Meaning::Macro(_)))
                 && self.meaning_wins(lx, name)
             {
-                if let Some(parts) = self.tail_loop(name) {
+                // Not in an alignment's entry, whose `&` and `\span` end it
+                // where tex reads them: a loop there is expanded as tex does.
+                let looped = match self.st_in_align_entry() {
+                    true => None,
+                    false => self.tail_loop(name),
+                };
+                if let Some(parts) = looped {
                     out.extend(self.lower_tail_loop(parts)?);
                     continue;
                 }

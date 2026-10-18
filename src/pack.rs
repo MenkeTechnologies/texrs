@@ -163,6 +163,8 @@ pub struct Packed {
     /// `total_shrink` (§646) per order, which §1201 reads after the `hpack`
     /// of a display.
     pub total_shrink: [Scaled; 4],
+    /// `total_stretch` per order, which §796 records in an unset box.
+    pub total_stretch: [Scaled; 4],
 }
 
 /// The four orders' worth of stretch or shrink found in a list (§646).
@@ -275,6 +277,7 @@ pub fn hpack(
         badness,
         report,
         total_shrink: shrink.0,
+        total_stretch: stretch.0,
     }
 }
 
@@ -341,6 +344,7 @@ pub fn vpackage(list: Vec<Node>, spec: Spec, max_depth: Scaled, tol: Tolerances)
         badness,
         report,
         total_shrink: shrink.0,
+        total_stretch: stretch.0,
     }
 }
 

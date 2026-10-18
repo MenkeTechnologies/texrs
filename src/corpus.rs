@@ -750,6 +750,48 @@ pub const CORPUS: &[Entry] = &[
         "\\setbox2\\vsplit1 to 1in [\\splitbotmark]",
     ),
     (
+        "\\halign",
+        "Boxes",
+        "A table of rows (\u{a7}768-\u{a7}812): a preamble of templates, `u#v` per column between `&`s and ended by `\\cr`, then rows whose entries are read inside their column's templates. Each entry is set at its natural width, each column as wide as its widest entry (and the entries spanning it, \u{a7}798), and the rows are packed `to` or `spread` the size given, with `\\tabskip` glue between the columns. In a display it is the display (\u{a7}1206), which is how plain.tex's `\\eqalignno` and `\\displaylines` are built.",
+        "\\halign{#\\hfil&\\hfil#\\cr name&value\\cr alpha&1\\cr}",
+    ),
+    (
+        "\\valign",
+        "Boxes",
+        "`\\halign` turned on its side (\u{a7}768): columns of entries set in vertical mode, whose heights are aligned across the columns.",
+        "\\hbox{\\valign{\\hbox{#}\\vfil\\cr a\\cr b\\cr}}",
+    ),
+    (
+        "\\cr",
+        "Boxes",
+        "End a row of an alignment, or its preamble (\u{a7}780, \u{a7}791): the last entry's v template is read, the entry and the row are finished, and `\\everycr` is inserted. Outside an alignment it is the error `Misplaced \\cr`.",
+        "a&b\\cr",
+    ),
+    (
+        "\\crcr",
+        "Boxes",
+        "`\\cr`, except that right after a `\\cr` (or at the start of the alignment's body) it does nothing (\u{a7}785), so a macro can end a row whether or not its argument already did.",
+        "\\halign{#\\cr a\\cr\\crcr}",
+    ),
+    (
+        "\\span",
+        "Boxes",
+        "In an alignment's body, join the entry to the next column's, so the two are set as one entry spanning both (\u{a7}791, \u{a7}798); in a preamble, expand the token after it (\u{a7}782).",
+        "\\halign{#&#\\cr a\\span b\\cr}",
+    ),
+    (
+        "\\omit",
+        "Boxes",
+        "At the start of an entry, leave out its column's templates (\u{a7}788-\u{a7}789).",
+        "\\halign{[#]&#\\cr \\omit a&b\\cr}",
+    ),
+    (
+        "\\noalign",
+        "Boxes",
+        "Between two rows of an alignment, material for the list the rows are in, in its own group (\u{a7}785, \u{a7}1133): a rule, a skip, a penalty.",
+        "\\halign{#\\cr a\\cr\\noalign{\\hrule}b\\cr}",
+    ),
+    (
         "\\insert",
         "Boxes",
         "An insertion of class N, its vertical list built in internal vertical mode and packed with `\\splittopskip`, `\\splitmaxdepth` and `\\floatingpenalty` as they stand at its end (\u{a7}1099-\u{a7}1100). `\\vadjust` is the same with material for the enclosing vertical list.",

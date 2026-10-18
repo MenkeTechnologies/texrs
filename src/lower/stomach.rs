@@ -102,6 +102,8 @@ pub(super) struct State {
     /// Every mark text met so far and its tokens, numbered from 1 in this
     /// order: what `\topmark` and its siblings may hold when the program runs.
     marks: Vec<(String, Vec<Token>)>,
+    /// The alignments being read, innermost last.
+    pub(super) aligns: Vec<super::align::Align>,
 }
 
 impl Default for State {
@@ -121,6 +123,7 @@ impl Default for State {
             end_block: false,
             par_shape_given: false,
             marks: Vec::new(),
+            aligns: Vec::new(),
         }
     }
 }
@@ -327,7 +330,7 @@ impl Lowerer {
 
     /// §1096's `end_graf`, when a paragraph is open, with §1070's
     /// `normal_paragraph` after it.
-    fn st_end_graf(&mut self, out: &mut Vec<Cmd>) -> R<()> {
+    pub(super) fn st_end_graf(&mut self, out: &mut Vec<Cmd>) -> R<()> {
         if self.st_mode() != CMode::Horizontal {
             return Ok(());
         }
@@ -554,6 +557,36 @@ impl Lowerer {
                 let code = *code;
                 self.st.run_open = was_open;
                 return self.st_char_code(lx, code, out).map(|_| true);
+            }
+        }
+        // §1130: `\halign` and `\valign` where they begin an alignment, and
+        // the alignment's commands where none is being read (§1127-§1129).
+        if self.st_managed() && self.st_mode() != CMode::Unmanaged {
+            match name.name() {
+                "halign" if self.st_mode().vertical() => {
+                    self.st_init_align(lx, true, out)?;
+                    return Ok(true);
+                }
+                "valign" if self.st_mode().horizontal() => {
+                    self.st_init_align(lx, false, out)?;
+                    return Ok(true);
+                }
+                "halign" if self.st_mode() == CMode::DisplayMath => {
+                    match self.eng.innermost_group() == Some(GroupKind::MathShift) {
+                        true => self.st_init_align(lx, true, out)?,
+                        false => {
+                            lx.push_back(&[Token::Char('}', Cat::EndGroup), Token::Cs(name)]);
+                            self.eng.report(lx, "Missing } inserted");
+                        }
+                    }
+                    return Ok(true);
+                }
+                "cr" | "crcr" | "span" | "noalign" | "omit" => {
+                    if self.st_misplaced_align(lx, name) {
+                        return Ok(true);
+                    }
+                }
+                _ => {}
             }
         }
         // §1046-§1047 and the cases of §1045 that only math mode has.
@@ -961,7 +994,7 @@ impl Lowerer {
     }
 
     /// §1070's `normal_paragraph`.
-    fn st_normal_paragraph(&mut self, out: &mut Vec<Cmd>) {
+    pub(super) fn st_normal_paragraph(&mut self, out: &mut Vec<Cmd>) {
         if let Some(i) = crate::intpar::index("looseness") {
             if self.eng.intpars.get(i) != 0 {
                 self.eng.assign_intpar(i, 0);
@@ -1269,8 +1302,11 @@ impl Lowerer {
         out: &mut Vec<Cmd>,
     ) -> R<()> {
         // §403: the left brace, skipping spaces and `\relax`.
-        match self.st_next_non_blank(lx)?.map(|(t, p)| (self.st_implicit(t), p)) {
-            Some((Token::Char(_, Cat::BeginGroup), _)) => {}
+        match self.st_next_non_blank(lx)? {
+            Some((Token::Char(_, Cat::BeginGroup), _)) => self.st_align_brace(),
+            Some((t, p)) if matches!(self.st_implicit(t), Token::Char(_, Cat::BeginGroup)) => {
+                let _ = p;
+            }
             other => {
                 if let Some((t, _)) = other {
                     lx.push_back(&[t]);

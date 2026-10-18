@@ -219,6 +219,28 @@ pub enum ListOp<N = Num> {
     ResumeAfterDisplay,
     /// `\mkern` (§1061 with `mu_glue`).
     MuKern(N),
+    /// `init_align` (§774): `\halign` or `\valign`, `to` or `spread` a size.
+    InitAlign { halign: bool, exactly: bool, size: N },
+    /// §778: the tabskip glue in force, onto the preamble.
+    AlignTabskip([N; 4]),
+    /// §779: an alignrecord; `periodic` when the preamble repeats from it
+    /// (§783's `cur_loop`).
+    AlignRecord(bool),
+    /// The preamble has ended (§774's `new_save_level(align_group)`).
+    AlignEntries,
+    /// §793: a periodic preamble lengthened by one column.
+    AlignLengthen,
+    /// `init_row` (§786).
+    InitRow,
+    /// `fin_col` (§791): an entry ended by `&` (0), `\span` (1) or `\cr` (2).
+    FinCol(u8),
+    /// `fin_row` (§799).
+    FinRow,
+    /// `fin_align` (§800), with `\displayindent` for an alignment in a
+    /// display and zero otherwise.
+    FinAlign(N),
+    /// §1206: a display alignment placed, after its closing `$$`.
+    FinishDisplayAlignment,
     /// `\parshape` (§1248): the (indent, width) pairs, flattened.
     ParShape { global: bool, dims: Vec<N> },
     /// `make_accent` (§1123): character `accent` of font `f`, over character
@@ -349,6 +371,16 @@ impl<N> ListOp<N> {
             ListOp::MuKern(_) => 59,
             ListOp::Accent { .. } => 60,
             ListOp::ParShape { .. } => 61,
+            ListOp::InitAlign { .. } => 62,
+            ListOp::AlignTabskip(_) => 63,
+            ListOp::AlignRecord(_) => 64,
+            ListOp::AlignEntries => 65,
+            ListOp::AlignLengthen => 66,
+            ListOp::InitRow => 67,
+            ListOp::FinCol(_) => 68,
+            ListOp::FinRow => 69,
+            ListOp::FinAlign(_) => 70,
+            ListOp::FinishDisplayAlignment => 71,
         }
     }
 
@@ -461,6 +493,23 @@ impl<N> ListOp<N> {
                 f(Arg::Int(i64::from(*g)));
                 f(Arg::Int(*over));
             }
+            ListOp::InitAlign { halign, exactly, size } => {
+                f(Arg::Int(i64::from(*halign) + 2 * i64::from(*exactly)));
+                f(Arg::Num(size));
+            }
+            ListOp::AlignTabskip(spec) => {
+                for n in spec {
+                    f(Arg::Num(n));
+                }
+            }
+            ListOp::AlignRecord(b) => f(Arg::Int(i64::from(*b))),
+            ListOp::FinCol(k) => f(Arg::Int(i64::from(*k))),
+            ListOp::FinAlign(n) => f(Arg::Num(n)),
+            ListOp::AlignEntries
+            | ListOp::AlignLengthen
+            | ListOp::InitRow
+            | ListOp::FinRow
+            | ListOp::FinishDisplayAlignment => {}
             ListOp::ParShape { global, dims } => {
                 f(Arg::Int(i64::from(*global)));
                 for d in dims {
@@ -840,6 +889,23 @@ impl ListOp<i64> {
             }
             58 => ListOp::ResumeAfterDisplay,
             59 => ListOp::MuKern(r.int()),
+            62 => {
+                let flags = r.int();
+                ListOp::InitAlign {
+                    halign: flags & 1 == 1,
+                    exactly: flags & 2 == 2,
+                    size: r.int(),
+                }
+            }
+            63 => ListOp::AlignTabskip([r.int(), r.int(), r.int(), r.int()]),
+            64 => ListOp::AlignRecord(r.int() == 1),
+            65 => ListOp::AlignEntries,
+            66 => ListOp::AlignLengthen,
+            67 => ListOp::InitRow,
+            68 => ListOp::FinCol(u8::try_from(r.int()).unwrap_or(2)),
+            69 => ListOp::FinRow,
+            70 => ListOp::FinAlign(r.int()),
+            71 => ListOp::FinishDisplayAlignment,
             61 => {
                 let global = r.int() == 1;
                 let mut dims = Vec::new();

@@ -415,6 +415,28 @@ impl Stomach {
             ListOp::EndMath(fams) => self.after_math(&fams, e),
             ListOp::ResumeAfterDisplay => self.resume_after_display(),
             ListOp::MuKern(w) => self.append_mu_kern(w),
+            ListOp::InitAlign { halign, exactly, size } => {
+                let spec = match exactly {
+                    true => crate::pack::Spec::Exactly(size),
+                    false => crate::pack::Spec::Additional(size),
+                };
+                self.init_align(halign, spec);
+            }
+            ListOp::AlignTabskip(s) => self.align_tabskip(crate::glue::Glue {
+                natural: s[0],
+                stretch: s[1],
+                shrink: s[2],
+                stretch_order: s[3] / 4,
+                shrink_order: s[3] % 4,
+            }),
+            ListOp::AlignRecord(periodic) => self.align_record(periodic),
+            ListOp::AlignEntries => self.align_begin_entries(),
+            ListOp::AlignLengthen => self.align_lengthen(),
+            ListOp::InitRow => self.init_row(),
+            ListOp::FinCol(k) => self.fin_col(k, tol),
+            ListOp::FinRow => self.fin_row(tol),
+            ListOp::FinAlign(o) => self.fin_align(o, tol),
+            ListOp::FinishDisplayAlignment => self.finish_display_alignment(e),
             ListOp::ParShape { global, dims } => {
                 let shape = dims.chunks(2).map(|p| (p[0], p.get(1).copied().unwrap_or(0))).collect();
                 self.set_par_shape(shape, global);

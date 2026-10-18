@@ -1,0 +1,25 @@
+% Alignments on the list path (tex.web 768-812, 1206): a table with rules
+% from \noalign, \tabskip set in the preamble, \omit and \span, plain.tex's
+% displays built with \halign (\eqalignno with its numbers, \displaylines,
+% \eqalign), and \matrix and \pmatrix in a display.
+\hsize=300pt
+Text before an aligned display
+$$\eqalignno{a&=b+c&(1)\cr d+e&=f&(2)\cr}$$
+and a display with lines
+$$\displaylines{x=1\cr y=2\cr}$$
+and one more: $$\left\{\eqalign{x&=1\cr y&=22\cr}\right.$$
+then a table:
+\par
+\halign{\hfil#\tabskip=1em&#\hfil\tabskip=0pt\cr
+\noalign{\hrule}
+Name&Value\cr
+\noalign{\hrule\vskip2pt}
+alpha&1\cr
+beta&22\cr
+gamma&333\cr
+\omit\span\omit\hfil spanning both\hfil\cr
+\noalign{\hrule}
+}
+\centerline{centered} \leftline{left} \rightline{right}
+$$\matrix{1&2\cr 3&4\cr}\qquad \pmatrix{a&b\cr c&d\cr}$$
+\bye

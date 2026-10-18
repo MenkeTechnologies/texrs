@@ -32,6 +32,7 @@
 use crate::glue::Glue;
 use crate::node::{BoxNode, Node, Scaled, IGNORE_DEPTH};
 
+pub mod align;
 pub mod build;
 pub mod font;
 pub mod hyph;
@@ -162,6 +163,9 @@ pub enum Opened {
     MathLeft,
     /// One of `\mathchoice`'s four lists (§1172).
     MathChoice(u8),
+    /// An alignment's list, a row of it, or one of its entries (§774, §786,
+    /// §787).
+    Align,
 }
 
 /// `\hbox`, `\vbox` or `\vtop` (§1083's `k`).
@@ -303,6 +307,10 @@ pub struct Stomach {
     /// Slots an action assigned that are not mirrors of anything else:
     /// §1145's `\predisplaysize`, `\displaywidth`, `\displayindent`.
     pub slot_writes: Vec<(i64, i64)>,
+    /// The alignments in progress, innermost last (§770's `align_ptr`).
+    pub aligns: Vec<align::Align>,
+    /// A finished alignment that was a display, waiting for §1206.
+    pub align_display: Option<(Vec<Node>, Scaled)>,
     /// The number the lowerer gave each mark's text (`ListOp::Mark`).
     pub mark_ids: rustc_hash::FxHashMap<String, u32>,
     /// The `exten` table of each font a formula has been set from (§544).
@@ -353,6 +361,8 @@ impl Stomach {
             slot_writes: Vec::new(),
             math_exten: rustc_hash::FxHashMap::default(),
             mark_ids: rustc_hash::FxHashMap::default(),
+            aligns: Vec::new(),
+            align_display: None,
         }
     }
 

@@ -129,6 +129,13 @@
     "\\botmark"
     "\\splitfirstmark"
     "\\splitbotmark"
+    "\\halign"
+    "\\valign"
+    "\\cr"
+    "\\crcr"
+    "\\span"
+    "\\omit"
+    "\\noalign"
     "\\insert"
     "\\shipout"
     "\\unhcopy"
@@ -471,6 +478,13 @@
     (puthash "\\botmark" "\\botmark  —  The last mark on the page the output routine is working on (§1014). [Boxes]" table)
     (puthash "\\splitfirstmark" "\\splitfirstmark  —  The first mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
     (puthash "\\splitbotmark" "\\splitbotmark  —  The last mark in the material the last `\\vsplit` took off (§979). [Boxes]" table)
+    (puthash "\\halign" "\\halign  —  A table of rows (§768-§812): a preamble of templates, `u#v` per column between `&`s and ended by `\\cr`, then rows whose entries are read inside their column's templates. [Boxes]" table)
+    (puthash "\\valign" "\\valign  —  `\\halign` turned on its side (§768): columns of entries set in vertical mode, whose heights are aligned across the columns. [Boxes]" table)
+    (puthash "\\cr" "\\cr  —  End a row of an alignment, or its preamble (§780, §791): the last entry's v template is read, the entry and the row are finished, and `\\everycr` is inserted. [Boxes]" table)
+    (puthash "\\crcr" "\\crcr  —  `\\cr`, except that right after a `\\cr` (or at the start of the alignment's body) it does nothing (§785), so a macro can end a row whether or not its argument already did. [Boxes]" table)
+    (puthash "\\span" "\\span  —  In an alignment's body, join the entry to the next column's, so the two are set as one entry spanning both (§791, §798); in a preamble, expand the token after it (§782). [Boxes]" table)
+    (puthash "\\omit" "\\omit  —  At the start of an entry, leave out its column's templates (§788-§789). [Boxes]" table)
+    (puthash "\\noalign" "\\noalign  —  Between two rows of an alignment, material for the list the rows are in, in its own group (§785, §1133): a rule, a skip, a penalty. [Boxes]" table)
     (puthash "\\insert" "\\insert  —  An insertion of class N, its vertical list built in internal vertical mode and packed with `\\splittopskip`, `\\splitmaxdepth` and `\\floatingpenalty` as they stand at its end (§1099-§1100). [Boxes]" table)
     (puthash "\\shipout" "\\shipout  —  Ship the box that follows as a page (§638-§641): the terminal says `[` and `\\count0..9` and `]`, as tex does. [Boxes]" table)
     (puthash "\\unhcopy" "\\unhcopy  —  `\\unhbox` that leaves the register as it was (§1110). [Boxes]" table)

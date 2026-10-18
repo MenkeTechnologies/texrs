@@ -62,6 +62,9 @@ impl Lowerer {
             // §1150.
             Cat::BeginGroup => {
                 self.st_emit(out, ListOp::Noad(0))?;
+                // §1150's `back_input`, which takes back the brace's count
+                // (§325): `scan_math` reads it again.
+                self.st_align_unbrace();
                 lx.push_back(&[Token::Char(c, cat)]);
                 self.st_scan_math(lx, out)?;
             }

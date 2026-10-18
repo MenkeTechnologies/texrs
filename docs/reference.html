@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">338</div>
+            <div class="stat-val">345</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -415,6 +415,13 @@
             <tr><td><code>\botmark</code></td><td>The last mark on the page the output routine is working on (§1014). Read as <code>\topmark</code> is.</td><td><pre>\footline={\hfil\botmark}</pre></td></tr>
             <tr><td><code>\splitfirstmark</code></td><td>The first mark in the material the last <code>\vsplit</code> took off (§979). Read as <code>\topmark</code> is.</td><td><pre>\setbox2\vsplit1 to 1in [\splitfirstmark]</pre></td></tr>
             <tr><td><code>\splitbotmark</code></td><td>The last mark in the material the last <code>\vsplit</code> took off (§979). Read as <code>\topmark</code> is.</td><td><pre>\setbox2\vsplit1 to 1in [\splitbotmark]</pre></td></tr>
+            <tr><td><code>\halign</code></td><td>A table of rows (§768-§812): a preamble of templates, <code>u#v</code> per column between <code>&amp;</code>s and ended by <code>\cr</code>, then rows whose entries are read inside their column's templates. Each entry is set at its natural width, each column as wide as its widest entry (and the entries spanning it, §798), and the rows are packed <code>to</code> or <code>spread</code> the size given, with <code>\tabskip</code> glue between the columns. In a display it is the display (§1206), which is how plain.tex's <code>\eqalignno</code> and <code>\displaylines</code> are built.</td><td><pre>\halign{#\hfil&amp;\hfil#\cr name&amp;value\cr alpha&amp;1\cr}</pre></td></tr>
+            <tr><td><code>\valign</code></td><td><code>\halign</code> turned on its side (§768): columns of entries set in vertical mode, whose heights are aligned across the columns.</td><td><pre>\hbox{\valign{\hbox{#}\vfil\cr a\cr b\cr}}</pre></td></tr>
+            <tr><td><code>\cr</code></td><td>End a row of an alignment, or its preamble (§780, §791): the last entry's v template is read, the entry and the row are finished, and <code>\everycr</code> is inserted. Outside an alignment it is the error <code>Misplaced \cr</code>.</td><td><pre>a&amp;b\cr</pre></td></tr>
+            <tr><td><code>\crcr</code></td><td><code>\cr</code>, except that right after a <code>\cr</code> (or at the start of the alignment's body) it does nothing (§785), so a macro can end a row whether or not its argument already did.</td><td><pre>\halign{#\cr a\cr\crcr}</pre></td></tr>
+            <tr><td><code>\span</code></td><td>In an alignment's body, join the entry to the next column's, so the two are set as one entry spanning both (§791, §798); in a preamble, expand the token after it (§782).</td><td><pre>\halign{#&amp;#\cr a\span b\cr}</pre></td></tr>
+            <tr><td><code>\omit</code></td><td>At the start of an entry, leave out its column's templates (§788-§789).</td><td><pre>\halign{[#]&amp;#\cr \omit a&amp;b\cr}</pre></td></tr>
+            <tr><td><code>\noalign</code></td><td>Between two rows of an alignment, material for the list the rows are in, in its own group (§785, §1133): a rule, a skip, a penalty.</td><td><pre>\halign{#\cr a\cr\noalign{\hrule}b\cr}</pre></td></tr>
             <tr><td><code>\insert</code></td><td>An insertion of class N, its vertical list built in internal vertical mode and packed with <code>\splittopskip</code>, <code>\splitmaxdepth</code> and <code>\floatingpenalty</code> as they stand at its end (§1099-§1100). <code>\vadjust</code> is the same with material for the enclosing vertical list.</td><td><pre>\insert100{\hbox{n}}  \vadjust{\kern2pt}</pre></td></tr>
             <tr><td><code>\shipout</code></td><td>Ship the box that follows as a page (§638-§641): the terminal says <code>[</code> and <code>\count0..9</code> and <code>]</code>, as tex does.</td><td><pre>\shipout\hbox{page}</pre></td></tr>
             <tr><td><code>\unhcopy</code></td><td><code>\unhbox</code> that leaves the register as it was (§1110).</td><td><pre>\unhcopy&lt;N&gt;</pre></td></tr>
