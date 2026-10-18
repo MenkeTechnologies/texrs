@@ -28,6 +28,8 @@ fn dispatched() -> BTreeSet<String> {
         // The list commands -- `\hbox`, `\kern`, `\setbox` -- are dispatched
         // on the mode they meet, in the stomach's half of the lowerer.
         include_str!("../src/lower/stomach.rs"),
+        // And the cases math mode has of its own (tex.web 1136-1207).
+        include_str!("../src/lower/math.rs"),
     ] {
         for line in src.lines() {
             let line = line.trim();
