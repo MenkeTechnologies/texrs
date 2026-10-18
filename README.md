@@ -308,8 +308,19 @@ than none.
   coerced and restored by a group like `\dimen`, `\skip` and `\toks`. They are
   stores: the breaker's measure is `Layout`'s, not `\hsize`, and `\everypar`
   is not inserted when a paragraph starts.
-  Box registers are the exception — there is no `\setbox`, so every one is
-  void, which is what `\ifvoid`, `\ifhbox` and `\ifvbox` answer.
+- Box registers and the lists they hold, built while the program runs
+  (`src/stomach.rs`): `\setbox`, `\box`, `\copy`, `\lastbox`, `\vsplit`,
+  `\hbox`/`\vbox`/`\vtop` with `to` and `spread`, `\raise` and its siblings,
+  `\unhbox` and its siblings, glue, kerns, penalties, rules, leaders,
+  discretionaries, marks, `\insert`, `\vadjust` and `\shipout`, with
+  `\font\x=cmr10 at 12pt` loading the `.tfm` and the main loop of §1034-§1040
+  applying its ligatures and kerns. A `\setbox` in a group is undone at its
+  end and a `\global` one is not (§283); `\wd`, `\ht`, `\dp`, `\badness` and
+  `\lastpenalty` read as registers wherever a number or dimension is read,
+  `\wd0=` changes the box in place, `\ifvoid`/`\ifhbox`/`\ifvbox` are run-time
+  branches, and `\showbox` prints §198's display. `tests/cases` holds three
+  documents of them against tex's terminal output. In a plain document only:
+  a LaTeX prelude defines `\hbox` as a text macro.
 - The integer parameters of `tex.web` §236 — `\tolerance`, `\escapechar`,
   `\mag`, `\time` and the rest — at INITEX's values (§240) and the local
   clock's date (§241): assigned, read by `\the`/`\number` and wherever a
@@ -490,10 +501,14 @@ converted by `mlist_to_hlist` (§719-§767), out of `cmr`/`cmmi`/`cmsy`/`cmex`'s
 `fontdimen`s (`src/math.rs`).
 
 What that leaves: the page breaker reads its penalties once per document
-rather than per paragraph, and the shipper is handed
-line boxes built from already-broken strings rather than a node list, so
-`src/postline.rs` and `src/page.rs` are a library beside the path a run takes
-rather than the path itself.
+rather than per paragraph, and the shipper is handed line boxes built from
+already-broken strings rather than a node list. Box construction is now on
+the run's path (`src/stomach.rs`: `\setbox`, `\hbox` and the rest, built while
+the program runs, [0x03]), but the OUTER vertical list is not: a paragraph is
+not yet broken from the node list it would be (§1091-§1096), so a character
+outside a box still goes to the string path, a paragraph inside a `\vbox` is
+refused with a message saying so, and `src/postline.rs` and `src/page.rs` are
+still a library beside the path rather than the path itself.
 
 The same missing node list is why a `\write`, `\openout`, `\closeout` or
 `\special` without `\immediate` does nothing yet. Each is read and built as the

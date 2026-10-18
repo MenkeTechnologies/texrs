@@ -119,7 +119,9 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
   `\box255` (`src/page.rs`). Maths is there too (§680-§767 plus §810 and
   §1204-§1206, `src/math.rs`).
 
-  What is NOT wired is the last join: `src/shipout.rs` is handed line boxes
+  Box construction is on the run's path now (`src/stomach.rs`, see "Box
+  registers" below), but the outer vertical list is not, and with it neither
+  paragraphs nor pages.   What is NOT wired is the last join: `src/shipout.rs` is handed line boxes
   built from broken strings rather than a node list with breakpoint indices, so
   `src/postline.rs`'s §877-§890 assembly and `src/page.rs`'s page builder are
   still a library beside the path a `--dvi` run takes rather than the path
@@ -138,13 +140,19 @@ Listed by `tex.primitives()` but undefined in luatex itself once every origin is
   from BYTES is where each mark lands, the `fnt_def` checksum written as zero,
   and §607-§615's compact movement encoding.
 
-- **Box registers.** There is no `\setbox` and no `\box`, so every box register
-  is void — which is what `\ifvoid`, `\ifhbox` and `\ifvbox` now answer
-  (`tex.web` §462's `box(n)` is null for a register nothing filled, and that is
-  all 256 of them). They agree with tex for any document that fills no box; the
-  reference `tex` loads plain.tex, which fills `\box0` and puts an `\hbox` in
-  `\strutbox`, so those two disagree the way `\count0` does.
-  `tests/cases/box_conditionals.tex` pins it. `\count`, `\dimen`, `\skip`,
+- **Box registers** are filled now, in a plain document: `\setbox`, `\hbox`,
+  `\vbox` and the rest are built while the program runs (`src/stomach.rs`) and
+  `\ifvoid`, `\ifhbox` and `\ifvbox` branch on what the register holds. What
+  is not done: a LaTeX document keeps its prelude's text-macro `\hbox`, so its
+  registers stay void and its box conditionals are decided while lowering; a
+  paragraph inside a `\vbox` is refused, because the paragraph builder is not on
+  this path yet; a font identifier in a `\dump`ed format names a font number
+  the loading run has not loaded; `\currentgrouptype` reports a box's group as
+  a simple group; and register numbers past 255 are not mirrored into slots.
+  The reference `tex` loads plain.tex, which fills `\box0` and puts an `\hbox`
+  in `\strutbox`, and sets `\showboxdepth`, `\baselineskip` and the rest, so
+  `tests/cases` documents set what they read; `box_conditionals.tex` pins the
+  void registers. `\count`, `\dimen`, `\skip`,
   `\toks` and `\muskip` are all registers now — `\muskip` is `\skip` in mu
   (§455 makes `mu` the only finite unit where a math glue is wanted, and no unit
   at all anywhere else), with `\muskipdef` and `\muexpr`, pinned against luatex
