@@ -93,11 +93,13 @@ fn it_runs_iteration_counts_real_tex_cannot() {
 #[test]
 fn mutual_recursion_is_still_bounded_rather_than_aborting() {
     // Two macros naming each other are not the loop idiom -- the recogniser
-    // requires a SELF call -- so this still inlines, and the depth bound is what
-    // keeps it from being a crash.
+    // requires a SELF call -- so this still inlines. `\count0` is 0, so each
+    // test holds and each call leaves its `\fi` behind: the input stack grows
+    // a level per call, and tex stops at `[input stack size=10000]` (measured).
+    // The bound is what keeps it from being a crash.
     let src = concat!(
         "\\catcode`\\{=1 \\catcode`\\}=2\n",
-        "\\count0=99\n",
+        "\\count0=0\n",
         "\\def\\a{\\ifnum\\count0<3 \\b \\fi}\n",
         "\\def\\b{\\ifnum\\count0<3 \\a \\fi}\n",
         "\\a \\message{ok}\n",
@@ -163,19 +165,18 @@ fn a_message_conditional_over_literals_takes_one_arm() {
 }
 
 #[test]
-fn an_undecidable_self_call_in_a_message_is_a_capacity_error() {
-    // The test reads a register, so it is a run-time branch and both arms are
-    // lowered, and the call to itself in the arm never bottoms out at lowering
-    // time. tex takes the false arm (`\count1` is 0) and prints nothing; this
-    // is a divergence, but it must end in the capacity error, not an abort.
+fn a_self_call_in_a_message_over_a_known_register_takes_tex_s_arm() {
+    // The test reads `\count1`, which nothing has assigned, so its value is
+    // known while lowering and the conditional is decided there, as tex
+    // decides it: the false arm, and the call to itself in the true arm is
+    // never read. Lowering both arms recursed until the capacity error.
     let src = concat!(
         "\\catcode`\\{=1 \\catcode`\\}=2 \\catcode`\\#=6\n",
         "\\def\\r{\\ifnum\\count1>0 \\r\\fi}\n",
-        "\\message{\\r}\n",
+        "\\message{[\\r]}\n",
         "\\end\n"
     );
-    let err = run_on_small_stack(src).expect_err("must not run");
-    assert!(err.contains("capacity exceeded"), "got {err:?}");
+    assert_eq!(run_on_small_stack(src).as_deref(), Ok("[]"));
 }
 
 #[test]

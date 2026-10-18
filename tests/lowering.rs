@@ -67,7 +67,10 @@ fn divide_truncates_to_an_integer() {
 
 #[test]
 fn a_conditional_lowers_to_a_real_branch() {
-    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=5\n\\ifnum\\count0>3 \\count1=1 \\else \\count1=2 \\fi\n\\end\n";
+    // Over a value only the run has -- a `\rustcall`'s. One the lowerer can
+    // follow (`\count0=5`) is decided while lowering, as tex decides it when
+    // the mouth reaches it, and leaves no branch to compile.
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\rust{\n#[no_mangle]\npub extern \"C\" fn five() -> i64 { 5 }\n}\n\\catcode`\\{=1 \\catcode`\\}=2\n\\count0=\\rustcall five\\endrust\n\\ifnum\\count0>3 \\count1=1 \\else \\count1=2 \\fi\n\\end\n";
     let got = ops(src);
     assert!(
         got.contains(&Op::NumGt),

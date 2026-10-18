@@ -812,6 +812,16 @@ impl Lowerer {
             self.eng.note_mouth(lx);
             tok
         } {
+            // §321's `push_input` overflows at `stack_size`: a macro that
+            // calls itself and leaves a token behind each time -- the `\fi`
+            // of `\def\a{\ifnum\count0<3 \b \fi}` -- grows the input stack by
+            // a level per call, and tex stops it there. The message path holds
+            // its own token list to the same bound.
+            if lx.input_levels() > 10_000 {
+                return Err(TexError(
+                    "TeX capacity exceeded, sorry [input stack size=10000]".into(),
+                ));
+            }
             let line = lx.line();
             if line != marked {
                 out.push(Cmd::Line(line));
