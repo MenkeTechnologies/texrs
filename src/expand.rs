@@ -2270,7 +2270,12 @@ impl Engine {
                 // the top of a document had `\csname` scanning an empty pending
                 // list and reporting a missing `\endcsname` that was sitting in
                 // the source a token away.
-                if !self.try_expand(lx, n, pending_only)? {
+                // §368's `expand` of the token after next, whatever kind of
+                // expandable command it is: `\number` and `\the` included,
+                // which the contexts that read them otherwise answer.
+                if !self.try_expand(lx, n, pending_only)?
+                    && !self.the_or_number_expands(lx, n, pending_only)?
+                {
                     lx.push_back(&[next]);
                 }
             }
@@ -2755,7 +2760,7 @@ impl Engine {
                 return Err(TexError(format!("Missing = inserted for \\{test}")));
             };
             match &t {
-                t if t.is_space() => continue,
+                t if self.is_spacer(&t) => continue,
                 Token::Char(c @ ('<' | '=' | '>'), Cat::Other) => return Ok(*c),
                 Token::Cs(n) if self.try_expand(lx, *n, pending_only)? => continue,
                 _ => {
@@ -2949,7 +2954,7 @@ impl Engine {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
-                t if t.is_space() => continue,
+                t if self.is_spacer(&t) => continue,
                 Token::Char('-', _) => sign = -sign,
                 Token::Char('+', _) => {}
                 other => {
@@ -3069,7 +3074,7 @@ impl Engine {
         };
         // §455's own "Scan an optional space", which every finite unit gets.
         if let Some(t) = self.take(lx, pending_only) {
-            if !t.is_space() {
+            if !self.is_spacer(&t) {
                 lx.push_back(std::slice::from_ref(&t));
             }
         }
@@ -3187,7 +3192,7 @@ impl Engine {
                 lx.push_back(&eaten);
                 return Ok(None);
             };
-            if t.is_space() {
+            if self.is_spacer(&t) {
                 eaten.push(t);
                 continue;
             }
@@ -3353,7 +3358,7 @@ impl Engine {
                 !crate::compiler::is_count_slot(reg.slot) && !crate::compiler::is_glue_slot(reg.slot);
             if reg.the && dimension {
                 if let Some(t) = self.take(lx, pending_only) {
-                    if !t.is_space() {
+                    if !self.is_spacer(&t) {
                         lx.push_back(std::slice::from_ref(&t));
                     }
                 }
@@ -3462,7 +3467,7 @@ impl Engine {
         };
         // One optional space is absorbed after a unit, as after a constant.
         if let Some(t) = self.take(lx, pending_only) {
-            if !t.is_space() {
+            if !self.is_spacer(&t) {
                 lx.back_input(std::slice::from_ref(&t));
             }
         }
@@ -4471,7 +4476,7 @@ impl Engine {
             _ => int * crate::dimen::UNITY + frac,
         };
         if let Some(t) = self.take(lx, pending_only) {
-            if !t.is_space() {
+            if !self.is_spacer(&t) {
                 lx.push_back(std::slice::from_ref(&t));
             }
         }
@@ -4504,7 +4509,7 @@ impl Engine {
                     }
                     return Ok(false);
                 };
-                if t.is_space() && seen.is_empty() {
+                if self.is_spacer(&t) && seen.is_empty() {
                     continue;
                 }
                 // §407 reads each letter with `get_x_token`, so a keyword may
@@ -4717,13 +4722,13 @@ impl Engine {
     /// carry a product.
     pub fn scan_glue(&mut self, lx: &mut Lexer) -> R<(i64, i64, i64, i64, i64)> {
         let g = self.scan_glue_parts(lx)?;
-        let flat = |d: crate::dimen::ScannedDimen| match d {
-            crate::dimen::ScannedDimen::Constant(v) => Some(v),
-            crate::dimen::ScannedDimen::Scaled { .. }
-            | crate::dimen::ScannedDimen::ByCount { .. } => None,
-        };
-        match (flat(g.natural), flat(g.stretch), flat(g.shrink)) {
-            (Some(n), Some(st), Some(sh)) => Ok((n, st, g.stretch_order, sh, g.shrink_order)),
+        // A component written with an internal dimension is that register's
+        // value, which the followed registers give when it is known.
+        let natural = self.dimen_value(lx, g.natural);
+        let stretch = self.dimen_value(lx, g.stretch);
+        let shrink = self.dimen_value(lx, g.shrink);
+        match (natural, stretch, shrink) {
+            (Ok(n), Ok(st), Ok(sh)) => Ok((n, st, g.stretch_order, sh, g.shrink_order)),
             _ => Err(self.illegal_unit()),
         }
     }
@@ -5154,7 +5159,7 @@ impl Engine {
                 return Err(TexError("Missing { inserted".into()));
             };
             match t {
-                t if t.is_space() => continue,
+                t if self.is_spacer(&t) => continue,
                 Token::Char(_, Cat::BeginGroup) => return Ok(()),
                 Token::Cs(n) if self.primitive_meaning(n).name() == "relax" => continue,
                 Token::Cs(n) if self.try_expand(lx, n, false)? => continue,
@@ -5968,7 +5973,7 @@ impl Engine {
     fn skip_equals(&mut self, lx: &mut Lexer) -> R<()> {
         while let Some(t) = lx.next_token(&self.cats) {
             match &t {
-                t if t.is_space() => continue,
+                t if self.is_spacer(&t) => continue,
                 Token::Char('=', _) => return Ok(()),
                 other => {
                     // §405: anything else is put back to be read again.
@@ -5987,7 +5992,7 @@ impl Engine {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
-                t if t.is_space() => continue,
+                t if self.is_spacer(&t) => continue,
                 Token::Char('-', _) => {
                     sign = -sign;
                     continue;
@@ -6028,7 +6033,7 @@ impl Engine {
                     Some(Token::Cs(n)) if self.digit_position_expands(lx, n, pending_only)? => {
                         continue
                     }
-                    Some(t) if t.is_space() => {}
+                    Some(t) if self.is_spacer(&t) => {}
                     Some(t) => lx.back_input(std::slice::from_ref(&t)),
                     None => {}
                 }
@@ -6154,7 +6159,7 @@ impl Engine {
                         value = self.fold_digit(lx, value, d, i64::from(radix), &mut ok_so_far);
                         any = true;
                     }
-                    other if other.is_space() && any => break,
+                    other if self.is_spacer(other) && any => break,
                     // §445 reads each digit with `get_x_token`: whatever
                     // expands after the first digits expands and the constant
                     // goes on.
@@ -6185,7 +6190,7 @@ impl Engine {
                 // ABSORBED (tex.web §444) -- it delimits the number and is not
                 // part of what follows. Pushing it back put it in the text, so
                 // `\ifnum\count0>3 BIG` rendered as " BIG".
-                other if other.is_space() && any => break,
+                other if self.is_spacer(other) && any => break,
                 // §445 reads each digit with `get_x_token`: `\count1=1\d`
                 // over `\def\d{23}` is 123, and `0\ifx\a\b\else 1\fi` is 01 --
                 // latex.ltx's `\IncludeInRelease` builds its test that way.
@@ -6591,6 +6596,16 @@ impl Engine {
             lx.push_back(&[t]);
             return Ok(None);
         };
+        // An expression's value is computed here (the operands it reads are
+        // the followed registers), so its `\the` is §478's characters too.
+        if matches!(
+            self.unaliased(what).name(),
+            "numexpr" | "dimexpr" | "glueexpr" | "muexpr"
+        ) {
+            lx.push_back(&[Token::Cs(what)]);
+            let text = self.read_the(lx, false, pending_only)?;
+            return Ok(Some(str_toks(&text)));
+        }
         let reg = match what.name() {
             "toks" => self.scan_register_number(lx, pending_only)?,
             _ => match self.toks_cs(what) {
@@ -6653,6 +6668,32 @@ impl Engine {
         }
         if let Some(reg) = self.toks_cs(what) {
             return Ok(self.toks_text(reg));
+        }
+        // etex.ch's `last_item` arms for the three expressions: `\dimexpr` is a
+        // `dimen_val`, `\glueexpr` a `glue_val` and `\muexpr` a `mu_val`, each
+        // printed as §465 prints its level.
+        match self.unaliased(what).name() {
+            "dimexpr" => {
+                let v = self.scan_expr(lx, pending_only, true)?;
+                return Ok(format!("{}pt", crate::dimen::print_scaled(v)));
+            }
+            expr @ ("glueexpr" | "muexpr") => {
+                let mu = expr == "muexpr";
+                let outer = std::mem::replace(&mut self.mu_units, mu);
+                let g = self.scan_glue_expr(lx);
+                self.mu_units = outer;
+                let g = g?;
+                let unit = if mu { "mu" } else { "pt" };
+                return Ok(crate::glue::print_glue_in(
+                    unit,
+                    g.natural,
+                    g.stretch,
+                    g.stretch_order,
+                    g.shrink,
+                    g.shrink_order,
+                ));
+            }
+            _ => {}
         }
         // §465's `dimen_val`, `glue_val` and `mu_val` arms: a dimension is
         // written by §103's `print_scaled` and `pt`, a glue by §178's
@@ -7208,7 +7249,7 @@ impl Engine {
             let Some(t) = self.take(lx, pending_only) else {
                 return Ok(None);
             };
-            if t.is_space() {
+            if self.is_spacer(&t) {
                 continue;
             }
             let name = match t {
@@ -7225,6 +7266,18 @@ impl Engine {
 
     /// Whether `t` is `relax_cmd` where it is read: `\relax` or a `\let` copy
     /// of it, or §358's `dont_expand` token, which reads as `\relax`.
+    /// Whether `t`'s command is §207's `spacer`: a space token, or a control
+    /// sequence `\let` to one (`\let\sp= `, expl3's `\exp_stop_f:`). The
+    /// scanners that skip blanks or absorb an optional space test the
+    /// command, so both count there; §393's argument reader and §1215's
+    /// `get_r_token` compare the token itself and take only the first.
+    pub fn is_spacer(&self, t: &Token) -> bool {
+        match t {
+            Token::Cs(n) => matches!(self.meanings.get(n), Some(Meaning::Char(_, Cat::Space))),
+            t => t.is_space(),
+        }
+    }
+
     pub fn means_relax(&self, t: &Token) -> bool {
         match t {
             Token::Cs(n) => {
@@ -7485,10 +7538,21 @@ impl Engine {
                         Some(_) => CsId::intern(""),
                         None => n,
                     };
-                    // §367: the token after `\noexpand` goes in as itself.
+                    // §367: the token after `\noexpand` goes in as itself when
+                    // it would expand; anything else is read again as usual,
+                    // so a brace after it (`\everyeof{\noexpand}` at the end of
+                    // a `\scantokens`) still counts.
                     if prim.name() == "noexpand" {
                         if let Some(next) = self.take(lx, false) {
-                            out.push(unmarked(next));
+                            let expandable = match &next {
+                                Token::Cs(m) => self.is_expandable(*m),
+                                Token::Char(c, Cat::Active) => self.is_expandable(Self::active_cs(*c)),
+                                Token::Char(..) => false,
+                            };
+                            match expandable {
+                                true => out.push(unmarked(next)),
+                                false => lx.back_input(&[next]),
+                            }
                         }
                         continue;
                     }

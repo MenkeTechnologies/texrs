@@ -994,9 +994,12 @@ impl Lowerer {
         let file = self.scan_file_name(lx)?;
         // §1258.
         let size = if self.eng.scan_keyword(lx, "at", false)? {
-            let s = match self.dimen_number(lx, false)? {
-                Num::Literal(v) => v,
-                _ => {
+            // A size that reads registers is their followed value: expl3's
+            // intarrays are `\font...at\g__intarray_font_int\c__intarray_sp_dim`.
+            let size = self.dimen_number(lx, false)?;
+            let s = match self.eng.known.num(&size) {
+                Some(v) => v,
+                None => {
                     return Err(TexError(
                         "a font size must be known while lowering".into(),
                     ))
