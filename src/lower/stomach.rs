@@ -913,7 +913,7 @@ impl Lowerer {
             crate::stomach::font::Size::At(s) => s,
             crate::stomach::font::Size::Scaled(m) => -m,
         };
-        let defined = match crate::node::hooks::define_font(&file, lua_size) {
+        let defined = match crate::node::hooks::define_font(&mut self.eng, lx, &file, lua_size) {
             Some(crate::node::hooks::Defined::Font(font)) => {
                 let mut font = *font;
                 font.id_text = id.clone();

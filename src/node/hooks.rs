@@ -40,8 +40,12 @@ pub type ListFilter = Box<dyn FnMut(&mut Vec<Node>, &Context)>;
 pub type Notice = Box<dyn FnMut(&str)>;
 /// LuaTeX's `define_font`: the file name and the size (positive scaled points
 /// for `at`, `-1000` times the scale for `scaled`, so `scaled 1000` is
-/// `-1000`), answered with a font or with a font already defined.
-pub type FontDefiner = Box<dyn FnMut(&str, i64) -> Option<Defined>>;
+/// `-1000`), answered with a font or with a font already defined. It is
+/// handed the engine and the mouth, as a `\directlua` chunk is, so a Lua
+/// definer can call the library functions that read them.
+pub type FontDefiner = Box<
+    dyn FnMut(&mut crate::expand::Engine, &mut crate::lexer::Lexer, &str, i64) -> Option<Defined>,
+>;
 
 /// What `define_font` answered.
 pub enum Defined {
@@ -109,11 +113,7 @@ fn packtype(spec: Spec) -> (&'static str, i64) {
 /// Run one filter, if it is registered. The hook is taken out of the table
 /// while it runs, so a hook that itself builds a box does not re-enter
 /// itself through the borrow.
-fn filter(
-    which: fn(&mut Hooks) -> &mut Option<ListFilter>,
-    list: &mut Vec<Node>,
-    cx: &Context,
-) {
+fn filter(which: fn(&mut Hooks) -> &mut Option<ListFilter>, list: &mut Vec<Node>, cx: &Context) {
     let Some(mut hook) = HOOKS.with(|h| which(&mut h.borrow_mut()).take()) else {
         return;
     };
@@ -194,9 +194,14 @@ pub fn contribute_filter(info: &str) {
 
 /// `define_font`, for `\font\x=name at/scaled ...`: `None` when no callback
 /// is registered or it gave no answer, and the TFM is read as tex reads it.
-pub fn define_font(name: &str, size: i64) -> Option<Defined> {
+pub fn define_font(
+    eng: &mut crate::expand::Engine,
+    lx: &mut crate::lexer::Lexer,
+    name: &str,
+    size: i64,
+) -> Option<Defined> {
     let mut hook = HOOKS.with(|h| h.borrow_mut().define_font.take())?;
-    let answer = hook(name, size);
+    let answer = hook(eng, lx, name, size);
     HOOKS.with(|h| h.borrow_mut().define_font = Some(hook));
     answer
 }
