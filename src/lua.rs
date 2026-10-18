@@ -479,9 +479,14 @@ fn read_group(eng: &mut Engine, lx: &mut Lexer) -> R<String> {
     let escaped = apply_escapestring(eng, &expanded);
     // The chunk is the token list printed as `token_show` prints it, which
     // doubles a macro parameter character: `#` of catcode 6 reaches Lua as
-    // `##`, in luatex as here.
+    // `##`, in luatex as here. And luatex writes it with
+    // `tokenlist_to_cstring(..., inhibit_par)`: the `\par` a blank line in the
+    // argument makes is left out, so a chunk may have blank lines in it --
+    // luatexbase.sty's do (measured: `\directlua{f([==[a<blank line>b]==])}`
+    // passes Lua `a b`).
     let shown: Vec<Token> = escaped
         .iter()
+        .filter(|t| !t.is_cs("par"))
         .flat_map(|t| match t {
             Token::Char(_, Cat::Param) => vec![*t, *t],
             _ => vec![*t],

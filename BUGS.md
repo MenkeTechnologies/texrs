@@ -140,11 +140,11 @@ the package refused):
 | `amsthm` | no | yes | same | texrs: package amsthm is not loadable: Runaway argument?{! Paragraph ended before \@newenv@optdef was complete.<to be re |
 | `graphicx` | yes | yes | differs |  |
 | `xcolor` | no | yes | same | texrs: package xcolor needs \cs_new_protected:Npn |
-| `hyperref` | no | yes | same | texrs: package hyperref is not loadable: Lua syntax error: [\directlua]:1: unexpected symbol near '\' |
+| `hyperref` | no | yes | same | texrs: package hyperref is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read ag |
 | `geometry` | no | yes | same | texrs: package geometry is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read ag |
-| `fontspec` | no | yes | same | texrs: package fontspec needs \e@alloc@attribute@count |
-| `unicode-math` | no | yes | same | texrs: package unicode-math needs \e@alloc@attribute@count |
-| `babel` | no | yes | same | texrs: package babel needs \e@alloc@attribute@count |
+| `fontspec` | no | yes | same | texrs: package fontspec is not loadable: Lua error: runtime error: ...cal/texlive/2026/texmf-dist/tex/latex/l3kernel/exp |
+| `unicode-math` | no | yes | same | texrs: package unicode-math is not loadable: Lua error: runtime error: ...cal/texlive/2026/texmf-dist/tex/latex/l3kernel |
+| `babel` | no | yes | same | texrs: package babel is not loadable: Lua error: runtime error: ...cal/texlive/2026/texmf-dist/tex/latex/l3kernel/expl3. |
 | `polyglossia` | no | yes | same | texrs: package polyglossia is not loadable: Missing number, found \insc@unt |
 | `enumitem` | yes | yes | same |  |
 | `booktabs` | yes | yes | same |  |
@@ -152,17 +152,24 @@ the package refused):
 | `array` | no | yes | same | texrs: package array needs \cs_new_protected:Npn |
 | `tabularx` | no | yes | same | texrs: package tabularx needs \cs_new_protected:Npn |
 | `caption` | no | yes | same | texrs: package caption is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read aga |
-| `fancyhdr` | no | yes | same | texrs: package fancyhdr needs \e@alloc@attribute@count |
+| `fancyhdr` | no | yes | same | texrs: package fancyhdr is not loadable: Lua error: runtime error: ...cal/texlive/2026/texmf-dist/tex/latex/l3kernel/exp |
 | `microtype` | no | yes | same | texrs: package microtype is not loadable: Illegal parameter number in definition of \ds@unknownkeysallowed.<to be read a |
 | `csquotes` | no | yes | same | texrs: package csquotes is not loadable: Missing number, found \insc@unt |
-| `biblatex` | no | yes | same | texrs: package biblatex is not loadable: Extra \else.l.203 \else           Lua syntax error: [\directlua]:1: unexpected  |
+| `biblatex` | no | yes | same | texrs: package biblatex is not loadable: Extra \else.l.203 \else           ! .\InfWarErr@GenericError ... immediate help |
 | `listings` | no | yes | same | texrs: package listings is not loadable: Illegal parameter number in definition of \ds@warn.<to be read again>           |
 | `tikz` | no | yes | same | texrs: package tikz needs \pgfutil@format@is@latextrue |
-| `expl3` | no | yes | same | texrs: package expl3 needs \e@alloc@attribute@count |
+| `expl3` | no | yes | same | texrs: package expl3 is not loadable: Lua error: runtime error: ...cal/texlive/2026/texmf-dist/tex/latex/l3kernel/expl3. |
 <!-- package-status:end -->
 
 `biblatex` needs `biber`, which this measurement never runs: a document's
 citations stay unresolved under both engines until it does.
+
+The stand-in kernel now carries latex.ltx's ltluatex section verbatim
+(`\newattribute`, `\newluafunction`, the catcode tables, the
+UnicodeData.txt pass and `require("ltluatex")`), so `luatexbase` and
+`luacode` load. Everything built on expl3 -- xcolor, array, tabularx,
+fontspec, unicode-math -- stops on the stand-in's missing l3 layer, or,
+where it reaches `expl3.lua`, on `tex.runtoks`.
 
 ## Not implemented
 
