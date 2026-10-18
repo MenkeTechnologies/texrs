@@ -446,6 +446,10 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `tex.insertpenalties`, `tex.lastpenalty` and the other `last` items, the
   direction parameters (`tex.bodydir`, `tex.pagedir`, ...) -- refuse where
   luatex answers.
+- **A name `tex.enableprimitives` defines for an expandable primitive does
+  not expand yet:** `\IFTEX@detokenize` means `\detokenize`, as `\meaning`
+  shows, but expands as an undefined name would in `\message` and `\edef`,
+  as a `\let` copy of an expandable primitive does.
 - **A catcode past 255 set from Lua is dropped,** and reads 12: the
   engine's catcode tables hold codes 0..255. `tex.setmathcode` refuses a family past 15 or a character past 255
   (`\Umathcode`).

@@ -1658,3 +1658,32 @@ fn getcatcode_and_setcatcode_reach_the_table_they_name() {
     assert_eq!(oracle, want, "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn enableprimitives_defines_the_prefixed_names_extraprimitives_lists() {
+    // ltexlib's `tex.extraprimitives` lists the primitives of the origins
+    // asked for in luatex's primitive-table order (eTeX's and LuaTeX's when
+    // none is), and `tex.enableprimitives(prefix, names)` defines each one
+    // that is a primitive under the prefix -- what lualatex.fmt does to make
+    // `\luatexcatcodetable` and iftex.sty to make `\IFTEX@detokenize`. A name
+    // that is not a primitive is passed over.
+    let body = "\\catcode`\\@=11 \
+        \\directlua{tex.enableprimitives('IFTEX@', {'detokenize', 'protected', 'nosuch'}) \
+        tex.enableprimitives('luatex', tex.extraprimitives('core', 'omega', 'aleph', 'luatex'))}\
+        \\directlua{local e = tex.extraprimitives() local l = tex.extraprimitives('luatex') \
+        local t = tex.extraprimitives('tex', 'core') tex.sprint(string.char(92) .. 'message{[' \
+        .. #e .. ' ' .. #l .. ' ' .. #t .. ' ' .. e[1] .. ' ' .. e[#e] .. ' ' .. t[2] .. ' ' \
+        .. tostring(token.is_defined('IFTEX@nosuch')) .. ']}')}\
+        \\message{[\\meaning\\IFTEX@detokenize/\\expandafter\\meaning\\csname luatexcatcodetable\\endcsname/\
+        \\expandafter\\meaning\\csname luatexdirectlua\\endcsname]}";
+    let want = "[385 320 341 Umathcloseopspacing protrudechars write false] \
+                [\\detokenize/\\catcodetable/\\directlua]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

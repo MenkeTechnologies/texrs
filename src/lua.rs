@@ -102,6 +102,7 @@ use std::rc::Rc;
 
 pub mod callback;
 mod ctx;
+mod extraprimitives;
 pub mod font;
 mod kpse;
 mod libs;
@@ -1591,17 +1592,79 @@ fn tex_table(
         "romannumeral",
         lua.create_function(|_, n: i64| Ok(roman(n)))?,
     )?;
-    // `\directlua{tex.enableprimitives('', tex.extraprimitives())}` is the first
-    // line of every `luatex -ini` document, because LuaTeX hides its extra
-    // primitives until asked. texrs never hid them, so this is the no-op that
-    // lets such a document run unchanged rather than stopping on a nil call.
-    tex.set(
-        "enableprimitives",
-        lua.create_function(|_, _: Variadic<Value>| Ok(()))?,
-    )?;
+    // `tex.extraprimitives(origin...)`: the names of the primitives made by
+    // those origins (all of luatex's but TeX82's and the core's when none is
+    // given), in primitive-table order.
     tex.set(
         "extraprimitives",
-        lua.create_function(|lua, _: Variadic<Value>| lua.create_table())?,
+        lua.create_function(|lua, args: Variadic<Value>| {
+            use extraprimitives::{Origin, PRIMITIVES};
+            let mut mask = Vec::new();
+            if args.is_empty() {
+                mask = vec![Origin::Etex, Origin::Luatex];
+            }
+            for a in args.iter() {
+                if let Value::String(s) = a {
+                    match &*s.to_str()? {
+                        "etex" => mask.push(Origin::Etex),
+                        "tex" => mask.push(Origin::Tex),
+                        "core" => mask.push(Origin::Core),
+                        "luatex" => mask.push(Origin::Luatex),
+                        _ => {}
+                    }
+                }
+            }
+            lua.create_sequence_from(
+                PRIMITIVES
+                    .iter()
+                    .filter(|(origin, _)| mask.contains(origin))
+                    .map(|(_, name)| *name),
+            )
+        })?,
+    )?;
+    // `tex.enableprimitives(prefix, names)`: each name that is a primitive is
+    // defined as `prefix` and the name -- or as the name itself when `prefix`
+    // already begins it -- unless that control sequence means something
+    // already (ltexlib.c's `tex_enableprimitives`, `primitive_def`, which is
+    // global). Every primitive texrs has is defined from the start, so with an
+    // empty prefix this changes only a name a document undefined.
+    tex.set(
+        "enableprimitives",
+        lua.create_function(|_, args: Variadic<Value>| {
+            let [Value::String(prefix), names] = &args[..] else {
+                return Err(mlua::Error::runtime("wrong number of arguments"));
+            };
+            let Value::Table(names) = names else {
+                return Err(mlua::Error::runtime(
+                    "Expected an array of names as second argument",
+                ));
+            };
+            let prefix = prefix.to_str()?.to_string();
+            let mut prims = Vec::new();
+            for v in names.sequence_values::<Value>() {
+                let Value::String(s) = v? else { break };
+                prims.push(s.to_str()?.to_string());
+            }
+            ctx::with("tex.enableprimitives", |eng, _| {
+                for prim in prims {
+                    if !token::is_primitive_name(&prim) {
+                        continue;
+                    }
+                    let name = match prim.starts_with(&prefix) {
+                        true => prim.clone(),
+                        false => format!("{prefix}{prim}"),
+                    };
+                    if token::means_something(eng, &name) {
+                        continue;
+                    }
+                    eng.meanings.insert(
+                        crate::token::CsId::intern(&name),
+                        Meaning::Primitive(crate::token::CsId::intern(&prim)),
+                    );
+                }
+                Ok(())
+            })
+        })?,
     )?;
 
     // The manual's "Internal parameter values" (`tex.tolerance`, `tex.get`,

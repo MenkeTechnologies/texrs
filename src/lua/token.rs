@@ -997,9 +997,7 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<node::Arena>>) -> mlua::Result
             }
             ctx::with("token.is_defined", |eng, _| {
                 let cs = CsId::intern(&name);
-                let defined = eng.meanings.contains_key(&cs)
-                    || super::claims(&name)
-                    || primitive_cmd(&name).0 != command("undefined_cs");
+                let defined = means_something(eng, &name);
                 Ok(match onlycs.unwrap_or(false) {
                     true => defined || CS_SLOTS.with(|m| m.borrow().contains_key(cs.name())),
                     false => defined,
@@ -1145,4 +1143,18 @@ fn scan_string(eng: &mut Engine, lx: &mut Lexer) -> R<Option<String>> {
             Ok(None)
         }
     }
+}
+
+/// Whether `name` is one of luatex's primitives.
+pub(super) fn is_primitive_name(name: &str) -> bool {
+    primitive_cmd(name).0 != command("undefined_cs")
+}
+
+/// Whether the control sequence `name` means anything: its `eq_type` is not
+/// `undefined_cs`. A primitive nothing has redefined is not in texrs's
+/// meaning table -- `crate::expand::Engine::new` starts it empty and the
+/// lowerer dispatches primitives by name -- so luatex's primitive census
+/// answers for those.
+pub(super) fn means_something(eng: &Engine, name: &str) -> bool {
+    eng.meanings.contains_key(&CsId::intern(name)) || super::claims(name) || is_primitive_name(name)
 }
