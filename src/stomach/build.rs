@@ -94,7 +94,8 @@ impl Stomach {
     }
 
     /// `make_mark` (§1101), with the mark's text already expanded.
-    pub fn make_mark(&mut self, text: String) {
+    pub fn make_mark(&mut self, id: u32, text: String) {
+        self.mark_ids.entry(text.clone()).or_insert(id);
         self.tail_append(Node::Mark(text));
     }
 
@@ -336,6 +337,7 @@ impl Stomach {
     fn vsplit(&mut self, n: u16, h: Scaled, tol: Tolerances) -> Option<BoxNode> {
         self.output.split_first_mark = None;
         self.output.split_bot_mark = None;
+        self.mirror_page();
         let v = self.box_register(n)?.clone();
         if !v.vertical {
             self.say(Said::Error("\\vsplit needs a \\vbox".into()));
@@ -350,6 +352,7 @@ impl Stomach {
         )?;
         self.output.split_first_mark = split.first_mark;
         self.output.split_bot_mark = split.bot_mark;
+        self.mirror_page();
         self.last_badness = split.badness;
         if let Some(r) = split.report {
             self.box_report(&r, true, &split.extracted);

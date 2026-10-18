@@ -1,0 +1,14 @@
+% Running heads from the three marks (tex.web 1012-1016): \topmark is empty
+% on the first page and is the page before's \botmark after it, and
+% \firstmark falls back to \topmark on a page with no mark of its own.
+\vsize=100pt \hsize=200pt
+\headline={\tenrm [\topmark] [\firstmark] [\botmark]\hfil}
+\def\sec#1{\mark{#1}\par\noindent{\bf #1}\par}
+\sec{One}
+Text of the first section, long enough to fill some lines on the page and run on to the next one for certain.
+\sec{Two}
+Text of the second section, also running on for a while so that pages turn over between the marks more than once.
+\sec{Three}
+More words to fill the page, and more words again so that the third page begins with no mark of its own on it at all.
+Still more words here.
+\bye

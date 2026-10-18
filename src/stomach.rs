@@ -303,6 +303,8 @@ pub struct Stomach {
     /// Slots an action assigned that are not mirrors of anything else:
     /// §1145's `\predisplaysize`, `\displaywidth`, `\displayindent`.
     pub slot_writes: Vec<(i64, i64)>,
+    /// The number the lowerer gave each mark's text (`ListOp::Mark`).
+    pub mark_ids: rustc_hash::FxHashMap<String, u32>,
     /// The `exten` table of each font a formula has been set from (§544).
     pub math_exten: rustc_hash::FxHashMap<usize, Vec<[u8; 4]>>,
 }
@@ -350,6 +352,7 @@ impl Stomach {
             just_box: None,
             slot_writes: Vec::new(),
             math_exten: rustc_hash::FxHashMap::default(),
+            mark_ids: rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -658,6 +661,10 @@ pub enum Internal {
     /// `\outputpenalty`: an integer parameter, but one `fire_up` (§1013)
     /// assigns while the program runs, so it is read from here.
     OutputPenalty,
+    /// Which mark `\topmark`, `\firstmark`, `\botmark`, `\splitfirstmark`
+    /// and `\splitbotmark` (0..4) hold (§382): the number the lowerer gave
+    /// the mark's text, 0 for none.
+    Mark(u8),
 }
 
 impl Internal {
@@ -679,6 +686,7 @@ impl Internal {
             Internal::DeadCycles => 18,
             Internal::InsertPenalties => 19,
             Internal::OutputPenalty => 20,
+            Internal::Mark(k) => 21 + i64::from(k.min(4)),
         };
         crate::compiler::INTERNAL_BASE + k
     }
@@ -724,7 +732,7 @@ impl Internal {
 }
 
 /// How many slots [`Internal`] occupies.
-pub const INTERNAL_SLOTS: i64 = 21;
+pub const INTERNAL_SLOTS: i64 = 26;
 
 /// Somewhere the mirrored values can be written: the VM's slot file.
 pub trait SlotSink {

@@ -290,7 +290,7 @@ impl Stomach {
             }
             ListOp::Unpackage { n, copy } => self.unpackage(n, copy),
             ListOp::DeleteLast(r) => self.delete_last(r),
-            ListOp::Mark(text) => self.make_mark(text),
+            ListOp::Mark { id, text } => self.make_mark(id, text),
             ListOp::ItalicCorrection => self.italic_correction(),
             ListOp::Hyphen(f) => self.append_hyphen(f as usize),
             ListOp::BeginDiscretionary => self.begin_discretionary(),

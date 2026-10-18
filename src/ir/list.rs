@@ -104,8 +104,10 @@ pub enum ListOp<N = Num> {
     Unpackage { n: u16, copy: bool },
     /// `delete_last` (§1105).
     DeleteLast(Removed),
-    /// `make_mark` (§1101), its text expanded.
-    Mark(String),
+    /// `make_mark` (§1101), its text expanded, and the number the lowerer
+    /// gave that text (0 when it could not keep its tokens), which
+    /// `\topmark` and its siblings branch on.
+    Mark { id: u32, text: String },
     /// `\/` (§1113).
     ItalicCorrection,
     /// `\-` in font `f` (§1117).
@@ -300,7 +302,7 @@ impl<N> ListOp<N> {
             ListOp::Fetch { .. } => 12,
             ListOp::Unpackage { .. } => 13,
             ListOp::DeleteLast(_) => 14,
-            ListOp::Mark(_) => 15,
+            ListOp::Mark { .. } => 15,
             ListOp::ItalicCorrection => 16,
             ListOp::Hyphen(_) => 17,
             ListOp::BeginDiscretionary => 18,
@@ -519,7 +521,11 @@ impl<N> ListOp<N> {
             }
             ListOp::Unpackage { n, copy } => f(Arg::Int(i64::from(*n) * 2 + i64::from(*copy))),
             ListOp::DeleteLast(r) => f(Arg::Int(removed_code(*r))),
-            ListOp::Mark(text) | ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
+            ListOp::Mark { id, text } => {
+                f(Arg::Int(i64::from(*id)));
+                f(Arg::Str(text));
+            }
+            ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
                 f(Arg::Str(text))
             }
             ListOp::Hyphen(font) => f(Arg::Int(i64::from(*font))),
@@ -739,7 +745,10 @@ impl ListOp<i64> {
                 1 => Removed::Kern,
                 _ => Removed::Glue,
             }),
-            15 => ListOp::Mark(r.string()),
+            15 => ListOp::Mark {
+                id: u32::try_from(r.int()).unwrap_or(0),
+                text: r.string(),
+            },
             16 => ListOp::ItalicCorrection,
             17 => ListOp::Hyphen(r.u16()),
             18 => ListOp::BeginDiscretionary,

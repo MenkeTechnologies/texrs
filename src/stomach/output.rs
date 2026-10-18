@@ -37,6 +37,8 @@ pub struct Output {
     /// `\splitfirstmark` and `\splitbotmark` (§382, §979).
     pub split_first_mark: Option<String>,
     pub split_bot_mark: Option<String>,
+    /// The numbers of the five marks (§382), for the mirror.
+    pub mark_ids: [i64; 5],
     /// `last_penalty`, `last_kern` and `last_glue` (§982): what the page
     /// builder last took off the contribution list, which `\lastpenalty`
     /// and its siblings read when the outer list is empty (§424).
@@ -65,6 +67,9 @@ impl Output {
         out.set(DeadCycles.slot(), self.dead_cycles);
         out.set(InsertPenalties.slot(), self.insert_penalties);
         out.set(OutputPenalty.slot(), self.output_penalty);
+        for (k, id) in self.mark_ids.iter().enumerate() {
+            out.set(Mark(k as u8).slot(), *id);
+        }
     }
 
     /// §424 for the outer vertical list once the page builder has emptied it.
@@ -365,7 +370,18 @@ impl Stomach {
     }
 
     /// The page builder's readable values into [`Output`], for the mirror.
-    fn mirror_page(&mut self) {
+    pub(super) fn mirror_page(&mut self) {
+        let id = |m: &Option<String>| {
+            m.as_ref()
+                .and_then(|t| self.mark_ids.get(t))
+                .map_or(0, |&n| i64::from(n))
+        };
+        let split = [id(&self.output.split_first_mark), id(&self.output.split_bot_mark)];
+        let page = match self.pages.builder.as_ref() {
+            Some(b) => [id(&b.top_mark), id(&b.first_mark), id(&b.bot_mark)],
+            None => [0; 3],
+        };
+        self.output.mark_ids = [page[0], page[1], page[2], split[0], split[1]];
         let Some(b) = self.pages.builder.as_ref() else {
             return;
         };

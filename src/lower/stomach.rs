@@ -99,6 +99,9 @@ pub(super) struct State {
     /// Whether a `\parshape` has been given, after which §1070's
     /// `normal_paragraph` has one to reset.
     par_shape_given: bool,
+    /// Every mark text met so far and its tokens, numbered from 1 in this
+    /// order: what `\topmark` and its siblings may hold when the program runs.
+    marks: Vec<(String, Vec<Token>)>,
 }
 
 impl Default for State {
@@ -117,6 +120,7 @@ impl Default for State {
             lowering_output: false,
             end_block: false,
             par_shape_given: false,
+            marks: Vec::new(),
         }
     }
 }
@@ -838,12 +842,13 @@ impl Lowerer {
                     self.st_list_body(lx, CMode::RestrictedHorizontal, Closer::Disc(k), out)?;
                 }
             }
-            "mark" if managed => {
-                // §1101: the text is expanded as `scan_toks(false,true)`
-                // expands it, which is what `\message` does.
-                let parts = self.message_parts(lx)?;
-                let text = self.static_text(&parts);
-                self.st_emit(out, ListOp::Mark(text))?;
+            "mark" if managed => self.st_make_mark(lx, out)?,
+            "topmark" | "firstmark" | "botmark" | "splitfirstmark" | "splitbotmark"
+                if managed && mode != CMode::Unmanaged =>
+            {
+                self.st.run_open = false;
+                self.st_insert_mark(name.name(), out)?;
+                self.st.run_open = false;
             }
             "insert" if managed => {
                 let mut n = self.eng.scan_register_file(lx)? as u16;
@@ -1731,5 +1736,93 @@ impl Lowerer {
             None => -1,
         };
         self.st_emit(out, ListOp::Accent { f, accent, g, over })
+    }
+}
+
+impl Lowerer {
+    /// `make_mark` (§1101): the text expanded as `scan_toks(false,true)`
+    /// expands it, kept as tokens and numbered, for `\topmark` and its
+    /// siblings to read again (§386).
+    fn st_make_mark(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        let (mut body, site) = self.eng.read_message_body_sited(lx)?;
+        if matches!(body.last(), Some(Token::Cs(n)) if n.name() == crate::expand::MESSAGE_END) {
+            body.pop();
+        }
+        let mark = self.eng.report_mark();
+        let expanded = self.eng.expand_edef_body(&body);
+        let (id, text) = match expanded {
+            Ok(toks) => {
+                let text = self.eng.tokens_text(&toks);
+                let id = match self.st.marks.iter().position(|(t, _)| *t == text) {
+                    Some(i) => i + 1,
+                    None => {
+                        self.st.marks.push((text.clone(), toks));
+                        self.st.marks.len()
+                    }
+                };
+                (id as u32, text)
+            }
+            // A text that reads what only the run knows is the message's,
+            // and has no tokens to read again.
+            Err(_) => {
+                self.eng.drain_diagnostics(mark);
+                let mut work = Lexer::new("");
+                work.push_back(&body);
+                work.attach_site(site);
+                let parts = self.msg_ops(&mut work, &[])?;
+                (0, self.static_text(&parts))
+            }
+        };
+        self.st_emit(out, ListOp::Mark { id, text })
+    }
+
+    /// `\topmark` and its siblings (§386) in a list: whichever mark the
+    /// program holds then, read as its tokens. Every mark met so far may be
+    /// the one, so each is lowered as a branch on the number the stomach
+    /// mirrors (`Internal::Mark`).
+    fn st_insert_mark(&mut self, which: &str, out: &mut Vec<Cmd>) -> R<()> {
+        let k = match which {
+            "topmark" => 0,
+            "firstmark" => 1,
+            "botmark" => 2,
+            "splitfirstmark" => 3,
+            "splitbotmark" => 4,
+            _ => return Ok(()),
+        };
+        let slot = Internal::Mark(k).slot();
+        let marks = self.st.marks.clone();
+        if marks.is_empty() {
+            return Ok(());
+        }
+        // In vertical mode a mark's characters would begin a paragraph in one
+        // branch and not in another, which the lowerer's one mode cannot follow.
+        if self.st_mode().vertical() {
+            return Err(TexError(format!(
+                "\\{which} in vertical mode, once a mark has been written, is not supported"
+            )));
+        }
+        let nest = self.st.nest.clone();
+        let mut chain: Vec<Cmd> = Vec::new();
+        for (i, (_, toks)) in marks.iter().enumerate().rev() {
+            let known = self.eng.known.mark();
+            let mut body = Vec::new();
+            self.st.run_open = false;
+            self.lower_into(toks, &mut body)?;
+            self.eng.known.undo_to(known, None);
+            if self.st.nest != nest {
+                return Err(TexError(format!(
+                    "a mark read by \\{which} that changes the mode is not supported"
+                )));
+            }
+            chain = vec![Cmd::IfNum {
+                left: Num::Count(slot),
+                rel: crate::ir::Rel::Equal,
+                right: Num::Literal(i as i64 + 1),
+                then_branch: body,
+                else_branch: chain,
+            }];
+        }
+        out.extend(chain);
+        Ok(())
     }
 }

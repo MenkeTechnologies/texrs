@@ -264,3 +264,26 @@ pub fn trip_verdict(dvi: &[u8]) -> (Trip, String) {
         Err(e) => (Trip::Unparsed, e),
     }
 }
+
+/// Every `.tex` file in `dir` whose DVI is not `tex`'s byte for byte, each
+/// with the rung it reached and why.
+pub fn short_of_bytes(oracle: &Oracle, dir: &Path) -> Vec<String> {
+    let mut cases: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "tex"))
+                .collect()
+        })
+        .unwrap_or_default();
+    cases.sort();
+    let mut short = Vec::new();
+    for case in cases {
+        let reference = reference(oracle, &case);
+        let mine = subject(&case);
+        let (rung, detail) = verdict(reference.as_ref(), mine.as_ref());
+        if rung != Rung::Bytes {
+            short.push(format!("{}: {} ({detail})", case.display(), rung.name()));
+        }
+    }
+    short
+}

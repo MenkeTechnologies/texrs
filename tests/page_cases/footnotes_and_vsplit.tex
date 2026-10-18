@@ -1,0 +1,15 @@
+% Insertions on the page (tex.web 1008-1010, 1018-1022): plain.tex's
+% \footnote and \topinsert, which plain's \output puts in place, and a
+% \vsplit with its split marks shown in the page (977-979).
+\vsize=150pt \hsize=200pt
+Words before the first footnote\footnote*{The text of a footnote, which goes
+at the foot of the page it was written on.} and more words after it to fill
+the paragraph out across a few lines of the page.
+\topinsert \hrule height 20pt \endinsert
+A second paragraph, with a footnote of its own\footnote\dag{Another
+footnote.} and enough words to need a line or two more.
+\setbox1\vbox{\hsize=100pt \mark{first}words in a box to be split across
+two parts \mark{second} at a height that falls between its lines\par}
+\setbox2\vsplit1 to 12pt
+\noindent [\splitfirstmark] [\splitbotmark] \box2 \box1
+\bye
