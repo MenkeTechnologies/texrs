@@ -1,0 +1,16 @@
+# This is LuaHBTeX, Version 1.24.0 (TeX Live 2026)
+# request<TAB>file luaotfload resolved it to<TAB>subfont, at 10pt
+file:lmroman10-regular.otf	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/lm/lmroman10-regular.otf	1
+lmroman10-regular.otf	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/lm/lmroman10-regular.otf	1
+name:STIX Two Math	/System/Library/Fonts/Supplemental/STIXTwoMath.otf	1
+STIX Two Math:mode=base;script=math	/System/Library/Fonts/Supplemental/STIXTwoMath.otf	1
+name:STIX Two Text/B	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/stix2-otf/STIXTwoText-Bold.otf	1
+name:Latin Modern Roman	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/lm/lmroman10-regular.otf	1
+name:Latin Modern Roman/I	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/lm/lmroman10-italic.otf	1
+name:Latin Modern Roman/B:optsize=5	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/lm/lmroman10-bold.otf	1
+name:TeX Gyre Termes/BI	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-bolditalic.otf	1
+name:Arial	/System/Library/Fonts/Supplemental/Arial.ttf	1
+Arial Unicode MS:mode=base;	/Library/Fonts/Arial Unicode.ttf	1
+name:DejaVu Sans Mono/B	/usr/local/texlive/2026/texmf-dist/fonts/truetype/public/dejavu/DejaVuSansMono-Bold.ttf	1
+name:EB Garamond	/usr/local/texlive/2026/texmf-dist/fonts/opentype/public/ebgaramond/EBGaramond-Regular.otf	1
+name:Noto Serif/I	/usr/local/texlive/2026/texmf-dist/fonts/truetype/google/noto/NotoSerif-Italic.ttf	1

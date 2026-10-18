@@ -27,6 +27,7 @@
 pub mod cff;
 pub mod dsp;
 pub mod features;
+pub mod names;
 pub mod nodes;
 pub mod normalize;
 pub mod ota;
