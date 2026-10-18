@@ -35,16 +35,7 @@ const LAST: usize = 253;
 /// `\newtheorem{name}` from ltthm, which declares a counter of the same name
 /// unless it is told to share another one.
 pub fn declared(src: &str) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for command in ["\\newcounter", "\\newtheorem"] {
-        for name in names_after(src, command) {
-            if seen.insert(name.clone()) {
-                out.push(name);
-            }
-        }
-    }
-    out
+    first_sightings(src, &["\\newcounter", "\\newtheorem"])
 }
 
 /// Every `{...}` group that follows `command` in `src`, as a trimmed name.
@@ -84,9 +75,7 @@ fn names_after(src: &str, command: &str) -> Vec<String> {
 /// `\refstepcounter` is listed on its own: the scan looks for the backslash as
 /// well as the letters, so `\stepcounter` does not find it.
 pub fn mentioned(src: &str) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for command in [
+    const COMMANDS: [&str; 13] = [
         "\\newcounter",
         "\\newtheorem",
         "\\setcounter",
@@ -100,11 +89,24 @@ pub fn mentioned(src: &str) -> Vec<String> {
         "\\alph",
         "\\Alph",
         "\\fnsymbol",
-    ] {
-        for name in names_after(src, command) {
-            if seen.insert(name.clone()) {
-                out.push(name);
-            }
+    ];
+    first_sightings(src, &COMMANDS)
+}
+
+/// The names after each of `commands` in `src`, command by command, each name
+/// once and where it is first met in that order.
+///
+/// Each command is its own search of the whole source, and the searches read
+/// nothing the others write, so a long source is searched for them side by
+/// side and the lists joined in the order of `commands`.
+fn first_sightings(src: &str, commands: &[&str]) -> Vec<String> {
+    let found =
+        crate::parallel::map_ordered(commands, src.len(), |command| names_after(src, command));
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for name in found.into_iter().flatten() {
+        if seen.insert(name.clone()) {
+            out.push(name);
         }
     }
     out

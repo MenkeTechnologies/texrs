@@ -112,28 +112,34 @@ pub fn declared(text: &str) -> Vec<(String, &'static str)> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
     // In source order across all twelve commands, so the register a name gets
-    // does not depend on which of them declared it.
-    let mut found: Vec<(usize, String, Pool)> = Vec::new();
-    for (command, pool) in COMMANDS {
-        let mut rest = text;
-        let mut base = 0usize;
-        while let Some(at) = rest.find(command) {
-            let after = &rest[at + command.len()..];
-            let at_abs = base + at;
-            base = at_abs + command.len();
-            rest = after;
-            // `\newcounter` starts with `\newcount`, and is not it. So does
-            // `\newboxes`; the rule is the mouth's -- a control word's name
-            // runs to the first non-letter.
-            if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
-                continue;
+    // does not depend on which of them declared it. Each command is a search
+    // of its own, so a long text is searched for them side by side.
+    let mut found: Vec<(usize, String, Pool)> =
+        crate::parallel::map_ordered(&COMMANDS, text.len(), |&(command, pool)| {
+            let mut found = Vec::new();
+            let mut rest = text;
+            let mut base = 0usize;
+            while let Some(at) = rest.find(command) {
+                let after = &rest[at + command.len()..];
+                let at_abs = base + at;
+                base = at_abs + command.len();
+                rest = after;
+                // `\newcounter` starts with `\newcount`, and is not it. So does
+                // `\newboxes`; the rule is the mouth's -- a control word's name
+                // runs to the first non-letter.
+                if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    continue;
+                }
+                let Some(name) = name_after(after) else {
+                    continue;
+                };
+                found.push((at_abs, name, pool));
             }
-            let Some(name) = name_after(after) else {
-                continue;
-            };
-            found.push((at_abs, name, pool));
-        }
-    }
+            found
+        })
+        .into_iter()
+        .flatten()
+        .collect();
     found.sort_by_key(|(at, _, _)| *at);
     for (_, name, pool) in found {
         if seen.insert(name.clone()) {

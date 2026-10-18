@@ -388,6 +388,61 @@ pub fn attempt(request: &Request) -> Outcome {
     outcome
 }
 
+/// Make the attempts for `requests` side by side, so the walk in [`preamble`]
+/// finds each answer in [`attempt`]'s memo.
+///
+/// An attempt reads its package into a `Lowerer` of its own and is memoised by
+/// name, so no attempt reads anything another one writes, and what each
+/// answers does not depend on which ran first. The walk still takes them in
+/// the document's order, which is the order the report and the preamble are
+/// written in. One thread, or a single package, leaves every attempt to the
+/// walk, as before.
+///
+/// At most [`crate::parallel::default_threads`] at once, each on a thread of
+/// its own with the label pass's stack, since an attempt lowers a whole
+/// package chain.
+fn attempt_all(requests: &[Request]) {
+    let mut distinct: Vec<&Request> = Vec::new();
+    for request in requests {
+        let named =
+            |seen: &&Request| seen.name == request.name && seen.extension == request.extension;
+        if !distinct.iter().any(named) {
+            distinct.push(request);
+        }
+    }
+    let workers = crate::parallel::default_threads().min(distinct.len());
+    if workers < 2 {
+        return;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let work = || {
+        while let Some(request) =
+            distinct.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+        {
+            attempt(request);
+        }
+    };
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .name("texrs-load".into())
+                    .stack_size(ATTEMPT_STACK)
+                    .spawn_scoped(s, work)
+                    .expect("spawn a package attempt")
+            })
+            .collect();
+        for handle in handles {
+            if let Err(panic) = handle.join() {
+                std::panic::resume_unwind(panic);
+            }
+        }
+    });
+}
+
+/// Stack for a thread making package attempts; see [`attempt_all`].
+const ATTEMPT_STACK: usize = 64 << 20;
+
 /// How far a `\RequirePackage` chain is followed.
 ///
 /// `graphicx` requires `graphics` requires `trig` and `graphics.cfg`: three
@@ -560,6 +615,7 @@ pub fn preamble(src: &str) -> (String, Vec<String>, String) {
             .map(|r| format!("{}.{}", r.name, r.extension))
             .collect::<Vec<_>>(),
     );
+    attempt_all(&requests);
     // A file already read stays read: two packages that both require `keyval`
     // must not read it twice, and the document may name one the class already
     // pulled in.

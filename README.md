@@ -907,8 +907,10 @@ in parallel; two pictures that match that way and still differ send the
 document back to the one-by-one comparison. Object numbers are handed out by a
 serial walk in the order the old single loop added objects, and each page's
 content stream and page dictionary are then built in parallel into the numbers
-reserved for them. The SHA-256 for `/ID` digests the streams while the object
-stream is packed and deflated. Subsetting and the cross-reference table stay
+reserved for them; each page's content moves into its stream rather than
+being copied there. The SHA-256 for `/ID` digests the streams where they lie,
+while they are copied into the file and while the object stream is packed and
+deflated. Subsetting and the cross-reference table stay
 sequential; output is byte-identical across runs and thread counts (set
 `SOURCE_DATE_EPOCH` to pin the creation date). Medians of interleaved runs
 at 8 threads, `pdf::document` alone: 55 to 16 ms on a 1401-page document
@@ -1119,6 +1121,30 @@ maximum height, width and stack depth are taken over the pages. The preamble,
 font definitions and postamble are written serially. The file is byte-identical
 to the single-writer output at any thread count, and a document of only a few
 pages is encoded on the calling thread.
+
+**Setup and writing out.** Outside the lowerer, a LaTeX run's longest serial
+stretch was its preamble: each package the document names is first tried in a
+throwaway lowerer of its own (see `src/latex/load.rs`), one after another, and
+the register and counter scans read the whole source once per command name.
+The tries read nothing another writes and are memoised by name, so on more
+than one thread they are made side by side, at most `TEXRS_THREADS` at once,
+and the preamble is then assembled from them in the document's order as
+before; the per-command scans of a source of 64 KiB or more run on the pool
+and are joined in command order. The code generator's string pool hashes with
+FxHash. Measured 2026-10-17 at 8 threads (phase medians of 9 runs, load
+averages 13 to 17), the preamble went from 13.4 to 5.7 ms on the 200-page
+LaTeX document and from 21.2 to 10.1 ms on the 1001-page one, code generation
+from 2.0 to 0.9 and 10.1 to 5.5 ms, and the PDF's stream copy, digest and
+object stream from 12.2 to 8.3 ms on the 1001-page one. Median wall (15
+interleaved runs, load averages 9 to 13) went from 69.6 to 62.4 ms and 244.3
+to 229.7 ms at 8 threads on those two, 82.3 to 79.9 ms on the 394-page plain
+TeX one and 13.9 to 13.0 ms on a one-line document; at one thread, 963.7 to
+914.9 ms on the 1001-page document and within a few milliseconds on the rest.
+PDF, DVI, `.aux`, stdout and stderr are byte-identical to the previous build at
+1 and 8 threads. What stays serial at 8 threads, largest first on the 1001-page
+document: lowering (about 100 ms), the SHA-256 over the file (about 8 ms), the
+page planner's choice, code generation, process start and exit, and the file
+write.
 
 **Bibliographies.** `-X bibtex` runs an `ITERATE` or `REVERSE` of 256 or more
 entries in chunks at once. An entry's own variables belong to it, so all one

@@ -53,9 +53,10 @@ fn requested(jobs: Option<usize>) -> Option<usize> {
 /// Fix the engine's thread count for the whole process, once, at startup.
 ///
 /// It sizes the global rayon pool (paragraph-parallel line breaking), is what
-/// [`default_threads`] reports (speculative prelex), and bounds the document
-/// batch. Output does not depend on it. With neither `--jobs` nor
-/// `TEXRS_THREADS` set every pool keeps its default of one thread per core.
+/// [`default_threads`] reports (speculative prelex, the package probes of a
+/// LaTeX preamble), and bounds the document batch. Output does not depend on
+/// it. With neither `--jobs` nor `TEXRS_THREADS` set every pool keeps its
+/// default of one thread per core.
 pub fn configure(jobs: Option<usize>) {
     let Some(n) = requested(jobs) else { return };
     if CONFIGURED.set(n).is_ok() {
@@ -73,6 +74,27 @@ pub fn default_threads() -> usize {
             .map(|n| n.get())
             .unwrap_or(1)
     })
+}
+
+/// Below this many bytes of input, [`map_ordered`] stays on the calling thread.
+const ORDERED_BYTES: usize = 64 * 1024;
+
+/// `f` over each of `items`, the answers in the order of `items`.
+///
+/// For scans that each read the same `bytes` of input and nothing another
+/// writes -- one search of a document per command name, say. On the pool once
+/// the input is long enough to pay for the fan-out, on the calling thread
+/// otherwise; the answers are the same either way.
+pub fn map_ordered<I: Sync, T: Send>(
+    items: &[I],
+    bytes: usize,
+    f: impl Fn(&I) -> T + Sync + Send,
+) -> Vec<T> {
+    use rayon::prelude::*;
+    match bytes >= ORDERED_BYTES {
+        true => items.par_iter().map(f).collect(),
+        false => items.iter().map(f).collect(),
+    }
 }
 
 /// Split at line boundaries into at most `n` roughly equal pieces.

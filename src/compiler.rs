@@ -9,8 +9,6 @@
 //! There are 256 count registers and they map onto slots 0..255 directly, which
 //! keeps the mapping trivial to read and means a register read is an array index.
 
-use std::collections::HashMap;
-
 use crate::expand::TexError;
 use crate::ir::{Arith, Cmd, MsgOp, Num, Rel};
 use fusevm::{Chunk, ChunkBuilder, Op, Value};
@@ -118,7 +116,7 @@ pub struct Compiler {
     /// still went past. Text repeats -- the same words, the same spacing -- so
     /// interning bounds the pool by what a document SAYS rather than by how
     /// often it says it.
-    strings: HashMap<String, u16>,
+    strings: rustc_hash::FxHashMap<String, u16>,
 }
 
 impl Compiler {
@@ -135,7 +133,7 @@ impl Compiler {
             b,
             debug: false,
             line: 0,
-            strings: HashMap::new(),
+            strings: rustc_hash::FxHashMap::default(),
         }
     }
 

@@ -141,9 +141,9 @@ fn preamble_in(src: &str, mode: Mode) -> String {
 /// and the `support` built over what it loaded, the class's numbering, and the
 /// two label seedings each read `src` (and the `.aux`) and write nothing
 /// another reads. So the three small ones run on threads of their own while
-/// the package load runs on the CALLING thread -- where its probes lower the
-/// packages and where it reports on stderr, exactly as before -- and the
-/// pieces are joined in the fixed order below.
+/// the package load runs on the CALLING thread -- which reports on stderr,
+/// exactly as before, and whose probes of the packages run side by side (see
+/// `load::preamble`) -- and the pieces are joined in the fixed order below.
 fn preamble_of(src: &str, mode: Mode, previous: Option<&std::path::Path>) -> String {
     // Everything scanned below is scanned over the document AND the chapters it
     // reads: a book declares its counters, writes its labels and refers to them

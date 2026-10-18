@@ -248,18 +248,24 @@ impl Object {
             }
             Object::Dict(pairs) => write_dict(pairs, out),
             Object::Stream { dict, data } => {
-                let mut dict = dict.clone();
-                // The length is what was written, so it is set here rather
-                // than trusted from the caller.
-                dict.insert("Length", Object::Integer(data.len() as i64));
-                write_dict(&dict, out);
-                out.extend(b"\nstream\n");
+                write_stream_head(dict, data.len(), out);
                 out.extend(data);
                 out.extend(b"\nendstream");
             }
             Object::Reference(number) => out.extend(format!("{number} 0 R").as_bytes()),
         }
     }
+}
+
+/// A stream's dictionary, with the `Length` of the data after it, and the
+/// keyword its data follows.
+fn write_stream_head(dict: &Dict, length: usize, out: &mut Vec<u8>) {
+    let mut dict = dict.clone();
+    // The length is what was written, so it is set here rather than trusted
+    // from the caller.
+    dict.insert("Length", Object::Integer(length as i64));
+    write_dict(&dict, out);
+    out.extend(b"\nstream\n");
 }
 
 fn write_dict(pairs: &Dict, out: &mut Vec<u8>) {
@@ -637,47 +643,64 @@ impl Pdf {
         let objstm = packable.iter().any(|&yes| yes).then_some(objects + 1);
         let table_number = objstm.unwrap_or(objects) + 1;
 
-        // Where each object ended up, which is what the table has to say.
+        // Each stream as the file holds it: what comes before its data, the
+        // data, and what comes after. The data is most of the file -- every
+        // page's content, every font program -- so it is read where it lies,
+        // once to be copied into the file and once to be digested, and those
+        // two reads run side by side.
+        const STREAM_TAIL: &[u8] = b"\nendstream\nendobj\n";
+        let streams: Vec<(usize, Vec<u8>, &[u8])> = self
+            .objects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, object)| match object {
+                Object::Stream { dict, data } => {
+                    let mut head = format!("{} 0 obj\n", i + 1).into_bytes();
+                    write_stream_head(dict, data.len(), &mut head);
+                    Some((i, head, data.as_slice()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        // Where each object ends up, which is what the table has to say: a
+        // stream at the offset the ones before it reach, anything else at its
+        // index in the object stream.
         let mut located: Vec<Where> = vec![Where::Nowhere; self.objects.len()];
-        for (i, object) in self.objects.iter().enumerate() {
+        let mut at = out.len();
+        for (i, head, data) in &streams {
+            located[*i] = Where::File(at);
+            at += head.len() + data.len() + STREAM_TAIL.len();
+        }
+        let mut in_objstm = 0usize;
+        for (i, place) in located.iter_mut().enumerate() {
             if packable[i] {
-                continue;
+                *place = Where::Packed(in_objstm);
+                in_objstm += 1;
             }
-            located[i] = Where::File(out.len());
-            out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
-            object.write(&mut out);
-            out.extend(b"\nendobj\n");
         }
 
         // The object stream: `N` pairs of object number and offset, then the
         // objects themselves, one after another. `First` is where the pairs
         // stop -- the offsets are measured from there and not from the start
         // of the data, so a reader adds the two.
-        //
-        // The identifier below digests everything written before the table,
-        // and most of that is the streams already written: so they are
-        // digested while the object stream is packed and deflated, and the
-        // object stream after them -- the same bytes in the same order.
-        let pack = |located: &mut Vec<Where>| -> Vec<u8> {
+        let pack = || -> Vec<u8> {
             let Some(number) = objstm else {
                 return Vec::new();
             };
             let mut head = String::new();
             let mut body = Vec::new();
-            let mut packed = 0usize;
             for (i, object) in self.objects.iter().enumerate() {
                 if !packable[i] {
                     continue;
                 }
-                let space = match packed {
-                    0 => "",
-                    _ => " ",
+                let space = match body.is_empty() {
+                    true => "",
+                    false => " ",
                 };
                 let _ = write!(head, "{space}{} {}", i + 1, body.len());
                 object.write(&mut body);
                 body.push(b'\n');
-                located[i] = Where::Packed(packed);
-                packed += 1;
             }
             head.push('\n');
             let first = head.len();
@@ -687,7 +710,7 @@ impl Pdf {
             Object::Stream {
                 dict: Dict::from([
                     ("Type".to_string(), Object::name("ObjStm")),
-                    ("N".to_string(), Object::Integer(packed as i64)),
+                    ("N".to_string(), Object::Integer(in_objstm as i64)),
                     ("First".to_string(), Object::Integer(first as i64)),
                     ("Filter".to_string(), Object::name("FlateDecode")),
                 ]),
@@ -697,14 +720,35 @@ impl Pdf {
             written.extend(b"\nendobj\n");
             written
         };
-        let (mut digest, packed) = rayon::join(
+
+        // The identifier below digests everything written before the table:
+        // the header, the streams and then the object stream, the same bytes
+        // in the same order. The streams are digested while they are copied
+        // into the file and while the object stream is packed and deflated.
+        let mut digest = <sha2::Sha256 as sha2::Digest>::new();
+        sha2::Digest::update(&mut digest, &out);
+        let ((mut digest, ()), packed) = rayon::join(
             || {
-                use sha2::Digest as _;
-                let mut digest = sha2::Sha256::new();
-                digest.update(&out);
-                digest
+                rayon::join(
+                    || {
+                        for (_, head, data) in &streams {
+                            sha2::Digest::update(&mut digest, head);
+                            sha2::Digest::update(&mut digest, data);
+                            sha2::Digest::update(&mut digest, STREAM_TAIL);
+                        }
+                        digest
+                    },
+                    || {
+                        out.reserve(at - out.len());
+                        for (_, head, data) in &streams {
+                            out.extend(head);
+                            out.extend(*data);
+                            out.extend(STREAM_TAIL);
+                        }
+                    },
+                )
             },
-            || pack(&mut located),
+            pack,
         );
         let objstm_offset = out.len();
         out.extend(&packed);
@@ -1295,6 +1339,23 @@ fn picture_classes(pages: &[Page]) -> Vec<Vec<usize>> {
 /// tree has to be numbered before the pages so a page can point at its parent
 /// and the tree at its children.
 pub fn document(pages: &[Page]) -> Vec<u8> {
+    let contents = pages.iter().map(|page| page.content.clone()).collect();
+    assemble(pages, contents)
+}
+
+/// [`document`], taking the pages: each page's content moves into its stream
+/// object instead of being copied there, and on a long document the content is
+/// most of the file.
+pub fn document_from(mut pages: Vec<Page>) -> Vec<u8> {
+    let contents = pages
+        .iter_mut()
+        .map(|page| std::mem::take(&mut page.content))
+        .collect();
+    assemble(&pages, contents)
+}
+
+/// The file for `pages`, whose content streams are `contents`, one a page.
+fn assemble(pages: &[Page], contents: Vec<String>) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let tree = pdf.reserve();
 
@@ -1336,7 +1397,7 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
     // what goes in them reads nothing another page decides, so they are built
     // afterwards, in parallel, and filled in.
     let mut numbered = Vec::with_capacity(pages.len());
-    for (page, classes) in pages.iter().zip(&pictures) {
+    for ((page, classes), data) in pages.iter().zip(&pictures).zip(contents) {
         let content = pdf.reserve();
         let mut fonts = Dict::new();
         for (name, font) in &page.fonts {
@@ -1360,12 +1421,13 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
             }
             images.insert(name.clone(), image_objects[class].clone());
         }
-        numbered.push((content, fonts, images, pdf.reserve()));
+        numbered.push((content, fonts, images, pdf.reserve(), data));
     }
 
     // One page's two objects, which read only the page and the numbers the
     // walk above gave it.
-    let build = |page: &Page, (content, fonts, images, number): (u32, Dict, Dict, u32)| {
+    let build = |page: &Page, numbered: (u32, Dict, Dict, u32, String)| {
+        let (content, fonts, images, number, data) = numbered;
         let mut resources = Dict::from([("Font".to_string(), Object::Dict(fonts))]);
         if !images.is_empty() {
             resources.insert("XObject".to_string(), Object::Dict(images));
@@ -1415,13 +1477,13 @@ pub fn document(pages: &[Page]) -> Vec<u8> {
         ]);
         let content_object = Object::Stream {
             dict: Dict::new(),
-            data: page.content.clone().into_bytes(),
+            data: data.into_bytes(),
         };
         [(content, content_object), (number, page_object)]
     };
     let kids: Vec<Object> = numbered
         .iter()
-        .map(|(_, _, _, number)| Object::Reference(*number))
+        .map(|(_, _, _, number, _)| Object::Reference(*number))
         .collect();
     let built: Vec<[(u32, Object); 2]> = match pages.len() >= PARALLEL_PAGES {
         true => {

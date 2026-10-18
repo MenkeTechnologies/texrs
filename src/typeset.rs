@@ -3111,7 +3111,7 @@ pub fn to_pdf_ahead(
     near: Option<&std::path::Path>,
     ahead: Option<Ahead>,
 ) -> crate::Pdf {
-    use crate::pdf::{document, Font, Page, Set};
+    use crate::pdf::{document_from, Font, Page, Set};
 
     // The faces, and what a word measures in them. See `Faces`.
     let (faces, ahead) = match ahead.filter(|a| a.measured_as(families, layout)) {
@@ -3572,9 +3572,10 @@ pub fn to_pdf_ahead(
         }
         false => work.into_iter().map(draw_page).collect(),
     };
+    let count = pages.len();
     crate::Pdf {
-        bytes: document(&pages),
-        pages: pages.len(),
+        bytes: document_from(pages),
+        pages: count,
     }
 }
 
