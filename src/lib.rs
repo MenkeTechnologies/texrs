@@ -766,6 +766,12 @@ pub fn run_dvi(
 pub fn run_messages_tex(src: &str) -> Result<String, TexError> {
     let src = crate::rust_ffi::desugar(src);
     let latex = crate::latex::looks_like_latex(&src);
+    // A plain document runs as `tex` runs it: plain.tex preloaded, and the
+    // stomach building every list, so the startup state is the oracle's
+    // (`\count0` is 1) and a page shipped says `[1]` where tex says it.
+    if !latex {
+        return run_tex_dvi(&src).map(|(m, _)| m);
+    }
     let mut lowerer = crate::lower::Lowerer::new().tex_errors(!latex);
     if latex {
         lowerer.preload(&crate::latex::preamble(&src))?;
