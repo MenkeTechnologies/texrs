@@ -396,20 +396,16 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `token.scan_list`, `token.scan_toks(true)`.
 - **The `pdf` library, where it is not luatex's.** Its dictionary strings,
   variables and objects are the backend's (`crate::backend`) and reach the
-  file as `\pdfextension`'s do. Where it differs: an object's text passes
-  through UTF-8, so a binary stream given as a Lua string is not kept byte for
-  byte; a stream's own `compresslevel` is checked and then ignored;
-  `setxformresources`/`setxformattributes` are kept and read back, but no form
-  is written from them; `getnofobjects` refuses, because the writer does not
-  count written and dropped objects apart; `getobjtype` of an object stream is
-  `nil` where luatex says `objstm`; and below PDF 1.5 an immediate object
-  still goes into an object stream, where luatex writes none. A dimension
+  file as `\pdfextension`'s do. Where it differs: an object's attribute
+  text passes through UTF-8; a stream's own `compresslevel` is checked and
+  then ignored; and `setxformresources`/`setxformattributes` are kept and read
+  back, but no form is written from them. A dimension
   variable assigned from Lua inside a group is restored at its end (see the
   next item). `pdf.print`, the font/page/xform name and number questions,
   `includechar`/`includefont`/`includeimage` and `registerannot` refuse; the
   position functions answer 0 and the matrix the identity, as luatex does
-  before shipout. `newcolorstack`, `mapfile`/`mapline` and
-  `setfontattributes` are kept and do not reach the writer.
+  before shipout. `mapfile`/`mapline` and `setfontattributes` are
+  kept and do not reach the writer.
   `pdf.getcreationdate` is the writer's `/CreationDate`, in UT where luatex
   writes local time.
 - **A `"global"` register assignment from Lua is local:**

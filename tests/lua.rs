@@ -1496,12 +1496,13 @@ fn a_font_defined_from_lua_is_kept_and_read_tfm_reads_what_luatex_reads() {
 #[test]
 fn the_pdf_library_numbers_objects_as_luatexs_backend_does() {
     // An immediate raw object goes into an object stream when the file is
-    // opened at PDF 1.5 or later with `objcompresslevel` above 0 (below 1.5
-    // luatex writes none: BUGS.md), and the
+    // opened at PDF 1.5 or later with `objcompresslevel` above 0, and the
     // first one opens the stream, which takes the next number; a stream
     // object never goes into one; an annotation reserved by name is not
     // `getlastobj`'s. The objects are the backend's, numbered as
-    // `\pdfextension obj` numbers them. The dictionary strings are kept and read back; a number is not a string and
+    // `\pdfextension obj` numbers them. An object stream is not written until it
+    // is full, so it counts as dropped; a new colour stack is numbered after
+    // the default one. The dictionary strings are kept and read back; a number is not a string and
     // is ignored. `\outputmode` is for the `luatex -ini` oracle, which starts
     // in DVI.
     let probe = |minor: u32| {
@@ -1511,22 +1512,31 @@ fn the_pdf_library_numbers_objects_as_luatexs_backend_does() {
                 "pdf.setobjcompresslevel(2) pdf.setminorversion({minor}) \
                  local a = pdf.immediateobj('x') local b = pdf.immediateobj('stream', 'y') \
                  local c = pdf.obj('z') local e = pdf.reserveobj('annot') \
-                 pdf.setcatalog('/X 1') pdf.setinfo(5) \
+                 pdf.setcatalog('/X 1') pdf.setinfo(5) local w, d = pdf.getnofobjects() \
                  local ok, m = pcall(pdf.obj, c, 'again') \
                  local out = a .. ' ' .. b .. ' ' .. c .. ' ' .. e .. ' ' .. pdf.getlastobj() .. ' ' \
-                 .. pdf.getmaxobjnum() .. ' ' .. pdf.getobjtype(e) .. ' ' \
-                 .. pdf.getcatalog() .. ' ' .. tostring(pdf.getinfo()) .. ' ' \
+                 .. pdf.getmaxobjnum() .. ' ' .. pdf.getobjtype(e) .. ' ' .. pdf.getobjtype(2) .. ' ' \
+                 .. w .. ' ' .. d .. ' ' .. pdf.getcatalog() .. ' ' .. pdf.newcolorstack('0 g', 'page', true) .. ' ' .. tostring(pdf.getinfo()) .. ' ' \
                  .. m .. ' ' .. tostring(pdf.getobjtype(99)) "
             ))
         )
     };
-    let streams = "[1 3 4 5 4 5 annot /X 1 nil pdf.obj() object in use nil]";
+    let streams = "[1 3 4 5 4 5 annot objstm 2 3 /X 1 1 nil pdf.obj() object in use nil]";
+    let plain = "[1 2 3 4 3 4 annot obj 2 2 /X 1 1 nil pdf.obj() object in use nil]";
     assert_eq!(out(&probe(7)), streams);
+    // Below 1.5 the backend says why it writes no object stream, as luatex
+    // does, before the message.
+    let got = out(&probe(0));
+    assert!(
+        got.starts_with("warning  (pdf backend): objcompresslevel > 0 requires minorversion > 4"),
+        "{got}"
+    );
+    assert!(got.ends_with(plain), "{got}");
     let Some(lua) = luatex() else {
         eprintln!("skipping the luatex half: no `luatex` on PATH");
         return;
     };
-    for (minor, want) in [(7, streams)] {
+    for (minor, want) in [(7, streams), (0, plain)] {
         let (oracle, got) = both(&lua, &probe(minor));
         assert_eq!(oracle, want, "the oracle");
         assert_eq!(got, oracle);

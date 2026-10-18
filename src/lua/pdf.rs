@@ -35,8 +35,6 @@ pub struct State {
     pub filled: std::collections::BTreeSet<u32>,
     /// `pdf.mapfile`/`pdf.mapline` lines, in order.
     pub map_lines: Vec<String>,
-    /// `newcolorstack(init, mode, page)`'s stacks.
-    pub color_stacks: Vec<(String, String, bool)>,
     /// `setfontattributes(font, attrs)`.
     pub font_attributes: BTreeMap<i64, String>,
 }
@@ -537,9 +535,7 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
     t.set(
         "getnofobjects",
         lua.create_function(|_, ()| {
-            Err::<(), _>(mlua::Error::runtime(
-                "pdf.getnofobjects: the writer does not count written and dropped objects apart yet",
-            ))
+            ctx::with("pdf", |eng, _| Ok(eng.backend.written_and_dropped()))
         })?,
     )?;
     for name in ["getobjtype", "objtype"] {
@@ -602,25 +598,38 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
             })?,
         )?;
     }
-    // `newcolorstack(init, mode, page)`: the stack's number, from 1 (0 is the
-    // default colour stack luatex makes for itself).
+    // `newpdfcolorstack(init [, mode [, page]])`: the backend's new stack,
+    // the one `\pdffeedback colorstackinit` makes.
     t.set(
         "newcolorstack",
-        lua.create_function(
-            |_, (init, mode, page): (String, Option<String>, Option<bool>)| {
-                let mode = mode.unwrap_or_else(|| "origin".to_string());
-                if !matches!(mode.as_str(), "origin" | "page" | "direct") {
-                    return Err(mlua::Error::runtime(
-                        "invalid literal mode in pdf.newcolorstack()",
-                    ));
-                }
-                Ok(STATE.with(|s| {
-                    let mut s = s.borrow_mut();
-                    s.color_stacks.push((init, mode, page.unwrap_or(false)));
-                    s.color_stacks.len() as i64
-                }))
-            },
-        )?,
+        lua.create_function(|_, args: Variadic<Value>| {
+            use crate::pdfpage::LiteralMode;
+            let Some(Value::String(init)) = args.first() else {
+                return Err(mlua::Error::runtime(
+                    "pdf.newcolorstack() expects a string as first argument",
+                ));
+            };
+            let init = init.to_str()?.to_string();
+            let mode = match args.get(1) {
+                Some(Value::String(m)) => match &*m.to_str()? {
+                    "origin" => LiteralMode::SetOrigin,
+                    "page" => LiteralMode::DirectPage,
+                    "text" => LiteralMode::DirectText,
+                    "direct" => LiteralMode::DirectAlways,
+                    "raw" => LiteralMode::DirectRaw,
+                    _ => {
+                        return Err(mlua::Error::runtime(
+                            "invalid literal mode in pdf.newcolorstack()",
+                        ))
+                    }
+                },
+                _ => LiteralMode::SetOrigin,
+            };
+            let page_start = matches!(args.get(2), Some(Value::Boolean(true)));
+            ctx::with("pdf", |eng, _| {
+                Ok(Backend::new_color_stack(eng, mode, page_start, init) as i64)
+            })
+        })?,
     )?;
     t.set(
         "setfontattributes",
