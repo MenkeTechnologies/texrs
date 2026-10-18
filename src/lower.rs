@@ -1510,19 +1510,23 @@ impl Lowerer {
                             if let Some((from, negative)) = self.peek_glue_register(lx, mu)? {
                                 out.extend(advance_glue_by_register(reg, from, negative));
                             } else {
-                                let (nat, st, sto, sh, sho) = match mu {
-                                    true => self.eng.scan_muglue(lx)?,
-                                    false => self.eng.scan_glue(lx)?,
+                                // Each width may be a `<factor><internal unit>`
+                                // the run computes -- plain.tex's `\openup` adds
+                                // `\dimen@` to `\baselineskip` -- so each is a
+                                // `Num`, as `glue_assign` makes them; the orders
+                                // are always known.
+                                self.eng.clear_scaling_sites();
+                                let g = match mu {
+                                    true => self.eng.scan_muglue_parts(lx)?,
+                                    false => self.eng.scan_glue_parts(lx)?,
                                 };
-                                out.extend(advance_glue(
+                                let natural = scaled_num(g.natural);
+                                self.note_scaling_site(&mut out, lx, &natural);
+                                out.push(Cmd::Arith(Arith::Add, reg, natural));
+                                out.extend(glue_add_orders(
                                     reg,
-                                    crate::glue::Glue {
-                                        natural: nat,
-                                        stretch: st,
-                                        stretch_order: sto,
-                                        shrink: sh,
-                                        shrink_order: sho,
-                                    },
+                                    (scaled_num(g.stretch), g.stretch_order),
+                                    (scaled_num(g.shrink), g.shrink_order),
                                 ));
                             }
                         }
@@ -6164,30 +6168,6 @@ fn case_chain_cmds(value: Num, mut branches: Vec<Vec<Cmd>>) -> Vec<Cmd> {
     chain
 }
 
-/// `\advance\skip<n> by <glue>`, as commands (`tex.web` §1240 through §1239's
-/// `glue_add`).
-///
-/// Adding glue adds the natural widths and combines each infinity ORDER
-/// separately: an infinite component beats any finite one however large, a
-/// higher infinity beats a lower, and only equal orders add. The operand is
-/// known while lowering and the register is not, so the rule becomes a branch
-/// on the register's own order.
-///
-/// The two orders live packed in one slot as `stretch*4 + shrink`, sixteen
-/// possible values, and the result is a function of that value alone -- so the
-/// chain enumerates all sixteen rather than trying to take the packed slot
-/// apart with arithmetic the VM has no remainder op for. It is the same shape
-/// `\ifcase` lowers to, and for the same reason.
-fn advance_glue(base: i64, op: crate::glue::Glue) -> Vec<Cmd> {
-    let mut out = vec![Cmd::Arith(Arith::Add, base, Num::Literal(op.natural))];
-    out.extend(glue_add_orders(
-        base,
-        (Num::Literal(op.stretch), op.stretch_order),
-        (Num::Literal(op.shrink), op.shrink_order),
-    ));
-    out
-}
-
 /// `\advance\skip<n> by \skip<m>`: the same §1239 `glue_add`, with an operand
 /// whose ORDERS are the run's too. The operand's packed orders are dispatched
 /// on first, sixteen ways, so inside each arm they are constants again and the
@@ -6219,6 +6199,18 @@ fn advance_glue_by_register(base: i64, from: i64, negative: bool) -> Vec<Cmd> {
 
 /// The stretch and shrink half of `glue_add`, for an operand whose two orders
 /// are known while lowering and whose values are `Num`s.
+///
+/// Adding glue adds the natural widths and combines each infinity ORDER
+/// separately: an infinite component beats any finite one however large, a
+/// higher infinity beats a lower, and only equal orders add. The operand's
+/// orders are known while lowering and the register's are not, so the rule
+/// becomes a branch on the register's own orders.
+///
+/// The two orders live packed in one slot as `stretch*4 + shrink`, sixteen
+/// possible values, and the result is a function of that value alone -- so the
+/// chain enumerates all sixteen rather than trying to take the packed slot
+/// apart with arithmetic the VM has no remainder op for. It is the same shape
+/// `\ifcase` lowers to, and for the same reason.
 fn glue_add_orders(base: i64, stretch: (Num, i64), shrink: (Num, i64)) -> Vec<Cmd> {
     let packed = base + 3;
     let mut out = Vec::new();
