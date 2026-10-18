@@ -195,9 +195,10 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
   the program runs, and `src/dvi/out.rs` writes the DVI (§583-§643). Every
   document dvi-parity measures comes out byte for byte as tex writes it.
   What that path does not do yet:
-  - maths: a formula's characters are set as text in the current font, not
-    through `mlist_to_hlist`;
-  - alignments (`\halign`, `\valign`), `\accent`, `\parshape` and `\vcenter`;
+  - alignments (`\halign`, `\valign`, and so plain.tex's `\matrix`, `\cases`
+    and `\eqalign`), text-mode `\accent` and `\parshape`;
+  - `\showgroups` names a box's or a formula's group by the token that opened
+    it, without the spec and context etex.ch's `show_save_groups` prints;
   - the marks' text in an output routine: `\topmark` and its siblings expand
     to nothing;
   - `\write`, `\openout` and `\special` without `\immediate`: they are not yet
@@ -234,9 +235,9 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
   `\vbox` and the rest are built while the program runs (`src/stomach.rs`) and
   `\ifvoid`, `\ifhbox` and `\ifvbox` branch on what the register holds. What
   is not done: a LaTeX document keeps its prelude's text-macro `\hbox`, so its
-  registers stay void and its box conditionals are decided while lowering; a font identifier in a `\dump`ed format names a font number
-  the loading run has not loaded; `\currentgrouptype` reports a box's group as
-  a simple group; and register numbers past 255 are not mirrored into slots.
+  registers stay void and its box conditionals are decided while lowering; a
+  font identifier in a `\dump`ed format names a font number the loading run
+  has not loaded; and register numbers past 255 are not mirrored into slots.
   The reference `tex` loads plain.tex, which fills `\box0`, puts an `\hbox` in
   `\strutbox` and sets `\showboxdepth`, `\baselineskip` and the rest; a plain
   document's message run now preloads it too, and `box_conditionals.tex` pins

@@ -428,7 +428,8 @@ than none.
   and registers its definer on `define_font`, as in luatex.
 - `--dvi`: a page. A plain document is set as `tex` sets it, plain.tex
   preloaded and every list built by the stomach, and its DVI is tex's byte for
-  byte on every document dvi-parity measures; no maths yet. A LaTeX document is
+  byte on every document dvi-parity measures and on the formulas and displays
+  of `tests/math_cases`. A LaTeX document is
   measured in a real font (`.tfm`), broken into total-fit lines by the same
   breaker as `--pdf`, packed into boxes and shipped through
   `hlist_out`/`vlist_out` -- a fixed number of lines to a page, and no maths (a
@@ -618,9 +619,12 @@ plain.tex is preloaded as `tex` preloads it, and the stomach builds every list
 `\output` runs when the page builder fires it, and the DVI is written as
 §583-§643 write it (`src/dvi/out.rs`). Every document
 `cargo run --bin dvi-parity` measures comes out byte for byte as tex writes
-it. That path sets no maths yet (a formula's characters come out as text in the
-current font), and no
-alignments, `\accent`, `\parshape` or `\vcenter`; `BUGS.md` lists the rest.
+it. Formulas are built there too: math mode's commands make an mlist
+(§1136-§1193, `src/stomach/math.rs`), `mlist_to_hlist` sets it from the
+families the document loaded, and a display is placed with its equation number
+as §1199-§1205 place it. The documents in `tests/math_cases` come out as tex's
+DVI byte for byte. That path sets no alignments, no text-mode `\accent` and no
+`\parshape` yet; `BUGS.md` lists the rest.
 `--pdf` and every LaTeX document still take the string path. There the page
 breaker reads its penalties once per document, and the shipper is handed line
 boxes built from already-broken strings.
@@ -905,8 +909,9 @@ and three of the things a document controls survive the trip:
   to nothing, `\pandocbounded` boxed every figure without setting the box, and
   once figures did reach the page they were placed at the file's own size.
 
-What `--dvi` still does not do is set maths or draw a picture. A plain
-document is set as tex sets it. A LaTeX one takes the string path, which
+What `--dvi` still does not do is draw a picture, or set the maths of a LaTeX
+document. A plain document is set as tex sets it, formulas included. A LaTeX
+one takes the string path, which
 stacks a fixed number of lines on each page where `--pdf` prices the whole
 document. A draft reads correctly either way; a book being sold on its
 typography should still be set by an engine that has been doing it for forty
