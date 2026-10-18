@@ -4381,19 +4381,19 @@ impl Lowerer {
                 // `\expanded{...}` expands its general text as an \edef body is
                 // expanded and puts the result back, where this loop expands
                 // it again: a `\noexpand` in the text holds for the first
-                // pass only. The first pass needs the registers the text
-                // reads, which the lowerer knows only while nothing has
-                // assigned them (see `edef_snapshot`); otherwise the text goes
-                // back as it stands, which differs only in what a `\noexpand`
-                // protects.
+                // pass only. The first pass reads the registers
+                // `crate::known` has followed; a text that reads one only the
+                // run has goes back as it stands, which differs only in what a
+                // `\noexpand` protects.
                 "expanded" => {
                     let group = self.eng.scan_general_text(work)?;
                     let mark = self.eng.report_mark();
-                    let macros = self.eng.expand_macros_only(&group)?;
-                    self.eng.drain_diagnostics(mark);
-                    let again = match self.reads_only_untouched_registers(&macros) {
-                        true => self.eng.expand_edef_body(&group)?,
-                        false => group,
+                    let again = match self.eng.expand_edef_body(&group) {
+                        Ok(expanded) => expanded,
+                        Err(_) => {
+                            self.eng.drain_diagnostics(mark);
+                            group
+                        }
                     };
                     work.push_back(&again);
                 }
