@@ -262,15 +262,18 @@ fn a_fraction_bar_is_centred_on_the_axis_and_is_one_rule_thick() {
     let bar = s.rules[0];
     let thickness = f.default_rule_thickness(0);
     assert_eq!(bar.height, thickness, "the bar is not one rule thick");
-    // §747: the rule's centre is the axis, so its bottom edge is half a
-    // thickness below it. `half` rounds an odd number up (§100).
+    // §747: the rule's top edge is `axis_height+delta` with `delta =
+    // half(thickness)`, so its bottom edge is `thickness-delta` below the
+    // axis. `half` rounds an odd number up (§100), so for an odd thickness
+    // (cmex10's 0.39998pt) the bar sits one sp above centre, as tex's two
+    // kerns, 1.23732pt over it and 1.2373pt under it, show.
     let half = match thickness % 2 == 0 {
         true => thickness / 2,
         false => (thickness + 1) / 2,
     };
     assert_eq!(
         bar.y,
-        f.axis_height(0) - half,
+        f.axis_height(0) - (thickness - half),
         "the bar sits at {} sp where §747 centres it on the {} sp axis",
         bar.y,
         f.axis_height(0)
