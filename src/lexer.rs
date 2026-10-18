@@ -697,8 +697,16 @@ impl Lexer {
     /// point somewhere. Counted from the characters already consumed rather
     /// than tracked incrementally: the scanner rewinds and pushes back, and a
     /// counter that has to be maintained through both is a counter that drifts.
+    ///
+    /// A line's end belongs to that line: tex reads the next line into its
+    /// buffer (§362's `incr(line)`) only when it needs a character from it,
+    /// so the `\par` an empty line makes, and the space at the end of a line,
+    /// are read on the line they end.
     pub fn line(&self) -> u32 {
-        let pos = self.pos.min(self.chars.len());
+        let mut pos = self.pos.min(self.chars.len());
+        if pos > 0 && self.chars[pos - 1] == '\n' {
+            pos -= 1;
+        }
         let (from, base) = match self.line_cache.get() {
             (cached_pos, line) if cached_pos <= pos => (cached_pos, line),
             // The scanner moved backwards: recount.
