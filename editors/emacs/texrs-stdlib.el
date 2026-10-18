@@ -157,6 +157,8 @@
     "\\hyphenchar"
     "\\skewchar"
     "\\patterns"
+    "\\accent"
+    "\\parshape"
     "\\hyphenation"
     "\\mathord"
     "\\mathop"
@@ -172,7 +174,6 @@
     "\\nolimits"
     "\\displaylimits"
     "\\radical"
-    "\\accent"
     "\\mathaccent"
     "\\vcenter"
     "\\displaystyle"
@@ -493,6 +494,8 @@
     (puthash "\\hyphenchar" "\\hyphenchar  —  The character a font hyphenates with (§1253): `\\-` puts it in a discretionary and the main loop follows each one it sets with an empty discretionary. [Boxes]" table)
     (puthash "\\skewchar" "\\skewchar  —  The character whose kerns position a font's math accents (§1253). [Boxes]" table)
     (puthash "\\patterns" "\\patterns  —  Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. [Boxes]" table)
+    (puthash "\\accent" "\\accent  —  Put character N of the current font over the character that follows (§1123-§1125): raised or lowered by the difference between the font's x-height and the character's height, centred over it and moved by the two slants, between two kerns `(for accent)`. [Boxes]" table)
+    (puthash "\\parshape" "\\parshape  —  Give the next paragraph a shape line by line (§1248): n, then n pairs of indentation and width; lines past the nth take the last pair. [Boxes]" table)
     (puthash "\\hyphenation" "\\hyphenation  —  Words with their hyphens written in (§934), which the second pass takes over the patterns. [Boxes]" table)
     (puthash "\\mathord" "\\mathord  —  Make the next math field an Ord atom (§1158). [Mathematics]" table)
     (puthash "\\mathop" "\\mathop  —  An Op atom (§1158): a large operator, with limits above and below in display style unless `\\nolimits` says otherwise (§749). [Mathematics]" table)
@@ -508,7 +511,6 @@
     (puthash "\\nolimits" "\\nolimits  —  After an Op atom, set its scripts beside it in every style (§1159). [Mathematics]" table)
     (puthash "\\displaylimits" "\\displaylimits  —  After an Op atom, the default: limits above and below in display style only (§1159). [Mathematics]" table)
     (puthash "\\radical" "\\radical  —  A radical noad with a 24-bit delimiter code, over the next field (§1163); plain.tex's `\\sqrt` is `\\radical\"270370`. [Mathematics]" table)
-    (puthash "\\accent" "\\accent  —  In math mode, the error `Please use \\mathaccent for accents in math mode`, after which the command is read as `\\mathaccent` (§1165-§1166). [Mathematics]" table)
     (puthash "\\mathaccent" "\\mathaccent  —  An accent noad with a 15-bit math code, over the next field (§1165); `\\accent` in math mode is the error `Please use \\mathaccent for accents in math mode` and is taken as this. [Mathematics]" table)
     (puthash "\\vcenter" "\\vcenter  —  A vbox centred on the math axis (§1167-§1168, §736), as a noad of its own; `to` and `spread` are read as for `\\vbox`. [Mathematics]" table)
     (puthash "\\displaystyle" "\\displaystyle  —  A style node (§1171): what follows is set in display style. [Mathematics]" table)

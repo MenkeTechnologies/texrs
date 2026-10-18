@@ -918,6 +918,18 @@ pub const CORPUS: &[Entry] = &[
         "\\patterns{.ach4 .ad4der}",
     ),
     (
+        "\\accent",
+        "Boxes",
+        "Put character N of the current font over the character that follows (\u{a7}1123-\u{a7}1125): raised or lowered by the difference between the font's x-height and the character's height, centred over it and moved by the two slants, between two kerns `(for accent)`. Font selections and integer parameters between the two are carried out first, so `\\accent\"7F\\it e` takes the e from the italic font. In math mode it is the error `Please use \\mathaccent for accents in math mode`, after which it is read as `\\mathaccent`.",
+        "\\accent N<character>\n\\accent\"13 e   % plain.tex's \\'e",
+    ),
+    (
+        "\\parshape",
+        "Boxes",
+        "Give the next paragraph a shape line by line (\u{a7}1248): n, then n pairs of indentation and width; lines past the nth take the last pair. Takes the place of `\\hangindent` and `\\hangafter` while it is set, sets a display's width and indentation on the line it falls on (\u{a7}1149), and is reset by the end of the paragraph (\u{a7}1070) and by its group. `\\the\\parshape` is not read on the list path yet.",
+        "\\parshape 2 0pt 4in 1in 3in\nA first line four inches wide, the rest three inches wide and indented an inch.\\par",
+    ),
+    (
         "\\hyphenation",
         "Boxes",
         "Words with their hyphens written in (\u{a7}934), which the second pass takes over the patterns.",
@@ -943,7 +955,6 @@ pub const CORPUS: &[Entry] = &[
     ("\\nolimits", "Mathematics", "After an Op atom, set its scripts beside it in every style (\u{a7}1159).", "$\\int\\nolimits_0^1$"),
     ("\\displaylimits", "Mathematics", "After an Op atom, the default: limits above and below in display style only (\u{a7}1159).", "$\\mathop{\\rm max}\\displaylimits_x$"),
     ("\\radical", "Mathematics", "A radical noad with a 24-bit delimiter code, over the next field (\u{a7}1163); plain.tex's `\\sqrt` is `\\radical\"270370`. The sign grows to the height of its nucleus plus the clearance \u{a7}737 computes.", "$\\radical\"270370{x+1}$"),
-    ("\\accent", "Mathematics", "In math mode, the error `Please use \\mathaccent for accents in math mode`, after which the command is read as `\\mathaccent` (\u{a7}1165-\u{a7}1166). Its text-mode meaning, \u{a7}1123's accent over the next character, is not built on the list path yet.", "$\\accent\"7F x$  % => an error, then \\mathaccent"),
     ("\\mathaccent", "Mathematics", "An accent noad with a 15-bit math code, over the next field (\u{a7}1165); `\\accent` in math mode is the error `Please use \\mathaccent for accents in math mode` and is taken as this. The accent is moved right by the `\\skewchar` kern of the accented character (\u{a7}741).", "$\\mathaccent\"705E x$"),
     ("\\vcenter", "Mathematics", "A vbox centred on the math axis (\u{a7}1167-\u{a7}1168, \u{a7}736), as a noad of its own; `to` and `spread` are read as for `\\vbox`.", "$\\vcenter{\\hbox{a}\\hbox{b}}$"),
     ("\\displaystyle", "Mathematics", "A style node (\u{a7}1171): what follows is set in display style. `\\textstyle`, `\\scriptstyle` and `\\scriptscriptstyle` select the other three; each changes the size the families are read at (\u{a7}703).", "$\\displaystyle{a\\over b}$"),

@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">332</div>
+            <div class="stat-val">333</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -444,6 +444,10 @@
             <tr><td><code>\hyphenchar</code></td><td>The character a font hyphenates with (§1253): <code>\-</code> puts it in a discretionary and the main loop follows each one it sets with an empty discretionary. -1 turns both off.</td><td><pre>\hyphenchar\tentt=-1</pre></td></tr>
             <tr><td><code>\skewchar</code></td><td>The character whose kerns position a font's math accents (§1253).</td><td><pre>\skewchar\teni='177</pre></td></tr>
             <tr><td><code>\patterns</code></td><td>Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. hyphen.tex is read this way by plain.tex.</td><td><pre>\patterns{.ach4 .ad4der}</pre></td></tr>
+            <tr><td><code>\accent</code></td><td>Put character N of the current font over the character that follows (§1123-§1125): raised or lowered by the difference between the font's x-height and the character's height, centred over it and moved by the two slants, between two kerns <code>(for accent)</code>. Font selections and integer parameters between the two are carried out first, so <code>\accent"7F\it e</code> takes the e from the italic font. In math mode it is the error <code>Please use \mathaccent for accents in math mode</code>, after which it is read as <code>\mathaccent</code>.</td><td><pre>\accent N&lt;character&gt;
+\accent"13 e   % plain.tex's \'e</pre></td></tr>
+            <tr><td><code>\parshape</code></td><td>Give the next paragraph a shape line by line (§1248): n, then n pairs of indentation and width; lines past the nth take the last pair. Takes the place of <code>\hangindent</code> and <code>\hangafter</code> while it is set, sets a display's width and indentation on the line it falls on (§1149), and is reset by the end of the paragraph (§1070) and by its group. <code>\the\parshape</code> is not read on the list path yet.</td><td><pre>\parshape 2 0pt 4in 1in 3in
+A first line four inches wide, the rest three inches wide and indented an inch.\par</pre></td></tr>
             <tr><td><code>\hyphenation</code></td><td>Words with their hyphens written in (§934), which the second pass takes over the patterns.</td><td><pre>\hyphenation{man-u-script}</pre></td></tr>
           </tbody>
         </table>
@@ -468,7 +472,6 @@
             <tr><td><code>\nolimits</code></td><td>After an Op atom, set its scripts beside it in every style (§1159).</td><td><pre>$\int\nolimits_0^1$</pre></td></tr>
             <tr><td><code>\displaylimits</code></td><td>After an Op atom, the default: limits above and below in display style only (§1159).</td><td><pre>$\mathop{\rm max}\displaylimits_x$</pre></td></tr>
             <tr><td><code>\radical</code></td><td>A radical noad with a 24-bit delimiter code, over the next field (§1163); plain.tex's <code>\sqrt</code> is <code>\radical"270370</code>. The sign grows to the height of its nucleus plus the clearance §737 computes.</td><td><pre>$\radical"270370{x+1}$</pre></td></tr>
-            <tr><td><code>\accent</code></td><td>In math mode, the error <code>Please use \mathaccent for accents in math mode</code>, after which the command is read as <code>\mathaccent</code> (§1165-§1166). Its text-mode meaning, §1123's accent over the next character, is not built on the list path yet.</td><td><pre>$\accent"7F x$  % =&gt; an error, then \mathaccent</pre></td></tr>
             <tr><td><code>\mathaccent</code></td><td>An accent noad with a 15-bit math code, over the next field (§1165); <code>\accent</code> in math mode is the error <code>Please use \mathaccent for accents in math mode</code> and is taken as this. The accent is moved right by the <code>\skewchar</code> kern of the accented character (§741).</td><td><pre>$\mathaccent"705E x$</pre></td></tr>
             <tr><td><code>\vcenter</code></td><td>A vbox centred on the math axis (§1167-§1168, §736), as a noad of its own; <code>to</code> and <code>spread</code> are read as for <code>\vbox</code>.</td><td><pre>$\vcenter{\hbox{a}\hbox{b}}$</pre></td></tr>
             <tr><td><code>\displaystyle</code></td><td>A style node (§1171): what follows is set in display style. <code>\textstyle</code>, <code>\scriptstyle</code> and <code>\scriptscriptstyle</code> select the other three; each changes the size the families are read at (§703).</td><td><pre>$\displaystyle{a\over b}$</pre></td></tr>
