@@ -173,7 +173,7 @@ impl Shipper<'_> {
             let p = &this_box.list[i];
             // §620: a run of character nodes is drawn in one go, which is what
             // makes this TeX's inner loop rather than a synch per letter.
-            if let Node::Char(c) | Node::Ligature(c) = p {
+            if let Node::Char(c) | Node::Ligature(c, _) = p {
                 self.synch_h();
                 self.synch_v();
                 let mut c = c;
@@ -181,7 +181,7 @@ impl Shipper<'_> {
                     self.out_char(c);
                     i += 1;
                     match this_box.list.get(i) {
-                        Some(Node::Char(next) | Node::Ligature(next)) => c = next,
+                        Some(Node::Char(next) | Node::Ligature(next, _)) => c = next,
                         _ => break,
                     }
                 }

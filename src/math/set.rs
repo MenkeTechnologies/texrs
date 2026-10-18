@@ -78,7 +78,7 @@ fn hlist(
     let mut x = left;
     for node in &b.list {
         match node {
-            Node::Char(c) | Node::Ligature(c) => {
+            Node::Char(c) | Node::Ligature(c, _) => {
                 out.glyphs.push(Glyph {
                     ch: c.character,
                     x,

@@ -23,6 +23,8 @@
 
 use crate::glue::{Glue, Order};
 
+pub mod show;
+
 /// A dimension, in scaled points.
 pub type Scaled = i64;
 
@@ -92,6 +94,12 @@ impl LeaderKind {
 /// Which `\skip` parameter a glue node came from (§149: "the subtype is set to
 /// indicate the source of glue"). Carried because the page builder and
 /// `\showlists` both name it, not because the arithmetic reads it.
+///
+/// Every §224 glue parameter is here, because `\showbox` names each of them
+/// (§189's `print_skip_param(subtype(p)-1)`): `\spaceskip` is what
+/// `app_space` (§1041) puts between words when it is set, and `\tabskip`
+/// what an alignment puts between columns. [`GlueSource::param_code`] is
+/// §149's arithmetic between the two numberings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum GlueSource {
     #[default]
@@ -104,6 +112,76 @@ pub enum GlueSource {
     TopSkip,
     SplitTopSkip,
     ParFillSkip,
+    AboveDisplaySkip,
+    BelowDisplaySkip,
+    AboveDisplayShortSkip,
+    BelowDisplayShortSkip,
+    TabSkip,
+    SpaceSkip,
+    XSpaceSkip,
+    ThinMuSkip,
+    MedMuSkip,
+    ThickMuSkip,
+    /// `cond_math_glue` (§149): `\nonscript`, which has no glue of its own.
+    CondMath,
+    /// `mu_glue` (§149): an `\mskip`, whose spec is in mu.
+    MuGlue,
+}
+
+impl GlueSource {
+    /// The §224 parameter number (`line_skip_code` .. `thick_mu_skip_code`)
+    /// this glue came from, which is `subtype(p)-1` (§149).
+    pub fn param_code(self) -> Option<usize> {
+        use GlueSource::*;
+        Some(match self {
+            LineSkip => 0,
+            BaselineSkip => 1,
+            ParSkip => 2,
+            AboveDisplaySkip => 3,
+            BelowDisplaySkip => 4,
+            AboveDisplayShortSkip => 5,
+            BelowDisplayShortSkip => 6,
+            LeftSkip => 7,
+            RightSkip => 8,
+            TopSkip => 9,
+            SplitTopSkip => 10,
+            TabSkip => 11,
+            SpaceSkip => 12,
+            XSpaceSkip => 13,
+            ParFillSkip => 14,
+            ThinMuSkip => 15,
+            MedMuSkip => 16,
+            ThickMuSkip => 17,
+            Normal | CondMath | MuGlue => return None,
+        })
+    }
+
+    /// The inverse of [`GlueSource::param_code`]: `new_param_glue(n)` (§152)
+    /// gives its node the subtype `n+1`.
+    pub fn of_param(code: usize) -> GlueSource {
+        use GlueSource::*;
+        match code {
+            0 => LineSkip,
+            1 => BaselineSkip,
+            2 => ParSkip,
+            3 => AboveDisplaySkip,
+            4 => BelowDisplaySkip,
+            5 => AboveDisplayShortSkip,
+            6 => BelowDisplayShortSkip,
+            7 => LeftSkip,
+            8 => RightSkip,
+            9 => TopSkip,
+            10 => SplitTopSkip,
+            11 => TabSkip,
+            12 => SpaceSkip,
+            13 => XSpaceSkip,
+            14 => ParFillSkip,
+            15 => ThinMuSkip,
+            16 => MedMuSkip,
+            17 => ThickMuSkip,
+            _ => Normal,
+        }
+    }
 }
 
 /// A box: an hlist or a vlist, packaged (§135-§137).
@@ -225,6 +303,22 @@ pub struct CharNode {
     pub depth: Scaled,
 }
 
+/// What a ligature was made of (§143): `lig_ptr`'s characters, in the
+/// ligature's own font, and the two boundary bits of its subtype.
+///
+/// The main loop (§1035) builds one when the font's program fuses two
+/// characters; `\showbox` prints the components (§193) and a hyphenation
+/// pass takes the word apart again from them (§898).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ligature {
+    /// The original characters.
+    pub components: Vec<char>,
+    /// `subtype(p)>1`: an implicit left boundary character took part.
+    pub left_boundary: bool,
+    /// `odd(subtype(p))`: an implicit right boundary character took part.
+    pub right_boundary: bool,
+}
+
 /// A discretionary break (§145): what to set before it, after it, and instead
 /// of it when no break is taken.
 #[derive(Clone, Debug, Default)]
@@ -246,8 +340,10 @@ pub enum Node {
     Mark(String),
     /// `\vadjust{...}`: material to move to the enclosing vertical list.
     Adjust(Vec<Node>),
-    /// A ligature, which behaves as the character it draws.
-    Ligature(CharNode),
+    /// A ligature, which behaves as the character it draws (§143). The
+    /// second field is what it was made of, which `\showbox` prints and a
+    /// discretionary break reconstitutes.
+    Ligature(CharNode, Ligature),
     Disc(DiscNode),
     /// `\special` and friends: no dimensions, carried through.
     Whatsit(String),
@@ -275,7 +371,7 @@ impl Node {
             Node::Ins(_) => 3,
             Node::Mark(_) => 4,
             Node::Adjust(_) => 5,
-            Node::Ligature(_) => 6,
+            Node::Ligature(..) => 6,
             Node::Disc(_) => 7,
             Node::Whatsit(_) => 8,
             Node::Math(_) => 9,

@@ -229,7 +229,7 @@ pub fn hpack(
         }
         match node {
             // §654 and §653: a character's, a box's or a rule's own width.
-            Node::Char(c) | Node::Ligature(c) => x += c.width,
+            Node::Char(c) | Node::Ligature(c, _) => x += c.width,
             Node::Box(_) | Node::Rule(_) => x += box_dimensions(node).0,
             // §656: glue adds its natural width and its two stretchabilities.
             Node::Glue(g) => {
@@ -352,7 +352,7 @@ pub fn vtop(mut packed: Packed) -> Packed {
 /// Nothing else in an hlist reaches either way.
 fn hlist_extent(node: &Node) -> Option<(Scaled, Scaled)> {
     match node {
-        Node::Char(c) | Node::Ligature(c) => Some((c.height, c.depth)),
+        Node::Char(c) | Node::Ligature(c, _) => Some((c.height, c.depth)),
         Node::Box(_) | Node::Rule(_) => {
             let (_, height, depth) = box_dimensions(node);
             let s = node.shift_amount();
@@ -384,7 +384,7 @@ fn box_dimensions(node: &Node) -> (Scaled, Scaled, Scaled) {
     match node {
         Node::Box(b) => (b.width, b.height, b.depth),
         Node::Rule(r) => (r.width, r.height, r.depth),
-        Node::Char(c) | Node::Ligature(c) => (c.width, c.height, c.depth),
+        Node::Char(c) | Node::Ligature(c, _) => (c.width, c.height, c.depth),
         _ => (0, 0, 0),
     }
 }

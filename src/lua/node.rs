@@ -849,7 +849,7 @@ fn to_engine(arena: &Arena, at: usize) -> mlua::Result<ENode> {
                 depth: 0,
             };
             match cell.subtype {
-                2 => ENode::Ligature(ch),
+                2 => ENode::Ligature(ch, Default::default()),
                 _ => ENode::Char(ch),
             }
         }
@@ -1877,7 +1877,7 @@ fn dimensions(arena: &Rc<RefCell<Arena>>, args: &[Value]) -> mlua::Result<Variad
                 ENode::Glue(g) => setter.glue(&g.spec),
                 ENode::Box(b) => b.width,
                 ENode::Rule(r) => r.width.max(0),
-                ENode::Char(c) | ENode::Ligature(c) => c.width,
+                ENode::Char(c) | ENode::Ligature(c, _) => c.width,
                 ENode::Kern { width, .. } => *width,
                 ENode::Math(s) => *s,
                 _ => 0,
