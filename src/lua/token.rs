@@ -278,7 +278,11 @@ fn cmd_chr(eng: &Engine, tok: &Token) -> (i64, i64) {
         Some(Meaning::AttributeDef(n)) => (command("assign_attr"), ATTRIBUTE_BASE + n),
         // A font identifier is `set_font` with the font's number (§1257).
         Some(Meaning::Font(f)) => (command("set_font"), i64::from(*f)),
-        None => primitive_cmd(name.name()),
+        None => match super::luacall(name.name()) {
+            Some((id, true)) => (command("lua_expandable_call"), id),
+            Some((id, false)) => (command("lua_call"), id),
+            None => primitive_cmd(name.name()),
+        },
     }
 }
 
@@ -1042,6 +1046,26 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<node::Arena>>) -> mlua::Result
         })?,
     )?;
 
+    // "set_lua(name, id [, flags...])" (lnewtokenlib.c `set_lua`): `\name`
+    // calls Lua function `id`, a `lua_expandable_call` that runs wherever the
+    // gullet expands, or with `"protected"` a `lua_call` that runs only where
+    // it is executed, as a `\luadef` name does. expl3.lua's `luacmd` makes
+    // every Lua-backed command of the LaTeX kernel this way.
+    t.set(
+        "set_lua",
+        lua.create_function(|_, args: Variadic<Value>| {
+            let (Some(Value::String(name)), Some(id)) =
+                (args.first(), args.get(1).and_then(|v| v.as_integer()))
+            else {
+                return Ok(());
+            };
+            let protected = args.iter().skip(2).any(
+                |v| matches!(v, Value::String(s) if s.to_str().is_ok_and(|s| &*s == "protected")),
+            );
+            super::define_luacall(&name.to_str()?, id, !protected);
+            Ok(())
+        })?,
+    )?;
     // "biggest_char" is a constant, and the constant is Unicode's last code
     // point in both engines.
     t.set("biggest_char", lua.create_function(|_, ()| Ok(0x10FFFF))?)?;

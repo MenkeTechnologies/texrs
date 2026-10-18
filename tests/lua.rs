@@ -2035,3 +2035,27 @@ fn a_parameter_character_reaches_lua_doubled() {
     assert_eq!(oracle, "[####]", "the oracle");
     assert_eq!(got, oracle);
 }
+
+#[test]
+fn set_lua_makes_an_expandable_or_a_protected_lua_call() {
+    // lnewtokenlib's `token.set_lua(name, id [, "protected"])`, which
+    // expl3.lua's `luacmd` defines the kernel's Lua-backed commands with: an
+    // expandable `lua_expandable_call`, or a `lua_call` with `"protected"`,
+    // calling function `id`; executed, each runs its function.
+    let body = "\\directlua{local t = lua.get_functions_table() \
+          t[11] = function() tex.sprint('E') end t[12] = function() tex.sprint('P') end \
+          token.set_lua('ex', 11) token.set_lua('pr', 12, 'protected') \
+          local a, b = token.create('ex'), token.create('pr') \
+          tex.sprint(string.char(92) .. 'message{[' .. a.cmdname .. ' ' .. a.mode .. ' ' .. b.cmdname \
+          .. ' ' .. b.mode .. ' ' .. tostring(a.expandable) .. ' ' .. tostring(b.expandable) .. ']}')}\
+        \\setbox0\\hbox{\\ex\\pr}\\message{[\\the\\wd0]}";
+    let want = "[lua_expandable_call 11 lua_call 12 true false] [0.0pt]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

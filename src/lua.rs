@@ -156,6 +156,11 @@ thread_local! {
     /// the lowerer meets, so it must not be a map lookup: a `Cell<bool>` keeps
     /// the common case (no `\luadef` anywhere) to a load and a branch.
     static ANY_LUADEF: Cell<bool> = const { Cell::new(false) };
+    /// The names of [`LUADEFS`] that are `lua_expandable_call` commands
+    /// (`token.set_lua` without `"protected"`): they run wherever the gullet
+    /// expands, where a `\luadef` name runs only where it is executed.
+    static EXPANDABLE_LUADEFS: RefCell<std::collections::HashSet<String>> =
+        RefCell::new(std::collections::HashSet::new());
     /// What `tex.jobname` answers, when something has said.
     static JOBNAME: RefCell<Option<String>> = const { RefCell::new(None) };
 }
@@ -256,6 +261,33 @@ pub fn claims(name: &str) -> bool {
     ANY_LUADEF.with(Cell::get) && LUADEFS.with(|m| m.borrow().contains_key(name))
 }
 
+/// Whether `name` is a Lua call the gullet expands: a `token.set_lua` name
+/// defined without `"protected"` (`lua_expandable_call_cmd`).
+pub fn expands_in_gullet(name: &str) -> bool {
+    ANY_LUADEF.with(Cell::get) && EXPANDABLE_LUADEFS.with(|m| m.borrow().contains(name))
+}
+
+/// The function a `\luadef` or `token.set_lua` name calls, and whether the
+/// gullet expands it.
+pub(super) fn luacall(name: &str) -> Option<(i64, bool)> {
+    if !ANY_LUADEF.with(Cell::get) {
+        return None;
+    }
+    let id = LUADEFS.with(|m| m.borrow().get(name).copied())?;
+    Some((id, EXPANDABLE_LUADEFS.with(|m| m.borrow().contains(name))))
+}
+
+/// Bind `name` to Lua function `id`, as `\luadef` does (`expandable` false)
+/// or as `token.set_lua` does.
+pub(super) fn define_luacall(name: &str, id: i64, expandable: bool) {
+    LUADEFS.with(|m| m.borrow_mut().insert(name.to_string(), id));
+    EXPANDABLE_LUADEFS.with(|m| match expandable {
+        true => m.borrow_mut().insert(name.to_string()),
+        false => m.borrow_mut().remove(name),
+    });
+    ANY_LUADEF.with(|f| f.set(true));
+}
+
 /// The fallback chain the chunk just run named, if it named one.
 fn take_fallbacks() -> Option<Vec<String>> {
     RUNTIME.with(|slot| {
@@ -336,6 +368,7 @@ fn current_attributes() -> Vec<(i64, i64)> {
 pub fn reset() {
     RUNTIME.with(|r| *r.borrow_mut() = None);
     LUADEFS.with(|m| m.borrow_mut().clear());
+    EXPANDABLE_LUADEFS.with(|m| m.borrow_mut().clear());
     ANY_LUADEF.with(|f| f.set(false));
 }
 
@@ -424,8 +457,7 @@ pub fn lower(
                 return Err(TexError("Missing control sequence after \\luadef".into()));
             };
             let n = eng.scan_number_file(lx)?;
-            LUADEFS.with(|m| m.borrow_mut().insert(cs.name().to_string(), n));
-            ANY_LUADEF.with(|f| f.set(true));
+            define_luacall(cs.name(), n, false);
             Ok(())
         }
         // A name `\luadef` bound to a function index.
@@ -784,6 +816,7 @@ fn runtime(eng: &mut Engine) -> R<(Lua, Rc<RefCell<Bridge>>)> {
         if fresh {
             *slot = Some(build(owner).map_err(|e| TexError(lua_error_text(&e)))?);
             LUADEFS.with(|m| m.borrow_mut().clear());
+            EXPANDABLE_LUADEFS.with(|m| m.borrow_mut().clear());
             ANY_LUADEF.with(|f| f.set(false));
         }
         let rt = slot.as_ref().expect("just built");
