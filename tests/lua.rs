@@ -1901,3 +1901,36 @@ fn the_input_callbacks_choose_read_and_rewrite_the_files_tex_reads() {
         "the oracle"
     );
 }
+
+#[test]
+fn a_define_font_callback_makes_the_font_backslash_font_names() {
+    // luatex's define_font: `\font` hands the callback the name and the size
+    // (`at` in scaled points, `scaled` as minus the scale), and the table it
+    // answers is the font -- its characters set type, its parameters are
+    // `\fontdimen`, `\fontname` is its name, and `font.getfont` answers it
+    // under the id `\font` gave it.
+    let body = "\\directlua{callback.register('define_font', function(name, size) \
+          texio.write_nl('[def ' .. name .. ' ' .. size .. ']') \
+          if size < 0 then size = 655360 * (-size) // 1000 end \
+          return { name = name, size = size, designsize = 655360, \
+            parameters = { space = size // 4, quad = size }, \
+            characters = { [65] = { width = size // 2, height = size // 3 } } } end)}\
+        \\font\\x=foo at 12pt \\font\\y=bar scaled 2000 \
+        \\setbox0\\hbox{\\x AA}\\message{[\\the\\wd0 \\the\\ht0 \\fontname\\x]}\
+        \\setbox0\\hbox{\\y A}\\message{[\\the\\wd0 \\the\\fontdimen6\\y]}\
+        \\directlua{local id = font.id('x') local f = font.getfont(id) \
+          tex.print(string.char(92) .. 'message{[' .. f.name .. ' ' .. f.size .. ' ' \
+          .. tostring(id + 1 == font.id('y')) .. ']}')}";
+    // Compared without the spaces and line ends the two terminals break the
+    // messages with differently.
+    let want = "[deffoo786432][defbar-2000][12.0pt4.0ptfooat12.0pt][10.0pt20.0pt][foo786432true]";
+    let squeeze = |s: String| s.split_whitespace().collect::<String>();
+    assert_eq!(squeeze(out(body)), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(squeeze(oracle.clone()), want, "the oracle");
+    assert_eq!(squeeze(got), squeeze(oracle));
+}

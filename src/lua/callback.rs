@@ -252,6 +252,42 @@ fn hook(lua: &Lua, arena: &Rc<RefCell<super::node::Arena>>, name: &'static str, 
     if input_hook(lua, name, on) {
         return;
     }
+    if name == "define_font" {
+        // `define_font(name, size)` while `\font` is lowered, with the engine
+        // lent as to a chunk: a table is `font.define`d under the id `\font`
+        // gives next, a number is a font already defined, anything else
+        // leaves the TFM to be read.
+        use crate::node::hooks::{Defined, FontDefiner};
+        let definer: Option<FontDefiner> = on.then(|| {
+            let lua = lua.clone();
+            Box::new(
+                move |eng: &mut crate::expand::Engine,
+                      lx: &mut crate::lexer::Lexer,
+                      file: &str,
+                      size: i64| {
+                    let f = function(&lua, name)?;
+                    let id = eng.fonts.fonts.len();
+                    let answer = super::ctx::enter(eng, lx, || -> mlua::Result<Option<Defined>> {
+                        Ok(match f.call::<Value>((file, size))? {
+                            Value::Table(t) => Some(Defined::Font(Box::new(
+                                super::font::define_for_tex(&lua, id, t)?,
+                            ))),
+                            Value::Integer(n) => u16::try_from(n).ok().map(Defined::Existing),
+                            Value::Number(n) => u16::try_from(n as i64).ok().map(Defined::Existing),
+                            _ => None,
+                        })
+                    });
+                    super::notes_to_engine(eng);
+                    answer.unwrap_or_else(|e| {
+                        super::warn(&format!("callback {name}: {}", super::lua_error_text(&e)));
+                        None
+                    })
+                },
+            ) as FontDefiner
+        });
+        crate::node::hooks::set(|h| h.define_font = definer);
+        return;
+    }
     use crate::node::hooks::{Context, Hooks, ListFilter, Notice};
     type Slot = fn(&mut Hooks) -> &mut Option<ListFilter>;
     let list_slot: Option<Slot> = match name {

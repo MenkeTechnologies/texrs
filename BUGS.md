@@ -395,18 +395,25 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `post_linebreak_filter` and `buildpage_filter` (a paragraph handed over
   from a `local_par` node, as luatex hands it); `vpack_filter`,
   `pre_output_filter`, `linebreak_filter`, `hyphenate`, `ligaturing`,
-  `kerning` and `contribute_filter` are not called yet. No file is opened through
-  `find_read_file`/`open_read_file`, no line passes through
-  `process_input_buffer`, and the stomach's `\font` calls the `define_font`
-  hook point, which a registered Lua definer does not fill yet.
+  `kerning` and `contribute_filter` are not called yet. `find_read_file`,
+  `open_read_file` and `process_input_buffer` are called where luatex calls
+  them (`crate::input_hooks`), but one that returns nothing from
+  `open_read_file` reads the file as it is, where luatex fails to open it, and
+  what they print with `texio` while the document is lowered is not shown.
+  `define_font` is called by `\font` and the font it answers sets type.
+  `token_filter`, `start_run`, `stop_run`, `start_page_number`,
+  `stop_page_number` and `show_error_message` are not called.
 - **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
   an attribute list, a disc's `penalty`, a glyph's offsets, `lang` and
   `expansion_factor`, and the LuaTeX-only nodes (`dir`, `local_par`,
   `boundary`, `margin_kern`, the noads) are there while the list is in Lua
   and dropped on the way back.
-- **Fonts defined from Lua** are kept by `font.define` and read by
-  `font.getfont`, numbered after the fonts `\font` had defined; the stomach
-  does not set type in one yet, and `font.read_vf` refuses.
+- **Fonts defined from Lua** by a `define_font` callback set type from
+  their characters' dimensions, with no ligature or kerning program; one
+  `font.define`d by a chunk alone, with no `\font` behind it, is kept and read
+  back by `font.getfont` but is not one the stomach sets type in. A font
+  table's glyphs do not yet reach the PDF as the file it names. `font.read_vf`
+  refuses.
 - **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
   `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,
   `token.scan_list`, `token.scan_toks(true)`.

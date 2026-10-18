@@ -224,6 +224,52 @@ fn store(lua: &Lua, id: usize, t: Table) -> mlua::Result<()> {
     Ok(())
 }
 
+/// `define_font`'s answer made into a font of the stomach's, kept here as
+/// font `id` too, so `font.getfont(id)` answers the table the callback gave:
+/// luatex `font.define`s a callback's table under the id `\font` assigns.
+/// The hyphen and skew characters are the table's, else `\defaulthyphenchar`
+/// and `\defaultskewchar` (luafont.c `font_from_lua`).
+pub(super) fn define_for_tex(
+    lua: &Lua,
+    id: usize,
+    t: Table,
+) -> mlua::Result<crate::stomach::font::Font> {
+    use crate::stomach::font::{Font, Metrics};
+    let hyphen = int_field(&t, "hyphenchar")?;
+    let skew = int_field(&t, "skewchar")?;
+    store(lua, id, t)?;
+    let f = get(id).ok_or_else(|| mlua::Error::runtime("font creation failed, error in table"))?;
+    let chars = f.characters.iter().filter_map(|(code, c)| {
+        let code = u32::try_from(*code).ok()?;
+        Some((
+            code,
+            Metrics {
+                width: c.width,
+                height: c.height,
+                depth: c.depth,
+                italic: c.italic,
+            },
+        ))
+    });
+    let mut font = Font::from_metrics(
+        &f.name,
+        "",
+        f.size,
+        f.designsize,
+        f.parameters.clone(),
+        chars,
+    );
+    let (default_hyphen, default_skew) = ctx::with("font.define", |eng, _| {
+        Ok((
+            eng.intpar_named("defaulthyphenchar"),
+            eng.intpar_named("defaultskewchar"),
+        ))
+    })?;
+    font.hyphen_char = hyphen.unwrap_or(default_hyphen);
+    font.skew_char = skew.unwrap_or(default_skew);
+    Ok(font)
+}
+
 fn valid(id: i64) -> bool {
     id > 0 && FONTS.with(|f| f.borrow().get(id as usize).is_some_and(|d| d.is_some()))
 }

@@ -294,6 +294,18 @@ fn say(bridge: &Rc<RefCell<Bridge>>, m: Message) {
     crate::runtime::tell(vec![crate::stomach::Said::Terminal(m.text)], false);
 }
 
+/// What Lua printed while a hook the lowerer calls ran with the engine lent
+/// (`define_font`), handed to the engine's terminal stream where the lowerer
+/// stands, as a chunk's messages are where the chunk stands.
+fn notes_to_engine(eng: &mut Engine) {
+    let bridge = RUNTIME.with(|slot| slot.borrow().as_ref().map(|rt| Rc::clone(&rt.bridge)));
+    let Some(b) = bridge else { return };
+    let said = std::mem::take(&mut b.borrow_mut().messages);
+    for m in said {
+        eng.terminal_note(&m.text);
+    }
+}
+
 /// Run `f` with the document's Lua state, when there is one.
 fn with_lua<T>(f: impl FnOnce(&Lua) -> T) -> Option<T> {
     let lua = RUNTIME.with(|slot| slot.borrow().as_ref().map(|rt| rt.lua.clone()))?;

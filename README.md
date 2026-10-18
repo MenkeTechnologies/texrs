@@ -662,12 +662,12 @@ TeX error. The node lists TeX builds are the stomach's and exist while the
 program runs, after the chunks have run while it was lowered: so a chunk cannot
 reach `tex.box[n]`, `tex.getlist` or the current list (`node.write`,
 `node.last_node`), and those refuse by name; a callback registered from a chunk
-is how Lua reaches the stomach's lists, and of the stomach's hook points only
-`hpack_filter` is called yet. `node.ligaturing`, `node.kerning`,
+is how Lua reaches the stomach's lists (BUGS.md lists which callbacks are
+called). `node.ligaturing`, `node.kerning`,
 `node.hyphenating` and `node.mlist_to_hlist` are not ported. Of LuaTeX's other
-libraries, `lang`, `vf`, `img`, `mplib`, `ffi` and `socket` are not there, no `\font` goes through
-`define_font` yet, and a font defined from Lua is not yet one the stomach sets
-type in. The shell is disabled (`os.execute`, `io.popen` and
+libraries, `lang`, `vf`, `img`, `mplib`, `ffi` and `socket` are not there, and a font a `define_font` callback
+answers sets type from its characters' dimensions but does not yet reach the
+PDF as the file it names. The shell is disabled (`os.execute`, `io.popen` and
 `kpse.check_permission` answer as `luatex -no-shell-escape` does), and a file a chunk opens, removes or makes goes through kpathsea's `openin_any`/`openout_any` checks as in luatex, and an error
 a Rust library function raises is a userdata that prints, concatenates and
 matches like the string luatex's C would raise, but is not `type` string. See
