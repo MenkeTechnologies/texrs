@@ -117,6 +117,7 @@ impl Stomach {
                 max_depth: crate::node::MAX_DIMEN,
             },
         );
+        l.mode_line = self.line;
         l.prev_depth = IGNORE_DEPTH;
         l.space_factor = 1000;
         self.nest.push(l);
@@ -219,7 +220,11 @@ impl Stomach {
             let mut font = None;
             d.short_display(&mut text, &b.list, &mut font);
         }
-        self.say(Said::Report(text));
+        // §663 ends an hbox's report with `print_ln`; §675 does not.
+        match vertical {
+            true => self.say(Said::ReportOpen(text)),
+            false => self.say(Said::Report(text)),
+        }
         let shown = self.show_box_text(std::slice::from_ref(&Node::Box(b.clone())));
         self.diagnostic(&shown);
     }
@@ -446,6 +451,7 @@ impl Stomach {
     fn begin_disc_list(&mut self) {
         self.group_begin();
         let mut l = ListState::new(Mode::RestrictedHorizontal, Opened::Page);
+        l.mode_line = self.line;
         l.space_factor = 1000;
         self.nest.push(l);
     }
@@ -498,6 +504,8 @@ impl Stomach {
     pub fn begin_insert(&mut self, n: u16) {
         self.group_begin();
         let mut l = ListState::new(Mode::InternalVertical, Opened::Insert(n));
+        // §1099: `mode_line:=-line`.
+        l.mode_line = -self.line;
         l.prev_depth = IGNORE_DEPTH;
         self.nest.push(l);
     }

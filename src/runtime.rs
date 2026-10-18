@@ -128,6 +128,10 @@ pub(crate) fn tell(said: Vec<crate::stomach::Said>, online: bool) {
             // texrs writes its terminal reports without the line ends tex
             // puts in them, as `report` does with an error's context.
             Said::Report(text) => push_report(&text.replace('\n', "")),
+            Said::ReportOpen(text) => {
+                push_report(&text.replace('\n', ""));
+                REPORT_TAIL.with(|t| *t.borrow_mut() = usize::MAX);
+            }
             Said::Terminal(text) => {
                 // A report ends with `print_ln` (§663), so what §638 prints
                 // after one starts its line with no space before it.
@@ -570,6 +574,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
     vm.register_builtin(ops::LIST, crate::stomach::run::b_list);
     vm.register_builtin(ops::LIST_SHOWBOX, crate::stomach::run::b_list_showbox);
+    vm.register_builtin(ops::LIST_SHOWLISTS, crate::stomach::run::b_list_showlists);
     vm.register_builtin(ops::OUT_OPEN, crate::write::b_out_open);
     vm.register_builtin(ops::OUT_WRITE, b_out_write);
     vm.register_builtin(ops::OUT_CLOSE, crate::write::b_out_close);
