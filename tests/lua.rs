@@ -1802,3 +1802,23 @@ fn a_paragraph_reaches_its_callbacks_as_luatex_hands_it_over() {
         "the oracle"
     );
 }
+
+#[test]
+fn iftex_loads_through_its_own_lua_and_says_luatex() {
+    // iftex.sty makes `\IFTEX@detokenize` with `tex.enableprimitives` and then
+    // runs `\directlua{\IFTEX@detokenize{...}}`: the chunk's text is expanded
+    // as an `\edef` body is, so Lua is handed the detokenized code.
+    if texrs::kpse::locate("iftex.sty").is_none() {
+        eprintln!("skipping: kpsewhich cannot find iftex.sty");
+        return;
+    }
+    let body = "\\catcode`\\#=6 \\input iftex.sty \\message{[\\ifluatex L\\fi\\ifxetex X\\fi]}";
+    assert!(out(body).ends_with(") [L]"), "{}", out(body));
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, "[L]", "the oracle");
+    assert_eq!(got, oracle);
+}
