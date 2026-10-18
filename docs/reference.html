@@ -81,11 +81,11 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">295</div>
+            <div class="stat-val">332</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val">12</div>
+            <div class="stat-val">13</div>
             <div class="stat-label">Chapters</div>
           </div>
           <div class="stat-card">
@@ -294,10 +294,10 @@
 \ifhbox200 \message{[H]}\else \message{[NO]}\fi   % =&gt; [NO]</pre></td></tr>
             <tr><td><code>\ifvbox</code></td><td>Does box register N hold a \vbox? A real branch on the kind the stomach mirrors, as <code>\ifvoid</code> is.</td><td><pre>\ifvbox&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi
 \ifvbox200 \message{[V]}\else \message{[NO]}\fi   % =&gt; [NO]</pre></td></tr>
-            <tr><td><code>\ifvmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifvmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
-            <tr><td><code>\ifhmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifhmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
-            <tr><td><code>\ifmmode</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifmmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
-            <tr><td><code>\ifinner</code></td><td>RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. Reaching one stops the run with <code>! Unsupported conditional \NAME.</code> and exit status 1; SKIPPING one inside an untaken branch is correct, because the skipper counts it for nesting.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifvmode</code></td><td>True in vertical mode, internal or not (§501). In a plain document the lowerer follows the semantic nest, so the test is decided where it is read. In a LaTeX document, whose lists the stomach does not build, reaching one stops the run with <code>! Unsupported conditional \NAME.</code>.</td><td><pre>\ifvmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifhmode</code></td><td>True in horizontal mode, restricted or not (§501). In a plain document the lowerer follows the semantic nest, so the test is decided where it is read. In a LaTeX document, whose lists the stomach does not build, reaching one stops the run with <code>! Unsupported conditional \NAME.</code>.</td><td><pre>\ifhmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifmmode</code></td><td>True in math mode, in a display or not (§501). In a plain document the lowerer follows the semantic nest, so the test is decided where it is read. In a LaTeX document, whose lists the stomach does not build, reaching one stops the run with <code>! Unsupported conditional \NAME.</code>.</td><td><pre>\ifmmode &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
+            <tr><td><code>\ifinner</code></td><td>True in an inner mode (§501): internal vertical, restricted horizontal, or math that is not a display. Decided while lowering in a plain document; in a LaTeX document reaching one stops the run with <code>! Unsupported conditional \NAME.</code>.</td><td><pre>\ifinner &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifeof</code></td><td>True when a <code>\read</code> stream is closed (tex.web §501): every stream is, until <code>\openin</code> finds a file, and again once <code>\closein</code> closes it or a <code>\read</code> finds nothing left. The number is a four-bit integer, and one out of range is <code>Bad number</code> and reads as 0.</td><td><pre>\ifeof&lt;N&gt; &lt;true&gt;\else &lt;false&gt;\fi</pre></td></tr>
             <tr><td><code>\ifcsname</code></td><td>Is the name built from these characters defined? etex.ch's <code>if_cs_code</code> reads them exactly as <code>\csname</code> does and then looks the name up with <code>no_new_control_sequence</code> still true, so a name it does not find is NOT entered — which is the whole difference from <code>\csname</code>, whose lookup DEFINES what it misses as <code>\relax</code> (tex.web §372) and so changes the answer for every later ask. Decided while lowering, in running text and inside a <code>\message</code> body alike, because the macro table is a frontend fact. LaTeX's <code>\@ifundefined</code> is built on this.</td><td><pre>\ifcsname &lt;characters&gt;\endcsname &lt;true&gt;\else &lt;false&gt;\fi
 \def\foo{F}
@@ -445,6 +445,52 @@
             <tr><td><code>\skewchar</code></td><td>The character whose kerns position a font's math accents (§1253).</td><td><pre>\skewchar\teni='177</pre></td></tr>
             <tr><td><code>\patterns</code></td><td>Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. hyphen.tex is read this way by plain.tex.</td><td><pre>\patterns{.ach4 .ad4der}</pre></td></tr>
             <tr><td><code>\hyphenation</code></td><td>Words with their hyphens written in (§934), which the second pass takes over the patterns.</td><td><pre>\hyphenation{man-u-script}</pre></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section" id="ch-mathematics">
+        <h2>Mathematics</h2>
+        <table class="file-table">
+          <thead><tr><th>Primitive</th><th>What it does</th><th>Syntax and example</th></tr></thead>
+          <tbody>
+            <tr><td><code>\mathord</code></td><td>Make the next math field an Ord atom (§1158). <code>\mathop</code>, <code>\mathbin</code>, <code>\mathrel</code>, <code>\mathopen</code>, <code>\mathclose</code>, <code>\mathpunct</code> and <code>\mathinner</code> make the other seven classes; the class decides the spacing §764's table puts around the atom. The field is a character or a subformula in braces (§1151).</td><td><pre>$\mathord{+}x$</pre></td></tr>
+            <tr><td><code>\mathop</code></td><td>An Op atom (§1158): a large operator, with limits above and below in display style unless <code>\nolimits</code> says otherwise (§749).</td><td><pre>$\mathop{\rm sup}\limits_x f$</pre></td></tr>
+            <tr><td><code>\mathbin</code></td><td>A Bin atom (§1158): a binary operator, which §728 turns into an Ord where nothing binary surrounds it, and after which §767 allows a break at <code>\binoppenalty</code>.</td><td><pre>$a\mathbin{\#}b$</pre></td></tr>
+            <tr><td><code>\mathrel</code></td><td>A Rel atom (§1158): a relation, with thick spaces either side and a break after it at <code>\relpenalty</code> (§767).</td><td><pre>$a\mathrel{:=}b$</pre></td></tr>
+            <tr><td><code>\mathopen</code></td><td>An Open atom (§1158): an opening bracket, after which §764 puts no space.</td><td><pre>$\mathopen{[}x$</pre></td></tr>
+            <tr><td><code>\mathclose</code></td><td>A Close atom (§1158): a closing bracket, before which §764 puts no space.</td><td><pre>$x\mathclose{]}$</pre></td></tr>
+            <tr><td><code>\mathpunct</code></td><td>A Punct atom (§1158), with a thin space after it outside the script styles.</td><td><pre>$x\mathpunct{;}y$</pre></td></tr>
+            <tr><td><code>\mathinner</code></td><td>An Inner atom (§1158), the class a <code>\left</code>..<code>\right</code> subformula gets (§1191).</td><td><pre>$\mathinner{\ldotp\ldotp\ldotp}$</pre></td></tr>
+            <tr><td><code>\underline</code></td><td>An Under atom (§1158): its nucleus with a rule <code>default_rule_thickness</code> thick below it (§735).</td><td><pre>$\underline{ab}$</pre></td></tr>
+            <tr><td><code>\overline</code></td><td>An Over atom (§1158): its nucleus with a rule above it, cramped (§734).</td><td><pre>$\overline{ab}$</pre></td></tr>
+            <tr><td><code>\limits</code></td><td>After an Op atom, set its scripts above and below in every style (§1159); elsewhere it is the error <code>Limit controls must follow a math operator</code>.</td><td><pre>$\sum\limits_{i=1}^n$</pre></td></tr>
+            <tr><td><code>\nolimits</code></td><td>After an Op atom, set its scripts beside it in every style (§1159).</td><td><pre>$\int\nolimits_0^1$</pre></td></tr>
+            <tr><td><code>\displaylimits</code></td><td>After an Op atom, the default: limits above and below in display style only (§1159).</td><td><pre>$\mathop{\rm max}\displaylimits_x$</pre></td></tr>
+            <tr><td><code>\radical</code></td><td>A radical noad with a 24-bit delimiter code, over the next field (§1163); plain.tex's <code>\sqrt</code> is <code>\radical"270370</code>. The sign grows to the height of its nucleus plus the clearance §737 computes.</td><td><pre>$\radical"270370{x+1}$</pre></td></tr>
+            <tr><td><code>\accent</code></td><td>In math mode, the error <code>Please use \mathaccent for accents in math mode</code>, after which the command is read as <code>\mathaccent</code> (§1165-§1166). Its text-mode meaning, §1123's accent over the next character, is not built on the list path yet.</td><td><pre>$\accent"7F x$  % =&gt; an error, then \mathaccent</pre></td></tr>
+            <tr><td><code>\mathaccent</code></td><td>An accent noad with a 15-bit math code, over the next field (§1165); <code>\accent</code> in math mode is the error <code>Please use \mathaccent for accents in math mode</code> and is taken as this. The accent is moved right by the <code>\skewchar</code> kern of the accented character (§741).</td><td><pre>$\mathaccent"705E x$</pre></td></tr>
+            <tr><td><code>\vcenter</code></td><td>A vbox centred on the math axis (§1167-§1168, §736), as a noad of its own; <code>to</code> and <code>spread</code> are read as for <code>\vbox</code>.</td><td><pre>$\vcenter{\hbox{a}\hbox{b}}$</pre></td></tr>
+            <tr><td><code>\displaystyle</code></td><td>A style node (§1171): what follows is set in display style. <code>\textstyle</code>, <code>\scriptstyle</code> and <code>\scriptscriptstyle</code> select the other three; each changes the size the families are read at (§703).</td><td><pre>$\displaystyle{a\over b}$</pre></td></tr>
+            <tr><td><code>\textstyle</code></td><td>A style node for text style (§1171).</td><td><pre>$$\textstyle\sum_i x_i$$</pre></td></tr>
+            <tr><td><code>\scriptstyle</code></td><td>A style node for script style (§1171): the script size fonts.</td><td><pre>$\scriptstyle a+b$</pre></td></tr>
+            <tr><td><code>\scriptscriptstyle</code></td><td>A style node for scriptscript style (§1171).</td><td><pre>$\scriptscriptstyle a+b$</pre></td></tr>
+            <tr><td><code>\nonscript</code></td><td>Glue that deletes the glue or kern right after it when the formula is in a script style (§1171, §732).</td><td><pre>$a\nonscript\mskip\thinmuskip b$</pre></td></tr>
+            <tr><td><code>\mathchoice</code></td><td>Four subformulas, for display, text, script and scriptscript style; the one the style at that point asks for is set (§1172-§1174, §731). plain.tex's <code>\mathpalette</code> is built on it.</td><td><pre>$\mathchoice{D}{T}{S}{SS}$</pre></td></tr>
+            <tr><td><code>\over</code></td><td>Make everything so far in the subformula the numerator and everything after it the denominator, with a bar <code>default_rule_thickness</code> thick (§1181-§1185). Two in one subformula is <code>Ambiguous; you need another { and }</code>.</td><td><pre>${n+1\over2}$</pre></td></tr>
+            <tr><td><code>\atop</code></td><td>A fraction with no bar (§1182).</td><td><pre>${n\atop k}$</pre></td></tr>
+            <tr><td><code>\above</code></td><td>A fraction with a bar of the thickness given (§1182).</td><td><pre>${a\above1pt b}$</pre></td></tr>
+            <tr><td><code>\overwithdelims</code></td><td><code>\over</code> with a delimiter on each side, each grown to <code>delim1</code> or <code>delim2</code> (§748); <code>\atopwithdelims</code> and <code>\abovewithdelims</code> likewise. plain.tex's <code>\choose</code> is <code>\atopwithdelims()</code>.</td><td><pre>${a\overwithdelims() b}$</pre></td></tr>
+            <tr><td><code>\atopwithdelims</code></td><td><code>\atop</code> with delimiters (§1182).</td><td><pre>${n\atopwithdelims() k}$</pre></td></tr>
+            <tr><td><code>\abovewithdelims</code></td><td><code>\above</code> with delimiters (§1182).</td><td><pre>${a\abovewithdelims[]1pt b}$</pre></td></tr>
+            <tr><td><code>\left</code></td><td>Open a subformula whose delimiters grow to its height and depth (§1191, §762); it ends at the matching <code>\right</code> and becomes an Inner atom. A delimiter is a character with a <code>\delcode</code>, <code>\delimiter</code>, or <code>.</code> for none.</td><td><pre>$\left(a\over b\right)$</pre></td></tr>
+            <tr><td><code>\right</code></td><td>Close the <code>\left</code> subformula (§1191); outside one it is <code>Extra \right</code>.</td><td><pre>$\left[x\right.$</pre></td></tr>
+            <tr><td><code>\eqno</code></td><td>In a display, set what follows to the closing <code>$$</code> as the equation number, at the right (§1142, §1199-§1205); a display too wide to share its line puts the number on a line of its own.</td><td><pre>$$a^2+b^2=c^2\eqno(1)$$</pre></td></tr>
+            <tr><td><code>\leqno</code></td><td>The same with the number at the left (§1142, §1203).</td><td><pre>$$x=1\leqno(2)$$</pre></td></tr>
+            <tr><td><code>\mkern</code></td><td>A kern in math units: eighteen mu are the quad of the family 2 font at the size the formula is set in (§717).</td><td><pre>$a\mkern18mu b$</pre></td></tr>
+            <tr><td><code>\mskip</code></td><td>Glue in math units (§716), converted at the size it lands in; <code>\thinmuskip</code>, <code>\medmuskip</code> and <code>\thickmuskip</code> are the three §764's spacing table uses.</td><td><pre>$a\mskip\thickmuskip b$</pre></td></tr>
+            <tr><td><code>\mathchar</code></td><td>A math character by its 15-bit code: class, family and character, as <code>\mathcode</code> holds them (§1154-§1155). Class 7 takes its family from <code>\fam</code> when that is 0..15.</td><td><pre>$\mathchar"7141$</pre></td></tr>
+            <tr><td><code>\delimiter</code></td><td>A delimiter by its 27-bit code (§1160): where a delimiter is wanted it is that, and as a math character it is its class and small variant (§1154).</td><td><pre>$\left\delimiter"426630A x\right.$</pre></td></tr>
           </tbody>
         </table>
       </section>

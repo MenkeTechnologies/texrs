@@ -158,6 +158,43 @@
     "\\skewchar"
     "\\patterns"
     "\\hyphenation"
+    "\\mathord"
+    "\\mathop"
+    "\\mathbin"
+    "\\mathrel"
+    "\\mathopen"
+    "\\mathclose"
+    "\\mathpunct"
+    "\\mathinner"
+    "\\underline"
+    "\\overline"
+    "\\limits"
+    "\\nolimits"
+    "\\displaylimits"
+    "\\radical"
+    "\\accent"
+    "\\mathaccent"
+    "\\vcenter"
+    "\\displaystyle"
+    "\\textstyle"
+    "\\scriptstyle"
+    "\\scriptscriptstyle"
+    "\\nonscript"
+    "\\mathchoice"
+    "\\over"
+    "\\atop"
+    "\\above"
+    "\\overwithdelims"
+    "\\atopwithdelims"
+    "\\abovewithdelims"
+    "\\left"
+    "\\right"
+    "\\eqno"
+    "\\leqno"
+    "\\mkern"
+    "\\mskip"
+    "\\mathchar"
+    "\\delimiter"
     "\\intercept"
     "\\proceed"
     "\\char"
@@ -383,10 +420,10 @@
     (puthash "\\ifvoid" "\\ifvoid  —  Is box register N empty? A real branch on the register as the program holds it (tex.web §505): the stomach mirrors each register's kind into a slot, so `\\setbox0\\hbox{}` makes `\\ifvoid0` false. [Conditionals]" table)
     (puthash "\\ifhbox" "\\ifhbox  —  Does box register N hold an \\hbox? A real branch on the kind the stomach mirrors, as `\\ifvoid` is. [Conditionals]" table)
     (puthash "\\ifvbox" "\\ifvbox  —  Does box register N hold a \\vbox? A real branch on the kind the stomach mirrors, as `\\ifvoid` is. [Conditionals]" table)
-    (puthash "\\ifvmode" "\\ifvmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
-    (puthash "\\ifhmode" "\\ifhmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
-    (puthash "\\ifmmode" "\\ifmmode  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
-    (puthash "\\ifinner" "\\ifinner  —  RECOGNISED BUT NOT EVALUATED: modes belong to the stomach. [Conditionals]" table)
+    (puthash "\\ifvmode" "\\ifvmode  —  True in vertical mode, internal or not (§501). [Conditionals]" table)
+    (puthash "\\ifhmode" "\\ifhmode  —  True in horizontal mode, restricted or not (§501). [Conditionals]" table)
+    (puthash "\\ifmmode" "\\ifmmode  —  True in math mode, in a display or not (§501). [Conditionals]" table)
+    (puthash "\\ifinner" "\\ifinner  —  True in an inner mode (§501): internal vertical, restricted horizontal, or math that is not a display. [Conditionals]" table)
     (puthash "\\ifeof" "\\ifeof  —  True when a `\\read` stream is closed (tex.web §501): every stream is, until `\\openin` finds a file, and again once `\\closein` closes it or a `\\read` finds nothing left. [Conditionals]" table)
     (puthash "\\ifcsname" "\\ifcsname  —  Is the name built from these characters defined? etex.ch's `if_cs_code` reads them exactly as `\\csname` does and then looks the name up with `no_new_control_sequence` still true, so a name it does not find is NOT entered — which is the whole difference from `\\csname`, whose lookup DEFINES what it misses as `\\relax` (tex.web §372) and so changes the answer for every later ask. [Conditionals]" table)
     (puthash "\\ifabsnum" "\\ifabsnum  —  `\\ifnum` on the magnitudes: each side is made positive before the comparison, so `\\ifabsnum -5>3` is true. [Conditionals]" table)
@@ -457,6 +494,43 @@
     (puthash "\\skewchar" "\\skewchar  —  The character whose kerns position a font's math accents (§1253). [Boxes]" table)
     (puthash "\\patterns" "\\patterns  —  Liang hyphenation patterns (§960), the characters between the braces, for the paragraph builder's second pass. [Boxes]" table)
     (puthash "\\hyphenation" "\\hyphenation  —  Words with their hyphens written in (§934), which the second pass takes over the patterns. [Boxes]" table)
+    (puthash "\\mathord" "\\mathord  —  Make the next math field an Ord atom (§1158). [Mathematics]" table)
+    (puthash "\\mathop" "\\mathop  —  An Op atom (§1158): a large operator, with limits above and below in display style unless `\\nolimits` says otherwise (§749). [Mathematics]" table)
+    (puthash "\\mathbin" "\\mathbin  —  A Bin atom (§1158): a binary operator, which §728 turns into an Ord where nothing binary surrounds it, and after which §767 allows a break at `\\binoppenalty`. [Mathematics]" table)
+    (puthash "\\mathrel" "\\mathrel  —  A Rel atom (§1158): a relation, with thick spaces either side and a break after it at `\\relpenalty` (§767). [Mathematics]" table)
+    (puthash "\\mathopen" "\\mathopen  —  An Open atom (§1158): an opening bracket, after which §764 puts no space. [Mathematics]" table)
+    (puthash "\\mathclose" "\\mathclose  —  A Close atom (§1158): a closing bracket, before which §764 puts no space. [Mathematics]" table)
+    (puthash "\\mathpunct" "\\mathpunct  —  A Punct atom (§1158), with a thin space after it outside the script styles. [Mathematics]" table)
+    (puthash "\\mathinner" "\\mathinner  —  An Inner atom (§1158), the class a `\\left`..`\\right` subformula gets (§1191). [Mathematics]" table)
+    (puthash "\\underline" "\\underline  —  An Under atom (§1158): its nucleus with a rule `default_rule_thickness` thick below it (§735). [Mathematics]" table)
+    (puthash "\\overline" "\\overline  —  An Over atom (§1158): its nucleus with a rule above it, cramped (§734). [Mathematics]" table)
+    (puthash "\\limits" "\\limits  —  After an Op atom, set its scripts above and below in every style (§1159); elsewhere it is the error `Limit controls must follow a math operator`. [Mathematics]" table)
+    (puthash "\\nolimits" "\\nolimits  —  After an Op atom, set its scripts beside it in every style (§1159). [Mathematics]" table)
+    (puthash "\\displaylimits" "\\displaylimits  —  After an Op atom, the default: limits above and below in display style only (§1159). [Mathematics]" table)
+    (puthash "\\radical" "\\radical  —  A radical noad with a 24-bit delimiter code, over the next field (§1163); plain.tex's `\\sqrt` is `\\radical\"270370`. [Mathematics]" table)
+    (puthash "\\accent" "\\accent  —  In math mode, the error `Please use \\mathaccent for accents in math mode`, after which the command is read as `\\mathaccent` (§1165-§1166). [Mathematics]" table)
+    (puthash "\\mathaccent" "\\mathaccent  —  An accent noad with a 15-bit math code, over the next field (§1165); `\\accent` in math mode is the error `Please use \\mathaccent for accents in math mode` and is taken as this. [Mathematics]" table)
+    (puthash "\\vcenter" "\\vcenter  —  A vbox centred on the math axis (§1167-§1168, §736), as a noad of its own; `to` and `spread` are read as for `\\vbox`. [Mathematics]" table)
+    (puthash "\\displaystyle" "\\displaystyle  —  A style node (§1171): what follows is set in display style. [Mathematics]" table)
+    (puthash "\\textstyle" "\\textstyle  —  A style node for text style (§1171). [Mathematics]" table)
+    (puthash "\\scriptstyle" "\\scriptstyle  —  A style node for script style (§1171): the script size fonts. [Mathematics]" table)
+    (puthash "\\scriptscriptstyle" "\\scriptscriptstyle  —  A style node for scriptscript style (§1171). [Mathematics]" table)
+    (puthash "\\nonscript" "\\nonscript  —  Glue that deletes the glue or kern right after it when the formula is in a script style (§1171, §732). [Mathematics]" table)
+    (puthash "\\mathchoice" "\\mathchoice  —  Four subformulas, for display, text, script and scriptscript style; the one the style at that point asks for is set (§1172-§1174, §731). [Mathematics]" table)
+    (puthash "\\over" "\\over  —  Make everything so far in the subformula the numerator and everything after it the denominator, with a bar `default_rule_thickness` thick (§1181-§1185). [Mathematics]" table)
+    (puthash "\\atop" "\\atop  —  A fraction with no bar (§1182). [Mathematics]" table)
+    (puthash "\\above" "\\above  —  A fraction with a bar of the thickness given (§1182). [Mathematics]" table)
+    (puthash "\\overwithdelims" "\\overwithdelims  —  `\\over` with a delimiter on each side, each grown to `delim1` or `delim2` (§748); `\\atopwithdelims` and `\\abovewithdelims` likewise. [Mathematics]" table)
+    (puthash "\\atopwithdelims" "\\atopwithdelims  —  `\\atop` with delimiters (§1182). [Mathematics]" table)
+    (puthash "\\abovewithdelims" "\\abovewithdelims  —  `\\above` with delimiters (§1182). [Mathematics]" table)
+    (puthash "\\left" "\\left  —  Open a subformula whose delimiters grow to its height and depth (§1191, §762); it ends at the matching `\\right` and becomes an Inner atom. [Mathematics]" table)
+    (puthash "\\right" "\\right  —  Close the `\\left` subformula (§1191); outside one it is `Extra \\right`. [Mathematics]" table)
+    (puthash "\\eqno" "\\eqno  —  In a display, set what follows to the closing `$$` as the equation number, at the right (§1142, §1199-§1205); a display too wide to share its line puts the number on a line of its own. [Mathematics]" table)
+    (puthash "\\leqno" "\\leqno  —  The same with the number at the left (§1142, §1203). [Mathematics]" table)
+    (puthash "\\mkern" "\\mkern  —  A kern in math units: eighteen mu are the quad of the family 2 font at the size the formula is set in (§717). [Mathematics]" table)
+    (puthash "\\mskip" "\\mskip  —  Glue in math units (§716), converted at the size it lands in; `\\thinmuskip`, `\\medmuskip` and `\\thickmuskip` are the three §764's spacing table uses. [Mathematics]" table)
+    (puthash "\\mathchar" "\\mathchar  —  A math character by its 15-bit code: class, family and character, as `\\mathcode` holds them (§1154-§1155). [Mathematics]" table)
+    (puthash "\\delimiter" "\\delimiter  —  A delimiter by its 27-bit code (§1160): where a delimiter is wanted it is that, and as a math character it is its class and small variant (§1154). [Mathematics]" table)
     (puthash "\\intercept" "\\intercept  —  Register advice on macro expansion: `before` puts the handler's body in front of the expansion, `after` puts it behind, and `around` replaces it with `\\proceed` standing for what the macro would have expanded to. [Intercepts]" table)
     (puthash "\\proceed" "\\proceed  —  Inside an `around` handler, what the intercepted macro would have expanded to. [Intercepts]" table)
     (puthash "\\char" "\\char  —  Set the character of a code in the text (tex.web §1110): `A\\char66 C` sets `ABC`. [Registers]" table)
