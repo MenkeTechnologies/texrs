@@ -71,6 +71,7 @@ pub mod pdf;
 pub mod pdf_parity;
 pub mod pdfdoc;
 pub mod pdfpage;
+pub mod pdfship;
 pub mod pdfread;
 pub mod pk;
 pub mod postline;

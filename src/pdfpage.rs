@@ -195,6 +195,9 @@ pub struct PageWriter {
     matrices: Vec<Matrix>,
     /// Every code drawn in each resource font: `pdf_mark_char`.
     pub used: BTreeMap<u32, BTreeSet<u8>>,
+    /// The resource fonts in the order the page first drew in them, which
+    /// is the order `pdf_init_font` numbers fonts in.
+    pub font_order: Vec<u32>,
     /// What LuaTeX would warn about, in order: a `restore` with no `save`, a
     /// misplaced one, a non-PDF `\special`.
     pub warnings: Vec<String>,
@@ -243,6 +246,7 @@ impl PageWriter {
             saves: Vec::new(),
             matrices: Vec::new(),
             used: BTreeMap::new(),
+            font_order: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -488,6 +492,9 @@ impl PageWriter {
         if self.mode == Mode::CharArray {
             self.out.push(b'(');
             self.mode = Mode::Char;
+        }
+        if !self.used.contains_key(&font.resource) {
+            self.font_order.push(font.resource);
         }
         self.used.entry(font.resource).or_default().insert(c);
         self.print_char(c);

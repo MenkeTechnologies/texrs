@@ -874,7 +874,13 @@ What is left, measured on `Hello world.`:
   become kerns in the array and no space is drawn. `src/pdfpage.rs` writes
   luatex's stream byte for byte from shipped positions (its tests hold
   `Hello world.` and a page of rules and specials against luatex's own
-  bytes), and is waiting for pages built from node lists to call it.
+  bytes), and `src/pdfship.rs` ships a box tree through it as `pdflistout.c`
+  does -- plain luatex's `Hello world.` page, built as its output routine
+  builds it and shipped there, comes out as luatex's file in every object but
+  the font program and the information dictionary. What is missing is a
+  `--pdf` run that ships the stomach's pages there; today they are drawn from
+  broken strings. Only the `TLT` direction is ported, virtual fonts are not,
+  and a font without a map line is not drawn (luatex makes it a Type 3 font).
 - Because texrs draws the word space as code 32, its CMR10 carries a `space`
   glyph and an `/Encoding` re-encoding 32 to it, and so a different glyph set,
   subset tag and `/CharSet`. Without spaces (`nested_macros.tex`) the font

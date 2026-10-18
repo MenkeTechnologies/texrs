@@ -314,6 +314,29 @@ pub struct Backend {
     pub last_box: u32,
     /// What luatex printed as a warning, in order, for the run to print.
     pub warnings: Vec<String>,
+    /// `obj_type` of the objects a document made, by number.
+    kinds: BTreeMap<u32, &'static str>,
+    /// lpdflib's `pdf.data` strings (`pdf.setcatalog`, `pdf.setinfo`,
+    /// `pdf.setnames`, `pdf.settrailer`, `pdf.setpageresources`,
+    /// `pdf.setpageattributes`, `pdf.setpagesattributes`, `pdf.settrailerid`),
+    /// kept apart from `\pdfextension`'s and written after them
+    /// (`print_pdf_table_string`). An empty one is not written.
+    pub lua: LuaStrings,
+}
+
+/// lpdflib's dictionary strings: see [`Backend::lua`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LuaStrings {
+    pub catalog: String,
+    pub info: String,
+    pub names: String,
+    pub trailer: String,
+    pub page_resources: String,
+    pub page_attributes: String,
+    pub pages_attributes: String,
+    /// When set, the trailer's `/ID` is this rather than the one `print_ID`
+    /// makes.
+    pub trailer_id: String,
 }
 
 impl Backend {
@@ -344,6 +367,59 @@ impl Backend {
                 self.pending_numbers
             }
         }
+    }
+
+    /// [`Self::create`], recording the object's `obj_type` for
+    /// [`Self::object_kind`].
+    fn create_as(&mut self, kind: &'static str) -> u32 {
+        let k = self.create();
+        self.kinds.insert(k, kind);
+        k
+    }
+
+    /// `pdf.getobjtype(n)`: what kind of object `n` was made as -- `obj`,
+    /// `annot`, `page`, `dest`, `outline` -- or `None` for one the backend made
+    /// for itself or never made.
+    pub fn object_kind(&self, n: u32) -> Option<&'static str> {
+        self.kinds.get(&n).copied()
+    }
+
+    /// How many numbers have been handed out so far.
+    pub fn objects(&self) -> u32 {
+        match &self.writer {
+            Some(w) => w.count(),
+            None => self.pending_numbers,
+        }
+    }
+
+    /// `pdf.reserveobj()`: a raw object's number, for a later `useobjnum`.
+    pub fn reserve(eng: &mut Engine) -> u32 {
+        let k = eng.backend.create_as("obj");
+        eng.backend.last_obj = k;
+        k
+    }
+
+    /// `pdf.reserveobj("annot")`.
+    pub fn reserve_annot(eng: &mut Engine) -> u32 {
+        let k = eng.backend.create_as("annot");
+        eng.backend.last_annot = k;
+        k
+    }
+
+    /// `pdf.obj`, `pdf.immediateobj` and `pdf.obj{...}`: what `scan_obj` does
+    /// once it has read the object -- numbered (or `number` reused), made
+    /// `lastobj`, and written now when `immediate`, held for a page otherwise.
+    /// `raw.uncompressed` is `objcompression=false` (`OBJSTM_NEVER`).
+    pub fn lua_obj(eng: &mut Engine, number: Option<u32>, raw: RawObject, immediate: bool) -> u32 {
+        let k = number.unwrap_or_else(|| eng.backend.create_as("obj"));
+        eng.backend.last_obj = k;
+        match immediate {
+            true => write_raw(eng, k, &raw),
+            false => {
+                eng.backend.raw.insert(k, raw);
+            }
+        }
+        k
     }
 
     /// The file, begun now if it is not yet: `ensure_output_state(pdf,
@@ -410,6 +486,7 @@ impl Backend {
             dests: std::mem::take(&mut self.dests),
             dest_names: std::mem::take(&mut self.dest_names),
             pages: std::mem::take(&mut self.pages),
+            lua: std::mem::take(&mut self.lua),
         }
     }
 }
@@ -449,6 +526,7 @@ pub struct Prepared {
     pub dests: BTreeMap<DestId, u32>,
     pub dest_names: Vec<(String, u32)>,
     pub pages: BTreeMap<i64, u32>,
+    pub lua: LuaStrings,
 }
 
 impl Default for Prepared {
@@ -471,6 +549,7 @@ impl Default for Prepared {
             dests: BTreeMap::new(),
             dest_names: Vec::new(),
             pages: BTreeMap::new(),
+            lua: LuaStrings::default(),
         }
     }
 }
@@ -742,7 +821,7 @@ fn page_object(b: &mut Backend, n: i64) -> u32 {
     if let Some(&k) = b.pages.get(&n) {
         return k;
     }
-    let k = b.create();
+    let k = b.create_as("page");
     b.pages.insert(n, k);
     k
 }
@@ -754,7 +833,7 @@ fn dest_object(b: &mut Backend, id: &DestId) -> u32 {
     if let Some(&k) = b.dests.get(id) {
         return k;
     }
-    let k = b.create();
+    let k = b.create_as("dest");
     b.dests.insert(id.clone(), k);
     if let DestId::Name(name) = id {
         b.dest_names.push((name.clone(), k));
@@ -1025,7 +1104,7 @@ fn append(to: &mut String, text: &str) {
 fn obj(eng: &mut Engine, lx: &mut Lexer, immediate: bool) -> R<()> {
     if keyword(eng, lx, "reserveobjnum")? {
         optional_space(eng, lx)?;
-        let k = eng.backend.create();
+        let k = eng.backend.create_as("obj");
         eng.backend.last_obj = k;
         if immediate {
             return Err(TexError(
@@ -1036,7 +1115,7 @@ fn obj(eng: &mut Engine, lx: &mut Lexer, immediate: bool) -> R<()> {
     }
     let k = match keyword(eng, lx, "useobjnum")? {
         true => int(eng, lx)?.max(0) as u32,
-        false => eng.backend.create(),
+        false => eng.backend.create_as("obj"),
     };
     let uncompressed = keyword(eng, lx, "uncompressed")?;
     let stream = keyword(eng, lx, "stream")?;
@@ -1093,14 +1172,14 @@ fn write_raw(eng: &mut Engine, k: u32, raw: &RawObject) {
 /// `scan_annot`.
 fn annot(eng: &mut Engine, lx: &mut Lexer) -> R<Option<PdfWhatsit>> {
     if keyword(eng, lx, "reserveobjnum")? {
-        let k = eng.backend.create();
+        let k = eng.backend.create_as("annot");
         optional_space(eng, lx)?;
         eng.backend.last_annot = k;
         return Ok(None);
     }
     let k = match keyword(eng, lx, "useobjnum")? {
         true => int(eng, lx)?.max(0) as u32,
-        false => eng.backend.create(),
+        false => eng.backend.create_as("annot"),
     };
     let rule = alt_rule(eng, lx)?;
     let data = expanded_string(eng, lx)?;
@@ -1218,7 +1297,7 @@ fn outline(eng: &mut Engine, lx: &mut Lexer) -> R<()> {
         let vars = Backend::variables(eng);
         eng.backend.writer(vars).object(j, 1, body.as_bytes());
     }
-    let k = eng.backend.create();
+    let k = eng.backend.create_as("outline");
     let l = eng.backend.create();
     let title_body = format!("{}\n", pdf_string(&title));
     let vars = Backend::variables(eng);

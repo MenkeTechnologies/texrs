@@ -165,6 +165,8 @@ pub struct Writer {
     /// Indexed by object number; 0 is the head of the free list.
     places: Vec<Place>,
     objstm: Option<ObjStm>,
+    /// `pdf.settrailerid`'s `/ID`, written in place of `print_ID`'s.
+    pub trailer_id: Option<String>,
 }
 
 /// `pdf_dict_add_streaminfo`'s `/Length`: LuaTeX reserves room, writes the
@@ -187,7 +189,13 @@ impl Writer {
             out,
             places: vec![Place::Fresh],
             objstm: None,
+            trailer_id: None,
         }
+    }
+
+    /// How many numbers have been handed out.
+    pub fn count(&self) -> u32 {
+        (self.places.len() - 1) as u32
     }
 
     /// `pdf_create_obj`: the next number.
@@ -347,7 +355,10 @@ impl Writer {
             keys.push(' ');
             keys.push_str(trailer);
         }
-        keys.push_str(&format!(" /ID [ <{hex}> <{hex}> ]"));
+        match &self.trailer_id {
+            Some(id) => keys.push_str(&format!(" /ID {id}")),
+            None => keys.push_str(&format!(" /ID [ <{hex}> <{hex}> ]")),
+        }
         self.stream(xref, &keys, &rows, true);
         self.out
             .extend(format!("startxref\n{xref_offset}\n%%EOF\n").as_bytes());
@@ -563,9 +574,11 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
             bp_text(page.width, vars.decimal_digits),
             bp_text(page.height, vars.decimal_digits)
         );
-        if !prepared.page_attr.is_empty() {
-            body.push(' ');
-            body.push_str(&prepared.page_attr);
+        for extra in [&prepared.page_attr, &prepared.lua.page_attributes] {
+            if !extra.is_empty() {
+                body.push(' ');
+                body.push_str(extra);
+            }
         }
         body.push_str(&format!(" /Parent {parent} 0 R >>"));
         w.object(page_number, OBJSTM_ALWAYS, body.as_bytes());
@@ -608,9 +621,14 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
         // `\pdfvariable pageresources` first, then what the page drew with.
         let mut body = Vec::new();
         Object::Dict(res).write_into(&mut body);
-        if !prepared.page_resources.is_empty() {
+        let first: Vec<&str> = [&prepared.page_resources, &prepared.lua.page_resources]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .map(String::as_str)
+            .collect();
+        if !first.is_empty() {
             let rest = String::from_utf8_lossy(&body[2..]).into_owned();
-            body = format!("<< {}{rest}", prepared.page_resources).into_bytes();
+            body = format!("<< {}{rest}", first.join(" ")).into_bytes();
         }
         w.object(resources, OBJSTM_ALWAYS, &body);
         last_page = page_number;
@@ -626,7 +644,13 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
     }
 
     write_fonts(&mut w, &fonts);
-    let root_pages = write_page_tree(&mut w, tree, &prepared.pages_attr);
+    let pages_attr = [&prepared.pages_attr, &prepared.lua.pages_attributes]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let root_pages = write_page_tree(&mut w, tree, &pages_attr);
     let outlines = write_outlines(&mut w, &prepared);
     let names = write_name_tree(&mut w, &prepared);
 
@@ -650,6 +674,10 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
     if let Some(a) = prepared.open_action {
         body.push_str(&format!(" /OpenAction {a} 0 R"));
     }
+    if !prepared.lua.catalog.is_empty() {
+        body.push(' ');
+        body.push_str(&prepared.lua.catalog);
+    }
     body.push_str(" >>");
     w.object(catalog, OBJSTM_ALWAYS, body.as_bytes());
 
@@ -657,11 +685,13 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
     // it did not give.
     let info = w.create();
     let date = crate::pdf::pdf_date(crate::pdf::stamp());
-    let given = |key: &str| prepared.info.contains(key);
+    let given = |key: &str| prepared.info.contains(key) || prepared.lua.info.contains(key);
     let mut body = String::from("<<");
-    if !prepared.info.is_empty() {
-        body.push(' ');
-        body.push_str(&prepared.info);
+    for extra in [&prepared.info, &prepared.lua.info] {
+        if !extra.is_empty() {
+            body.push(' ');
+            body.push_str(extra);
+        }
     }
     let v = env!("CARGO_PKG_VERSION");
     if !given("/Producer") {
@@ -692,7 +722,15 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
         &cwd,
         &format!("{}.pdf", crate::lua::jobname()),
     );
-    w.finish(catalog, Some(info), &prepared.trailer, id)
+    let trailer = [&prepared.trailer, &prepared.lua.trailer]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut w = w;
+    w.trailer_id = (!prepared.lua.trailer_id.is_empty()).then(|| prepared.lua.trailer_id.clone());
+    w.finish(catalog, Some(info), &trailer, id)
 }
 
 /// How many pages the tree holds so far, which is the number of the page
@@ -856,7 +894,7 @@ fn write_name_tree(w: &mut Writer, p: &crate::backend::Prepared) -> Option<u32> 
         }
         dests = level[0].0;
     }
-    if dests == 0 && p.names.is_empty() {
+    if dests == 0 && p.names.is_empty() && p.lua.names.is_empty() {
         return None;
     }
     let m = w.create();
@@ -864,9 +902,11 @@ fn write_name_tree(w: &mut Writer, p: &crate::backend::Prepared) -> Option<u32> 
     if dests != 0 {
         body.push_str(&format!(" /Dests {dests} 0 R"));
     }
-    if !p.names.is_empty() {
-        body.push(' ');
-        body.push_str(&p.names);
+    for extra in [&p.names, &p.lua.names] {
+        if !extra.is_empty() {
+            body.push(' ');
+            body.push_str(extra);
+        }
     }
     body.push_str(" >>");
     w.object(m, OBJSTM_ALWAYS, body.as_bytes());

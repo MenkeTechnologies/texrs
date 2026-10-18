@@ -458,7 +458,12 @@ than none.
   level, a TeX font's widths and descriptor taken from its TFM, its subset tag
   and the file's `/ID` made by luatex's recipes. LuaTeX's page-stream writer is
   ported too (`src/pdfpage.rs`: text in `BT`/`TJ` with kerns, rules, `pdf:`
-  specials, save, restore and matrices), for pages built from node lists.
+  specials, save, restore and matrices), and so is its shipout
+  (`src/pdfship.rs`: `hlist_out` and `vlist_out` over the stomach's box trees).
+  Plain luatex's page for `Hello world.`, built as its output routine builds it
+  and shipped there, is luatex's file object for object but for the font
+  program and the information dictionary. No run ships through it yet: a
+  `--pdf` page is still drawn from broken strings.
 - LuaTeX's backend commands. `\pdfvariable` expands to the parameter its key
   names, assigned, read and grouped like any; `\pdffeedback` answers
   `lastobj`, `lastannot`, `lastlink`, `pageref`, `colorstackinit`, `version`
