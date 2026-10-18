@@ -21,7 +21,8 @@
 //! multiple of sixteen is how Knuth packs a family and a size into one index
 //! into `fam_fnt`, and this carries the two apart.
 
-use crate::tfm::{Tag, Tfm};
+use crate::tfm::{store_scaled, Tag, Tfm};
+use std::sync::Arc;
 
 /// A dimension in scaled points, as everywhere else in the stomach.
 pub type Scaled = i64;
@@ -59,9 +60,21 @@ const FAMILY_AT: [[f64; 3]; 4] = [
 /// One loaded font: its metrics, the size it is set at, and its extensible
 /// recipes.
 pub struct MathFont {
-    pub tfm: Tfm,
+    pub tfm: Arc<Tfm>,
     /// The size the font is loaded at, in points.
     pub at: f64,
+    /// The same size in scaled points, which every dimension is scaled by
+    /// with §571-§575's arithmetic.
+    pub size: Scaled,
+    /// `param(1..np)` at this size (§575), as `\fontdimen` may have changed
+    /// them since.
+    pub params: Vec<Scaled>,
+    /// `skew_char` (§549), or -1 for none: what §741 kerns an accent by.
+    pub skew_char: i64,
+    /// The font number a character node set from this font carries when the
+    /// formula goes into the stomach's lists. `None` on the PDF path, whose
+    /// nodes carry [`crate::math::mlist::font_index`] and a Unicode character.
+    pub node_font: Option<usize>,
     /// The `exten` table (§544): four character codes -- top, mid, bot, rep --
     /// per recipe, indexed by a character's `remainder` when its tag is
     /// `ext_tag`. `src/tfm.rs` reads every other table but not this one, so it
@@ -71,21 +84,46 @@ pub struct MathFont {
 }
 
 impl MathFont {
-    /// A value in design-size units, in scaled points at this font's size.
-    ///
-    /// `tex.web` §572 does the same multiplication in fixed point while it
-    /// reads the file; `src/tfm.rs` has already converted to `f64`, so this
-    /// rounds rather than repeating Knuth's arithmetic, and the two can differ
-    /// by a single scaled point on a value that lands exactly between.
-    fn sp(&self, v: f64) -> Scaled {
-        (v * self.at * 65536.0).round() as i64
+    /// `tfm` at `size` scaled points, its parameters scaled as §575 scales
+    /// them: the slant is a pure number, every other one a dimension.
+    pub fn new(tfm: Arc<Tfm>, size: Scaled, exten: Vec<[u8; 4]>) -> MathFont {
+        let params = tfm
+            .raw_params
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| match i {
+                0 => (v * 65536.0).round() as Scaled,
+                _ => store_scaled(v, size),
+            })
+            .collect();
+        MathFont {
+            tfm,
+            at: size as f64 / 65536.0,
+            size,
+            params,
+            skew_char: -1,
+            node_font: None,
+            exten,
+        }
+    }
+
+    /// The `exten` table of the `.tfm` file at `path`, which [`Tfm`] does not
+    /// keep.
+    pub fn exten_of(path: &std::path::Path) -> Vec<[u8; 4]> {
+        std::fs::read(path).map(|b| exten_table(&b)).unwrap_or_default()
+    }
+
+    /// A value in design-size units, in scaled points at this font's size,
+    /// with §571-§575's fixed-point arithmetic.
+    pub fn sp(&self, v: f64) -> Scaled {
+        store_scaled(v, self.size)
     }
 
     /// `param(n)` for a one-based `fontdimen` number, the way §700's macros
     /// index it.
     pub fn param(&self, n: usize) -> Scaled {
-        match n.checked_sub(1).and_then(|i| self.tfm.raw_params.get(i)) {
-            Some(v) => self.sp(*v),
+        match n.checked_sub(1).and_then(|i| self.params.get(i)) {
+            Some(v) => *v,
             None => 0,
         }
     }
@@ -139,11 +177,14 @@ pub struct CharDim {
     pub italic: Scaled,
 }
 
-/// The families and sizes a formula is set from.
+/// The families and sizes a formula is set from (`fam_fnt`, §230), and the
+/// parameters `mlist_to_hlist` reads besides their `fontdimen`s.
 pub struct MathFonts {
-    fonts: [[Option<MathFont>; 3]; 4],
+    /// Sixteen families, each at text, script and scriptscript size.
+    fonts: Vec<[Option<MathFont>; 3]>,
     /// The document's type size, in points: what a 10pt design is scaled to.
     pub size: f64,
+    pub params: super::noad::MathParams,
 }
 
 impl MathFonts {
@@ -155,7 +196,7 @@ impl MathFonts {
     /// can still set the text.
     pub fn load(size: f64) -> MathFonts {
         let ratio = size / 10.0;
-        let mut fonts: [[Option<MathFont>; 3]; 4] = Default::default();
+        let mut fonts: Vec<[Option<MathFont>; 3]> = (0..16).map(|_| Default::default()).collect();
         for fam in 0..4 {
             for s in 0..3 {
                 let Some(path) = crate::typeset::find_font(FAMILY_FILES[fam][s]) else {
@@ -167,14 +208,30 @@ impl MathFonts {
                 let Ok(tfm) = Tfm::parse(&bytes) else {
                     continue;
                 };
-                fonts[fam][s] = Some(MathFont {
-                    tfm,
-                    at: FAMILY_AT[fam][s] * ratio,
-                    exten: exten_table(&bytes),
-                });
+                let at = (FAMILY_AT[fam][s] * ratio * 65536.0).round() as Scaled;
+                let mut font = MathFont::new(Arc::new(tfm), at, exten_table(&bytes));
+                font.skew_char = super::noad::SKEW_CHAR[fam].map_or(-1, i64::from);
+                fonts[fam][s] = Some(font);
             }
         }
-        MathFonts { fonts, size }
+        MathFonts {
+            fonts,
+            size,
+            params: super::noad::MathParams::plain(),
+        }
+    }
+
+    /// The families a document defined (`\textfont`, `\scriptfont`,
+    /// `\scriptscriptfont`, §1234), with the parameters in force.
+    pub fn from_families(
+        fonts: Vec<[Option<MathFont>; 3]>,
+        params: super::noad::MathParams,
+    ) -> MathFonts {
+        MathFonts {
+            fonts,
+            size: 10.0,
+            params,
+        }
     }
 
     /// Whether the installation carried enough to set a formula at all.

@@ -320,6 +320,10 @@ pub struct MuGlue {
     pub natural: Scaled,
     pub stretch: Scaled,
     pub shrink: Scaled,
+    /// `fil`, `fill` or `filll` stretch and shrink, which §716 copies
+    /// without converting (0 is finite).
+    pub stretch_order: i64,
+    pub shrink_order: i64,
 }
 
 impl MuGlue {
@@ -338,6 +342,7 @@ impl MuGlue {
             natural: spec.0,
             stretch: spec.1,
             shrink: spec.2,
+            ..MuGlue::default()
         }
     }
 
@@ -347,6 +352,7 @@ impl MuGlue {
             natural: -self.natural,
             stretch: -self.stretch,
             shrink: -self.shrink,
+            ..self
         }
     }
 }
@@ -432,6 +438,40 @@ pub const REL_PENALTY: i64 = 500;
 /// `inf_penalty` (§157): the penalty §767 reads as "do not break here", and
 /// the one every noad but a Bin and a Rel carries.
 pub const INF_PENALTY: i64 = 10000;
+
+/// The parameters `mlist_to_hlist` reads from `eqtb` besides the family
+/// fonts: §764's three math skips, §757's `\scriptspace`, §762's
+/// `\delimiterfactor` and `\delimitershortfall`, §706's
+/// `\nulldelimiterspace` and §761's two penalties.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MathParams {
+    pub thin_mu_skip: MuGlue,
+    pub med_mu_skip: MuGlue,
+    pub thick_mu_skip: MuGlue,
+    pub script_space: Scaled,
+    pub delimiter_factor: i64,
+    pub delimiter_shortfall: Scaled,
+    pub null_delimiter_space: Scaled,
+    pub bin_op_penalty: i64,
+    pub rel_penalty: i64,
+}
+
+impl MathParams {
+    /// The values plain.tex sets, which the PDF path's formulas are set with.
+    pub fn plain() -> MathParams {
+        MathParams {
+            thin_mu_skip: MuGlue::of(THIN_MU_SKIP),
+            med_mu_skip: MuGlue::of(MED_MU_SKIP),
+            thick_mu_skip: MuGlue::of(THICK_MU_SKIP),
+            script_space: SCRIPT_SPACE,
+            delimiter_factor: DELIMITER_FACTOR,
+            delimiter_shortfall: DELIMITER_SHORTFALL,
+            null_delimiter_space: NULL_DELIMITER_SPACE,
+            bin_op_penalty: BIN_OP_PENALTY,
+            rel_penalty: REL_PENALTY,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

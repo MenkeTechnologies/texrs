@@ -18,7 +18,7 @@
 use super::font::{CharDim, MathFont, MathFonts, TEXT_SIZE};
 use super::noad::*;
 use crate::glue::Glue;
-use crate::node::{BoxNode, CharNode, GlueNode, Node, RuleNode};
+use crate::node::{BoxNode, CharNode, GlueNode, GlueSource, Node, RuleNode};
 use crate::pack::{hlist_height_depth, hpack, vpack, Spec, Tolerances, NATURAL};
 
 /// `half(x)` (§100), which is not `x/2`: an odd number rounds AWAY from zero
@@ -179,10 +179,18 @@ impl<'a> Converter<'a> {
 
     /// A character node, measured in the font the family and size name.
     fn char_node(&self, c: MathChar, size: usize) -> Option<Node> {
-        let (_, m) = self.fetch(c, size)?;
-        let character = super::font::unicode(c.fam, c.character)?;
+        let (f, m) = self.fetch(c, size)?;
+        // In the stomach's lists a character is its code in its font; on the
+        // PDF path it is the Unicode character the slot draws.
+        let (font, character) = match f.node_font {
+            Some(id) => (id, char::from(c.character)),
+            None => (
+                font_index(c.fam, size),
+                super::font::unicode(c.fam, c.character)?,
+            ),
+        };
         Some(Node::Char(CharNode {
-            font: font_index(c.fam, size),
+            font,
             character,
             width: m.width,
             height: m.height,
@@ -379,7 +387,7 @@ impl<'a> Converter<'a> {
             }
             // §706: no delimiter at all is a box of `\nulldelimiterspace`.
             None => BoxNode {
-                width: NULL_DELIMITER_SPACE,
+                width: self.fonts.params.null_delimiter_space,
                 ..BoxNode::null()
             },
         };
@@ -641,14 +649,14 @@ impl<'a> Converter<'a> {
         let Field::Char(c) = a.nucleus else {
             return 0;
         };
-        let Some(skew_char) = SKEW_CHAR.get(c.fam).copied().flatten() else {
-            return 0;
-        };
         let Some(f) = self.fonts.font(c.fam, self.size) else {
             return 0;
         };
+        let Ok(skew_char) = u8::try_from(f.skew_char) else {
+            return 0;
+        };
         match f.tfm.step(c.character, skew_char) {
-            Some(crate::tfm::Step::Kern { by, .. }) => (by * f.at * 65536.0).round() as i64,
+            Some(crate::tfm::Step::Kern { by, .. }) => f.sp(by),
             _ => 0,
         }
     }
@@ -888,7 +896,7 @@ impl<'a> Converter<'a> {
         }
         let f = self.fonts.font(q.fam, self.size)?;
         match f.tfm.step(q.character, r.character) {
-            Some(crate::tfm::Step::Kern { by, .. }) => Some((by * f.at * 65536.0).round() as i64),
+            Some(crate::tfm::Step::Kern { by, .. }) => Some(f.sp(by)),
             _ => None,
         }
     }
@@ -916,7 +924,7 @@ impl<'a> Converter<'a> {
             // §757: a subscript on its own must not rise above four fifths of
             // the x-height.
             let mut x = self.clean_box(&a.subscr, sub_style(self.style));
-            x.width += SCRIPT_SPACE;
+            x.width += self.fonts.params.script_space;
             let floor = self.fonts.sub1(self.size);
             if shift_down < floor {
                 shift_down = floor;
@@ -931,7 +939,7 @@ impl<'a> Converter<'a> {
             // §758: a superscript must not descend below a quarter of the
             // x-height.
             let mut x = self.clean_box(&a.supscr, sup_style(self.style));
-            x.width += SCRIPT_SPACE;
+            x.width += self.fonts.params.script_space;
             let mut clr = match self.style % 2 == 1 {
                 true => self.fonts.sup3(self.size),
                 false => match self.style < TEXT_STYLE {
@@ -953,7 +961,7 @@ impl<'a> Converter<'a> {
                 // §759: both present. They must be four rule thicknesses
                 // apart, and the superscript sits `delta` to the right.
                 let mut y = self.clean_box(&a.subscr, sub_style(self.style));
-                y.width += SCRIPT_SPACE;
+                y.width += self.fonts.params.script_space;
                 let floor = self.fonts.sub2(self.size);
                 if shift_down < floor {
                     shift_down = floor;
@@ -994,8 +1002,8 @@ impl<'a> Converter<'a> {
         if delta2 > delta1 {
             delta1 = delta2;
         }
-        let mut delta = (delta1 / 500) * DELIMITER_FACTOR;
-        let delta2 = delta1 + delta1 - DELIMITER_SHORTFALL;
+        let mut delta = (delta1 / 500) * self.fonts.params.delimiter_factor;
+        let delta2 = delta1 + delta1 - self.fonts.params.delimiter_shortfall;
         if delta < delta2 {
             delta = delta2;
         }
@@ -1060,7 +1068,7 @@ impl<'a> Converter<'a> {
                 // §732: `\mskip` is written in `mu` and becomes ordinary glue
                 // here, where the size it lands in is finally known.
                 Noad::MuGlue(g) => {
-                    let glue = self.math_glue(g.natural, g.stretch, g.shrink);
+                    let glue = self.math_glue(g);
                     items.push(Translated::plain(Node::Glue(GlueNode::new(glue))));
                     at += 1;
                     continue;
@@ -1190,8 +1198,8 @@ impl<'a> Converter<'a> {
                 // §761: only a Bin and a Rel are breakable, and only in a
                 // formula `mlist_penalties` was turned on for.
                 penalty: match class {
-                    RType::Class(Class::Bin) => BIN_OP_PENALTY,
-                    RType::Class(Class::Rel) => REL_PENALTY,
+                    RType::Class(Class::Bin) => self.fonts.params.bin_op_penalty,
+                    RType::Class(Class::Rel) => self.fonts.params.rel_penalty,
                     _ => INF_PENALTY,
                 },
             });
@@ -1314,7 +1322,7 @@ impl<'a> Converter<'a> {
             };
             if let Some(r) = r_type {
                 if let Some(g) = self.inter_element(r, t) {
-                    out.push(Node::Glue(GlueNode::new(g)));
+                    out.push(Node::Glue(g));
                 }
             }
             out.extend(hlist);
@@ -1343,18 +1351,20 @@ impl<'a> Converter<'a> {
     ///
     /// The glue is `math_glue` (§716) of the parameter §764's digit names,
     /// converted from `mu` to points at the current size's `cur_mu`.
-    fn inter_element(&self, r: Class, t: Class) -> Option<Glue> {
+    fn inter_element(&self, r: Class, t: Class) -> Option<GlueNode> {
         let script = self.style >= SCRIPT_STYLE;
-        let (w, plus, minus) = match spacing(r, t) {
+        let p = &self.fonts.params;
+        let (g, source) = match spacing(r, t) {
             Space::None | Space::Impossible => return None,
             Space::ConditionalThin if script => return None,
-            Space::ConditionalThin | Space::Thin => THIN_MU_SKIP,
+            Space::ConditionalThin | Space::Thin => (p.thin_mu_skip, GlueSource::ThinMuSkip),
             Space::ConditionalMedium if script => return None,
-            Space::ConditionalMedium => MED_MU_SKIP,
+            Space::ConditionalMedium => (p.med_mu_skip, GlueSource::MedMuSkip),
             Space::ConditionalThick if script => return None,
-            Space::ConditionalThick => THICK_MU_SKIP,
+            Space::ConditionalThick => (p.thick_mu_skip, GlueSource::ThickMuSkip),
         };
-        Some(self.math_glue(w, plus, minus))
+        // §766: `subtype(z):=x+1`, the parameter the glue came from.
+        Some(GlueNode::param(self.math_glue(&g), source))
     }
 
     /// One `mu` amount, in points at the current size (§716).
@@ -1374,13 +1384,20 @@ impl<'a> Converter<'a> {
     }
 
     /// `math_glue(g,m)` (§716): a glue written in `mu`, in points.
-    fn math_glue(&self, w: Scaled, plus: Scaled, minus: Scaled) -> Glue {
+    ///
+    /// Infinite stretch and shrink are copied as they are: a `fil` is not a
+    /// length in mu.
+    fn math_glue(&self, g: &MuGlue) -> Glue {
+        let finite = |v: Scaled, order: i64| match order {
+            0 => self.mu_mult(v),
+            _ => v,
+        };
         Glue {
-            natural: self.mu_mult(w),
-            stretch: self.mu_mult(plus),
-            stretch_order: 0,
-            shrink: self.mu_mult(minus),
-            shrink_order: 0,
+            natural: self.mu_mult(g.natural),
+            stretch: finite(g.stretch, g.stretch_order),
+            stretch_order: g.stretch_order,
+            shrink: finite(g.shrink, g.shrink_order),
+            shrink_order: g.shrink_order,
         }
     }
 }
