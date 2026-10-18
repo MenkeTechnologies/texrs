@@ -1836,7 +1836,8 @@ impl Engine {
         if matches!(
             name.name(),
             "directlua" | "luadirect" | "luaescapestring" | "luafunction" | "luabytecode"
-        ) || crate::lua::expands_in_gullet(name.name()) {
+        ) || crate::lua::expands_in_gullet(name.name())
+        {
             let mut cmds = Vec::new();
             let mut families = crate::typeset::Families::default();
             crate::lua::lower(self, lx, name.name(), &mut cmds, &mut families)?;
