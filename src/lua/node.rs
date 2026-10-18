@@ -138,6 +138,7 @@ const WHATSITS: &[(i64, &str)] = &[
 
 const HLIST: u8 = 0;
 const VLIST: u8 = 1;
+const LOCAL_PAR: u8 = 9;
 const RULE: u8 = 2;
 const INS: u8 = 3;
 const MARK: u8 = 4;
@@ -1345,6 +1346,24 @@ pub(super) fn list_to_engine(arena: &Arena, head: usize) -> mlua::Result<Vec<ENo
     Ok(out)
 }
 
+/// `head` with a `local_par` node in front of it: what a paragraph's list
+/// starts with in LuaTeX (`new_graf`'s `new_par_node`), which the stomach's
+/// tex.web list has no node for. Lua code walks from it -- luaotfload and
+/// lua-visual-debug test for it as the paragraph's head -- and the way back
+/// drops it, as every node without a stomach counterpart is dropped.
+pub(super) fn with_local_par(
+    arena: &mut Arena,
+    head: Option<usize>,
+) -> mlua::Result<Option<usize>> {
+    let at = arena.make(LOCAL_PAR, None);
+    let pairs = super::current_attributes();
+    if !pairs.is_empty() {
+        arena.set_attributes(at, &pairs)?;
+    }
+    arena.link(Some(at), head)?;
+    Ok(Some(at))
+}
+
 /// A stomach list as cells, the head of them, `None` for an empty list.
 pub(super) fn from_engine(arena: &mut Arena, list: &[ENode]) -> mlua::Result<Option<usize>> {
     let mut made: Vec<usize> = Vec::with_capacity(list.len());
@@ -1381,7 +1400,8 @@ pub(super) fn from_engine(arena: &mut Arena, list: &[ENode]) -> mlua::Result<Opt
 fn one_from_engine(arena: &mut Arena, n: &ENode) -> mlua::Result<usize> {
     Ok(match n {
         ENode::Box(b) => {
-            let at = arena.make(if b.vertical { VLIST } else { HLIST }, Some(0));
+            let id = if b.vertical { VLIST } else { HLIST };
+            let at = arena.make(id, Some(i64::from(b.subtype)));
             let head = from_engine(arena, &b.list)?;
             let c = arena.cell_mut(at)?;
             c.set("width", Some(FV::I(b.width)));

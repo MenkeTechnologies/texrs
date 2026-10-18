@@ -1461,6 +1461,22 @@ fn an_hpack_filter_sees_the_list_the_stomach_packs_and_its_answer_is_packed() {
 }
 
 #[test]
+fn a_callback_that_answers_true_keeps_what_it_changed_in_place() {
+    // `true` is "keep the list", and the list is the nodes the callback was
+    // handed: a kern it widened in place is packed at its new width.
+    let body = "\\directlua{callback.register('hpack_filter', function(h) h.kern = 3 * 65536 return true end)}\
+                \\setbox0\\hbox{\\kern1pt}\\message{[\\the\\wd0]}";
+    assert_eq!(out(body), "[3.0pt]");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (want, got) = both(&lua, body);
+    assert_eq!(want, "[3.0pt]", "the oracle");
+    assert_eq!(got, want);
+}
+
+#[test]
 fn a_font_defined_from_lua_is_kept_and_read_tfm_reads_what_luatex_reads() {
     // `font.define` keeps the table it was given, and `font.getfont` answers
     // that table; `font.read_tfm` builds luatex's own table for a TFM, the
@@ -1721,5 +1737,68 @@ fn the_linebreak_callbacks_see_the_paragraph_on_the_list_path() {
     assert!(
         msgs.contains("[pre 4 ]") && msgs.contains("[post 1]"),
         "{msgs}"
+    );
+}
+
+/// Every `<<...>>` in `text`, in order: what a callback printed, picked out
+/// of terminal output that also carries the page numbers and file names.
+fn marked(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(a) = rest.find("<<") {
+        let Some(b) = rest[a..].find(">>") else { break };
+        out.push(rest[a + 2..a + b].to_string());
+        rest = &rest[a + b + 2..];
+    }
+    out
+}
+
+#[test]
+fn a_paragraph_reaches_its_callbacks_as_luatex_hands_it_over() {
+    // luatex 1.24.0 for one paragraph: `buildpage_filter` told why the page
+    // is built, `pre_linebreak_filter` given the list from its `local_par`
+    // node and indent box (hlist subtype 3) on, `post_linebreak_filter` the
+    // line (hlist subtype 1).
+    if texrs::kpse::locate("cmr10.tfm").is_none() {
+        eprintln!("skipping: kpsewhich cannot find cmr10.tfm");
+        return;
+    }
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\
+        \\directlua{tex.enableprimitives('', tex.extraprimitives())}\n\
+        \\font\\x=cmr10 \\x \\hsize=100pt \\parindent=5pt \\tolerance=10000 \\hbadness=10000\n\
+        \\directlua{local function show(h) local t = {} for n in node.traverse(h) do \
+        t[#t + 1] = node.type(n.id) .. ((n.id == 0) and (':' .. n.subtype) or '') end \
+        return table.concat(t, ' ') end \
+        callback.register('pre_linebreak_filter', function(h, gc) \
+        texio.write_nl('<<pre ' .. gc .. ': ' .. show(h) .. '>>') return true end) \
+        callback.register('post_linebreak_filter', function(h, gc) \
+        texio.write_nl('<<post ' .. gc .. ': ' .. show(h) .. '>>') return true end) \
+        callback.register('buildpage_filter', function(info) texio.write_nl('<<page ' .. info .. '>>') end)}\n\
+        ab cd\\par\n\\end\n";
+    let want = [
+        "page new_graf",
+        "pre : local_par hlist:3 glyph glyph glue glyph glyph penalty glue",
+        "post : hlist:1",
+        "page hmode_par",
+        "page end",
+    ];
+    let (msgs, _) = texrs::run_list_path(src).expect("run");
+    assert_eq!(marked(&msgs), want, "{msgs}");
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("case.tex"), src).expect("write");
+    let reference = Command::new(lua)
+        .args(["-ini", "-interaction=nonstopmode", "case.tex"])
+        .env("max_print_line", "8000")
+        .current_dir(dir.path())
+        .output()
+        .expect("run luatex");
+    assert_eq!(
+        marked(&String::from_utf8_lossy(&reference.stdout)),
+        want,
+        "the oracle"
     );
 }

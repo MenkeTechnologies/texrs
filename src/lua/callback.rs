@@ -309,7 +309,10 @@ fn run_list_callback(
     if list.is_empty() {
         return Ok(());
     }
-    let head = super::node::from_engine(&mut arena.borrow_mut(), list)?;
+    let mut head = super::node::from_engine(&mut arena.borrow_mut(), list)?;
+    if matches!(name, "pre_linebreak_filter" | "linebreak_filter") {
+        head = super::node::with_local_par(&mut arena.borrow_mut(), head)?;
+    }
     let head_v = super::node::handle(lua, arena, head)?;
     let s = |v: &str| lua.create_string(v).map(Value::String);
     let args: Vec<Value> = match name {
@@ -347,7 +350,9 @@ fn run_list_callback(
             Some(h) => Some(arena_first(arena, h)?),
             None => None,
         },
-        (_, Value::Boolean(true)) => return Ok(()),
+        // `true` keeps the list the callback was given -- with whatever it
+        // changed in place, since the nodes are the same ones.
+        (_, Value::Boolean(true)) => head,
         (_, Value::Boolean(false)) => None,
         // Anything else is `nodelist_from_lua`: a node is the new head and nil
         // an empty list.

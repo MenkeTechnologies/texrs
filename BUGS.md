@@ -389,8 +389,12 @@ The state `src/lua` builds is compared against `luatex` 1.24.0 by running the
 same chunk in both (`tests/lua.rs`). Where they still differ:
 
 - **Callbacks the engine calls.** `callback.register` fills the stomach's
-  hook points (`crate::node::hooks`) for the list callbacks, and of those the
-  stomach calls `hpack_filter` so far. No file is opened through
+  hook points (`crate::node::hooks`) for the list callbacks. The stomach calls
+  `hpack_filter`, and on its list path `pre_linebreak_filter`,
+  `post_linebreak_filter` and `buildpage_filter` (a paragraph handed over
+  from a `local_par` node, as luatex hands it); `vpack_filter`,
+  `pre_output_filter`, `linebreak_filter`, `hyphenate`, `ligaturing`,
+  `kerning` and `contribute_filter` are not called yet. No file is opened through
   `find_read_file`/`open_read_file`, no line passes through
   `process_input_buffer`, and no `\font` goes through `define_font`.
 - **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
