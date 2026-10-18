@@ -459,7 +459,10 @@ fn read_chunk(eng: &mut Engine, lx: &mut Lexer) -> R<(Option<String>, String)> {
 /// A braced group, expanded and serialised.
 fn read_group(eng: &mut Engine, lx: &mut Lexer) -> R<String> {
     let toks = eng.read_balanced_group(lx)?;
-    let expanded = eng.expand_macros_only(&toks)?;
+    // The ⟨general text⟩ is expanded as an `\edef` body is (`scan_toks(false,
+    // true)`): macros, conditionals, `\the`, and the expandable primitives a
+    // name stands for, such as iftex.sty's `\IFTEX@detokenize`.
+    let expanded = eng.expand_edef_body(&toks)?;
     let escaped = apply_escapestring(eng, &expanded);
     Ok(eng.tokens_text(&escaped))
 }
