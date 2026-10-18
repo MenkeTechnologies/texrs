@@ -215,6 +215,18 @@ pub struct Lowerer {
     /// boundary, which is what makes `-{}-` two hyphens: the spelling a LaTeX
     /// document has always used to ask for them.
     lig: Option<char>,
+    /// What `\immediate\write` has written into each file this lowering
+    /// opened, so `\input` and `\openin` read such a file as it now stands
+    /// (see `crate::write`).
+    written: crate::write::Written,
+    /// The `\openout`, `\write`, `\closeout` and `\special` whatsits read
+    /// without `\immediate`, in order (§1341-§1354).
+    ///
+    /// §1373 performs each one when the page holding it is shipped, and
+    /// `ship_whatsit` is that step; what is missing is the list a whatsit sits
+    /// in. Until pages are built from node lists here, they wait in this list
+    /// and no shipout reaches them, so a deferred `\write` writes nothing.
+    pub deferred_whatsits: Vec<crate::write::Whatsit>,
 }
 
 /// A list environment that is open, and how many items it has had.
@@ -326,6 +338,8 @@ impl Lowerer {
             listing_depth: 0,
             lig: None,
             toc_depth: 2,
+            written: crate::write::Written::default(),
+            deferred_whatsits: Vec::new(),
         }
     }
 
@@ -1430,7 +1444,10 @@ impl Lowerer {
                     let n = self.eng.scan_stream_number(lx, false)?;
                     self.eng.skip_equals_file(lx)?;
                     let name = self.scan_file_name(lx)?;
-                    let text = Self::locate_input(&name).map(|(_, src)| src);
+                    let text = self
+                        .locate_written(&name)
+                        .or_else(|| Self::locate_input(&name))
+                        .map(|(_, src)| src);
                     self.eng.open_read_stream(n, text);
                 }
                 "closein" => {
@@ -1443,18 +1460,20 @@ impl Lowerer {
                 // the same line, as in tex.
                 "endinput" => lx.end_file_after_line(),
                 // §1375: `\immediate` reads the next token with `get_x_token`
-                // and, when it is `\write`, writes now. Anything else goes back
-                // to be read as if `\immediate` had not been there. `\openout`
-                // and `\closeout` are not implemented, so no write stream is
-                // ever open and every `\write` goes where §1370 sends one to a
-                // closed stream.
+                // and, when it is `\openout`, `\write` or `\closeout`, does it
+                // now. Anything else goes back to be read as if `\immediate`
+                // had not been there -- `\special` included, which LuaTeX's
+                // `do_extension` makes a node either way.
                 "immediate" => match self.eng.next_unexpandable(lx)? {
-                    Some((_, Some(p))) if p.name() == "write" => {
-                        self.immediate_write(lx, &mut out)?
+                    Some((_, Some(p))) if matches!(p.name(), "openout" | "write" | "closeout") => {
+                        self.extension(lx, p.name(), true, &mut out)?
                     }
                     Some((t, _)) => lx.push_back(&[t]),
                     None => {}
                 },
+                "openout" | "write" | "closeout" | "special" => {
+                    self.extension(lx, name.name(), false, &mut out)?
+                }
                 // `\input FILE` reads another file HERE, sharing every piece of
                 // state: a macro it defines is defined afterwards, a `\catcode`
                 // it sets stays set. That is the whole point of it -- a real
@@ -3935,26 +3954,181 @@ impl Lowerer {
         out
     }
 
-    /// `\immediate\write<number>{<text>}`: §1350 reads the stream number and
-    /// the text unexpanded, and §1370's `write_out` expands the text the way
-    /// `\message` does and prints it on a line of its own. No stream is open,
-    /// so a negative number writes to the log alone -- nothing reaches the
-    /// terminal, though the text is still expanded -- and any other number
-    /// writes to the terminal (and the log).
-    fn immediate_write(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
-        let stream = self.eng.scan_number_file(lx)?;
-        let body = self.eng.read_write_text(lx)?;
-        self.eng.note_mouth(lx);
-        let mut work = Lexer::new("");
-        work.push_back(&body);
-        let parts = self.msg_ops(&mut work, &[])?;
-        if stream < 0 {
-            return Ok(());
+    /// §1348's `do_extension` for the four extensions of §1344, as LuaTeX's
+    /// `extensions.c` reads them: the whatsit is built, and then either done
+    /// now (`immediate`, §1375) or kept for the shipout of the page it lands
+    /// on (see `deferred_whatsits`).
+    fn extension(&mut self, lx: &mut Lexer, which: &str, immediate: bool, out: &mut Vec<Cmd>) -> R<()> {
+        use crate::write::{Stream, Whatsit};
+        let whatsit = match which {
+            // `new_write_whatsit(open_node_size, 1)`: the stream is checked
+            // against the last of LuaTeX's 128, then §1351 reads the name.
+            "openout" => {
+                let stream = self.scan_out_stream(lx)?;
+                self.eng.skip_equals_file(lx)?;
+                let name = self.scan_out_name(lx)?;
+                Whatsit::Open { stream, name }
+            }
+            // §1352: the number, then the text without expanding it.
+            "write" => {
+                let n = self.eng.scan_number_file(lx)?;
+                let tokens = self.eng.read_write_text(lx)?;
+                Whatsit::Write {
+                    stream: Stream::of(n),
+                    tokens,
+                }
+            }
+            "closeout" => Whatsit::Close {
+                stream: self.scan_out_stream(lx)?,
+            },
+            // §1354, with LuaTeX's `shipout` keyword: the text is expanded
+            // now as `\xdef` expands, unless it is to wait for the shipout.
+            _ => {
+                let late = self.eng.scan_keyword(lx, "shipout", false)?;
+                let tokens = self.eng.read_write_text(lx)?;
+                let tokens = match late {
+                    true => tokens,
+                    false => self.eng.expand_edef_body(&tokens)?,
+                };
+                Whatsit::Special { tokens, late }
+            }
+        };
+        match immediate {
+            true => self.ship_whatsit(lx, &whatsit, out),
+            false => {
+                self.deferred_whatsits.push(whatsit);
+                Ok(())
+            }
         }
-        let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
-        let mut ops = self.take_reports();
-        ops.extend(crate::ir::printed_ops(parts, nl));
-        out.push(Cmd::Write(ops));
+    }
+
+    /// `scan_limited_int(last_file_selector)`: a stream for `\openout` or
+    /// `\closeout`, reported and read as 0 when it is out of range.
+    fn scan_out_stream(&mut self, lx: &mut Lexer) -> R<usize> {
+        let n = self.eng.scan_number_file(lx)?;
+        if !(0..crate::write::WRITE_STREAMS as i64).contains(&n) {
+            self.eng.report(lx, &format!("Bad number ({n})"));
+            return Ok(0);
+        }
+        Ok(n as usize)
+    }
+
+    /// §1351's file name, as LuaTeX's `do_extension` reads it: blanks and
+    /// `\relax` skipped with expansion, then a name in braces (every character
+    /// of the expanded list, spaces included -- `scan_file_name_toks`) or §526's
+    /// `scan_file_name`, characters read with `get_x_token` up to a space or
+    /// the first token that is not a character, which is put back.
+    ///
+    /// Expansion is the difference from `\input`'s scanner here: LaTeX opens
+    /// its `.aux` with `\openout\@mainaux\jobname.aux`.
+    fn scan_out_name(&mut self, lx: &mut Lexer) -> R<String> {
+        let first = loop {
+            match self.eng.next_unexpandable(lx)? {
+                Some((t, _)) if t.is_space() => continue,
+                Some((_, Some(p))) if p.name() == "relax" => continue,
+                Some((t, _)) => break t,
+                None => return Err(TexError("Missing file name".into())),
+            }
+        };
+        if let Token::Char(_, Cat::BeginGroup) = first {
+            lx.push_back(&[first]);
+            let body = self.eng.read_balanced_group(lx)?;
+            let body = self.eng.expand_edef_body(&body)?;
+            let escape = self.eng.esc();
+            return Ok(body.iter().map(|t| t.to_text(escape)).collect());
+        }
+        let mut name = String::new();
+        let mut next = Some(first);
+        while let Some(t) = next {
+            match t {
+                // A `"` quotes a stretch with spaces in it and is not part of
+                // the name (web2c's `more_name`).
+                Token::Char(_, _) if t.is_space() && name.matches('"').count() % 2 == 0 => break,
+                Token::Char(c, _) => name.push(c),
+                Token::Cs(_) => {
+                    lx.push_back(&[t]);
+                    break;
+                }
+            }
+            next = self.eng.next_unexpandable(lx)?.map(|(t, _)| t);
+        }
+        Ok(name.replace('"', ""))
+    }
+
+    /// §1373's `out_what` (`wrapup_leader` in LuaTeX): do what a whatsit asks
+    /// for, at the moment it is shipped -- or read, under `\immediate`.
+    ///
+    /// The node-list stomach calls this for each whatsit on a page it ships,
+    /// in the order they sit on the page; `\immediate` calls it at once. A
+    /// `\write` is expanded HERE, as §1370 expands it when it is written, so
+    /// a macro redefined between the `\write` and the shipout writes its new
+    /// meaning.
+    pub(crate) fn ship_whatsit(
+        &mut self,
+        lx: &mut Lexer,
+        whatsit: &crate::write::Whatsit,
+        out: &mut Vec<Cmd>,
+    ) -> R<()> {
+        use crate::write::{Stream, Whatsit};
+        match whatsit {
+            Whatsit::Open { stream, name } => {
+                let name = crate::write::out_file_name(name);
+                self.written.open(*stream, &name);
+                out.push(Cmd::OpenOut {
+                    stream: *stream,
+                    name,
+                });
+            }
+            Whatsit::Close { stream } => {
+                self.written.close(*stream);
+                out.push(Cmd::CloseOut(*stream));
+            }
+            Whatsit::Write { stream, tokens } => {
+                self.eng.note_mouth(lx);
+                let mut work = Lexer::new("");
+                work.push_back(tokens);
+                let parts = self.msg_ops(&mut work, &[])?;
+                let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
+                // What §1370 does when the stream is closed: the log alone
+                // for a negative number, and otherwise the terminal, the
+                // reports waiting for it in front as `\message` carries them.
+                let closed = |this: &mut Self, parts: Vec<MsgOp>| match *stream {
+                    Stream::LogOnly => Vec::new(),
+                    _ => {
+                        let mut ops = this.take_reports();
+                        ops.extend(crate::ir::printed_ops(parts, nl));
+                        vec![Cmd::Write(ops)]
+                    }
+                };
+                match *stream {
+                    Stream::File(n) => {
+                        // A stream the lowering has open has its line put into
+                        // the lowering's copy of the file, and leaves the
+                        // reports waiting for the next thing printed.
+                        let otherwise = match self.written.is_open(n) {
+                            true => {
+                                let line = self.static_text(&parts);
+                                self.written
+                                    .write(*stream, &crate::write::printed_to_file(&line, nl));
+                                vec![Cmd::Write(crate::ir::printed_ops(parts.clone(), nl))]
+                            }
+                            false => closed(self, parts.clone()),
+                        };
+                        out.push(Cmd::WriteOut {
+                            stream: n,
+                            file: crate::write::file_ops(parts, nl),
+                            otherwise,
+                        });
+                    }
+                    _ => out.extend(closed(self, parts)),
+                }
+            }
+            // In PDF mode LuaTeX's backend has nothing to do with a `\special`
+            // but warn that it was ignored (`pdf_special` in `pdfgen.c`); the
+            // DVI writer is where one means something, and it reads specials
+            // from the text it is handed rather than from here.
+            Whatsit::Special { .. } => {}
+        }
         Ok(())
     }
 
@@ -4891,10 +5065,24 @@ impl Lowerer {
                 "TeX capacity exceeded, sorry [text input levels={MAX_LEVELS}]"
             )));
         }
-        match Self::locate_input(name) {
+        match self.locate_written(name).or_else(|| Self::locate_input(name)) {
             Some((shown, src)) => Ok((shown, crate::latex::load::without_trailing_endinput(src))),
             None => Err(TexError(format!("I can't find file `{name}'"))),
         }
+    }
+
+    /// A file this lowering wrote with `\immediate\write`, as it now stands,
+    /// found by the name `\input` would look for it under: `.tex` supplied
+    /// when the name has no extension, and the working directory written as
+    /// `./`, which is where the writer put it.
+    fn locate_written(&self, name: &str) -> Option<(String, String)> {
+        let file = crate::write::out_file_name(name);
+        let text = self.written.text(&file)?;
+        let shown = match std::path::Path::new(&file).is_absolute() {
+            true => file.clone(),
+            false => format!("./{file}"),
+        };
+        Some((shown, text.to_string()))
     }
 
     /// The file `name` names, as `open_input` searches for it: the path to
@@ -5133,6 +5321,9 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             Cmd::Message(_)
             | Cmd::Reports(_)
             | Cmd::Write(_)
+            | Cmd::OpenOut { .. }
+            | Cmd::WriteOut { .. }
+            | Cmd::CloseOut(_)
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
@@ -5298,7 +5489,12 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 Cmd::Loop { body, .. } | Cmd::Color { body, .. } | Cmd::Group { body, .. } => {
                     walk(body, regs)
                 }
-                Cmd::Message(_) | Cmd::Reports(_) | Cmd::Write(_) => {}
+                Cmd::Message(_)
+                | Cmd::Reports(_)
+                | Cmd::Write(_)
+                | Cmd::OpenOut { .. }
+                | Cmd::WriteOut { .. }
+                | Cmd::CloseOut(_) => {}
             }
         }
     }

@@ -74,6 +74,19 @@ pub mod ops {
     /// Finish an `\immediate\write` and record it on a line of its own: glued
     /// to what came before, and the next message glued to it. No arguments.
     pub const WRITE_FLUSH: u16 = 4018;
+    /// `\openout`: the stream, then the file name (`crate::write`).
+    ///
+    /// Numbered from 4200, clear of the numbers after 4018 that other builtins
+    /// take (the list actions are 4100 on): a number registered twice silently
+    /// keeps the last function (see `COLOR_PUSH`).
+    pub const OUT_OPEN: u16 = 4200;
+    /// `\write` to an open stream: the stream, after the text is built as a
+    /// message's is.
+    pub const OUT_WRITE: u16 = 4201;
+    /// `\closeout`: the stream.
+    pub const OUT_CLOSE: u16 = 4202;
+    /// Whether a stream is open: the stream; 1 or 0 back.
+    pub const OUT_IS_OPEN: u16 = 4203;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -287,6 +300,38 @@ impl Compiler {
             Cmd::Write(msg) => {
                 self.msg_ops(msg)?;
                 self.b.emit(Op::CallBuiltin(ops::WRITE_FLUSH, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::OpenOut { stream, name } => {
+                self.b.emit(Op::LoadInt(*stream as i64), self.line);
+                let k = self.str_const(name)?;
+                self.b.emit(Op::LoadConst(k), self.line);
+                self.b.emit(Op::CallBuiltin(ops::OUT_OPEN, 2), self.line);
+                self.b.emit(Op::Pop, self.line);
+            }
+            Cmd::WriteOut {
+                stream,
+                file,
+                otherwise,
+            } => {
+                // Which of the two is decided by the run: see `Cmd::WriteOut`.
+                self.b.emit(Op::LoadInt(*stream as i64), self.line);
+                self.b.emit(Op::CallBuiltin(ops::OUT_IS_OPEN, 1), self.line);
+                let to_else = self.b.emit(Op::JumpIfFalse(0), self.line);
+                self.msg_ops(file)?;
+                self.b.emit(Op::LoadInt(*stream as i64), self.line);
+                self.b.emit(Op::CallBuiltin(ops::OUT_WRITE, 1), self.line);
+                self.b.emit(Op::Pop, self.line);
+                let over_else = self.b.emit(Op::Jump(0), self.line);
+                let else_at = self.b.current_pos();
+                self.b.patch_jump(to_else, else_at);
+                self.block(otherwise)?;
+                let end = self.b.current_pos();
+                self.b.patch_jump(over_else, end);
+            }
+            Cmd::CloseOut(stream) => {
+                self.b.emit(Op::LoadInt(*stream as i64), self.line);
+                self.b.emit(Op::CallBuiltin(ops::OUT_CLOSE, 1), self.line);
                 self.b.emit(Op::Pop, self.line);
             }
             Cmd::Group { saves, keeps, body } => {

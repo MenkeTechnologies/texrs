@@ -150,6 +150,16 @@ fn b_write_flush(_vm: &mut VM, _argc: u8) -> Value {
     Value::Undef
 }
 
+/// Finish a `\write` to an open stream: §1370's `write_out` once the text is
+/// built, with the selector on the file. One argument, the stream. The text
+/// was made for the file while lowering (`crate::write::file_ops`).
+fn b_out_write(vm: &mut VM, _argc: u8) -> Value {
+    let stream = vm.pop().to_int();
+    let done = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    crate::write::write_line(stream, &done);
+    Value::Undef
+}
+
 /// How a value prints inside a message. An integer prints as TeX prints one;
 /// there are no floats in this subset, so anything else is a string already.
 fn render(v: &Value) -> String {
@@ -194,6 +204,12 @@ fn fault(vm: &mut VM, msg: impl Into<String>) -> Value {
     FAULT.with(|f| *f.borrow_mut() = Some(msg.into()));
     vm.request_halt();
     Value::Undef
+}
+
+/// [`fault`], for a builtin that lives outside this module: `crate::write`'s
+/// `\openout` on a file that cannot be created.
+pub(crate) fn fault_now(vm: &mut VM, msg: impl Into<String>) -> Value {
+    fault(vm, msg)
 }
 
 /// Report `msg` and CARRY ON — `tex.web` §82's `print_err` followed by `error`,
@@ -417,6 +433,10 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);
+    vm.register_builtin(ops::OUT_OPEN, crate::write::b_out_open);
+    vm.register_builtin(ops::OUT_WRITE, b_out_write);
+    vm.register_builtin(ops::OUT_CLOSE, crate::write::b_out_close);
+    vm.register_builtin(ops::OUT_IS_OPEN, crate::write::b_out_is_open);
 }
 
 /// Take what `\message` has written so far, clearing the buffer.
@@ -485,6 +505,9 @@ pub(crate) fn finish_run() -> Result<(), String> {
     if !held.is_empty() {
         record(held);
     }
+    // §1333's `close_files_and_terminate`: every stream still open is closed,
+    // so what was written reaches the disk before anything reads it.
+    crate::write::close_all();
     // A builtin that faulted halted the VM, so the halt has to be read as the
     // error it stands for rather than as a clean finish.
     match FAULT.with(|f| f.borrow_mut().take()) {

@@ -192,6 +192,22 @@ pub enum Cmd {
     /// sits on a line of its own: nothing between it and what came before, and
     /// no space in front of the `\message` after it.
     Write(Vec<MsgOp>),
+    /// `\openout`, done now: the stream and the name of the file
+    /// (`crate::write::out_file_name`), which the run creates. See
+    /// `crate::write` for why the run and not the lowerer holds the file.
+    OpenOut { stream: usize, name: String },
+    /// `\write` to one of the 128 streams, which the run may or may not have
+    /// open -- a conditional the run decides can open or close one -- so both
+    /// lines are lowered and the run picks: `file`, built as a message is and
+    /// written to the stream's file (`crate::write::file_ops`), or `otherwise`,
+    /// what §1370 does for a closed stream, which is the terminal's `Write`.
+    WriteOut {
+        stream: usize,
+        file: Vec<MsgOp>,
+        otherwise: Vec<Cmd>,
+    },
+    /// `\closeout`, done now.
+    CloseOut(usize),
     /// The `)` that closes an `\input` file, attached to the message before it.
     ///
     /// tex writes `(./inner.tex [msg])` with no space in front of the paren,
@@ -303,6 +319,20 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 out.push_str(&format!("{pad}Write\n"));
                 render_msg(ops, depth + 1, out);
             }
+            Cmd::OpenOut { stream, name } => {
+                out.push_str(&format!("{pad}OpenOut {stream} {name:?}\n"))
+            }
+            Cmd::WriteOut {
+                stream,
+                file,
+                otherwise,
+            } => {
+                out.push_str(&format!("{pad}WriteOut {stream}\n"));
+                render_msg(file, depth + 1, out);
+                out.push_str(&format!("{pad}closed\n"));
+                render_into(otherwise, depth + 1, out);
+            }
+            Cmd::CloseOut(stream) => out.push_str(&format!("{pad}CloseOut {stream}\n")),
             Cmd::KeepGlobal { reg, into } => {
                 out.push_str(&format!("{pad}KeepGlobal \\count{reg} into={into:?}\n"))
             }

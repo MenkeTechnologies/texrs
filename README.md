@@ -313,9 +313,17 @@ than none.
   set, paragraph by paragraph and under `--dvi` too, and its page breaker
   reads `\clubpenalty`, `\widowpenalty` and `\brokenpenalty`.
 - `\errmessage`, reported as tex reports an error and carried on from.
-- `\message`, and `\immediate\write` to the terminal (a negative stream to the
-  log alone). `\openout` is not implemented, so no write stream is ever open,
-  and neither is a `\write` without `\immediate`, which waits for a shipout.
+- `\message`, and `\immediate\openout`, `\immediate\write` and
+  `\immediate\closeout` on LuaTeX's 128 write streams. A file gets LuaTeX's
+  name -- `.tex` added when the name has none, a braced name keeping its
+  spaces, `\jobname` expanded inside it -- and LuaTeX's bytes, every character
+  raw and `\newlinechar` ending the line; `tests/write_streams.rs` holds the
+  files byte for byte against luatex's. A closed stream or one past 127 writes
+  to the terminal and a negative one to the log alone. A file written in the run
+  is read back by a later `\input` or `\openin` as it now stands, not as the
+  run before left it. A `\write`, `\openout`, `\closeout` or `\special`
+  WITHOUT `\immediate` waits for the shipout of its page, and [0x06] says why
+  none reaches one yet.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's. `\endinput`
   ends it with the line it is on.
@@ -464,6 +472,14 @@ rather than per paragraph, and the shipper is handed
 line boxes built from already-broken strings rather than a node list, so
 `src/postline.rs` and `src/page.rs` are a library beside the path a run takes
 rather than the path itself.
+
+The same missing node list is why a `\write`, `\openout`, `\closeout` or
+`\special` without `\immediate` does nothing yet. Each is read and built as the
+whatsit §1341 describes, and `Lowerer::ship_whatsit` is §1373's `out_what` for
+it -- the `\write` expanded when it is shipped, not when it was read -- but a
+whatsit has to sit in the list of the page it is shipped with, and until pages
+are built from node lists the whatsits wait in `deferred_whatsits` for a
+shipout that never comes. `\immediate` does all three now.
 
 On the DVI ladder nine of the ten documents reach STRUCTURE: the text and its
 structure agree with `tex`, the bytes do not — see `BUGS.md`.

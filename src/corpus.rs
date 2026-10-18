@@ -194,13 +194,31 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\immediate",
         "Expansion",
-        "Do the `\\write` that follows now rather than at shipout (tex.web \u{a7}1375). The next token is read with expansion; anything other than `\\write` is put back and read as if `\\immediate` had not been there. `\\openout` and `\\closeout` are not implemented.",
-        "\\immediate\\write<number>{<text>}\n\\immediate\\write16{HELLO}",
+        "Do the `\\openout`, `\\write` or `\\closeout` that follows now rather than at shipout (tex.web \u{a7}1375). The next token is read with expansion; anything else is put back and read as if `\\immediate` had not been there.",
+        "\\immediate\\write<number>{<text>}\n\\immediate\\openout3=notes   % => notes.tex, created empty",
+    ),
+    (
+        "\\openout",
+        "Expansion",
+        "Open a write stream on a file (tex.web \u{a7}1351, \u{a7}1374), closing it first if it is open. LuaTeX's 128 streams, 0 to 127. The name is read with expansion -- `\\openout1=\\jobname.aux` -- or taken whole from braces, spaces and all, and `.tex` is added when it has no extension; the file goes under `-output-directory` when one is given. A file written now is read back as it now stands by a later `\\input` or `\\openin`. Only `\\immediate\\openout` is done; one waiting for a shipout is held and never reached.",
+        "\\immediate\\openout<number>=<file name>\n\\immediate\\openout1=\\jobname.aux   % => job.aux\n\\immediate\\openout2={my notes}   % => my notes.tex",
+    ),
+    (
+        "\\closeout",
+        "Expansion",
+        "Close a write stream (tex.web \u{a7}1374). Every stream still open is closed when the run ends. Only `\\immediate\\closeout` is done.",
+        "\\immediate\\closeout<number>",
+    ),
+    (
+        "\\special",
+        "Expansion",
+        "A whatsit for the driver (tex.web \u{a7}1354): the text is expanded now as `\\xdef` expands, or kept unexpanded for the shipout after LuaTeX's `shipout` keyword. In PDF mode LuaTeX's backend ignores one, and so does `--pdf`; the whatsit is held for the page it lands on, and no shipout reaches it yet.",
+        "\\special{<text>}\n\\special shipout{<text>}",
     ),
     (
         "\\write",
         "Expansion",
-        "Write a line (tex.web \u{a7}1350, \u{a7}1370). The text is read unexpanded and expanded when written, as `\\message` expands its own, and printed on a line of its own: nothing between it and what came before, and no space in front of the next `\\message`. No stream is ever open, so a negative number writes to the log alone and any other number to the terminal. Only `\\immediate\\write` is implemented; one waiting for a shipout is not.",
+        "Write a line (tex.web \u{a7}1350, \u{a7}1370). The text is read unexpanded and expanded when written, as `\\message` expands its own. To an open stream it goes into the file as LuaTeX writes it -- every character raw, `\\newlinechar` ending the line; to a negative number, the log alone; to a closed stream or one past 127, the terminal, on a line of its own. Only `\\immediate\\write` is done; one waiting for a shipout is held and never reached.",
         "\\immediate\\write<number>{<text>}\n\\immediate\\write16{\\the\\count0}   % => its own line on the terminal\n\\immediate\\write-1{log only}",
     ),
     (

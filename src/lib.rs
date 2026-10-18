@@ -86,6 +86,7 @@ pub mod token;
 pub mod type1;
 pub mod typeset;
 pub mod vf;
+pub mod write;
 
 pub use expand::{Engine, TexError};
 

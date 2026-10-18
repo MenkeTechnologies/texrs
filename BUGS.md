@@ -254,6 +254,33 @@ texrs output reached tracked lualatex references in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).
 
+## A `\write` without `\immediate` writes nothing
+
+`\openout`, `\write`, `\closeout` and `\special` are read as §1350-§1354
+read them and built into the whatsits of §1341 (`crate::write::Whatsit`), and
+`Lowerer::ship_whatsit` does what §1373's `out_what` does with one. What is
+missing is the list a whatsit is put into: §1373 runs when the page HOLDING the
+whatsit is shipped, and texrs's pages are drawn from broken strings rather than
+built as node lists and shipped, so a deferred whatsit waits in
+`Lowerer::deferred_whatsits` and is never reached. luatex writes the line when
+the page goes out; texrs writes nothing, and a LaTeX document's deferred
+`.aux` and `.toc` lines come from the kernel's own label pass instead. The
+hookup is the node-list stomach putting each whatsit into the list where it was
+read and performing it when that page ships, in page order. With the lists built
+while the program runs rather than while it is lowered, a `\write`'s text has to
+be lowered when it is read -- its macros expanded then, its registers read at the
+shipout -- which is earlier than §1370 expands it.
+
+A file written with `\immediate\write` is on disk only when the run that wrote
+it ends: the lowering reads the whole document before the run executes it. So
+`\input` and `\openin` read a file this lowering wrote from the lowering's own
+copy (`crate::write::Written`), made with the register values the lowering
+knows; a line whose text reads a register only the run can decide is written to
+disk with the run's value and read back with the lowering's.
+
+There is no `.log`, so the `\openout3 = foo.tex` line luatex writes there for
+every file it opens is not written anywhere.
+
 ## `\directlua` does not expand inside a `\message`
 
 `\directlua` is EXPANDABLE, so luatex runs the chunk while it reads a

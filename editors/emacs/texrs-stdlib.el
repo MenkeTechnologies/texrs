@@ -38,6 +38,9 @@
     "\\noexpand"
     "\\message"
     "\\immediate"
+    "\\openout"
+    "\\closeout"
+    "\\special"
     "\\write"
     "\\errmessage"
     "\\relax"
@@ -226,7 +229,10 @@
     (puthash "\\expandafter" "\\expandafter  —  One token of lookahead: hold the next token back, expand what follows it once, then put the held token in front of the result. [Expansion]" table)
     (puthash "\\noexpand" "\\noexpand  —  Suppress expansion of the next token for one step — the token is used for its own sake rather than its meaning. [Expansion]" table)
     (puthash "\\message" "\\message  —  Write to the terminal. [Expansion]" table)
-    (puthash "\\immediate" "\\immediate  —  Do the `\\write` that follows now rather than at shipout (tex.web §1375). [Expansion]" table)
+    (puthash "\\immediate" "\\immediate  —  Do the `\\openout`, `\\write` or `\\closeout` that follows now rather than at shipout (tex.web §1375). [Expansion]" table)
+    (puthash "\\openout" "\\openout  —  Open a write stream on a file (tex.web §1351, §1374), closing it first if it is open. [Expansion]" table)
+    (puthash "\\closeout" "\\closeout  —  Close a write stream (tex.web §1374). [Expansion]" table)
+    (puthash "\\special" "\\special  —  A whatsit for the driver (tex.web §1354): the text is expanded now as `\\xdef` expands, or kept unexpanded for the shipout after LuaTeX's `shipout` keyword. [Expansion]" table)
     (puthash "\\write" "\\write  —  Write a line (tex.web §1350, §1370). [Expansion]" table)
     (puthash "\\errmessage" "\\errmessage  —  Report an error of the document's own and carry on (tex.web §1283). [Expansion]" table)
     (puthash "\\relax" "\\relax  —  Do nothing. [Expansion]" table)

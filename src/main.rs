@@ -37,6 +37,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // Where `\openout` writes a relative name, as tex's own option says.
+    texrs::write::set_output_directory(cli.output_directory.clone());
 
     match cli.mode {
         texrs::cli::Mode::Help => {

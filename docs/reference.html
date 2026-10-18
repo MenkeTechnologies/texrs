@@ -81,7 +81,7 @@
       <p class="tutorial-subtitle">Every primitive texrs carries, what it does, and where it happens — at compile time while lowering, or at run time on the VM. A primitive not on this page is not implemented; <a href="https://github.com/MenkeTechnologies/texrs/blob/main/BUGS.md">BUGS.md</a> says so explicitly for the ones that are commonly reached for.</p>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-val">185</div>
+            <div class="stat-val">188</div>
             <div class="stat-label">Primitives</div>
           </div>
           <div class="stat-card">
@@ -193,9 +193,15 @@
 \edef\keep{\noexpand\later}</pre></td></tr>
             <tr><td><code>\message</code></td><td>Write to the terminal. This is texrs's parity contract for the milestone: two host builtins, one appending a rendered piece and one flushing the assembled string, so a message reads its registers at run time.</td><td><pre>\message{&lt;text&gt;}
 \message{HELLO-WORLD}   % =&gt; (./file.tex HELLO-WORLD )</pre></td></tr>
-            <tr><td><code>\immediate</code></td><td>Do the <code>\write</code> that follows now rather than at shipout (tex.web §1375). The next token is read with expansion; anything other than <code>\write</code> is put back and read as if <code>\immediate</code> had not been there. <code>\openout</code> and <code>\closeout</code> are not implemented.</td><td><pre>\immediate\write&lt;number&gt;{&lt;text&gt;}
-\immediate\write16{HELLO}</pre></td></tr>
-            <tr><td><code>\write</code></td><td>Write a line (tex.web §1350, §1370). The text is read unexpanded and expanded when written, as <code>\message</code> expands its own, and printed on a line of its own: nothing between it and what came before, and no space in front of the next <code>\message</code>. No stream is ever open, so a negative number writes to the log alone and any other number to the terminal. Only <code>\immediate\write</code> is implemented; one waiting for a shipout is not.</td><td><pre>\immediate\write&lt;number&gt;{&lt;text&gt;}
+            <tr><td><code>\immediate</code></td><td>Do the <code>\openout</code>, <code>\write</code> or <code>\closeout</code> that follows now rather than at shipout (tex.web §1375). The next token is read with expansion; anything else is put back and read as if <code>\immediate</code> had not been there.</td><td><pre>\immediate\write&lt;number&gt;{&lt;text&gt;}
+\immediate\openout3=notes   % =&gt; notes.tex, created empty</pre></td></tr>
+            <tr><td><code>\openout</code></td><td>Open a write stream on a file (tex.web §1351, §1374), closing it first if it is open. LuaTeX's 128 streams, 0 to 127. The name is read with expansion -- <code>\openout1=\jobname.aux</code> -- or taken whole from braces, spaces and all, and <code>.tex</code> is added when it has no extension; the file goes under <code>-output-directory</code> when one is given. A file written now is read back as it now stands by a later <code>\input</code> or <code>\openin</code>. Only <code>\immediate\openout</code> is done; one waiting for a shipout is held and never reached.</td><td><pre>\immediate\openout&lt;number&gt;=&lt;file name&gt;
+\immediate\openout1=\jobname.aux   % =&gt; job.aux
+\immediate\openout2={my notes}   % =&gt; my notes.tex</pre></td></tr>
+            <tr><td><code>\closeout</code></td><td>Close a write stream (tex.web §1374). Every stream still open is closed when the run ends. Only <code>\immediate\closeout</code> is done.</td><td><pre>\immediate\closeout&lt;number&gt;</pre></td></tr>
+            <tr><td><code>\special</code></td><td>A whatsit for the driver (tex.web §1354): the text is expanded now as <code>\xdef</code> expands, or kept unexpanded for the shipout after LuaTeX's <code>shipout</code> keyword. In PDF mode LuaTeX's backend ignores one, and so does <code>--pdf</code>; the whatsit is held for the page it lands on, and no shipout reaches it yet.</td><td><pre>\special{&lt;text&gt;}
+\special shipout{&lt;text&gt;}</pre></td></tr>
+            <tr><td><code>\write</code></td><td>Write a line (tex.web §1350, §1370). The text is read unexpanded and expanded when written, as <code>\message</code> expands its own. To an open stream it goes into the file as LuaTeX writes it -- every character raw, <code>\newlinechar</code> ending the line; to a negative number, the log alone; to a closed stream or one past 127, the terminal, on a line of its own. Only <code>\immediate\write</code> is done; one waiting for a shipout is held and never reached.</td><td><pre>\immediate\write&lt;number&gt;{&lt;text&gt;}
 \immediate\write16{\the\count0}   % =&gt; its own line on the terminal
 \immediate\write-1{log only}</pre></td></tr>
             <tr><td><code>\errmessage</code></td><td>Report an error of the document's own and carry on (tex.web §1283). The text is expanded as <code>\message</code> expands its own and printed as tex prints an error: <code>! </code>, the text, a <code>.</code> and the context. The help goes to the log alone in nonstop mode, so the terminal shows nothing more, and the run ends with the transcript notice.</td><td><pre>\errmessage{&lt;text&gt;}
@@ -685,6 +691,10 @@ back at the margin</pre></td></tr>
             <tr><td><code>MSG_ROMAN</code></td><td><code>4016</code></td><td>Append a number as `\romannumeral` writes it: one argument, the value.</td></tr>
             <tr><td><code>MSG_REPORT</code></td><td><code>4017</code></td><td>Append a report the lowerer made (§82's `print_err` and its context): one argument, the text. Unlike `MSG_APPEND` it marks a message that OPENS with it as starting on a fresh line rather than after a space.</td></tr>
             <tr><td><code>WRITE_FLUSH</code></td><td><code>4018</code></td><td>Finish an `\immediate\write` and record it on a line of its own: glued to what came before, and the next message glued to it. No arguments.</td></tr>
+            <tr><td><code>OUT_OPEN</code></td><td><code>4100</code></td><td>`\openout`: the stream, then the file name (`crate::write`). Numbered from 4100 rather than after 4018, because other builtins are being added after 4018 too and a number registered twice silently keeps the last function (see `COLOR_PUSH`).</td></tr>
+            <tr><td><code>OUT_WRITE</code></td><td><code>4101</code></td><td>`\write` to an open stream: the stream, after the text is built as a message's is.</td></tr>
+            <tr><td><code>OUT_CLOSE</code></td><td><code>4102</code></td><td>`\closeout`: the stream.</td></tr>
+            <tr><td><code>OUT_IS_OPEN</code></td><td><code>4103</code></td><td>Whether a stream is open: the stream; 1 or 0 back.</td></tr>
           </tbody>
         </table>
       </section>
@@ -714,7 +724,6 @@ back at the margin</pre></td></tr>
           <tbody>
             <tr><td><code>plain_count0.tex</code></td><td>The oracle is `tex' with the PLAIN format preloaded, where \count0 is the page number and already holds 1. texrs starts every register at zero, as INITEX does, and loads no format. Not an engine bug -- a startup-state difference, recorded so it cannot be mistaken for one later.</td></tr>
             <tr><td><code>let_char_token.tex</code></td><td>`\let\egroup=}' copies a CHARACTER token, and printing one through \message must print the character. texrs prints the name with the trailing space a multi-letter control word gets (tex.web 294's print_cs), so the stream ends `INSIDE\egroup ' where tex ends `INSIDE\egroup'. The meaning-copy half of \let is in parity; this is the char-token half.</td></tr>
-            <tr><td><code>def_in_conditional_arm.tex</code></td><td>A `\def' inside an arm of a RUN-TIME conditional is executed while lowering, and lowering emits both arms because neither is decided yet -- so the else arm's definition overwrites the then arm's and the losing branch wins. tex interprets and runs only the arm it took: it prints `&lt;a&gt;' where texrs prints `[a]'. This is a miscompile rather than a refusal, which is what makes it worth a case: nothing errors, the answer is just wrong. It blocks LaTeX's `\newcommand{\x}[n]{...}', whose argument-count dispatch is exactly a chain of `\ifnum...\def...\else'. Fixing it needs the macro table to be run-time state, or the conditional to be decidable while lowering; neither is a small change.</td></tr>
             <tr><td><code>outer_forbidden_use.tex</code></td><td>texrs records \outer but does not police it. tex forbids an outer macro inside a group being scanned as text and reports `Forbidden control sequence found while scanning text of \message'; texrs expands it and prints the body. \outer is ONLY an error-detection feature, and every position it governs -- an argument, a text group, skipped conditional text -- is one tex reports and recovers from while texrs stops, so enforcing it cannot reach parity either. Recorded rather than half-enforced: a false positive here would refuse a document that works.</td></tr>
           </tbody>
         </table>
