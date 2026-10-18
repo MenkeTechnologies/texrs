@@ -673,6 +673,13 @@ pub fn run_dvi_fallback(
     chain: &crate::typeset::FontChain,
     layout: &crate::typeset::Layout,
 ) -> Result<Vec<u8>, TexError> {
+    // A plain document is set as `tex` sets it: plain.tex preloaded and the
+    // stomach building every list (see [`run_tex_dvi`]). A run that ships no
+    // page leaves a DVI of no pages, which the caller reports as tex does.
+    if !crate::latex::looks_like_latex(src) {
+        let (_, dvi) = run_tex_dvi(src)?;
+        return Ok(dvi.unwrap_or_else(|| crate::dvi::Writer::new("texrs").finish()));
+    }
     // The MARKED text: colour is an instruction to the driver, and this is the
     // one path that has a driver to instruct.
     let text = match path {
@@ -736,6 +743,12 @@ pub fn run_dvi(
     font_path: &std::path::Path,
     layout: &crate::typeset::Layout,
 ) -> Result<Vec<u8>, TexError> {
+    // A plain document is set as `tex` sets it; one that ships no page has no
+    // DVI file, as tex writes none (§642).
+    if !crate::latex::looks_like_latex(src) {
+        let (_, dvi) = run_tex_dvi(src)?;
+        return dvi.ok_or_else(|| TexError("No pages of output.".into()));
+    }
     let text = run_text(src)?;
     let font = crate::tfm::Tfm::open(font_path).map_err(TexError)?;
     let name = font_path

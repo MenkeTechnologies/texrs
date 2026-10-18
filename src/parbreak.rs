@@ -106,7 +106,6 @@ struct Search<'a> {
     best_pl_line: [i64; 4],
     disc_width: Scaled,
     threshold: i64,
-    second_pass: bool,
     final_pass: bool,
     easy_line: i64,
     last_special_line: i64,
@@ -142,7 +141,16 @@ fn finite(g: &mut Glue) -> bool {
 ///
 /// The list is the stomach's, and §826's `check_shrinkage` edits its glue in
 /// place.
-pub fn line_break(list: &mut [Node], p: &BreakParams) -> Breaks {
+/// The hyphenation pass's word-breaking: called once with the paragraph
+/// before the first pass that may hyphenate (§863's `second_pass`), it puts
+/// the discretionaries §894-§918 would in. Every word that follows a glue
+/// node the scan reaches gets its turn in tex too -- a pass ends early only
+/// when a later one will scan the rest -- and what a word becomes depends on
+/// the word and what follows it, not on the breaks, so doing them all at the
+/// start of the pass sets the same list.
+pub type Hyphenate<'a> = &'a mut dyn FnMut(&mut Vec<Node>);
+
+pub fn line_break(list: &mut Vec<Node>, p: &BreakParams, mut hyphenate: Option<Hyphenate>) -> Breaks {
     let mut infinite_shrinkage = false;
     // §827 for the two skips; §868 does the paragraph's own glue as it goes,
     // but the answer is the same done once here.
@@ -166,41 +174,42 @@ pub fn line_break(list: &mut [Node], p: &BreakParams) -> Breaks {
         true => last_special_line,
         false => MAX_HALFWORD,
     };
-    let mut s = Search {
-        list,
-        p,
-        active: Vec::new(),
-        passive: Vec::new(),
-        active_width: [0; 6],
-        cur_active_width: [0; 6],
-        background,
-        break_width: [0; 6],
-        minimal_demerits: [AWFUL_BAD; 4],
-        minimum_demerits: AWFUL_BAD,
-        best_place: [None; 4],
-        best_pl_line: [0; 4],
-        disc_width: 0,
-        threshold: p.pretolerance,
-        second_pass: false,
-        final_pass: false,
-        easy_line,
-        last_special_line,
-        second_width: p.shape.second_width(),
-    };
-
     // §863.
-    if s.threshold >= 0 {
-        s.second_pass = false;
-        s.final_pass = false;
-    } else {
-        s.threshold = p.tolerance;
-        s.second_pass = true;
-        s.final_pass = p.emergency_stretch <= 0;
-    }
-    let best_bet = loop {
-        if s.threshold > INF_BAD {
-            s.threshold = INF_BAD;
+    let (mut threshold, mut second_pass, mut final_pass) = match p.pretolerance >= 0 {
+        true => (p.pretolerance, false, false),
+        false => (p.tolerance, true, p.emergency_stretch <= 0),
+    };
+    let mut hyphenated = false;
+    loop {
+        if threshold > INF_BAD {
+            threshold = INF_BAD;
         }
+        if second_pass && !hyphenated {
+            hyphenated = true;
+            if let Some(h) = hyphenate.as_mut() {
+                h(list);
+            }
+        }
+        let mut s = Search {
+            list,
+            p,
+            active: Vec::new(),
+            passive: Vec::new(),
+            active_width: [0; 6],
+            cur_active_width: [0; 6],
+            background,
+            break_width: [0; 6],
+            minimal_demerits: [AWFUL_BAD; 4],
+            minimum_demerits: AWFUL_BAD,
+            best_place: [None; 4],
+            best_pl_line: [0; 4],
+            disc_width: 0,
+            threshold,
+            final_pass,
+            easy_line,
+            last_special_line,
+            second_width: p.shape.second_width(),
+        };
         // §864: the beginning of the paragraph.
         s.active = vec![Entry::Active {
             passive: None,
@@ -210,34 +219,31 @@ pub fn line_break(list: &mut [Node], p: &BreakParams) -> Breaks {
             total_demerits: 0,
         }];
         s.active_width = s.background;
-        s.passive.clear();
-        if let Some(found) = s.scan() {
-            break found;
+        if let Some((passive, best_line)) = s.scan() {
+            // §878: the chain from the best break back to the start,
+            // reversed.
+            let mut breaks = Vec::new();
+            let mut q = passive;
+            while let Some(i) = q {
+                breaks.push(s.passive[i].cur_break);
+                q = s.passive[i].prev_break;
+            }
+            breaks.reverse();
+            return Breaks {
+                breaks,
+                best_line,
+                infinite_shrinkage,
+            };
         }
         // §863: try again.
-        if !s.second_pass {
-            s.threshold = p.tolerance;
-            s.second_pass = true;
-            s.final_pass = p.emergency_stretch <= 0;
+        if !second_pass {
+            threshold = p.tolerance;
+            second_pass = true;
+            final_pass = p.emergency_stretch <= 0;
         } else {
-            s.background[1] += p.emergency_stretch;
-            s.final_pass = true;
+            background[1] += p.emergency_stretch;
+            final_pass = true;
         }
-    };
-
-    // §878: the chain from the best break back to the start, reversed.
-    let (passive, best_line) = best_bet;
-    let mut breaks = Vec::new();
-    let mut q = passive;
-    while let Some(i) = q {
-        breaks.push(s.passive[i].cur_break);
-        q = s.passive[i].prev_break;
-    }
-    breaks.reverse();
-    Breaks {
-        breaks,
-        best_line,
-        infinite_shrinkage,
     }
 }
 
@@ -833,7 +839,7 @@ mod tests {
     #[test]
     fn a_short_paragraph_is_one_line() {
         let mut list = ended(vec![word(10 * PT), space(), word(10 * PT)]);
-        let b = line_break(&mut list, &params(100 * PT));
+        let b = line_break(&mut list, &params(100 * PT), None);
         assert_eq!(b.breaks, vec![None]);
         assert_eq!(b.best_line, 2);
     }
@@ -852,7 +858,7 @@ mod tests {
             space(),
             word(20 * PT),
         ]);
-        let b = line_break(&mut list, &params(43 * PT));
+        let b = line_break(&mut list, &params(43 * PT), None);
         assert_eq!(b.breaks, vec![Some(3), None]);
     }
 
@@ -864,7 +870,7 @@ mod tests {
             Node::Penalty(-10000),
             word(10 * PT),
         ]);
-        let b = line_break(&mut list, &params(100 * PT));
+        let b = line_break(&mut list, &params(100 * PT), None);
         assert_eq!(b.breaks, vec![Some(1), None]);
     }
 }

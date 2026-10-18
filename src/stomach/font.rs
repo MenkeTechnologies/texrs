@@ -152,6 +152,11 @@ impl Font {
 
     /// §1042's `font_glue`: the interword glue of the font, from
     /// `\fontdimen2..4`.
+    /// `font_bchar` (§576): the right boundary character, 256 for none.
+    pub(super) fn bchar_code(&self) -> u16 {
+        self.bchar
+    }
+
     pub fn space_glue(&self) -> Glue {
         Glue {
             natural: self.param(2),
@@ -161,17 +166,17 @@ impl Font {
         }
     }
 
-    fn lig_word(&self, k: usize) -> Option<[u8; 4]> {
+    pub(super) fn lig_word(&self, k: usize) -> Option<[u8; 4]> {
         self.tfm.as_ref()?.lig_kern_word(k)
     }
 
     /// `lig_kern_start` for `code` (256 is the left boundary, §1034's
     /// `bchar_label`), when its tag says it has a program.
-    fn lig_start(&self, code: u16) -> Option<usize> {
+    pub(super) fn lig_start(&self, code: u16) -> Option<usize> {
         self.tfm.as_ref()?.lig_kern_start(code)
     }
 
-    fn kern(&self, op: u8, rem: u8) -> Scaled {
+    pub(super) fn kern(&self, op: u8, rem: u8) -> Scaled {
         match &self.tfm {
             Some(t) => store_scaled(t.kern_value(op, rem), self.size),
             None => 0,

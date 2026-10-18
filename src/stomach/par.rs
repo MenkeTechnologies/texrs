@@ -118,7 +118,11 @@ impl Stomach {
             shape: shape.clone(),
             prev_graf,
         };
-        let breaks = crate::parbreak::line_break(&mut list, &params);
+        let breaks = crate::parbreak::line_break(
+            &mut list,
+            &params,
+            Some(&mut |l: &mut Vec<Node>| self.hyphenate_all(l)),
+        );
         if breaks.infinite_shrinkage {
             self.say(super::Said::Error(
                 "Infinite glue shrinkage found in a paragraph".into(),

@@ -354,12 +354,12 @@ impl Stomach {
             ListOp::OutputRoutine(_) => {}
             ListOp::Patterns(text) => {
                 self.hyphenation_source
-                    .push_str(&format!("\\patterns{{{text}}}\n"));
+                    .push_str(&format!("\\patterns{{\n{text}\n}}\n"));
                 self.hyphenator = None;
             }
             ListOp::Hyphenation(text) => {
                 self.hyphenation_source
-                    .push_str(&format!("\\hyphenation{{{text}}}\n"));
+                    .push_str(&format!("\\hyphenation{{\n{text}\n}}\n"));
                 self.hyphenator = None;
             }
             ListOp::Converted { f, form, values } => {

@@ -34,6 +34,7 @@ use crate::node::{BoxNode, Node, Scaled, IGNORE_DEPTH};
 
 pub mod build;
 pub mod font;
+pub mod hyph;
 pub mod output;
 pub mod par;
 pub mod run;
@@ -221,6 +222,8 @@ pub struct Stomach {
     pub int_pars: Vec<i64>,
     /// §230's `sf_code`, for the characters whose code is not INITEX's.
     pub sf_codes: rustc_hash::FxHashMap<char, i64>,
+    /// §230's `lc_code`, for the characters whose code is not INITEX's.
+    pub lc_codes: rustc_hash::FxHashMap<char, i64>,
     /// `last_badness` (§646): what `\badness` reads.
     pub last_badness: i64,
     /// A leader box waiting for its glue (§1078).
@@ -277,6 +280,7 @@ impl Stomach {
             fonts: vec![Font::null()],
             int_pars: initex_int_pars(),
             sf_codes: rustc_hash::FxHashMap::default(),
+            lc_codes: rustc_hash::FxHashMap::default(),
             last_badness: 0,
             leader_box: None,
             output: output::Output::default(),
