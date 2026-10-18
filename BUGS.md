@@ -477,8 +477,9 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
 - **Fonts defined from Lua** by a `define_font` callback set type from
   their characters' dimensions, with no ligature or kerning program; one
   `font.define`d by a chunk alone, with no `\font` behind it, is kept and read
-  back by `font.getfont` but is not one the stomach sets type in. A font
-  table's glyphs do not yet reach the PDF as the file it names. `font.read_vf`
+  back by `font.getfont` but is not one the stomach sets type in. An OpenType
+  or TrueType font table is registered with `crate::otf` by glyph index for
+  the writer. `font.read_vf`
   refuses.
 - **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
   `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,

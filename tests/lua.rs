@@ -1934,3 +1934,31 @@ fn a_define_font_callback_makes_the_font_backslash_font_names() {
     assert_eq!(squeeze(oracle.clone()), want, "the oracle");
     assert_eq!(squeeze(got), squeeze(oracle));
 }
+
+#[test]
+fn an_opentype_font_a_definer_answers_is_registered_for_the_writer_by_glyph() {
+    // A `define_font` table naming an OpenType file is handed to
+    // `crate::otf`'s registry under the font's id, character by glyph index,
+    // which is what the writer and the subsetters draw it from.
+    let body = "\\directlua{callback.register('define_font', function(name, size) \
+          return { name = name, size = size, designsize = 655360, filename = '/fonts/x.otf', \
+            format = 'opentype', psname = 'X-Regular', \
+            characters = { [65] = { width = 1, index = 36, tounicode = '0041' }, [66] = { width = 1 } } } end)}\
+        \\font\\x=foo at 10pt \\directlua{tex.print(string.char(92) .. 'message{[' .. font.id('x') .. ']}')}";
+    let said = out(body);
+    let id: u16 = said
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .expect("the id");
+    let font = texrs::otf::lua_font(id).expect("the font registered");
+    assert_eq!(font.filename, "/fonts/x.otf");
+    assert_eq!(font.psname.as_deref(), Some("X-Regular"));
+    assert_eq!(font.glyphs.get(&65), Some(&(36, Some("0041".to_string()))));
+    assert_eq!(
+        font.glyphs.get(&66),
+        None,
+        "a character without an index has no glyph"
+    );
+}

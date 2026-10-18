@@ -182,6 +182,7 @@ thread_local! {
 /// Forget every font, for a fresh state.
 pub(super) fn reset() {
     FONTS.with(|f| *f.borrow_mut() = vec![None]);
+    crate::otf::clear_lua_fonts();
     CURRENT.with(|c| c.set(0));
 }
 
@@ -237,6 +238,7 @@ pub(super) fn define_for_tex(
     use crate::stomach::font::{Font, Metrics};
     let hyphen = int_field(&t, "hyphenchar")?;
     let skew = int_field(&t, "skewchar")?;
+    let subfont = int_field(&t, "subfont")?.unwrap_or(0);
     store(lua, id, t)?;
     let f = get(id).ok_or_else(|| mlua::Error::runtime("font creation failed, error in table"))?;
     let chars = f.characters.iter().filter_map(|(code, c)| {
@@ -267,6 +269,26 @@ pub(super) fn define_for_tex(
     })?;
     font.hyphen_char = hyphen.unwrap_or(default_hyphen);
     font.skew_char = skew.unwrap_or(default_skew);
+    // An OpenType or TrueType font is drawn from the file the table names, by
+    // each character's glyph `index` (`crate::otf::register_lua_font`, which
+    // the writer and the subsetters read), and is processed by the definer's
+    // own callbacks rather than texrs's node mode.
+    if let (Some(file), "opentype" | "truetype") = (&f.filename, f.format.as_str()) {
+        let glyphs: Vec<(u32, u32, Option<String>)> = f
+            .characters
+            .iter()
+            .filter_map(|(code, c)| {
+                Some((
+                    u32::try_from(*code).ok()?,
+                    u32::try_from(c.index?).ok()?,
+                    c.tounicode.clone(),
+                ))
+            })
+            .collect();
+        if let Ok(id) = u16::try_from(id) {
+            crate::otf::register_lua_font(id, file, subfont, f.psname.as_deref(), &glyphs);
+        }
+    }
     Ok(font)
 }
 
