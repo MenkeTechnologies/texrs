@@ -394,17 +394,22 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
 - **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
   `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,
   `token.scan_list`, `token.scan_toks(true)`.
-- **The `pdf` library is not yet the writer's.** Its dictionaries
-  (`setcatalog`, `setpageresources`, ...), variables and objects are kept and
-  answered back, and object numbers are handed out as luatex's backend hands
-  them out (an immediate raw object goes into an object stream above PDF 1.4,
-  which takes the next number); but nothing a chunk sets is written into the
-  file, and the numbers are not the ones the writer gives its own objects. The
-  variables are `\pdfvariable`'s, a dimension one assigned from Lua inside
-  a group restored at its end (see the next item). `pdf.print`, the
-  font/page/xform name and number questions, `includechar`/`includefont`/
-  `includeimage` and `registerannot` refuse; the position functions answer 0
-  and the matrix the identity, as luatex does before shipout.
+- **The `pdf` library, where it is not luatex's.** Its dictionary strings,
+  variables and objects are the backend's (`crate::backend`) and reach the
+  file as `\pdfextension`'s do. Where it differs: an object's text passes
+  through UTF-8, so a binary stream given as a Lua string is not kept byte for
+  byte; a stream's own `compresslevel` is checked and then ignored;
+  `setxformresources`/`setxformattributes` are kept and read back, but no form
+  is written from them; `getnofobjects` refuses, because the writer does not
+  count written and dropped objects apart; `getobjtype` of an object stream is
+  `nil` where luatex says `objstm`; and below PDF 1.5 an immediate object
+  still goes into an object stream, where luatex writes none. A dimension
+  variable assigned from Lua inside a group is restored at its end (see the
+  next item). `pdf.print`, the font/page/xform name and number questions,
+  `includechar`/`includefont`/`includeimage` and `registerannot` refuse; the
+  position functions answer 0 and the matrix the identity, as luatex does
+  before shipout. `newcolorstack`, `mapfile`/`mapline` and
+  `setfontattributes` are kept and do not reach the writer.
   `pdf.getcreationdate` is the writer's `/CreationDate`, in UT where luatex
   writes local time.
 - **A `"global"` register assignment from Lua is local:**

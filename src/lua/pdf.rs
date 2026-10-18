@@ -1,62 +1,38 @@
 //! The `pdf` library: what a chunk tells the PDF backend (luatexdir/lua/lpdflib.c).
 //!
-//! Three kinds of thing pass through it:
+//! Three kinds of thing pass through it, each into `crate::backend`, the
+//! state `\pdfextension` and `\pdfvariable` keep, so the file is written with
+//! them:
 //!
 //! - **Strings for the file's dictionaries** -- `pdf.setcatalog`, `setinfo`,
 //!   `setnames`, `settrailer`, `setpageresources`, `setpageattributes`,
-//!   `setpagesattributes`, `setxformresources`, `setxformattributes`,
-//!   `settrailerid` -- kept as luatex keeps them, a string per key (a value
-//!   that is not a string is ignored, `l_set_pdf_value`), and read back by the
-//!   matching getter.
+//!   `setpagesattributes`, `settrailerid` -- kept apart from `\pdfextension`'s
+//!   as luatex keeps them (`Backend::lua`), a string per key (a value that is
+//!   not a string is ignored, `l_set_pdf_value`), and read back by the
+//!   matching getter. `setxformresources` and `setxformattributes` are kept
+//!   and read back here; no form is written from them yet.
 //! - **The backend's variables** -- `compresslevel`, `objcompresslevel`,
 //!   `decimaldigits`, the PDF version and the rest -- which are `\pdfvariable`'s
-//!   entries (`crate::backend`), read and stored as luatex reads and stores
-//!   them, so the writer, `\the\pdfvariable` and Lua agree.
-//! - **Objects** -- `pdf.obj`, `pdf.immediateobj`, `pdf.reserveobj` -- which
-//!   are numbered and their contents kept, with luatex's argument checking.
-//!
-//! [`state`] is what the writer would read for the other two. It does not read
-//! it yet -- the dictionaries and objects a chunk sets are kept and answered
-//! back, and not yet written into the file (BUGS.md); the object numbers are
-//! this table's own, counted from 1 as a fresh luatex counts them.
+//!   entries, read and stored as luatex reads and stores them, so the writer,
+//!   `\the\pdfvariable` and Lua agree.
+//! - **Objects** -- `pdf.obj`, `pdf.immediateobj`, `pdf.reserveobj` -- read
+//!   with luatex's argument checking and numbered, held and written by the
+//!   backend as `\pdfextension obj` is.
 //!
 //! What has no meaning before shipout returns what luatex returns then: the
 //! position functions answer 0, the matrix is the identity.
 
 use super::*;
+use crate::backend::{Backend, RawObject};
 
-/// One object a chunk made.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Obj {
-    /// `raw`, `stream`, `file` (raw contents read from a file) or `streamfile`.
-    pub kind: String,
-    /// The text, or the file name for the `file` kinds.
-    pub data: Option<Vec<u8>>,
-    /// A stream's extra dictionary entries.
-    pub attr: Option<Vec<u8>>,
-    pub immediate: bool,
-    pub compress_level: Option<i64>,
-}
-
-/// Everything a document's Lua told the backend.
+/// What a chunk set that the backend does not hold.
 #[derive(Clone, Debug, Default)]
 pub struct State {
-    /// `catalog`, `info`, `names`, `trailer`, `pageresources`,
-    /// `pageattributes`, `pagesattributes`, `xformresources`,
-    /// `xformattributes`, `trailerid`.
-    pub strings: BTreeMap<&'static str, Vec<u8>>,
-    /// Every object number handed out, from 1: `obj_tab`'s type and what
-    /// was put in it.
-    pub table: Vec<Slot>,
-    /// The object stream immediate objects are collecting in, 0 for none
-    /// (`os->cur_objstm`), and how many it holds (`os->idx`).
-    pub cur_objstm: i64,
-    pub os_idx: usize,
-    /// The `objcompresslevel` the file was opened with, fixed then
-    /// (`init_pdf_outputparameters`): bounded to 0..3, and 0 below PDF 1.5.
-    pub os_level: Option<i64>,
-    pub last_obj: i64,
-    pub last_annot: i64,
+    /// `xformresources` and `xformattributes`.
+    pub xform: BTreeMap<&'static str, Vec<u8>>,
+    /// The object numbers a chunk has given contents to: a second
+    /// `pdf.obj(n, ...)` is "object in use".
+    pub filled: std::collections::BTreeSet<u32>,
     /// `pdf.mapfile`/`pdf.mapline` lines, in order.
     pub map_lines: Vec<String>,
     /// `newcolorstack(init, mode, page)`'s stacks.
@@ -65,29 +41,13 @@ pub struct State {
     pub font_attributes: BTreeMap<i64, String>,
 }
 
-/// One object number: its `pdf_obj_typenames` type, whether it is in the
-/// file yet (`is_obj_written`), and the contents a chunk gave it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Slot {
-    pub kind: &'static str,
-    pub written: bool,
-    pub obj: Option<Obj>,
-}
-
-/// `OBJSTM_ALWAYS` and `OBJSTM_NEVER` (`pdftypes.h`): an immediate object
-/// goes into an object stream when `objcompresslevel` reaches its threshold.
-const OBJSTM_ALWAYS: i64 = 1;
-const OBJSTM_NEVER: i64 = 4;
-/// `PDF_OS_MAX_OBJS`: an object stream is written once it holds this many.
-const OS_MAX_OBJS: usize = 100;
-
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
     /// The chunk's view of the registers, for the dimension variables.
     static BRIDGE: RefCell<Option<Rc<RefCell<Bridge>>>> = const { RefCell::new(None) };
 }
 
-/// What the backend has been told, for the writer.
+/// What the chunks told the backend that it does not hold itself.
 pub fn state() -> State {
     STATE.with(|s| s.borrow().clone())
 }
@@ -109,6 +69,21 @@ const KEYS: &[&str] = &[
     "xformattributes",
     "trailerid",
 ];
+
+/// The backend's string for `key`, or `None` for the two it does not hold.
+fn lua_string<'a>(s: &'a mut crate::backend::LuaStrings, key: &str) -> Option<&'a mut String> {
+    Some(match key {
+        "catalog" => &mut s.catalog,
+        "info" => &mut s.info,
+        "names" => &mut s.names,
+        "trailer" => &mut s.trailer,
+        "pageresources" => &mut s.page_resources,
+        "pageattributes" => &mut s.page_attributes,
+        "pagesattributes" => &mut s.pages_attributes,
+        "trailerid" => &mut s.trailer_id,
+        _ => return None,
+    })
+}
 
 const VARIABLES: &[&str] = &[
     "compresslevel",
@@ -202,366 +177,205 @@ fn bytes(v: &Value) -> mlua::Result<Option<Vec<u8>>> {
     })
 }
 
-/// Open the file if it is not open yet (`ensure_output_state`), which fixes
-/// the object-stream level it is written with; that level.
-fn open_output() -> i64 {
-    if let Some(level) = STATE.with(|s| s.borrow().os_level) {
-        return level;
+/// An object's contents as `pdf.obj` and its siblings read them.
+struct Contents {
+    stream: bool,
+    file: bool,
+    data: Vec<u8>,
+    attr: Option<Vec<u8>>,
+    /// `objcompression = false`: never into an object stream.
+    uncompressed: bool,
+}
+
+impl Contents {
+    /// The kinds the positional forms name: `"file"`, `"stream"`,
+    /// `"streamfile"`, or none for a raw object's text.
+    fn of(kind: Option<&str>, data: Vec<u8>, attr: Option<Vec<u8>>) -> Contents {
+        Contents {
+            stream: matches!(kind, Some("stream" | "streamfile")),
+            file: matches!(kind, Some("file" | "streamfile")),
+            data,
+            attr,
+            uncompressed: false,
+        }
     }
-    let level = var("objcompresslevel").clamp(0, 3);
-    let streams = var("majorversion") > 1 || var("minorversion") >= 5;
-    let level = if streams { level } else { 0 };
-    STATE.with(|s| s.borrow_mut().os_level = Some(level));
-    level
-}
 
-/// A new object number of type `kind` (`pdf_create_obj`).
-fn create(s: &mut State, kind: &'static str) -> i64 {
-    s.table.push(Slot {
-        kind,
-        written: false,
-        obj: None,
-    });
-    s.table.len() as i64
-}
-
-/// A new raw object's number, which becomes `getlastobj`'s
-/// (`obj_count++; k = pdf_create_obj(...); pdf_last_obj = k`).
-fn new_obj() -> i64 {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        let k = create(&mut s, "obj");
-        s.last_obj = k;
-        k
-    })
+    fn raw(self) -> RawObject {
+        let text = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
+        RawObject {
+            stream: self.stream,
+            attr: self.attr.map(text),
+            file: self.file,
+            uncompressed: self.uncompressed,
+            data: text(self.data),
+        }
+    }
 }
 
 /// An object number a chunk passed in: it must exist, be a raw object's
 /// (`check_obj_exists`, `check_obj_type`) and not be filled yet.
-fn reuse(k: i64, func: &str) -> mlua::Result<i64> {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        if k < 0 || k > s.table.len() as i64 {
-            return Err(mlua::Error::runtime("cannot find referenced object"));
-        }
-        let Some(slot) = s.table.get((k - 1) as usize) else {
-            return Err(mlua::Error::runtime("cannot find referenced object"));
-        };
-        if slot.kind != "obj" {
+fn reuse(eng: &Engine, k: i64, func: &str) -> mlua::Result<u32> {
+    if k < 0 || k > i64::from(eng.backend.objects()) {
+        return Err(mlua::Error::runtime("cannot find referenced object"));
+    }
+    let k = k as u32;
+    match eng.backend.object_kind(k) {
+        Some("obj") => {}
+        kind => {
             return Err(mlua::Error::runtime(format!(
                 "referenced object has wrong type {}; should be obj",
-                slot.kind
-            )));
+                kind.unwrap_or("others")
+            )))
         }
-        if slot.obj.is_some() || slot.written {
-            return Err(mlua::Error::runtime(format!("pdf.{func}() object in use")));
-        }
-        s.last_obj = k;
+    }
+    if eng.backend.raw.contains_key(&k) || STATE.with(|s| s.borrow().filled.contains(&k)) {
+        return Err(mlua::Error::runtime(format!("pdf.{func}() object in use")));
+    }
+    Ok(k)
+}
+
+/// Hand `contents` to the backend as object `number` (a new one when
+/// `None`), written now when `immediate`: `Backend::lua_obj`.
+fn put(number: Option<i64>, func: &str, contents: Contents, immediate: bool) -> mlua::Result<u32> {
+    ctx::with("pdf", |eng, _| {
+        let number = match number {
+            Some(k) => Some(reuse(eng, k, func)?),
+            None => None,
+        };
+        let k = Backend::lua_obj(eng, number, contents.raw(), immediate);
+        STATE.with(|s| s.borrow_mut().filled.insert(k));
         Ok(k)
     })
 }
 
-/// Give object `k` its contents, and when it is immediate write it out now
-/// at `threshold`: into the current object stream when `objcompresslevel`
-/// reaches it, a stream being opened for the first (`pdf_prepare_obj`) and
-/// written once it holds `PDF_OS_MAX_OBJS` (`pdf_end_obj`).
-fn store(k: i64, obj: Obj, threshold: Option<i64>) {
-    let level = open_output();
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        s.table[(k - 1) as usize].obj = Some(obj);
-        let Some(threshold) = threshold else { return };
-        if level >= threshold {
-            if s.cur_objstm == 0 {
-                s.cur_objstm = create(&mut s, "objstm");
-                s.os_idx = 0;
-            }
-            s.os_idx += 1;
-            if s.os_idx == OS_MAX_OBJS {
-                let stm = s.cur_objstm;
-                s.table[(stm - 1) as usize].written = true;
-                s.cur_objstm = 0;
-            }
-        }
-        s.table[(k - 1) as usize].written = true;
-    })
+/// The leading object number of the positional forms, if there is one.
+fn leading_number(args: &Variadic<Value>) -> (Option<i64>, &[Value]) {
+    match args.first() {
+        Some(Value::Integer(n)) => (Some(*n), &args[1..]),
+        _ => (None, &args[..]),
+    }
 }
 
-/// `pdf.immediateobj([n,] text)`, `([n,] "file", name)`,
-/// `([n,] "stream"|"streamfile", data [, attr])`.
-fn immediateobj(args: &Variadic<Value>) -> mlua::Result<i64> {
-    open_output();
-    let mut first = 0;
-    let k = match args.first() {
-        Some(Value::Integer(n)) => {
-            first = 1;
-            reuse(*n, "immediateobj")?
+/// The positional forms `orig_obj` and `l_immediateobj` share:
+/// `([n,] text)`, `([n,] "file", name)`, `([n,] "stream"|"streamfile",
+/// data [, attr])`, checked with `func`'s messages.
+fn positional(rest: &[Value], func: &str) -> mlua::Result<Contents> {
+    let err = |what: &str| mlua::Error::runtime(format!("pdf.{func}() {what}"));
+    match rest.len() {
+        0 => Err(err("needs at least one argument")),
+        1 => {
+            let data = bytes(&rest[0])?.ok_or_else(|| err("1st argument must be string"))?;
+            Ok(Contents::of(None, data, None))
         }
-        _ => new_obj(),
-    };
-    let rest = &args[first..];
-    let obj = match rest.len() {
-        0 => {
-            return Err(mlua::Error::runtime(
-                "pdf.immediateobj() needs at least one argument",
-            ))
-        }
-        1 => Obj {
-            kind: "raw".into(),
-            data: Some(bytes(&rest[0])?.ok_or_else(|| {
-                mlua::Error::runtime("pdf.immediateobj() 1st argument must be string")
-            })?),
-            attr: None,
-            immediate: true,
-            compress_level: None,
-        },
         2 | 3 => {
             let Value::String(kind) = &rest[0] else {
-                return Err(mlua::Error::runtime(
-                    "pdf.immediateobj() 1st argument must be string",
-                ));
+                return Err(err("1st argument must be string"));
             };
             let kind = kind.to_str()?.to_string();
-            let data = bytes(&rest[1])?.ok_or_else(|| {
-                mlua::Error::runtime("pdf.immediateobj() 2nd argument must be string")
-            })?;
+            let data = bytes(&rest[1])?.ok_or_else(|| err("2nd argument must be string"))?;
             if kind == "file" && rest.len() == 3 {
-                return Err(mlua::Error::runtime(
-                    "pdf.immediateobj() 3rd argument forbidden in file mode",
-                ));
+                return Err(err("3rd argument forbidden in file mode"));
             }
             if !matches!(kind.as_str(), "file" | "stream" | "streamfile") {
-                return Err(mlua::Error::runtime("pdf.immediateobj() invalid argument"));
+                return Err(err("invalid argument"));
             }
             let attr = match rest.get(2) {
-                Some(v) => Some(bytes(v)?.ok_or_else(|| {
-                    mlua::Error::runtime("pdf.immediateobj() 3rd argument must be string")
-                })?),
+                Some(v) => Some(bytes(v)?.ok_or_else(|| err("3rd argument must be string"))?),
                 None => None,
             };
-            Obj {
-                kind,
-                data: Some(data),
-                attr,
-                immediate: true,
-                compress_level: None,
-            }
+            Ok(Contents::of(Some(&kind), data, attr))
         }
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.immediateobj() allows max. 3 arguments",
-            ))
-        }
-    };
-    let threshold = match obj.kind.as_str() {
-        "raw" | "file" => OBJSTM_ALWAYS,
-        _ => OBJSTM_NEVER,
-    };
-    store(k, obj, Some(threshold));
-    Ok(k)
+        _ => Err(err("allows max. 3 arguments")),
+    }
+}
+
+/// `pdf.immediateobj`.
+fn immediateobj(args: &Variadic<Value>) -> mlua::Result<u32> {
+    let (number, rest) = leading_number(args);
+    let contents = positional(rest, "immediateobj")?;
+    put(number, "immediateobj", contents, true)
+}
+
+/// `orig_obj`: the positional form of `pdf.obj`, held for a page.
+fn orig_obj(args: &Variadic<Value>) -> mlua::Result<u32> {
+    let (number, rest) = leading_number(args);
+    let contents = positional(rest, "obj")?;
+    put(number, "obj", contents, false)
 }
 
 /// `pdf.obj{...}`: `table_obj`'s keys and checks.
-fn table_obj(t: &Table) -> mlua::Result<i64> {
+fn table_obj(t: &Table) -> mlua::Result<u32> {
+    let err = |what: &str| mlua::Error::runtime(format!("pdf.obj(): {what}"));
     let kind = match t.raw_get::<Value>("type")? {
-        Value::Nil => return Err(mlua::Error::runtime("pdf.obj(): object \"type\" missing")),
+        Value::Nil => return Err(err("object \"type\" missing")),
         Value::String(s) => s.to_str()?.to_string(),
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): object \"type\" must be string",
-            ))
-        }
+        _ => return Err(err("object \"type\" must be string")),
     };
     if kind != "raw" && kind != "stream" {
-        return Err(mlua::Error::runtime(format!(
-            "pdf.obj(): \"{kind}\" is not a valid object type"
-        )));
+        return Err(err(&format!("\"{kind}\" is not a valid object type")));
     }
+    let stream = kind == "stream";
     let immediate = match t.raw_get::<Value>("immediate")? {
         Value::Nil => false,
         Value::Boolean(b) => b,
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): \"immediate\" must be boolean",
-            ))
-        }
+        _ => return Err(err("\"immediate\" must be boolean")),
     };
-    let k = match t.raw_get::<Value>("objnum")? {
-        Value::Nil => new_obj(),
-        Value::Integer(n) => reuse(n, "obj")?,
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): \"objnum\" must be integer",
-            ))
-        }
-    };
-    let attr =
-        match t.raw_get::<Value>("attr")? {
-            Value::Nil => None,
-            v => {
-                if kind != "stream" {
-                    return Err(mlua::Error::runtime(
-                        "pdf.obj(): \"attr\" key not allowed for non-stream object",
-                    ));
-                }
-                Some(bytes(&v)?.ok_or_else(|| {
-                    mlua::Error::runtime("pdf.obj(): object \"attr\" must be string")
-                })?)
-            }
-        };
-    let compress_level = match t.raw_get::<Value>("compresslevel")? {
+    let number = match t.raw_get::<Value>("objnum")? {
         Value::Nil => None,
+        Value::Integer(n) => Some(n),
+        _ => return Err(err("\"objnum\" must be integer")),
+    };
+    let attr = match t.raw_get::<Value>("attr")? {
+        Value::Nil => None,
+        v => {
+            if !stream {
+                return Err(err("\"attr\" key not allowed for non-stream object"));
+            }
+            Some(bytes(&v)?.ok_or_else(|| err("object \"attr\" must be string"))?)
+        }
+    };
+    // A stream's own `compresslevel` is checked as luatex checks it; the
+    // writer compresses every stream at `\pdfvariable compresslevel`.
+    match t.raw_get::<Value>("compresslevel")? {
+        Value::Nil => {}
         Value::Integer(n) => {
-            if kind == "raw" {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj(): \"compresslevel\" key not allowed for raw object",
-                ));
+            if !stream {
+                return Err(err("\"compresslevel\" key not allowed for raw object"));
             }
             if n > 9 {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj(): \"compresslevel\" must be <= 9",
-                ));
+                return Err(err("\"compresslevel\" must be <= 9"));
             }
             if n < 0 {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj(): \"compresslevel\" must be >= 0",
-                ));
-            }
-            Some(n)
-        }
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): \"compresslevel\" must be integer",
-            ))
-        }
-    };
-    // Whether a raw object may go into an object stream.
-    let threshold = match t.raw_get::<Value>("objcompression")? {
-        Value::Nil => OBJSTM_ALWAYS,
-        Value::Boolean(b) => {
-            if kind == "stream" {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj(): \"objcompression\" key not allowed for stream object",
-                ));
-            }
-            if b {
-                OBJSTM_ALWAYS
-            } else {
-                OBJSTM_NEVER
+                return Err(err("\"compresslevel\" must be >= 0"));
             }
         }
-        _ => {
-            if kind == "stream" {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj(): \"objcompression\" key not allowed for stream object",
-                ));
-            }
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): \"objcompression\" must be boolean",
-            ));
-        }
-    };
-    let threshold = if kind == "stream" {
-        OBJSTM_NEVER
-    } else {
-        threshold
+        _ => return Err(err("\"compresslevel\" must be integer")),
+    }
+    let uncompressed = match t.raw_get::<Value>("objcompression")? {
+        Value::Nil => false,
+        _ if stream => return Err(err("\"objcompression\" key not allowed for stream object")),
+        Value::Boolean(b) => !b,
+        _ => return Err(err("\"objcompression\" must be boolean")),
     };
     let (string, file) = (t.raw_get::<Value>("string")?, t.raw_get::<Value>("file")?);
     let (data, from_file) = match (&string, &file) {
-        (Value::Nil, Value::Nil) => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): no \"string\" or \"file\" given",
-            ))
-        }
+        (Value::Nil, Value::Nil) => return Err(err("no \"string\" or \"file\" given")),
         (Value::Nil, f) => (bytes(f)?, true),
         (s, Value::Nil) => (bytes(s)?, false),
-        _ => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj(): \"string\" and \"file\" must not be given together",
-            ))
-        }
+        _ => return Err(err("\"string\" and \"file\" must not be given together")),
     };
-    let kind = match (kind.as_str(), from_file) {
-        ("raw", true) => "file",
-        ("stream", true) => "streamfile",
-        (k, _) => k,
+    let data = data.ok_or_else(|| match (stream, from_file) {
+        (_, true) => err(&format!("\"file\" name must be string for {kind} object")),
+        (_, false) => err(&format!("\"string\" must be string for {kind} object")),
+    })?;
+    let contents = Contents {
+        stream,
+        file: from_file,
+        data,
+        attr,
+        uncompressed,
     };
-    store(
-        k,
-        Obj {
-            kind: kind.to_string(),
-            data,
-            attr,
-            immediate,
-            compress_level,
-        },
-        immediate.then_some(threshold),
-    );
-    Ok(k)
-}
-
-/// `orig_obj`: the positional form of `pdf.obj`.
-fn orig_obj(args: &Variadic<Value>) -> mlua::Result<i64> {
-    let mut first = 0;
-    let k = match args.first() {
-        Some(Value::Integer(n)) => {
-            first = 1;
-            reuse(*n, "obj")?
-        }
-        _ => new_obj(),
-    };
-    let rest = &args[first..];
-    let (kind, data, attr) = match rest.len() {
-        0 => {
-            return Err(mlua::Error::runtime(
-                "pdf.obj() needs at least one argument",
-            ))
-        }
-        1 => (
-            "raw".to_string(),
-            bytes(&rest[0])?
-                .ok_or_else(|| mlua::Error::runtime("pdf.obj() 1st argument must be string"))?,
-            None,
-        ),
-        2 | 3 => {
-            let Value::String(kind) = &rest[0] else {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj() 1st argument must be string",
-                ));
-            };
-            let kind = kind.to_str()?.to_string();
-            let data = bytes(&rest[1])?
-                .ok_or_else(|| mlua::Error::runtime("pdf.obj() 2nd argument must be string"))?;
-            if kind == "file" && rest.len() == 3 {
-                return Err(mlua::Error::runtime(
-                    "pdf.obj() 3rd argument forbidden in file mode",
-                ));
-            }
-            if !matches!(kind.as_str(), "file" | "stream" | "streamfile") {
-                return Err(mlua::Error::runtime("pdf.obj() invalid argument"));
-            }
-            let attr = match rest.get(2) {
-                Some(v) => Some(bytes(v)?.ok_or_else(|| {
-                    mlua::Error::runtime("pdf.obj() 3rd argument must be string")
-                })?),
-                None => None,
-            };
-            (kind, data, attr)
-        }
-        _ => return Err(mlua::Error::runtime("pdf.obj() allows max. 3 arguments")),
-    };
-    store(
-        k,
-        Obj {
-            kind,
-            data: Some(data),
-            attr,
-            immediate: false,
-            compress_level: None,
-        },
-        None,
-    );
-    Ok(k)
+    put(number, "obj", contents, immediate)
 }
 
 /// The `pdf` table.
@@ -575,17 +389,32 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
             format!("set{key}"),
             lua.create_function(move |_, args: Variadic<Value>| {
                 // `l_set_pdf_value`: a string is kept, anything else ignored.
-                if let Some(Value::String(s)) = args.last() {
-                    let v = s.as_bytes().to_vec();
-                    STATE.with(|st| st.borrow_mut().strings.insert(key, v));
-                }
-                Ok(())
+                let Some(Value::String(s)) = args.last() else {
+                    return Ok(());
+                };
+                let v = s.as_bytes().to_vec();
+                ctx::with("pdf", |eng, _| {
+                    match lua_string(&mut eng.backend.lua, key) {
+                        Some(field) => *field = String::from_utf8_lossy(&v).into_owned(),
+                        None => {
+                            STATE.with(|st| st.borrow_mut().xform.insert(key, v));
+                        }
+                    }
+                    Ok(())
+                })
             })?,
         )?;
         t.set(
             format!("get{key}"),
             lua.create_function(move |lua, ()| {
-                match STATE.with(|st| st.borrow().strings.get(key).cloned()) {
+                // Nothing set reads `nil`, as an absent `pdf.data` key does.
+                let v = ctx::with("pdf", |eng, _| {
+                    Ok(match lua_string(&mut eng.backend.lua, key) {
+                        Some(field) => (!field.is_empty()).then(|| field.clone().into_bytes()),
+                        None => STATE.with(|st| st.borrow().xform.get(key).cloned()),
+                    })
+                })?;
+                match v {
                     Some(v) => Ok(Value::String(lua.create_string(v)?)),
                     None => Ok(Value::Nil),
                 }
@@ -649,12 +478,9 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
     )?;
     t.set(
         "obj",
-        lua.create_function(|_, args: Variadic<Value>| {
-            open_output();
-            match &args[..] {
-                [Value::Table(t)] => table_obj(t),
-                _ => orig_obj(&args),
-            }
+        lua.create_function(|_, args: Variadic<Value>| match &args[..] {
+            [Value::Table(t)] => table_obj(t),
+            _ => orig_obj(&args),
         })?,
     )?;
     t.set(
@@ -664,13 +490,10 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
     t.set(
         "reserveobj",
         lua.create_function(|_, args: Variadic<Value>| match &args[..] {
-            [] => Ok(new_obj()),
-            [Value::String(s)] if &*s.to_str()? == "annot" => Ok(STATE.with(|st| {
-                let mut st = st.borrow_mut();
-                let k = create(&mut st, "annot");
-                st.last_annot = k;
-                k
-            })),
+            [] => ctx::with("pdf", |eng, _| Ok(Backend::reserve(eng))),
+            [Value::String(s)] if &*s.to_str()? == "annot" => {
+                ctx::with("pdf", |eng, _| Ok(Backend::reserve_annot(eng)))
+            }
             [Value::String(_)] => Err(mlua::Error::runtime(
                 "pdf.reserveobj() optional string must be \"annot\"",
             )),
@@ -701,35 +524,33 @@ pub(super) fn table(lua: &Lua, bridge: &Rc<RefCell<Bridge>>) -> mlua::Result<Tab
             ))
         })?,
     )?;
-    let getter = |lua: &Lua, f: fn(&State) -> i64| {
-        lua.create_function(move |_, ()| Ok(STATE.with(|s| f(&s.borrow()))))
+    // What the backend counts and remembers.
+    let getter = |lua: &Lua, f: fn(&crate::backend::Backend) -> i64| {
+        lua.create_function(move |_, ()| ctx::with("pdf", |eng, _| Ok(f(&eng.backend))))
     };
-    t.set("getmaxobjnum", getter(lua, |s| s.table.len() as i64)?)?;
-    t.set("maxobjnum", getter(lua, |s| s.table.len() as i64)?)?;
-    t.set("getlastobj", getter(lua, |s| s.last_obj)?)?;
-    t.set("getlastannot", getter(lua, |s| s.last_annot)?)?;
-    t.set("getlastlink", lua.create_function(|_, ()| Ok(0))?)?;
-    t.set("getretval", lua.create_function(|_, ()| Ok(0))?)?;
+    t.set("getmaxobjnum", getter(lua, |b| i64::from(b.objects()))?)?;
+    t.set("maxobjnum", getter(lua, |b| i64::from(b.objects()))?)?;
+    t.set("getlastobj", getter(lua, |b| i64::from(b.last_obj))?)?;
+    t.set("getlastannot", getter(lua, |b| i64::from(b.last_annot))?)?;
+    t.set("getlastlink", getter(lua, |b| i64::from(b.last_link))?)?;
+    t.set("getretval", getter(lua, |b| b.retval)?)?;
     t.set(
         "getnofobjects",
         lua.create_function(|_, ()| {
-            Ok(STATE.with(|s| {
-                let s = s.borrow();
-                let written = s.table.iter().filter(|slot| slot.written).count();
-                (written, s.table.len() - written)
-            }))
+            Err::<(), _>(mlua::Error::runtime(
+                "pdf.getnofobjects: the writer does not count written and dropped objects apart yet",
+            ))
         })?,
     )?;
     for name in ["getobjtype", "objtype"] {
         t.set(
             name,
             lua.create_function(|_, k: i64| {
-                Ok(STATE.with(|s| {
-                    let s = s.borrow();
-                    (k > 0)
-                        .then(|| s.table.get((k - 1) as usize).map(|slot| slot.kind))
-                        .flatten()
-                }))
+                ctx::with("pdf", |eng, _| {
+                    Ok(u32::try_from(k)
+                        .ok()
+                        .and_then(|k| eng.backend.object_kind(k)))
+                })
             })?,
         )?;
     }
