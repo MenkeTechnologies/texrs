@@ -30,11 +30,13 @@ pub mod features;
 pub mod nodes;
 pub mod normalize;
 pub mod otc;
+pub mod ota;
 pub mod otj;
 pub mod otr;
 pub mod ots;
 pub mod ott;
 pub mod oup;
+pub mod procs;
 pub mod stream;
 pub mod tfm;
 
@@ -59,6 +61,8 @@ pub struct Face {
     pub layout: dsp::Layout,
     /// The contextual rules `expandlookups` builds.
     pub expanded: oup::Expanded,
+    /// `resources.variants`: variation selector -> base character -> slot.
+    pub variants: BTreeMap<u32, BTreeMap<u32, u32>>,
 }
 
 impl Face {
@@ -101,6 +105,12 @@ impl Face {
             }
         }
         oup::unify_resources(&mut layout, &indices, &fontdata.duplicates);
+        // unifyresources' variants (font-oup.lua, merged :16553-16560): the
+        // cmap 14 glyph indices become slots
+        let variants: BTreeMap<u32, BTreeMap<u32, u32>> = std::mem::take(&mut fontdata.variants)
+            .into_iter()
+            .map(|(selector, m)| (selector, m.into_iter().filter_map(|(u, g)| ix(g).map(|s| (u, s))).collect()))
+            .collect();
         oup::copy_duplicates(&mut descriptions, &fontdata.duplicates);
         // unifymissing (font-oup.lua:748-772): the names of the glyphs that
         // have a real Unicode, then addtounicode with the lookups.
@@ -146,6 +156,7 @@ impl Face {
             private,
             layout,
             expanded,
+            variants,
         }))
     }
 

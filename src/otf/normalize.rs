@@ -118,7 +118,8 @@ impl Tables {
             .as_ref()
     }
 
-    fn ccc(&self, c: u32) -> Option<u32> {
+    /// The canonical combining class, `None` for 0.
+    pub fn ccc(&self, c: u32) -> Option<u32> {
         self.ccc.get(&c).copied()
     }
 }

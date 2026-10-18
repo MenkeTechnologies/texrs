@@ -2359,14 +2359,6 @@ const AUTOFEATURES: [&str; 12] = [
     "init", "medi", "med2", "fina", "fin2", "fin3", "isol", "rphf", "half", "pref", "blwf", "pstf",
 ];
 
-/// The scripts whose node-mode processing runs an analyzer (font-ota.lua,
-/// font-osd.lua) before the lookups; not ported, so refused rather than
-/// processed without it.
-pub const ANALYZED_SCRIPTS: [&str; 15] = [
-    "arab", "syrc", "mong", "nko ", "dev2", "deva", "bng2", "beng", "gjr2", "gujr", "gur2", "guru",
-    "knd2", "mlm2", "tml2",
-];
-
 /// `hasspacekerns` (font-ots.lua:4371-4431): whether a GPOS kern lookup kerns
 /// the space.
 fn hasspacekerns(face: &Face) -> bool {
@@ -2710,7 +2702,8 @@ impl State<'_> {
                 let mut start = self.list.tail(head);
                 while let Some(st) = start {
                     if let Ok(Some(c)) = self.ischar(Some(st)) {
-                        if attribute.is_none() {
+                        // (this loop tests no analyzer state)
+                        {
                             for (i, step) in seq.steps.iter().enumerate() {
                                 if let Some(m) = step_match(step, c) {
                                     let (h, s, ok, _) =
@@ -2740,9 +2733,11 @@ impl State<'_> {
                             start = self.next(Some(st));
                             continue;
                         };
-                        // an auto feature needs the analyzer's state, which no
-                        // node has here
-                        if attribute.is_some() {
+                        // an analyzer feature applies where the analyzer gave its
+                        // state (`getstate(start, attribute)`)
+                        if attribute
+                            .is_some_and(|k| self.list.state(st) != super::ota::feature_state(k))
+                        {
                             start = self.next(Some(st));
                             continue;
                         }
@@ -3185,25 +3180,59 @@ impl State<'_> {
 }
 
 /// `nodes.simple_font_handler` (fontloader-fonts-gbn.lua:288-299) for the
-/// node-mode fonts of a list: every font's features, then the injections.
-/// `fonts` are the list's node-mode fonts by id; the Lua visits them in
-/// table order, here ascending id.
+/// node-mode fonts of a list: `nodepass` -- the variation selectors, then
+/// each font's processors in turn (`szss`, `normalize`, `amtra`,
+/// `analyze`, `features`, `notdef`, `invisible`) -- and then the
+/// injections. `fonts` are the list's node-mode fonts by id; the Lua visits
+/// them in table order, here ascending id.
+///
+/// A font whose script needs an analyzer that is not ported is refused.
 pub fn process(
     list: &mut List,
     head: Option<Ix>,
     fonts: &BTreeMap<usize, Font>,
     direction: i32,
     widths: &dyn otj::Widths,
-) -> Option<Ix> {
+) -> Result<Option<Ix>, String> {
+    let mut head = head;
+    // nodepass: the fonts used, and the selectors after a glyph of a font
+    // with cmap 14 variants (fontloader-fonts-gbn.lua:102-183)
     let mut used: BTreeSet<usize> = BTreeSet::new();
+    let mut prevfont: Option<usize> = None;
+    let mut variants: Option<&BTreeMap<u32, BTreeMap<u32, u32>>> = None;
+    let mut redundant = Vec::new();
     let mut n = head;
     while let Some(i) = n {
-        if let Kind::Glyph { font, .. } = list.nodes[i].kind {
-            if fonts.contains_key(&font) {
-                used.insert(font);
+        if let Kind::Glyph { font, char, .. } = list.nodes[i].kind {
+            if prevfont != Some(font) {
+                prevfont = Some(font);
+                if fonts.contains_key(&font) {
+                    used.insert(font);
+                }
+                variants = fonts
+                    .get(&font)
+                    .map(|f| &f.face.variants)
+                    .filter(|v| !v.is_empty());
+            }
+            if let Some(v) = variants {
+                if (0xFE00..=0xFE0F).contains(&char) || (0xE0100..=0xE01EF).contains(&char) {
+                    if let Some(hash) = v.get(&char) {
+                        let p = list.nodes[i].prev;
+                        if let Some(pc) = list.isglyph(p) {
+                            if let Some(&variant) = hash.get(&pc) {
+                                list.set_char(p.unwrap(), variant);
+                            }
+                        }
+                    }
+                    redundant.push(i);
+                }
             }
         }
         n = list.nodes[i].next;
+    }
+    for r in redundant {
+        let (h, _) = list.remove(head, Some(r));
+        head = h;
     }
     let mut d = head;
     while let Some(i) = d {
@@ -3220,26 +3249,58 @@ pub fn process(
         }
         d = list.nodes[i].next;
     }
+    for id in &used {
+        if super::ota::unsupported(&fonts[id].script) {
+            return Err(format!(
+                "script {} needs an analyzer that is not ported",
+                fonts[id].script
+            ));
+        }
+    }
     let mut counts = Counts::default();
     let mut triggers = BTreeMap::new();
-    let mut head = head;
     let nofused = used.len();
+    let tables = super::normalize::Tables::get();
     for id in &used {
         let font = &fonts[id];
-        // the `normalize` processor comes first (position 1)
-        if let Some(how) = font.features.get("normalize") {
-            let nfc = match how {
-                FeatureValue::Text(t) => !matches!(t.as_str(), "nfd" | "nfkd"),
-                _ => true,
-            };
-            if let (true, Some(t)) = (nfc, super::normalize::Tables::get()) {
-                let allowed = |c: u32| font.face.descriptions.contains_key(&c);
-                head = super::normalize::nodes_to_nfc(list, head, *id, &allowed, t);
+        let has = |c: u32| font.face.descriptions.contains_key(&c);
+        let on = |k: &str| font.features.contains_key(k);
+        // szss: `auto` is on for a font without U+1E9E
+        let szss = match font.features.get("szss") {
+            Some(FeatureValue::Text(t)) if t == "auto" => !has(0x1E9E),
+            Some(_) => true,
+            None => false,
+        };
+        if szss {
+            head = super::procs::szss(list, head, *id);
+        }
+        if let (Some(how), Some(t)) = (font.features.get("normalize"), tables) {
+            // nfd and nfkd are other functions, not ported; anything else
+            // is NFC
+            if !matches!(how, FeatureValue::Text(s) if s == "nfd" || s == "nfkd") {
+                head = super::normalize::nodes_to_nfc(list, head, *id, &has, t);
             }
         }
-        let plan = plan(font);
-        let mut state = State::new(list, font, &mut counts, &mut triggers, nofused);
-        head = state.featuresprocessor(head, direction, &plan);
+        if let (true, Some(t)) = (on("amtra"), tables) {
+            super::procs::amtra(list, head, *id, t);
+        }
+        if on("analyze") {
+            super::ota::analyze(list, head, *id, font.face, &font.script);
+        }
+        if on("features") {
+            let plan = plan(font);
+            let mut state = State::new(list, font, &mut counts, &mut triggers, nofused);
+            head = state.featuresprocessor(head, direction, &plan);
+        }
+        if on("notdef") {
+            let code = super::procs::notdef_code(font.face);
+            super::procs::notdef(list, head, *id, code, &has);
+        }
+        if on("invisible") {
+            let r =
+                super::procs::invisible_replacement(font.features.get("invisible"), &font.widths);
+            head = super::procs::invisible(list, head, *id, r);
+        }
     }
     let thresholds = |id: usize| -> (f64, f64) {
         (
@@ -3247,5 +3308,12 @@ pub fn process(
             fonts.get(&id).map_or(0.0, |f| f.factor),
         )
     };
-    otj::handler(list, head, &mut counts, &mut triggers, &thresholds, widths)
+    Ok(otj::handler(
+        list,
+        head,
+        &mut counts,
+        &mut triggers,
+        &thresholds,
+        widths,
+    ))
 }

@@ -251,7 +251,7 @@ fn node_mode_matches_luaotfload() {
         let mut list = List::default();
         let mut at = 0;
         let head = parse_list(&case.input, &mut at, &mut list);
-        let head = ots::process(&mut list, head, &fonts, 0, &Widths(&scaled));
+        let head = ots::process(&mut list, head, &fonts, 0, &Widths(&scaled)).unwrap();
         let mut got = Vec::new();
         write_list(&list, head, &scaled, 0, &mut got);
         compared += 1;

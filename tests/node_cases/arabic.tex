@@ -1,0 +1,12 @@
+% Arabic in mode=node: the joining analyzer (init/medi/fina/isol), the
+% lam-alef ligatures, marks attached by mark/mkmk with the Arabic Mark
+% Transient Reordering of shadda first, and kerning right to left.
+\font\am="file:Amiri-Regular.ttf:mode=node;script=arab" at 12pt
+\setbox0\hbox{\am\textdir TRT السلام عليكم}\directlua{harfdump.box("amiri joining and lam-alef")}
+\setbox0\hbox{\am\textdir TRT بِسْمِ اللَّهِ الرَّحْمَٰنِ}\directlua{harfdump.box("amiri marks")}
+\setbox0\hbox{\am\textdir TRT كتب، ١٢٣ (نص)}\directlua{harfdump.box("amiri digits and punctuation")}
+\setbox0\hbox{\am\textdir TRT ب^^^^0651^^^^064e ب^^^^064e^^^^0651}\directlua{harfdump.box("amiri shadda reordering")}
+\font\amd="file:Amiri-Regular.ttf:mode=node" at 12pt
+\setbox0\hbox{\amd\textdir TRT السلام}\directlua{harfdump.box("amiri script=dflt")}
+\font\amn="file:Amiri-Regular.ttf:mode=node;script=arab;+anum" at 12pt
+\setbox0\hbox{\amn\textdir TRT 2024}\directlua{harfdump.box("amiri +anum")}

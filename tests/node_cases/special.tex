@@ -1,0 +1,15 @@
+% luaotfload's processors around the lookups: default ignorables, the
+% notdef glyph for characters a font lacks, capital sharp s, variation
+% selectors, and the generic analyzer of script=latn.
+\font\ar="file:Arimo-Regular.ttf:mode=node" at 10pt
+\setbox0\hbox{\ar a^^^^200bb A^^^^200dV x^^^^feffy soft^^adhyphen}\directlua{harfdump.box("arimo ignorables")}
+\font\arrm="file:Arimo-Regular.ttf:mode=node;invisible=remove" at 10pt
+\setbox0\hbox{\arrm a^^^^200bb A^^^^200dV}\directlua{harfdump.box("arimo invisible=remove")}
+\font\lm="file:lmroman10-regular.otf:mode=node" at 10pt
+\setbox0\hbox{\lm aაb ^^^^1e9eE x}\directlua{harfdump.box("lm notdef and sharp s")}
+\font\tm="file:texgyretermes-regular.otf:mode=node" at 10pt
+\setbox0\hbox{\tm ^^^^1e9e GROSS}\directlua{harfdump.box("termes sharp s")}
+\font\ha="file:HaranoAjiMincho-Regular.otf:mode=node" at 10pt
+\setbox0\hbox{\ha 葛^^^^^^0e0100城 葛城 辻^^^^^^0e0101}\directlua{harfdump.box("haranoaji variation selectors")}
+\font\arl="file:Arimo-Regular.ttf:mode=node;script=latn" at 10pt
+\setbox0\hbox{\arl AVAT office}\directlua{harfdump.box("arimo script=latn")}

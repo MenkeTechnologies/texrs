@@ -121,6 +121,8 @@ pub enum Slot {
 pub struct Props {
     pub slots: [Field<Inj>; 5],
     pub cursivedy: Field<f64>,
+    /// The analyzer's `state` (font-ota.lua, set with `setprop`).
+    pub state: Field<u8>,
     /// The node this one was copied from, whose table this one's metatable
     /// falls back on.
     pub parent: Option<Ix>,
@@ -591,6 +593,32 @@ impl List {
                     None => return None,
                 },
             }
+        }
+    }
+
+    /// `getprop(n, "state")` through the chain.
+    pub fn state(&self, n: Ix) -> Option<u8> {
+        let mut at = n;
+        loop {
+            let Some(Some(p)) = &self.nodes[at].props else {
+                return None;
+            };
+            match &p.state {
+                Field::Value(v) => return Some(*v),
+                Field::False => return None,
+                Field::Unset => match p.parent {
+                    Some(parent) => at = parent,
+                    None => return None,
+                },
+            }
+        }
+    }
+
+    /// `setprop(n, "state", v)` (fontloader-basics-nod.lua:177-186): nothing
+    /// for a nil `v`, else into the node's own table, made when it has none.
+    pub fn set_state(&mut self, n: Ix, v: Option<u8>) {
+        if let Some(v) = v {
+            self.props_mut(n).state = Field::Value(v);
         }
     }
 

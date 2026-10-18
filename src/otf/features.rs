@@ -142,11 +142,20 @@ pub fn node_features(raw: &BTreeMap<String, Raw>) -> NodeFeatures {
         }
     }
     // checkedfeatures: the defaults of the features processing reads, where
-    // the request says nothing (`normalize`: luaotfload-features.lua:868-871)
+    // the request says nothing (`normalize`: luaotfload-features.lua:868-871;
+    // `szss`: luaotfload-szss.lua:64-77; `amtra`: luaotfload-arabic.lua:126-143;
+    // `analyze`: font-ota.lua:239-250; `notdef`, `invisible`:
+    // luaotfload-notdef.lua:155-165, 363-371)
     let defaults = [
         ("checkmarks", FeatureValue::True),
         ("spacekern", FeatureValue::True),
         ("normalize", FeatureValue::Text("nfc".into())),
+        ("szss", FeatureValue::Text("auto".into())),
+        ("amtra", FeatureValue::Text("auto".into())),
+        ("analyze", FeatureValue::True),
+        ("features", FeatureValue::True),
+        ("notdef", FeatureValue::Number(1.0)),
+        ("invisible", FeatureValue::True),
     ];
     for (f, v) in defaults {
         let said = spec.keys().any(|k| k.to_lowercase() == f);
