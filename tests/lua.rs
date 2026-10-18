@@ -1962,3 +1962,30 @@ fn an_opentype_font_a_definer_answers_is_registered_for_the_writer_by_glyph() {
         "a character without an index has no glyph"
     );
 }
+
+#[test]
+fn token_create_makes_a_given_value_with_no_name_as_luatex_does() {
+    // expl3.lua's `token.create(1, command_id('char_given'))`: a `\chardef`
+    // value standing alone, which TeX reads as the number wherever it scans
+    // one; with a character command the second argument is the catcode, and
+    // 0, 9, 14 and 15 are taken as 12 with a warning.
+    let body = shows(
+        "local cg = token.command_id('char_given') local mg = token.command_id('math_given') \
+         local t = token.create(1, cg) local m = token.create(0x7123, mg) \
+         local a = token.create(65, 11) local b = token.create(66, 0) \
+         token.put_next({token.create('count'), token.create(49, 12), token.create(61, 12), \
+           token.create(7, cg), token.create('relax')}) \
+         local out = t.cmdname .. ' ' .. t.mode .. ' ' .. tostring(t.csname) .. ' ' .. m.cmdname .. ' ' \
+         .. m.mode .. ' ' .. a.cmdname .. ' ' .. b.cmdname .. ' ' .. b.mode ",
+    );
+    let body = format!("{body}\\message{{[\\the\\count1]}}");
+    let want = "[char_given 1 nil math_given 28963 letter other_char 66] [7]";
+    assert!(out(&body).ends_with(want), "{}", out(&body));
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, &body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

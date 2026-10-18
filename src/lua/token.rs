@@ -400,6 +400,8 @@ impl LuaToken {
     /// `csname`: the name, without the active prefix; nil for a character.
     fn csname(&self) -> Option<String> {
         match self.tok {
+            // A `char_given` value standing alone has no name in luatex.
+            Token::Cs(n) if n.name().starts_with(ANONYMOUS) => None,
             Token::Cs(n) => Some(n.name().to_string()),
             Token::Char(c, Cat::Active) => Some(c.to_string()),
             _ => None,
@@ -784,27 +786,45 @@ pub(super) fn table(lua: &Lua, arena: &Rc<RefCell<node::Arena>>) -> mlua::Result
     // is entered into the hash if it was not there, as `string_lookup` does.
     t.set(
         "create",
-        lua.create_function(|lua, (v, cat): (Value, Option<i64>)| match v {
+        // lnewtokenlib.c `run_build`: a number and an optional command code
+        // (the character's catcode when absent). Codes 0, 9, 14 and 15 are no
+        // tokens and become 12 with a warning; 1 to 13 are the character
+        // commands, 13 an active character; `char_given` and `math_given`
+        // are a `\chardef` and a `\mathchardef` value standing alone, which
+        // texrs holds as a control sequence no document can name
+        // ([`anonymous`]).
+        lua.create_function(|lua, (v, cmd): (Value, Option<i64>)| match v {
             Value::Integer(_) | Value::Number(_) => {
                 let code = v.as_integer().unwrap_or_else(|| v.as_number().unwrap_or(0.0) as i64);
                 let c = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
-                let cat = match cat {
+                let cmd = match cmd {
                     Some(n) => n,
                     None => ctx::with("token.create", |eng, _| Ok(eng.cats.get(c) as i64))?,
                 };
-                let cat = match cat {
+                let cmd = match cmd {
                     0 | 9 | 14 | 15 => {
                         let msg = format!(
-                            "token lib: not a good token, catcode {cat} can not be returned, so 12 will be used"
+                            "token lib: not a good token, catcode {cmd} can not be returned, so 12 will be used"
                         );
                         super::warn(&msg);
                         12
                     }
                     n => n,
                 };
-                let cat = crate::catcode::cat_from_i64(cat)
-                    .ok_or_else(|| mlua::Error::runtime(format!("bad catcode {cat}")))?;
-                Ok(Value::UserData(lua.create_userdata(LuaToken::new(Token::Char(c, cat)))?))
+                let tok = match cmd {
+                    1..=13 => Token::Char(c, crate::catcode::cat_from_i64(cmd).expect("1 to 13 are catcodes")),
+                    n if n == command("char_given") => anonymous(Meaning::CharDef(code))?,
+                    n if n == command("math_given") => anonymous(Meaning::MathCharDef(code))?,
+                    n => {
+                        return Err(mlua::Error::runtime(format!(
+                            "token.create({code}, {n}): command {} with no control sequence is a token \
+                             texrs cannot hold; it holds characters, control sequences and \
+                             char_given/math_given values",
+                            COMMANDS.get(n as usize).copied().unwrap_or("?")
+                        )))
+                    }
+                };
+                Ok(Value::UserData(lua.create_userdata(LuaToken::new(tok))?))
             }
             Value::String(s) => {
                 let name = s.to_str()?.to_string();
@@ -1160,4 +1180,27 @@ pub(super) fn is_primitive_name(name: &str) -> bool {
 /// answers for those.
 pub(super) fn means_something(eng: &Engine, name: &str) -> bool {
     eng.meanings.contains_key(&CsId::intern(name)) || super::claims(name) || is_primitive_name(name)
+}
+
+/// The first character of a control sequence a document cannot name: a
+/// tokenizer never puts it in a name, so no `\csname` or `\string` of a
+/// document's reaches one.
+const ANONYMOUS: char = '\u{1}';
+
+/// A token that means `m` and is named by nothing a document can write:
+/// LuaTeX's `char_given`/`math_given` token with no control sequence, which
+/// texrs holds as a control sequence of its own defined to mean `m`, globally,
+/// as the token carries its meaning wherever it goes.
+fn anonymous(m: Meaning) -> mlua::Result<Token> {
+    let name = match &m {
+        Meaning::CharDef(n) => format!("{ANONYMOUS}char_given:{n}"),
+        Meaning::MathCharDef(n) => format!("{ANONYMOUS}math_given:{n}"),
+        _ => unreachable!("only the two given commands are made anonymous"),
+    };
+    let cs = CsId::intern(&name);
+    ctx::with("token.create", |eng, _| {
+        eng.meanings.insert(cs, m);
+        Ok(())
+    })?;
+    Ok(Token::Cs(cs))
 }
