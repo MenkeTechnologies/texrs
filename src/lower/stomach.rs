@@ -309,22 +309,8 @@ impl Lowerer {
             return Ok(Some(MsgOp::Dimen(Num::Count(slot))));
         }
         // §425 and §578: a font's parameters are the lowerer's font memory.
-        match w.name() {
-            "fontdimen" => {
-                let (f, n) = self.st_find_font_dimen(work, false)?;
-                let v = self.eng.fonts.get(f).param(n as usize);
-                return Ok(Some(MsgOp::Dimen(Num::Literal(v))));
-            }
-            "hyphenchar" | "skewchar" => {
-                let f = self.st_scan_font_ident(work)?;
-                let font = self.eng.fonts.get(f);
-                let v = match w.name() {
-                    "hyphenchar" => font.hyphen_char,
-                    _ => font.skew_char,
-                };
-                return Ok(Some(MsgOp::Number(Num::Literal(v))));
-            }
-            _ => {}
+        if let Some(text) = self.st_the_font_quantity(w, work)? {
+            return Ok(Some(MsgOp::Text(text)));
         }
         let Some(i) = Internal::of_name(w.name()) else {
             return Ok(None);
@@ -343,6 +329,28 @@ impl Lowerer {
             _ if i.is_dimen() => MsgOp::Dimen(Num::Count(slot)),
             _ => MsgOp::Number(Num::Count(slot)),
         }))
+    }
+
+    /// `\the\fontdimen n f`, `\the\hyphenchar f` and `\the\skewchar f`,
+    /// printed: font memory is the lowerer's, so the value is known now.
+    pub(super) fn st_the_font_quantity(&mut self, w: CsId, lx: &mut Lexer) -> R<Option<String>> {
+        Ok(match w.name() {
+            "fontdimen" => {
+                let (f, n) = self.st_find_font_dimen(lx, false)?;
+                let v = self.eng.fonts.get(f).param(n as usize);
+                Some(format!("{}pt", crate::dimen::print_scaled(v)))
+            }
+            "hyphenchar" | "skewchar" => {
+                let f = self.st_scan_font_ident(lx)?;
+                let font = self.eng.fonts.get(f);
+                Some(match w.name() {
+                    "hyphenchar" => font.hyphen_char,
+                    _ => font.skew_char,
+                }
+                .to_string())
+            }
+            _ => None,
+        })
     }
 
     /// Whether a character token of category `cat` is this file's to lower.
@@ -899,7 +907,26 @@ impl Lowerer {
         } else {
             crate::stomach::font::Size::Scaled(1000)
         };
-        match self.eng.fonts.load(&file, size, &id) {
+        // LuaTeX's `define_font` callback answers first, when one is
+        // registered (`crate::node::hooks`).
+        let lua_size = match size {
+            crate::stomach::font::Size::At(s) => s,
+            crate::stomach::font::Size::Scaled(m) => -m,
+        };
+        let defined = match crate::node::hooks::define_font(&file, lua_size) {
+            Some(crate::node::hooks::Defined::Font(font)) => {
+                let mut font = *font;
+                font.id_text = id.clone();
+                Some((self.eng.fonts.add(font), true))
+            }
+            Some(crate::node::hooks::Defined::Existing(f))
+                if (f as usize) < self.eng.fonts.fonts.len() =>
+            {
+                Some((f, false))
+            }
+            _ => self.eng.fonts.load(&file, size, &id),
+        };
+        match defined {
             Some((f, fresh)) => {
                 if !fresh {
                     // The newest name is the one of record (§1257), and the

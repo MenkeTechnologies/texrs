@@ -3983,6 +3983,13 @@ impl Lowerer {
         if self.eng.cant_use_after_the(lx, &t) {
             return Ok(vec![Token::cs("number"), Token::Char('0', Cat::Other)]);
         }
+        // §425 and §578: a font's parameters are the lowerer's font
+        // memory, so the value is read here, with its operands.
+        if let Token::Cs(n) = t {
+            if let Some(text) = self.st_the_font_quantity(n, lx)? {
+                return Ok(crate::expand::str_toks(&text));
+            }
+        }
         let mut spelt = vec![Token::cs("the"), t];
         let takes_number = match t {
             Token::Cs(n) => {

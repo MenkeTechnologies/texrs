@@ -38,6 +38,9 @@ pub struct Font {
     pub skew_char: i64,
     /// The metrics, per code: `None` where the font has no character.
     chars: Vec<Option<Metrics>>,
+    /// The characters above 255, which only a font made from metrics (a
+    /// `define_font` callback's) has.
+    wide: rustc_hash::FxHashMap<u32, Metrics>,
     /// The ligature/kern program, kept for §1039's walk.
     tfm: Option<std::sync::Arc<Tfm>>,
     /// `font_bchar` and `font_false_bchar` (§576).
@@ -67,6 +70,7 @@ impl Font {
             hyphen_char: '-' as i64,
             skew_char: -1,
             chars: Vec::new(),
+            wide: rustc_hash::FxHashMap::default(),
             tfm: None,
             bchar: NON_CHAR,
             false_bchar: NON_CHAR,
@@ -117,10 +121,45 @@ impl Font {
             hyphen_char: '-' as i64,
             skew_char: -1,
             chars,
+            wide: rustc_hash::FxHashMap::default(),
             tfm: Some(tfm),
             bchar,
             false_bchar,
         }
+    }
+
+    /// A font made from metrics rather than read from a TFM: what LuaTeX's
+    /// `define_font` callback answers with a font table. It has no
+    /// ligature/kern program, no boundary character and no checksum.
+    pub fn from_metrics(
+        name: &str,
+        id_text: &str,
+        size: Scaled,
+        design_size: Scaled,
+        mut params: Vec<Scaled>,
+        chars: impl IntoIterator<Item = (u32, Metrics)>,
+    ) -> Font {
+        if params.len() < 7 {
+            params.resize(7, 0);
+        }
+        let mut font = Font {
+            name: name.to_string(),
+            id_text: id_text.to_string(),
+            size,
+            design_size,
+            params,
+            ..Font::null()
+        };
+        font.chars = vec![None; 256];
+        for (code, m) in chars {
+            match code < 256 {
+                true => font.chars[code as usize] = Some(m),
+                false => {
+                    font.wide.insert(code, m);
+                }
+            }
+        }
+        font
     }
 
     /// The character's metrics, if the font has it (§554's `char_exists`).
@@ -128,7 +167,7 @@ impl Font {
         let code = u32::from(c);
         match code < 256 {
             true => self.chars.get(code as usize).copied().flatten(),
-            false => None,
+            false => self.wide.get(&code).copied(),
         }
     }
 
@@ -150,13 +189,13 @@ impl Font {
         }
     }
 
-    /// §1042's `font_glue`: the interword glue of the font, from
-    /// `\fontdimen2..4`.
     /// `font_bchar` (§576): the right boundary character, 256 for none.
     pub(super) fn bchar_code(&self) -> u16 {
         self.bchar
     }
 
+    /// §1042's `font_glue`: the interword glue of the font, from
+    /// `\fontdimen2..4`.
     pub fn space_glue(&self) -> Glue {
         Glue {
             natural: self.param(2),
@@ -373,9 +412,16 @@ impl Stomach {
                 },
                 Label::Move2 => {
                     let c = chars[j];
-                    let exists = s.cur_l < 256
-                        && font.metrics(char::from(s.cur_l as u8)).is_some()
-                        && font.metrics(c).is_some();
+                    // A code past 255 is in a font made from metrics, which
+                    // has no ligature/kern program to have changed `cur_l`.
+                    let exists = match u32::from(c) < 256 {
+                        true => {
+                            s.cur_l < 256
+                                && font.metrics(char::from(s.cur_l as u8)).is_some()
+                                && font.metrics(c).is_some()
+                        }
+                        false => font.metrics(c).is_some(),
+                    };
                     if !exists {
                         self.char_warning(f, c);
                         return j + 1;
@@ -762,6 +808,18 @@ impl Table {
         self.fonts.get_mut(f as usize)
     }
 
+    /// Put a font made from metrics into font memory, as LuaTeX's
+    /// `font.define` does, and return its number. The program finds it under
+    /// its name and size when it is told to define it ([`provided`]).
+    pub fn add(&mut self, font: Font) -> u16 {
+        PROVIDED.with(|p| {
+            p.borrow_mut()
+                .insert((font.name.clone(), font.size), font.clone())
+        });
+        self.fonts.push(font);
+        (self.fonts.len() - 1) as u16
+    }
+
     /// §1257-§1260's `new_font` from the file name on: reuse a font already
     /// loaded from the same file at the same size, or read the TFM. `None`
     /// when the file cannot be found or read (§561's `Font ... not
@@ -811,4 +869,22 @@ impl Table {
             false => font.name.clone(),
         }
     }
+}
+
+thread_local! {
+    /// The fonts [`Table::add`] put into the lowerer's font memory, by name
+    /// and size, for the program's copy of font memory to take when it is
+    /// told to define them: there is no TFM file it could read instead.
+    static PROVIDED: std::cell::RefCell<rustc_hash::FxHashMap<(String, Scaled), Font>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+}
+
+/// A font [`Table::add`] was given, under the identifier `id_text`.
+pub fn provided(name: &str, size: Scaled, id_text: &str) -> Option<Font> {
+    PROVIDED.with(|p| {
+        p.borrow().get(&(name.to_string(), size)).map(|f| Font {
+            id_text: id_text.to_string(),
+            ..f.clone()
+        })
+    })
 }

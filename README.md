@@ -425,10 +425,13 @@ than none.
   is called by the stomach while the program runs, with luatex's arguments, and
   its answer is what gets packed. TeX Live's luaotfload loads under ltluatex
   and registers its definer on `define_font`, as in luatex.
-- `--dvi`: a page. Text measured in a real font (`.tfm`), broken into total-fit
-  lines by the same breaker as `--pdf`, packed into boxes and shipped through
-  `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
-  to a page, and no maths (a formula's scripts are dropped; `--pdf` sets them).
+- `--dvi`: a page. A plain document is set as `tex` sets it, plain.tex
+  preloaded and every list built by the stomach, and its DVI is tex's byte for
+  byte on every document dvi-parity measures; no maths yet. A LaTeX document is
+  measured in a real font (`.tfm`), broken into total-fit lines by the same
+  breaker as `--pdf`, packed into boxes and shipped through
+  `hlist_out`/`vlist_out` -- a fixed number of lines to a page, and no maths (a
+  formula's scripts are dropped; `--pdf` sets them).
 - `\label`, `\ref` and `\pageref`, resolved against the pass that finds the
   pages — `\ref` gives `\@currentlabel` as the class's `\the<counter>` writes
   it: a heading's number (`1` in an article, `1.1` in a report or book, lettered

@@ -401,9 +401,11 @@ impl Stomach {
         if self.fonts.len() <= f {
             self.fonts.resize(f + 1, super::Font::null());
         }
-        let loaded = crate::typeset::find_font(name)
-            .and_then(|p| crate::tfm::Tfm::open(p).ok())
-            .map(|t| super::Font::load(std::sync::Arc::new(t), name, id, size));
+        let loaded = super::font::provided(name, size, id).or_else(|| {
+            crate::typeset::find_font(name)
+                .and_then(|p| crate::tfm::Tfm::open(p).ok())
+                .map(|t| super::Font::load(std::sync::Arc::new(t), name, id, size))
+        });
         self.fonts[f] = match loaded {
             Some(font) => font,
             // §561: a font that cannot be loaded leaves the identifier

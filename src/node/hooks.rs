@@ -23,8 +23,10 @@
 //! | `vpack_filter` | every `vpack`/`vpackage` a box construction makes | `head, groupcode, size, packtype, maxdepth` |
 //! | `pre_output_filter` | §1017, before `\box255` is packaged for `\output` | `head, groupcode, size, packtype, maxdepth` |
 //! | `hyphenate`, `ligaturing`, `kerning` | LuaTeX's three passes over a paragraph's characters, before `pre_linebreak_filter` | `head, tail` |
+//! | `define_font` | §1257's `new_font`, while lowering, before the TFM is read | `name, size` |
 //!
-//! These run while the PROGRAM runs, not while it is lowered: the lists exist
+//! These run while the PROGRAM runs, not while it is lowered (all but
+//! `define_font`): the lists exist
 //! only then. A Lua chunk that registers one at `\directlua` time is
 //! registering for the run that follows.
 
@@ -36,6 +38,18 @@ use std::cell::RefCell;
 pub type ListFilter = Box<dyn FnMut(&mut Vec<Node>, &Context)>;
 /// A notification with LuaTeX's `extrainfo` string.
 pub type Notice = Box<dyn FnMut(&str)>;
+/// LuaTeX's `define_font`: the file name and the size (positive scaled points
+/// for `at`, `-1000` times the scale for `scaled`, so `scaled 1000` is
+/// `-1000`), answered with a font or with a font already defined.
+pub type FontDefiner = Box<dyn FnMut(&str, i64) -> Option<Defined>>;
+
+/// What `define_font` answered.
+pub enum Defined {
+    /// A font made from the callback's table, to be added to font memory.
+    Font(Box<crate::stomach::font::Font>),
+    /// The number of a font already in font memory.
+    Existing(u16),
+}
 
 /// What a filter is told besides the list: LuaTeX's `groupcode`, and for the
 /// packagers the size and pack type and `maxdepth`.
@@ -66,6 +80,9 @@ pub struct Hooks {
     pub hyphenate: Option<ListFilter>,
     pub ligaturing: Option<ListFilter>,
     pub kerning: Option<ListFilter>,
+    /// Called while LOWERING, at `\font` (§1257), where every other hook is
+    /// called while the program runs.
+    pub define_font: Option<FontDefiner>,
 }
 
 thread_local! {
@@ -173,6 +190,15 @@ pub fn buildpage_filter(info: &str) {
 /// `contribute_filter`, as material reaches the contribution list.
 pub fn contribute_filter(info: &str) {
     notice(|h| &mut h.contribute_filter, info);
+}
+
+/// `define_font`, for `\font\x=name at/scaled ...`: `None` when no callback
+/// is registered or it gave no answer, and the TFM is read as tex reads it.
+pub fn define_font(name: &str, size: i64) -> Option<Defined> {
+    let mut hook = HOOKS.with(|h| h.borrow_mut().define_font.take())?;
+    let answer = hook(name, size);
+    HOOKS.with(|h| h.borrow_mut().define_font = Some(hook));
+    answer
 }
 
 /// Whether `linebreak_filter` is registered, in which case it replaces the

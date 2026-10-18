@@ -397,7 +397,8 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
   `pre_output_filter`, `linebreak_filter`, `hyphenate`, `ligaturing`,
   `kerning` and `contribute_filter` are not called yet. No file is opened through
   `find_read_file`/`open_read_file`, no line passes through
-  `process_input_buffer`, and no `\font` goes through `define_font`.
+  `process_input_buffer`, and the stomach's `\font` calls the `define_font`
+  hook point, which a registered Lua definer does not fill yet.
 - **A list crossing to Lua and back** keeps what `crate::node::Node` holds;
   an attribute list, a disc's `penalty`, a glyph's offsets, `lang` and
   `expansion_factor`, and the LuaTeX-only nodes (`dir`, `local_par`,
