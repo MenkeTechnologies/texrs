@@ -54,6 +54,7 @@ pub mod lower;
 pub mod lsp;
 pub mod lua;
 pub mod luatex_oracle;
+pub mod luatex_primitives;
 pub mod math;
 pub mod node;
 pub mod pack;

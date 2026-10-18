@@ -95,9 +95,9 @@ pub fn primitives(program: &str) -> Result<Vec<Primitive>, String> {
     let dir = scratch_dir();
     let lua = "for _,o in ipairs({'tex','etex','luatex','core'}) do \
                  for _,v in ipairs(tex.extraprimitives(o)) do \
-                   texio.write_nl('log','ORIGIN '..o..' '..v) end end \
+                   texio.write_nl('log','ORIGIN '..o..' ['..v..']') end end \
                for _,v in ipairs(tex.primitives()) do \
-                 texio.write_nl('log','ALL '..v) end";
+                 texio.write_nl('log','ALL ['..v..']') end";
     std::fs::write(dir.join("list.lua"), lua).map_err(|e| e.to_string())?;
     std::fs::write(
         dir.join("list.tex"),
@@ -114,26 +114,29 @@ pub fn primitives(program: &str) -> Result<Vec<Primitive>, String> {
 
     let mut origin_of = std::collections::HashMap::new();
     let mut all = Vec::new();
+    // Each name is written between brackets, so the control space is `[ ]`
+    // and whatever the log puts after the last one (the file's `)`) is not
+    // read as part of it.
+    let bracketed = |s: &str| {
+        s.strip_prefix('[')
+            .and_then(|s| s.rfind(']').map(|end| s[..end].to_string()))
+    };
     for line in log.lines() {
-        let mut words = line.splitn(3, ' ');
-        match (words.next(), words.next(), words.next()) {
-            (Some("ORIGIN"), Some(o), Some(name)) => {
-                let o: &'static str = match o {
-                    "tex" => "tex",
-                    "etex" => "etex",
-                    "luatex" => "luatex",
-                    _ => "core",
-                };
-                origin_of.entry(name.to_string()).or_insert(o);
+        if let Some(rest) = line.strip_prefix("ORIGIN ") {
+            let Some((o, name)) = rest.split_once(' ') else {
+                continue;
+            };
+            let o: &'static str = match o {
+                "tex" => "tex",
+                "etex" => "etex",
+                "luatex" => "luatex",
+                _ => "core",
+            };
+            if let Some(name) = bracketed(name) {
+                origin_of.entry(name).or_insert(o);
             }
-            // `splitn` keeps the control space whole: `ALL  ` is the name " ".
-            (Some("ALL"), Some(first), rest) => {
-                all.push(match rest {
-                    Some(r) => format!("{first} {r}"),
-                    None => first.to_string(),
-                });
-            }
-            _ => {}
+        } else if let Some(name) = line.strip_prefix("ALL ").and_then(bracketed) {
+            all.push(name);
         }
     }
     if all.is_empty() {
@@ -152,6 +155,68 @@ pub fn primitives(program: &str) -> Result<Vec<Primitive>, String> {
             meaning,
         })
         .collect())
+}
+
+/// Every primitive a document can reach in luatex, with the command code
+/// luatex gives it (`token.create(name).cmdname`) and whether that command
+/// expands (`.expandable`), sorted by name: the table
+/// `src/luatex_primitives.rs` is written from. A name `tex.primitives()` lists
+/// that is still `undefined_cs` once every origin is enabled is left out.
+pub fn command_table(program: &str) -> Result<Vec<(String, String, bool)>, String> {
+    let dir = scratch_dir();
+    let lua = "for _,v in ipairs(tex.primitives()) do \
+                 local t = token.create(v) \
+                 texio.write_nl('log','CMD '..t.cmdname..' '..tostring(t.expandable)..' ['..v..']') \
+               end";
+    std::fs::write(dir.join("cmds.lua"), lua).map_err(|e| e.to_string())?;
+    std::fs::write(
+        dir.join("case.tex"),
+        "\\catcode123=1 \\catcode125=2 \\directlua{dofile('cmds.lua')}\\end\n",
+    )
+    .map_err(|e| e.to_string())?;
+    Command::new(program)
+        .args(["--ini", "-interaction=nonstopmode", ENABLE_ALL])
+        .current_dir(&dir)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let log = std::fs::read_to_string(dir.join("case.log")).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut table: Vec<(String, String, bool)> = log
+        .lines()
+        .filter_map(|l| l.strip_prefix("CMD "))
+        .filter_map(|rest| {
+            let mut w = rest.splitn(3, ' ');
+            let (cmd, expandable, name) = (w.next()?, w.next()?, w.next()?);
+            let name = name.strip_prefix('[')?;
+            let name = &name[..name.rfind(']')?];
+            (cmd != "undefined_cs").then(|| (name.to_string(), cmd.to_string(), expandable == "true"))
+        })
+        .collect();
+    table.sort();
+    table.dedup();
+    match table.is_empty() {
+        true => Err("luatex reported no command codes".to_string()),
+        false => Ok(table),
+    }
+}
+
+/// `src/luatex_primitives.rs` as [`command_table`] makes it.
+pub fn render_command_table(table: &[(String, String, bool)]) -> String {
+    let mut out = format!(
+        "//! Every primitive a document can reach in luatex {PINNED}, with the command\n\
+         //! code luatex gives it (`token.create(name).cmdname`) and whether that\n\
+         //! command expands. WRITTEN by `bash scripts/primitive-census.sh` out of\n\
+         //! luatex's own table (`crate::luatex_oracle::command_table`); not edited\n\
+         //! by hand, and `tests/luatex_primitives.rs` checks it against luatex.\n\
+         \n\
+         /// `(name, luatex command, expandable)`, sorted by name.\n\
+         pub const TABLE: &[(&str, &str, bool)] = &[\n"
+    );
+    for (name, cmd, expandable) in table {
+        out.push_str(&format!("    ({name:?}, {cmd:?}, {expandable}),\n"));
+    }
+    out.push_str("];\n");
+    out
 }
 
 /// The control sequence `name` as a document spells it: a control symbol is

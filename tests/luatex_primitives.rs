@@ -111,3 +111,25 @@ fn the_frozen_file_still_says_what_luatex_says() {
         stale.join("\n")
     );
 }
+
+#[test]
+fn the_command_table_is_luatexs() {
+    // `src/luatex_primitives.rs` is what texrs knows about every primitive it
+    // has no arm for; it is only worth that if it is still luatex's own.
+    let program = match texrs::luatex_oracle::program() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("skipping: {e}");
+            return;
+        }
+    };
+    let live = texrs::luatex_oracle::command_table(&program).expect("luatex's table");
+    let committed: Vec<(String, String, bool)> = texrs::luatex_primitives::TABLE
+        .iter()
+        .map(|(n, c, e)| (n.to_string(), c.to_string(), *e))
+        .collect();
+    assert!(
+        live == committed,
+        "src/luatex_primitives.rs is stale -- run `bash scripts/primitive-census.sh`"
+    );
+}

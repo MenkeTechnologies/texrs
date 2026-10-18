@@ -275,6 +275,12 @@ than none.
 - `\let`, `\edef`/`\xdef`, `\gdef`, `\global`, `\begingroup`/`\endgroup`.
 - Conditionals: `\iftrue`, `\iffalse`, `\ifnum`, `\ifodd`, `\ifx`, `\if`, `\ifcat`, `\ifcase`
   with `\or`, `\else`, `\fi` — nested, and inside a `\message` body.
+- Every primitive luatex has is a primitive here too, with the command code
+  luatex gives it (`src/luatex_primitives.rs`, written from luatex's own table),
+  so `\meaning`, `\ifdefined` and `\ifcsname` answer for `\numexpr`,
+  `\attribute` or `\Umathchar` as luatex does, whether or not texrs executes it;
+  `BUGS.md` has the census of which ones it does. `\ifdefined` of a character
+  that is not active is true, as in luatex.
 - Groups, which scope the macro table AND the registers they write; a
   register assigned `\global` inside one keeps what the last global assignment
   left, even when a local one follows it (§283).

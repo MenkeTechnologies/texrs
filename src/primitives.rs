@@ -472,9 +472,23 @@ pub fn meaning(name: &str, esc: &str) -> String {
     }
 }
 
+/// luatex's command code for the primitive `name` (`crate::luatex_primitives`,
+/// written from luatex's own table), if luatex has a primitive of that name.
+///
+/// This is what the expander knows about a primitive it has no arm for: that
+/// it IS one, of which command, and whether that command expands -- so
+/// `\meaning` and `\ifdefined` answer as luatex does, whatever texrs executes.
+pub fn luatex_command(name: &str) -> Option<&'static str> {
+    use crate::luatex_primitives::TABLE;
+    TABLE
+        .binary_search_by(|(n, ..)| (*n).cmp(name))
+        .ok()
+        .map(|i| TABLE[i].1)
+}
+
 /// Whether `name` is something tex starts out knowing: a TeX82 primitive, a §236
-/// parameter, or a command this engine documents. Anything else is undefined
-/// until a document defines it.
+/// parameter, a primitive of luatex's, or a command this engine documents.
+/// Anything else is undefined until a document defines it.
 ///
 /// A set rather than a scan of the lists: the expander asks for every control
 /// sequence it expands.
@@ -483,6 +497,7 @@ pub fn is_known_name(name: &str) -> bool {
     static KNOWN: Lazy<std::collections::HashSet<&'static str>> = Lazy::new(|| {
         let mut set: std::collections::HashSet<&'static str> = NAMES.iter().copied().collect();
         set.extend(crate::intpar::NAMES.iter().copied());
+        set.extend(crate::luatex_primitives::TABLE.iter().map(|(n, ..)| *n));
         set.extend(crate::corpus::names().filter_map(|n| n.strip_prefix('\\')));
         set
     });

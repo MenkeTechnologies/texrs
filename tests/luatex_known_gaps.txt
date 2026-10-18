@@ -12,8 +12,6 @@ expanded.tex       `\expanded' in a \message body leaves its result unexpanded
 #                  where luatex's back_list puts it back to be expanded again
 #                  (`[AA\a ]' for `[AAA]'), and `\expandafter' does not expand
 #                  it inside an \edef.
-ifdefined.tex      `\ifdefined\relax' is false: a primitive nothing has
-#                  redefined is looked up in the macro table only.
 numexpr.tex        `\the\numexpr' in a \message body is refused
 #                  (`Unsupported \the'): the message lowering has no
 #                  expression operand.

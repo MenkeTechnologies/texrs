@@ -13,6 +13,8 @@
 [2.0pt plus 4.0pt minus 6.0pt][3.0pt plus 1.0fil][6.0mu plus 2.0fill]
 #==# ifdefined.tex
 [Y][N][Y] [Y][N][N]
+#==# ifdefined_edges.tex
+[ Y][N] [Y][Y][Y] [N][N][N] [Y]
 #==# numexpr.tex
 [7][9][4] [-4][48][14]
 #==# protected.tex

@@ -1608,10 +1608,10 @@ impl Engine {
                 }
             }
             "ifodd" => self.scan_number(lx, pending_only)? % 2 != 0,
-            "ifdefined" => match self.take(lx, pending_only) {
-                Some(Token::Cs(n)) => self.meanings.contains_key(&n),
-                _ => false,
-            },
+            "ifdefined" => {
+                let t = self.take(lx, pending_only);
+                self.if_def_truth(t.as_ref())
+            }
             // etex.ch's `if_cs_code`. It reads the characters up to
             // `\endcsname` exactly as `\csname` does and then asks whether that
             // name is defined -- but its `id_lookup` runs with
@@ -1625,7 +1625,7 @@ impl Engine {
             // etex's is: both test `eq_type(cur_cs) <> undefined_cs`.
             "ifcsname" => {
                 let built = self.read_csname(lx, pending_only)?;
-                self.meanings.contains_key(&CsId::intern(&built))
+                !self.is_undefined(CsId::intern(&built))
             }
             "ifx" => {
                 let a = self.take(lx, pending_only);
@@ -2886,6 +2886,22 @@ impl Engine {
         }
     }
 
+    /// etex.ch's `if_def_code`: `get_next`, then `eq_type(cur_cs) <>
+    /// undefined_cs`. A primitive nothing has redefined is defined, and so is a
+    /// character that is not active -- its `cur_cs` is zero, whose `eq_type`
+    /// is not `undefined_cs`; measured, `\ifdefined a` is true in luatex. An
+    /// active character is whatever its meaning is.
+    pub fn if_def_truth(&self, t: Option<&Token>) -> bool {
+        match t {
+            Some(Token::Cs(n)) => !self.is_undefined(*n),
+            Some(Token::Char(c, Cat::Active)) => self
+                .active_meaning(*c)
+                .is_some_and(|id| !self.is_undefined(id)),
+            Some(Token::Char(..)) => true,
+            None => false,
+        }
+    }
+
     /// Whether a name the table holds nothing for is a primitive rather than
     /// undefined -- the question [`Self::unbound_meaning`] answers in words.
     fn is_primitive_name(&self, name: CsId) -> bool {
@@ -2906,6 +2922,12 @@ impl Engine {
         // Every other TeX82 primitive, whether or not texrs executes it.
         if crate::primitives::is_primitive(name.name()) {
             return crate::primitives::meaning(name.name(), &self.esc().to_string());
+        }
+        // A primitive TeX82 has not got: luatex's `print_cmd_chr` prints every
+        // one of them as its own escaped name -- measured over the whole table
+        // by `scripts/primitive-census.sh`.
+        if crate::primitives::luatex_command(name.name()).is_some() {
+            return format!("{}{}", self.esc(), name.name());
         }
         match crate::corpus::lookup(&format!("\\{}", name.name())) {
             Some(_) => format!("{}{}", self.esc(), name.name()),

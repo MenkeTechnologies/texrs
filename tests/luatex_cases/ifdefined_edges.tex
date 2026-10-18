@@ -1,0 +1,10 @@
+% primitives: ifdefined ifcsname
+\catcode`\{=1 \catcode`\}=2 \catcode`\~=13
+\message{[\ifdefined a Y\else N\fi][\ifdefined ~Y\else N\fi]}
+\def~{}
+\message{[\ifdefined ~Y\else N\fi][\ifcsname relax\endcsname Y\else N\fi][\ifdefined\scantokens Y\else N\fi]}
+\let\u\undefinedzz
+\message{[\ifdefined\u Y\else N\fi][\ifcsname u\endcsname Y\else N\fi][\ifcsname\endcsname Y\else N\fi]}
+\expandafter\let\csname\endcsname\relax
+\message{[\ifcsname\endcsname Y\else N\fi]}
+\end

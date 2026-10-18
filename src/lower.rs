@@ -4392,12 +4392,12 @@ impl Lowerer {
                         "ifcsname" => {
                             let built = self.eng.read_csname_pending(work)?;
                             let id = crate::token::CsId::intern(&built);
-                            self.eng.meanings.contains_key(&id)
+                            !self.eng.is_undefined(id)
                         }
-                        "ifdefined" => match work.pending.pop() {
-                            Some(Token::Cs(cs)) => self.eng.meanings.contains_key(&cs),
-                            _ => false,
-                        },
+                        "ifdefined" => {
+                            let t = work.pending.pop();
+                            self.eng.if_def_truth(t.as_ref())
+                        }
                         other => {
                             let _reg = self.eng.scan_number_pending(work)?;
                             other == "ifvoid"
