@@ -1492,3 +1492,78 @@ fn a_font_defined_from_lua_is_kept_and_read_tfm_reads_what_luatex_reads() {
         assert_eq!(got, want, "{b}");
     }
 }
+
+#[test]
+fn the_pdf_library_numbers_objects_as_luatexs_backend_does() {
+    // An immediate raw object goes into an object stream when the file is
+    // opened at PDF 1.5 or later with `objcompresslevel` above 0, and the
+    // first one opens the stream, which takes the next number; a stream
+    // object never goes into one; an annotation reserved by name is not
+    // `getlastobj`'s; an object stream is not written until it is full. The
+    // dictionary strings are kept and read back; a number is not a string and
+    // is ignored. `\outputmode` is for the `luatex -ini` oracle, which starts
+    // in DVI.
+    let probe = |minor: u32| {
+        format!(
+            "\\outputmode=1 {}",
+            shows(&format!(
+                "pdf.setobjcompresslevel(2) pdf.setminorversion({minor}) \
+                 local a = pdf.immediateobj('x') local b = pdf.immediateobj('stream', 'y') \
+                 local c = pdf.obj('z') local e = pdf.reserveobj('annot') \
+                 pdf.setcatalog('/X 1') pdf.setinfo(5) local w, d = pdf.getnofobjects() \
+                 local ok, m = pcall(pdf.obj, c, 'again') \
+                 local out = a .. ' ' .. b .. ' ' .. c .. ' ' .. e .. ' ' .. pdf.getlastobj() .. ' ' \
+                 .. pdf.getmaxobjnum() .. ' ' .. pdf.getobjtype(e) .. ' ' .. pdf.getobjtype(2) .. ' ' \
+                 .. w .. ' ' .. d .. ' ' .. pdf.getcatalog() .. ' ' .. tostring(pdf.getinfo()) .. ' ' \
+                 .. m .. ' ' .. tostring(pdf.getobjtype(99)) "
+            ))
+        )
+    };
+    let streams = "[1 3 4 5 4 5 annot objstm 2 3 /X 1 nil pdf.obj() object in use nil]";
+    let plain = "[1 2 3 4 3 4 annot obj 2 2 /X 1 nil pdf.obj() object in use nil]";
+    assert_eq!(out(&probe(7)), streams);
+    assert_eq!(out(&probe(0)), plain);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    for (minor, want) in [(7, streams), (0, plain)] {
+        let (oracle, got) = both(&lua, &probe(minor));
+        assert_eq!(oracle, want, "the oracle");
+        assert_eq!(got, oracle);
+    }
+}
+
+#[test]
+fn the_real_luaotfload_loads_and_registers_its_font_definer() {
+    // TeX Live's own luaotfload, loaded the way its `luaotfload.sty` loads it
+    // under ltluatex: `require` then `luaotfload.main()`. That reaches the
+    // whole fontloader, which takes `pdfe.new`, `pdf.getpageresources` and
+    // `node.direct` at load time; what it leaves behind is luatex's -- its
+    // definer on `define_font` and the same four callbacks set.
+    if texrs::kpse::locate("luaotfload.lua").is_none()
+        || texrs::kpse::locate("ltluatex.lua").is_none()
+    {
+        eprintln!("skipping: kpsewhich cannot find luaotfload.lua and ltluatex.lua");
+        return;
+    }
+    let body = "\\catcode`\\@=11 \
+        \\countdef\\e@alloc@attribute@count=200 \\countdef\\e@alloc@whatsit@count=201 \
+        \\countdef\\e@alloc@bytecode@count=202 \\countdef\\e@alloc@luafunction@count=203 \
+        \\countdef\\e@alloc@luachunk@count=204 \
+        \\countdef\\CountZero=0 \\chardef\\charzero=0 \\dimendef\\dimenzero=0 \
+        \\skipdef\\skipzero=0 \\toksdef\\tokszero=0 \\mathchardef\\mathcharzero=0 \
+        \\directlua{require('ltluatex') require('luaotfload') luaotfload.main() \
+        local t = {} for k, v in pairs(callback.list()) do if v then t[#t + 1] = k end end \
+        table.sort(t) tex.sprint(string.char(92) .. 'message{[' .. table.concat(t, ' ') .. ' ' \
+        .. table.concat(luatexbase.callback_descriptions('define_font'), ',') .. ']}')}";
+    let want = "[define_font glyph_stream_provider hpack_filter pre_linebreak_filter luaotfload.define_font]";
+    assert_eq!(out(body), want);
+    let Some(lua) = luatex() else {
+        eprintln!("skipping the luatex half: no `luatex` on PATH");
+        return;
+    };
+    let (oracle, got) = both(&lua, body);
+    assert_eq!(oracle, want, "the oracle");
+    assert_eq!(got, oracle);
+}

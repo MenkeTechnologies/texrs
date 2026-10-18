@@ -403,9 +403,12 @@ than none.
   reads and assigns the internal parameters texrs holds and the catcode,
   lccode, uccode, sfcode, mathcode and delcode tables through the engine's
   own assignments; `font` defines fonts from Lua tables and reads TFMs as
-  luatex does. A list callback (`hpack_filter`, `pre_linebreak_filter` and the
-  rest) registered from a chunk is called by the stomach while the program
-  runs, with luatex's arguments, and its answer is what gets packed.
+  luatex does; `pdf` keeps the dictionaries, variables and objects a chunk
+  gives it and numbers objects as luatex's backend does. A list callback
+  (`hpack_filter`, `pre_linebreak_filter` and the rest) registered from a chunk
+  is called by the stomach while the program runs, with luatex's arguments, and
+  its answer is what gets packed. TeX Live's luaotfload loads under ltluatex
+  and registers its definer on `define_font`, as in luatex.
 - `--dvi`: a page. Text measured in a real font (`.tfm`), broken into total-fit
   lines by the same breaker as `--pdf`, packed into boxes and shipped through
   `hlist_out`/`vlist_out` as DVI that `dvitype` reads — a fixed number of lines
@@ -596,9 +599,10 @@ reach `tex.box[n]`, `tex.getlist` or the current list (`node.write`,
 is how Lua reaches the stomach's lists, and of the stomach's hook points only
 `hpack_filter` is called yet. `node.ligaturing`, `node.kerning`,
 `node.hyphenating` and `node.mlist_to_hlist` are not ported. Of LuaTeX's other
-libraries, `lang`, `pdf`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and
-`socket` are not there, and a font defined from Lua is not yet one the stomach
-sets type in. The shell is disabled (`os.execute`, `io.popen` and
+libraries, `lang`, `vf`, `img`, `mplib`, `fio`, `sio`, `ffi` and `socket` are
+not there, `pdf` is not yet read by the writer, no `\font` goes through
+`define_font` yet, and a font defined from Lua is not yet one the stomach sets
+type in. The shell is disabled (`os.execute`, `io.popen` and
 `kpse.check_permission` answer as `luatex -no-shell-escape` does), and an error
 a Rust library function raises is a userdata that prints, concatenates and
 matches like the string luatex's C would raise, but is not `type` string. See

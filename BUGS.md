@@ -366,10 +366,23 @@ same chunk in both (`tests/lua.rs`). Where they still differ:
 - **Not ported:** `node.ligaturing`, `node.kerning`, `node.hyphenating`,
   `node.mlist_to_hlist`, `node.make_extensible`, `token.expand`,
   `token.scan_list`, `token.scan_toks(true)`.
-- **Missing libraries:** `lang`, `pdf`, `vf`, `img`, `mplib`, `pdfe`,
-  `pdfscanner`, `fio`, `sio`, `ffi`, `socket`/`mime`, `zip`. lualibs and the
-  luaotfload font loader test for `fio` and `sio` and use their own Lua readers
-  without them.
+- **The `pdf` library is not yet the writer's.** Its dictionaries
+  (`setcatalog`, `setpageresources`, ...), variables and objects are kept and
+  answered back, and object numbers are handed out as luatex's backend hands
+  them out (an immediate raw object goes into an object stream above PDF 1.4,
+  which takes the next number); but nothing a chunk sets is written into the
+  file, the numbers are not the ones the writer gives its own objects, and the
+  variables are this table's, not `\pdfvariable`'s. `pdf.print`, the
+  font/page/xform name and number questions, `includechar`/`includefont`/
+  `includeimage` and `registerannot` refuse; the position functions answer 0
+  and the matrix the identity, as luatex does before shipout.
+  `pdf.getcreationdate` is the writer's `/CreationDate`, in UT where luatex
+  writes local time.
+- **Missing libraries:** `lang`, `vf`, `img`, `mplib`, `pdfscanner`, `fio`,
+  `sio`, `ffi`, `socket`/`mime`, `zip`. `pdfe` is there with each function
+  refusing by name (pplib is not ported); the luaotfload font loader takes
+  `pdfe.new` at load time. lualibs and the luaotfload font loader test for
+  `fio` and `sio` and use their own Lua readers without them.
 - **No shell.** `status.shell_escape` is 0 and `os.execute`, `os.exec`,
   `os.spawn`, `io.popen`/`os.kpsepopen` and `kpse.check_permission` refuse with
   luatex's own messages; luatex in TeX Live's default configuration is

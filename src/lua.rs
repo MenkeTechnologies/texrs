@@ -107,6 +107,7 @@ mod kpse;
 mod libs;
 mod lualib;
 mod node;
+pub mod pdf;
 mod tex;
 mod token;
 
@@ -949,12 +950,86 @@ fn build(owner: usize) -> mlua::Result<Runtime> {
     register("lua", lualib::table(&lua)?)?;
     register("status", status_table(&lua)?)?;
     register("font", font::table(&lua)?)?;
+    register("pdf", pdf::table(&lua)?)?;
+    register(
+        "pdfe",
+        unported(
+            &lua,
+            "pdfe",
+            PDFE,
+            "reads PDF files through pplib, which is not ported",
+        )?,
+    )?;
     globals.set("texconfig", lua.create_table()?)?;
     kpse::install_searcher(&lua)?;
     libs::core(&lua)?;
     globals.set("luatexbase", luatexbase_table(&lua)?)?;
     globals.set("luaotfload", luaotfload_table(&lua, &bridge)?)?;
     Ok(Runtime { lua, bridge, owner })
+}
+
+/// `pdfe`'s functions, as luatex 1.24.0 lists them.
+const PDFE: &[&str] = &[
+    "arraytotable",
+    "close",
+    "closestream",
+    "dictionarytotable",
+    "getarray",
+    "getboolean",
+    "getbox",
+    "getcatalog",
+    "getdictionary",
+    "getfromarray",
+    "getfromdictionary",
+    "getfromreference",
+    "getfromstream",
+    "getinfo",
+    "getinteger",
+    "getmemoryusage",
+    "getname",
+    "getnofobjects",
+    "getnofpages",
+    "getnumber",
+    "getpage",
+    "getpages",
+    "getsize",
+    "getstatus",
+    "getstream",
+    "getstring",
+    "gettrailer",
+    "getversion",
+    "new",
+    "open",
+    "openstream",
+    "pagestotable",
+    "readfromstream",
+    "readwholestream",
+    "type",
+    "unencrypt",
+];
+
+/// A library whose every function says it is not ported. For one a package
+/// indexes unconditionally when it loads -- the luaotfload font loader takes
+/// `local openpdf = pdfe.new` at load time, for the colour fonts that carry
+/// PDF glyphs -- so that the load goes through and a document that actually
+/// uses it is told why it stopped, rather than an index of nil at load.
+fn unported(
+    lua: &Lua,
+    lib: &'static str,
+    names: &[&'static str],
+    why: &'static str,
+) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for name in names {
+        let name: &'static str = name;
+        t.set(
+            name,
+            lua.create_function(move |_, _: Variadic<Value>| {
+                Err::<(), _>(mlua::Error::runtime(format!("{lib}.{name}: {lib} {why}")))
+            })?,
+        )?;
+    }
+    Ok(t)
 }
 
 /// Lua's own `tostring`, so a number reaches TeX formatted as Lua formats it.
