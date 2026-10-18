@@ -901,6 +901,15 @@ fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
         eprintln!("skipping the settings: no TeX installation, so no math fonts");
         return;
     }
+    // The math fonts can be found without kpsewhich (`typeset::find_font`
+    // searches fixed roots); the class cannot. With no article.cls, `leqno` is
+    // an option of a class that never loads, and the number stays at the right.
+    if texrs::latex::load::resolve("article", "cls").is_none()
+        || texrs::latex::load::resolve("leqno", "clo").is_none()
+    {
+        eprintln!("skipping the position: kpsewhich cannot find article.cls and leqno.clo");
+        return;
+    }
     // leqno.clo: the number is drawn to the LEFT of the formula.
     let first = &settings[0];
     let x_of = |c: char| first.glyphs.iter().find(|g| g.ch == c).map(|g| g.x);
