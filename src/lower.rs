@@ -4574,7 +4574,14 @@ impl Lowerer {
                 self.eng.note_mouth(lx);
                 let mut work = Lexer::new("");
                 work.push_back(tokens);
-                let parts = self.msg_ops(&mut work, &[])?;
+                // §1370's `mode:=0` while the text is expanded, where the
+                // lowerer follows the modes at all.
+                let no_list = (crate::expand::ModeKind::NoList, false);
+                let mode = self.eng.list_mode.map(|_| no_list);
+                let mode = std::mem::replace(&mut self.eng.list_mode, mode);
+                let parts = self.msg_ops(&mut work, &[]);
+                self.eng.list_mode = mode;
+                let parts = parts?;
                 let nl = self.eng.intpars.get(crate::intpar::NEW_LINE_CHAR);
                 // What §1370 does when the stream is closed: the log alone
                 // for a negative number, and otherwise the terminal, the
@@ -5184,6 +5191,13 @@ impl Lowerer {
                     self.open_decided(work, n, truth, &mut decided)?;
                 }
                 "ifcondition" => {}
+                // §501's mode conditionals, where the lowerer follows the
+                // semantic nest: the mode is its to know, so they are decided
+                // here. They were printed as text, both arms with them.
+                "ifvmode" | "ifhmode" | "ifmmode" | "ifinner" if self.eng.list_mode.is_some() => {
+                    let truth = self.eng.mode_test(n.name());
+                    self.open_decided(work, n, truth, &mut decided)?;
+                }
                 "ifx" => {
                     let a = work.pending.pop();
                     let b = work.pending.pop();

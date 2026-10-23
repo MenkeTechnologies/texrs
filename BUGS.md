@@ -289,9 +289,12 @@ there too.
   `\tracingparagraphs`, `\tracingpages` and `\tracingoutput` are not written:
   they need the stomach or the save stack at run time.
 
-- **Mode and file conditionals.** `\ifvmode`, `\ifhmode`, `\ifmmode`,
-  `\ifinner`, `\ifeof` — all of them test state that belongs to the stomach or
-  to file I/O, neither of which exists yet.
+- **Mode conditionals on the string path.** `\ifvmode`, `\ifhmode`,
+  `\ifmmode` and `\ifinner` test the mode the lowerer follows the semantic
+  nest in (§501). A plain document's list path (`--dvi`) decides them in
+  running text, in an `\edef` and in a `\message`, and in a `\write`, where
+  §1370's `mode:=0` makes all four false; the string path follows no mode and
+  does not decide them.
 - **`\ifcsname` is implemented** (etex.ch's `if_cs_code`): it reads the name and
   looks it up with `no_new_control_sequence` still true, so unlike `\csname` it
   does not define what it does not find. `\ifx` also sees a `\csname`-made
@@ -384,8 +387,9 @@ texrs output reached tracked lualatex references in
   quantity it cannot read, or a `Use of \a doesn't match its definition` --
   still stops with one `TexError`, `\end` with a conditional still open does
   not say `(\end occurred when \iftrue on line N was incomplete)`, and `\outer`
-  is not policed at all. Mode conditionals, box registers, `\halign`,
-  `\fontdimen` and the page builder's `[1]` are not implemented.
+  is not policed at all. On the string path, which a LaTeX document takes,
+  the mode conditionals, box registers, `\halign` and the page builder's
+  `[1]` are not implemented; a plain document's list path has them.
 - **No expansion budget.** `\def\x{\x}\x` expands forever, exactly as it does in
   real tex — neither engine has a step limit, so this is parity rather than a
   bug. It is why the fuzz targets are run under a timeout (see below).

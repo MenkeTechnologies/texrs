@@ -10,6 +10,8 @@
 //! Without `plain.tex` and `cmr10.tfm` the list path cannot run and the tests
 //! say so and stop.
 
+mod common;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -93,54 +95,9 @@ const PRINTED: &[(&str, &str)] = &[
     ),
 ];
 
-/// Whether the list path can run here.
-fn can_run() -> bool {
-    if texrs::typeset::find_font("cmr10").is_none() || texrs::kpse::locate("plain.tex").is_none() {
-        eprintln!("skipping: no cmr10.tfm or plain.tex to run the list path with");
-        return false;
-    }
-    true
-}
-
-fn tex_on_path() -> bool {
-    Command::new("tex")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-/// What tex printed for `case.tex` in `dir`, line ends removed, from the
-/// `(./case.tex` that opens the file to the `)` that closes it.
-fn tex_terminal(dir: &Path) -> String {
-    let out = Command::new("tex")
-        .args(["-interaction=nonstopmode", "case.tex"])
-        .env("SOURCE_DATE_EPOCH", "0")
-        .current_dir(dir)
-        .output()
-        .expect("tex runs");
-    let text = String::from_utf8_lossy(&out.stdout).replace('\n', "");
-    let start = text.find("(./case.tex").expect("tex opened the file") + "(./case.tex".len();
-    let end = ["Output written", "No pages of output"]
-        .iter()
-        .filter_map(|m| text.find(m))
-        .min()
-        .unwrap_or(text.len());
-    let body = text[start..end].trim_start_matches(' ');
-    body.strip_suffix(" )")
-        .or_else(|| body.strip_suffix(')'))
-        .unwrap_or(body)
-        .to_string()
-}
-
-/// The DVI after its preamble's comment, which is the time of the run.
-fn without_the_date(dvi: &[u8]) -> Vec<u8> {
-    let k = usize::from(dvi[14]);
-    [&dvi[..15], &dvi[15 + k..]].concat()
-}
-
 #[test]
 fn a_deferred_write_prints_when_its_page_ships() {
-    if !can_run() {
+    if !common::list_path_runs() {
         return;
     }
     let mut differ = Vec::new();
@@ -150,29 +107,33 @@ fn a_deferred_write_prints_when_its_page_ships() {
             differ.push(format!("{src:?}\n  tex:   {printed:?}\n  texrs: {said:?}"));
         }
     }
-    assert!(differ.is_empty(), "printed otherwise than tex prints:\n{}", differ.join("\n"));
+    assert!(
+        differ.is_empty(),
+        "printed otherwise than tex prints:\n{}",
+        differ.join("\n")
+    );
 }
 
 #[test]
 fn the_pinned_terminal_and_the_dvi_agree_with_tex_when_it_is_installed() {
-    if !can_run() {
+    if !common::list_path_runs() {
         return;
     }
-    if !tex_on_path() {
-        eprintln!("skipping: no `tex` on PATH");
+    let Some(tex) = common::tex() else {
         return;
-    }
+    };
     let mut differ = Vec::new();
     for (src, printed) in PRINTED {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("case.tex"), src).expect("write the case");
-        let theirs = tex_terminal(dir.path());
+        let theirs = common::tex_in(&tex, dir.path(), src);
         if theirs != *printed {
             differ.push(format!("{src:?}: tex now prints {theirs:?}"));
         }
         let (_, ours) = texrs::run_tex_dvi(src).expect("the document runs");
         let reference = std::fs::read(dir.path().join("case.dvi")).ok();
-        if reference.as_deref().map(without_the_date) != ours.as_deref().map(without_the_date) {
+        if reference.as_deref().map(common::without_the_date)
+            != ours.as_deref().map(common::without_the_date)
+        {
             differ.push(format!("{src:?}: the DVI differs from tex's"));
         }
     }
@@ -212,12 +173,16 @@ fn texrs_dvi(dir: &Path) {
         .current_dir(dir)
         .output()
         .expect("run texrs");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
 fn deferred_file_whatsits_write_the_files_tex_writes() {
-    if !can_run() {
+    if !common::list_path_runs() {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");
@@ -227,13 +192,11 @@ fn deferred_file_whatsits_write_the_files_tex_writes() {
             .unwrap_or_else(|_| panic!("{name} was not written"));
         assert_eq!(&got, bytes, "{name}");
     }
-    if !tex_on_path() {
-        eprintln!("skipping the comparison: no `tex` on PATH");
+    let Some(tex) = common::tex() else {
         return;
-    }
+    };
     let theirs = tempfile::tempdir().expect("tempdir");
-    std::fs::write(theirs.path().join("case.tex"), FILES_DOCUMENT).expect("write the document");
-    let _ = tex_terminal(theirs.path());
+    let _ = common::tex_in(&tex, theirs.path(), FILES_DOCUMENT);
     for (name, _) in FILES_WRITTEN {
         let a = std::fs::read(theirs.path().join(name)).expect("tex wrote it");
         let b = std::fs::read(dir.path().join(name)).expect("texrs wrote it");
@@ -241,5 +204,9 @@ fn deferred_file_whatsits_write_the_files_tex_writes() {
     }
     let a = std::fs::read(theirs.path().join("case.dvi")).expect("tex wrote a DVI");
     let b = std::fs::read(dir.path().join("case.dvi")).expect("texrs wrote a DVI");
-    assert_eq!(without_the_date(&a), without_the_date(&b), "case.dvi");
+    assert_eq!(
+        common::without_the_date(&a),
+        common::without_the_date(&b),
+        "case.dvi"
+    );
 }

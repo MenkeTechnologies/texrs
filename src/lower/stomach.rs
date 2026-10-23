@@ -404,6 +404,22 @@ impl Lowerer {
         if i == Internal::OutputPenalty {
             return Ok(None);
         }
+        // §418: `\spacefactor` is horizontal mode's and `\prevdepth` vertical
+        // mode's; read in any other, math and a `\write`'s none included, it
+        // is `Improper` and 0 -- an integer 0, since `\the` scans at
+        // `tok_val` (§428), so `\the\prevdepth` prints `0`, not `0.0pt`.
+        let belongs = match i {
+            Internal::SpaceFactor => Some(crate::expand::ModeKind::Horizontal),
+            Internal::PrevDepth => Some(crate::expand::ModeKind::Vertical),
+            _ => None,
+        };
+        if let (Some(m), Some((kind, _))) = (belongs, self.eng.list_mode) {
+            if kind != m {
+                let msg = format!("Improper {}", self.eng.sprint_cs(w));
+                self.eng.report(work, &msg);
+                return Ok(Some(MsgOp::Text("0".into())));
+            }
+        }
         let slot = i.slot();
         Ok(Some(match i {
             Internal::LastSkip => MsgOp::Glue([
@@ -420,23 +436,7 @@ impl Lowerer {
     /// `\the\fontdimen n f`, `\the\hyphenchar f` and `\the\skewchar f`,
     /// printed: font memory is the lowerer's, so the value is known now.
     pub(super) fn st_the_font_quantity(&mut self, w: CsId, lx: &mut Lexer) -> R<Option<String>> {
-        Ok(match w.name() {
-            "fontdimen" => {
-                let (f, n) = self.st_find_font_dimen(lx, false)?;
-                let v = self.eng.fonts.get(f).param(n as usize);
-                Some(format!("{}pt", crate::dimen::print_scaled(v)))
-            }
-            "hyphenchar" | "skewchar" => {
-                let f = self.st_scan_font_ident(lx)?;
-                let font = self.eng.fonts.get(f);
-                Some(match w.name() {
-                    "hyphenchar" => font.hyphen_char,
-                    _ => font.skew_char,
-                }
-                .to_string())
-            }
-            _ => None,
-        })
+        self.eng.the_font_quantity(lx, w.name(), false)
     }
 
     /// A `\let` copy of a character, as the character `main_control`
@@ -1643,60 +1643,12 @@ impl Lowerer {
     /// font), or a family member; anything else is `Missing font identifier`,
     /// read again, and `\nullfont`.
     fn st_scan_font_ident(&mut self, lx: &mut Lexer) -> R<u16> {
-        let (t, p) = loop {
-            let Some((t, p)) = self.eng.next_unexpandable(lx)? else {
-                return Ok(0);
-            };
-            if !t.is_space() {
-                break (t, p);
-            }
-        };
-        if let Token::Cs(n) = t {
-            if let Some(Meaning::Font(f)) = self.eng.meanings.get(&n) {
-                return Ok(*f);
-            }
-            let size = match p.unwrap_or(n).name() {
-                "font" => return Ok(self.eng.cur_font),
-                "nullfont" => return Ok(0),
-                "textfont" => Some(0),
-                "scriptfont" => Some(1),
-                "scriptscriptfont" => Some(2),
-                _ => None,
-            };
-            if let Some(size) = size {
-                let fam = self.eng.scan_number_file(lx)?;
-                return Ok(self.eng.fam_fonts[size][(fam & 15) as usize]);
-            }
-        }
-        lx.back_input(&[t]);
-        self.eng.report(lx, "Missing font identifier");
-        Ok(0)
+        self.eng.scan_font_ident(lx, false)
     }
 
-    /// §578's `find_font_dimen`: `\fontdimen n f`, as the font and the
-    /// parameter number. Writing past the last parameter of the font loaded
-    /// last makes room for it; past any other font's is §579's error.
+    /// §578's `find_font_dimen` (`crate::expand::Engine::find_font_dimen`).
     fn st_find_font_dimen(&mut self, lx: &mut Lexer, writing: bool) -> R<(u16, u16)> {
-        let n = self.eng.scan_number_file(lx)?;
-        let f = self.st_scan_font_ident(lx)?;
-        let last = self.eng.fonts.fonts.len().saturating_sub(1) as u16;
-        let have = self.eng.fonts.get(f).params.len() as i64;
-        let fits = n > 0 && (n <= have || (writing && f == last && f != 0));
-        if !fits {
-            let esc = self.eng.esc().to_string();
-            let id = self.eng.fonts.get(f).id_text.clone();
-            self.eng.report(
-                lx,
-                &format!("Font {esc}{id} has only {have} fontdimen parameters"),
-            );
-            return Ok((0, 1));
-        }
-        if n > have {
-            if let Some(font) = self.eng.fonts.get_mut(f) {
-                font.params.resize(n as usize, 0);
-            }
-        }
-        Ok((f, n as u16))
+        self.eng.find_font_dimen(lx, writing, false)
     }
 }
 

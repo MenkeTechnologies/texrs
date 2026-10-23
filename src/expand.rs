@@ -179,6 +179,9 @@ pub enum ModeKind {
     Vertical,
     Horizontal,
     Math,
+    /// `mode=0`: no list at all, which §1370 sets while a `\write` is
+    /// expanded, so every mode conditional is false there.
+    NoList,
 }
 
 /// What opened a group (`tex.web` §269's group codes).
@@ -2425,13 +2428,7 @@ impl Engine {
             // §501: the mode the lowerer is following; `\ifinner` is
             // `mode<0`.
             "ifvmode" | "ifhmode" | "ifmmode" | "ifinner" if self.list_mode.is_some() => {
-                let (kind, inner) = self.list_mode.unwrap_or((ModeKind::Vertical, false));
-                match name {
-                    "ifvmode" => kind == ModeKind::Vertical,
-                    "ifhmode" => kind == ModeKind::Horizontal,
-                    "ifmmode" => kind == ModeKind::Math,
-                    _ => inner,
-                }
+                self.mode_test(name)
             }
             other => return Err(TexError(format!("Unsupported conditional \\{other}"))),
         };
@@ -4154,6 +4151,119 @@ impl Engine {
             self.trace_toks("into", reg);
         }
         Ok(())
+    }
+
+    /// §577's `scan_font_ident`: blanks skipped with expansion, then `\font`,
+    /// `\nullfont`, a name `\font` defined, or `\textfont`, `\scriptfont` or
+    /// `\scriptscriptfont` and a family, as the internal font number. Anything
+    /// else is put back and is `Missing font identifier`, with `\nullfont`.
+    pub fn scan_font_ident(&mut self, lx: &mut Lexer, pending_only: bool) -> R<u16> {
+        let t = loop {
+            let Some(t) = self.take(lx, pending_only) else {
+                return Ok(0);
+            };
+            match t {
+                Token::Cs(n) if self.try_expand(lx, n, pending_only)? => continue,
+                t if t.is_space() => continue,
+                t => break t,
+            }
+        };
+        if let Token::Cs(n) = t {
+            if let Some(Meaning::Font(f)) = self.meanings.get(&n) {
+                return Ok(*f);
+            }
+            let size = match self.primitive_meaning(n).name() {
+                "font" => return Ok(self.cur_font),
+                "nullfont" => return Ok(0),
+                "textfont" => Some(0),
+                "scriptfont" => Some(1),
+                "scriptscriptfont" => Some(2),
+                _ => None,
+            };
+            if let Some(size) = size {
+                let fam = self.scan_number(lx, pending_only)?;
+                return Ok(self.fam_fonts[size][(fam & 15) as usize]);
+            }
+        }
+        match pending_only {
+            true => lx.push_back(&[t]),
+            false => lx.back_input(&[t]),
+        }
+        self.report(lx, "Missing font identifier");
+        Ok(0)
+    }
+
+    /// §578's `find_font_dimen`: `\fontdimen n f`, as the font and the
+    /// parameter number. Writing past the last parameter of the font loaded
+    /// last makes room for it; past any other font's is §579's error, and
+    /// reads parameter 1 of `\nullfont`.
+    pub fn find_font_dimen(
+        &mut self,
+        lx: &mut Lexer,
+        writing: bool,
+        pending_only: bool,
+    ) -> R<(u16, u16)> {
+        let n = self.scan_number(lx, pending_only)?;
+        let f = self.scan_font_ident(lx, pending_only)?;
+        let last = self.fonts.fonts.len().saturating_sub(1) as u16;
+        let have = self.fonts.get(f).params.len() as i64;
+        let fits = n > 0 && (n <= have || (writing && f == last && f != 0));
+        if !fits {
+            let esc = self.esc().to_string();
+            let id = self.fonts.get(f).id_text.clone();
+            self.report(
+                lx,
+                &format!("Font {esc}{id} has only {have} fontdimen parameters"),
+            );
+            return Ok((0, 1));
+        }
+        if n > have {
+            if let Some(font) = self.fonts.get_mut(f) {
+                font.params.resize(n as usize, 0);
+            }
+        }
+        Ok((f, n as u16))
+    }
+
+    /// `\the\fontdimen n f`, `\the\hyphenchar f` and `\the\skewchar f`
+    /// (§425, §578), as §465 prints them, after `what`: font memory is the
+    /// lowerer's, so the value is known while lowering. `None` for anything
+    /// else, with nothing read.
+    pub fn the_font_quantity(
+        &mut self,
+        lx: &mut Lexer,
+        what: &str,
+        pending_only: bool,
+    ) -> R<Option<String>> {
+        Ok(match what {
+            "fontdimen" => {
+                let (f, n) = self.find_font_dimen(lx, false, pending_only)?;
+                let v = self.fonts.get(f).param(n as usize);
+                Some(format!("{}pt", crate::dimen::print_scaled(v)))
+            }
+            "hyphenchar" | "skewchar" => {
+                let f = self.scan_font_ident(lx, pending_only)?;
+                let font = self.fonts.get(f);
+                let value = match what {
+                    "hyphenchar" => font.hyphen_char,
+                    _ => font.skew_char,
+                };
+                Some(value.to_string())
+            }
+            _ => None,
+        })
+    }
+
+    /// §501's `if_vmode_code`..`if_inner_code` over the mode the lowerer is
+    /// following (`list_mode`): `\ifinner` is `mode<0`.
+    pub fn mode_test(&self, name: &str) -> bool {
+        let (kind, inner) = self.list_mode.unwrap_or((ModeKind::Vertical, false));
+        match name {
+            "ifvmode" => kind == ModeKind::Vertical,
+            "ifhmode" => kind == ModeKind::Horizontal,
+            "ifmmode" => kind == ModeKind::Math,
+            _ => inner,
+        }
     }
 
     /// A token list as text, by `tex.web` §292's `show_token_list`: a character
@@ -6700,6 +6810,11 @@ impl Engine {
                 ));
             }
             _ => {}
+        }
+        // §425 and §578: a font's quantities are the lowerer's font memory.
+        let name = self.primitive_meaning(what).name();
+        if let Some(text) = self.the_font_quantity(lx, name, pending_only)? {
+            return Ok(text);
         }
         // §465's `dimen_val`, `glue_val` and `mu_val` arms: a dimension is
         // written by §103's `print_scaled` and `pt`, a glue by §178's

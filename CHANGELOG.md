@@ -13,6 +13,16 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\ifvmode`, `\ifhmode`, `\ifmmode` and `\ifinner` in a `\message` on a plain
+  document's list path are decided by the mode (§501); they were printed as
+  text with both arms and an `Extra \fi` each. A `\write`, deferred or under
+  `\immediate`, is expanded with §1370's `mode:=0`, so all four are false
+  there.
+- `\the\spacefactor` outside horizontal mode and `\the\prevdepth` outside
+  vertical mode, in a `\message`, are `Improper` and 0 (§418, §428).
+- `\the\fontdimen`, `\the\hyphenchar` and `\the\skewchar` expand in an
+  `\edef` (§425, §578), with §579's and §577's errors; they stopped the run
+  as unsupported.
 - `\write`, `\openout` and `\closeout` without `\immediate` on a plain
   document's DVI path are §1341's whatsit nodes, carried out when the page
   holding them is shipped (§1373-§1374), in the order the page is drawn and
