@@ -370,6 +370,8 @@ impl Stomach {
                     .push_str(&format!("\\hyphenation{{\n{text}\n}}\n"));
                 self.hyphenator = None;
             }
+            // §1354 appends the whatsit to the current list, whatever the mode.
+            ListOp::Whatsit(text) => self.tail_append(crate::node::Node::Whatsit(text)),
             ListOp::Converted { f, form, values } => {
                 let text = match form {
                     0 => values[0].to_string(),

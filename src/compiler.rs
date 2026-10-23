@@ -101,6 +101,9 @@ pub mod ops {
     /// The end of an expression: its value or the error marker, then the
     /// report to make for the marker.
     pub const EXPR_END: u16 = 4020;
+    /// Take the message being built as a string, onto the stack: the text
+    /// of a `\special` the run builds (`Cmd::Special`). No arguments.
+    pub const MSG_TAKE: u16 = 4021;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -366,6 +369,16 @@ impl Compiler {
                 self.block(otherwise)?;
                 let end = self.b.current_pos();
                 self.b.patch_jump(over_else, end);
+            }
+            // The opcode, the text built and taken as the one argument, and the
+            // list action `ops::LIST` then decodes as `ListOp::Whatsit`.
+            Cmd::Special(parts) => {
+                let code = crate::ir::list::ListOp::<Num>::Whatsit(String::new()).code();
+                self.b.emit(Op::LoadInt(code), self.line);
+                self.msg_ops(parts)?;
+                self.b.emit(Op::CallBuiltin(ops::MSG_TAKE, 0), self.line);
+                self.b.emit(Op::CallBuiltin(ops::LIST, 2), self.line);
+                self.b.emit(Op::Pop, self.line);
             }
             Cmd::CloseOut(stream) => {
                 self.b.emit(Op::LoadInt(*stream as i64), self.line);

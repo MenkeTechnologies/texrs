@@ -301,3 +301,167 @@ fn a_hyphenated_word_keeps_the_kern_before_the_punctuation_after_it() {
         &dvi[..dvi.len().min(400)]
     );
 }
+
+/// The DVI after its preamble's comment, which is the time of the run
+/// (§617: ` TeX output YYYY.MM.DD:HHMM`) and so differs between any two runs
+/// a minute apart. The fixed part of the preamble is kept.
+fn without_the_date(dvi: &[u8]) -> Vec<u8> {
+    let k = usize::from(dvi[14]);
+    [&dvi[..15], &dvi[15 + k..]].concat()
+}
+
+/// Every `xxx1` (§1368) in a DVI, in file order.
+fn specials(dvi: &[u8]) -> Vec<String> {
+    texrs::dvi::Dvi::parse(dvi).expect("a readable DVI");
+    let mut found = Vec::new();
+    let mut i = 0;
+    while let Some(at) = dvi[i..].windows(1).position(|w| w[0] == 239) {
+        let start = i + at;
+        let len = usize::from(dvi[start + 1]);
+        if let Ok(text) = std::str::from_utf8(&dvi[start + 2..start + 2 + len]) {
+            if text.is_ascii() && !text.is_empty() && text.chars().all(|c| !c.is_control()) {
+                found.push(text.to_string());
+            }
+        }
+        i = start + 1;
+    }
+    found
+}
+
+fn shipped(src: &str) -> Vec<u8> {
+    let (_, dvi) = texrs::run_tex_dvi(src).expect("the document runs");
+    dvi.expect("a page was shipped")
+}
+
+/// Documents whose DVI tex 3.141592653 writes byte for byte as texrs does
+/// now, past the date: `\special` in a paragraph, between boxes, alone on a
+/// page, in a formula, under `\immediate` and reading `\count0` on two pages;
+/// `\everypar` before the letter, the `\char` and the `\noindent` that start
+/// a paragraph; and pages of a box, a rule, a mark or an insertion alone,
+/// which plain's `\output` ships with their headline and folio.
+const SPECIAL_AND_PAGE_CASES: &[&str] = &[
+    "Hello\\special{k07 in a paragraph}world.\\par\n\\end\n",
+    "\\hbox{x}\\special{k08 vertical}\\hbox{y}\n\\end\n",
+    "\\special{alone}\\end\n",
+    "$a\\special{in math}b$ and \\immediate\\special{imm} x\\par\n\\end\n",
+    "one\\special{pg\\the\\count0}\\vfill\\eject two\\special{pg\\the\\count0}\\par\\end\n",
+    "\\special{a\\romannumeral\\count0 b\\the\\hsize}\\hbox{}\\end\n",
+    "\\everypar{X}abc\\par\n\\end\n",
+    "\\everypar{X}\\char98 c\\par\\everypar{Y}\\noindent z\\par\\end\n",
+    "\\hbox{x}\\end\n",
+    "\\mark{x}\\end\n",
+    "\\insert100{\\hbox{x}}\\end\n",
+    "\\setbox1\\hbox{s}\\special{v}\\vskip 3pt\\penalty-10000 \\hbox{a}\\end\n",
+];
+
+#[test]
+fn specials_everypar_and_box_only_pages_match_tex_byte_for_byte() {
+    let Some(oracle) = dvi_parity::oracle() else {
+        eprintln!("skipping: no `tex` on PATH");
+        return;
+    };
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("texrs-special-cases-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let mut differ = Vec::new();
+    for (n, src) in SPECIAL_AND_PAGE_CASES.iter().enumerate() {
+        let case = dir.join(format!("case{n}.tex"));
+        std::fs::write(&case, src).expect("the case is written");
+        let reference = dvi_parity::reference(&oracle, &case).expect("tex writes a DVI");
+        let subject = shipped(src);
+        if without_the_date(&reference) != without_the_date(&subject) {
+            differ.push(format!(
+                "{src:?}: tex {} bytes, texrs {} bytes",
+                reference.len(),
+                subject.len()
+            ));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(differ.is_empty(), "these DVIs differ from tex's: {differ:#?}");
+}
+
+/// §1354 appends a `\special`'s whatsit to the current list in every mode,
+/// and §1368 writes it where it stands. It was dropped outside `\immediate`,
+/// which writes nothing for a `\special` at all.
+#[test]
+fn a_special_reaches_the_dvi_from_every_mode() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    let dvi = shipped("Hello\\special{in a paragraph}world.\\par\n\\end\n");
+    assert_eq!(specials(&dvi), ["in a paragraph"]);
+    // tex sets `Hello`, then the `xxx1`, then `world.`: the special is between
+    // the two words' characters, not before or after the line.
+    let o = dvi.iter().position(|&b| b == b'o').expect("Hello's o");
+    let x = dvi.iter().position(|&b| b == 239).expect("the xxx1");
+    let w = dvi.iter().position(|&b| b == b'w').expect("world's w");
+    assert!(o < x && x < w, "the special is not between the words");
+
+    let dvi = shipped("\\hbox{x}\\special{between boxes}\\hbox{y}\n\\end\n");
+    assert_eq!(specials(&dvi), ["between boxes"]);
+    let dvi = shipped("$a\\special{in math}b$ and \\immediate\\special{imm} x\\par\n\\end\n");
+    assert_eq!(specials(&dvi), ["in math", "imm"]);
+    // A page that holds only the whatsit is still a page (§1000 moves it on).
+    let dvi = shipped("\\special{alone}\\end\n");
+    assert_eq!(specials(&dvi), ["alone"]);
+}
+
+/// The text is expanded when the program reaches the `\special`, as
+/// `scan_toks(false,true)` expands it: on the second page `\count0` is the 2
+/// plain's output routine advanced it to after the first.
+#[test]
+fn a_special_reads_the_page_number_of_its_own_page() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    let dvi = shipped(
+        "one\\special{pg\\the\\count0}\\vfill\\eject two\\special{pg\\the\\count0}\\par\\end\n",
+    );
+    assert_eq!(specials(&dvi), ["pg1", "pg2"]);
+}
+
+/// §1090's `back_input; new_graf`: the letter that starts a paragraph is read
+/// again after `\everypar`, which §1091 inserts in front of it, so
+/// `\everypar{X}abc` sets `Xabc`. texrs set `aXbc`.
+#[test]
+fn everypar_comes_before_the_letter_that_starts_the_paragraph() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    let dvi = shipped("\\everypar{X}abc\\par\n\\end\n");
+    assert!(
+        // cmr10 kerns `b` against `c`, so the run tex writes is `X a b`, a
+        // `right3`, then `c`.
+        dvi.windows(3).any(|w| w == b"Xab"),
+        "no set_char run X a b in the DVI: {:02x?}",
+        &dvi[..dvi.len().min(200)]
+    );
+}
+
+/// A page of a box alone is a page plain's `\output` ships (§1054 fires the
+/// builder from `\end`): with its headline's empty box, `\box255`, and the
+/// footline's folio `1` (set_char_49). The routine was not lowered when no
+/// paragraph had reached the page, and the box went out with nothing round it.
+#[test]
+fn a_page_of_a_box_alone_gets_plains_footline() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    for src in ["\\hbox{x}\\end\n", "\\mark{x}\\end\n", "\\insert100{\\hbox{x}}\\end\n"] {
+        let dvi = shipped(src);
+        let page = texrs::dvi::Dvi::parse(&dvi).expect("a readable DVI");
+        assert!(
+            page.text().ends_with('1'),
+            "{src:?}: no folio at the foot of the page, text {:?}",
+            page.text()
+        );
+    }
+}

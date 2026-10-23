@@ -237,6 +237,11 @@ pub enum Cmd {
     },
     /// `\closeout`, done now.
     CloseOut(usize),
+    /// A `\special` whose text reads what only the run knows (§1354):
+    /// the text built as a message's is, then appended to the current list
+    /// as `ListOp::Whatsit`. One whose text the lowerer knows is a
+    /// `Cmd::List` of that action directly.
+    Special(Vec<MsgOp>),
     /// The `)` that closes an `\input` file, attached to the message before it.
     ///
     /// tex writes `(./inner.tex [msg])` with no space in front of the paren,
@@ -375,6 +380,10 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
                 render_into(otherwise, depth + 1, out);
             }
             Cmd::CloseOut(stream) => out.push_str(&format!("{pad}CloseOut {stream}\n")),
+            Cmd::Special(ops) => {
+                out.push_str(&format!("{pad}Special\n"));
+                render_msg(ops, depth + 1, out);
+            }
             Cmd::KeepGlobal { reg, into } => {
                 out.push_str(&format!("{pad}KeepGlobal \\count{reg} into={into:?}\n"))
             }

@@ -205,8 +205,11 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
     to nothing; in vertical mode, once a mark has been written, they stop the
     run as unsupported; and a mark whose text reads a register only the run
     knows has no tokens for them to read again;
-  - `\write`, `\openout` and `\special` without `\immediate`: they are not yet
-    put on the page they belong to.
+  - `\write`, `\openout` and `\closeout` without `\immediate`: they are not
+    yet put on the page they belong to. `\special` is: §1354's whatsit goes
+    on the current list in every mode, its text built when the program
+    reaches it, and §1368 writes the `xxx` where it stands. LuaTeX's
+    `\special shipout` is expanded then too, not at the shipout.
 
   The output routine is lowered at each place the page builder may fire it,
   and emitted again only when what it lowers to changes. So a macro it
@@ -387,6 +390,11 @@ texrs output reached tracked lualatex references in
   bug. It is why the fuzz targets are run under a timeout (see below).
 
 ## A `\write` without `\immediate` writes nothing
+
+On the list path of a plain document (`--dvi`) a `\special` is the
+exception: it is a node of the list it was read into, and reaches the DVI
+with its page. What follows holds for the other three there, and for all four
+on the string path.
 
 `\openout`, `\write`, `\closeout` and `\special` are read as §1350-§1354
 read them and built into the whatsits of §1341 (`crate::write::Whatsit`), and

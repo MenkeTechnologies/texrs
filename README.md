@@ -341,9 +341,11 @@ than none.
   The dimension, glue and token parameters of `tex.web` §247, §224 and §230 --
   `\hsize`, `\parindent`, `\baselineskip`, `\thinmuskip`, `\everypar` and the
   rest -- are registers in the same sense, at INITEX's zero: assigned, read,
-  coerced and restored by a group like `\dimen`, `\skip` and `\toks`. They are
-  stores: the breaker's measure is `Layout`'s, not `\hsize`, and `\everypar`
-  is not inserted when a paragraph starts.
+  coerced and restored by a group like `\dimen`, `\skip` and `\toks`. On the string
+  path they are stores: the breaker's measure is `Layout`'s, not `\hsize`,
+  and `\everypar` is not inserted when a paragraph starts. A plain document's
+  list path (`--dvi`) reads them as tex does, `\everypar` in front of the
+  token that started the paragraph (§1090-§1091).
 - Box registers and the lists they hold, built while the program runs
   (`src/stomach.rs`): `\setbox`, `\box`, `\copy`, `\lastbox`, `\vsplit`,
   `\hbox`/`\vbox`/`\vtop` with `to` and `spread`, `\raise` and its siblings,
@@ -379,9 +381,11 @@ than none.
   files byte for byte against luatex's. A closed stream or one past 127 writes
   to the terminal and a negative one to the log alone. A file written in the run
   is read back by a later `\input` or `\openin` as it now stands, not as the
-  run before left it. A `\write`, `\openout`, `\closeout` or `\special`
-  WITHOUT `\immediate` waits for the shipout of its page, and [0x06] says why
-  none reaches one yet.
+  run before left it. A `\write`, `\openout` or `\closeout` WITHOUT
+  `\immediate` waits for the shipout of its page, and [0x06] says why none
+  reaches one yet; so does a `\special` on the string path. On a plain
+  document's list path a `\special` is a whatsit node of its page, in any
+  mode, and the DVI carries its `xxx` where it stands.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's. `\endinput`
   ends it with the line it is on.
@@ -639,7 +643,9 @@ whatsit §1341 describes, and `Lowerer::ship_whatsit` is §1373's `out_what` for
 it -- the `\write` expanded when it is shipped, not when it was read -- but a
 whatsit has to sit in the list of the page it is shipped with, and until pages
 are built from node lists the whatsits wait in `deferred_whatsits` for a
-shipout that never comes. `\immediate` does all three now.
+shipout that never comes. `\immediate` does all three now. A plain
+document's `\special` on the list path is the one that has its node: it
+reaches the DVI with its page.
 
 On the DVI ladder nine of the ten documents reach STRUCTURE: the text and its
 structure agree with `tex`, the bytes do not — see `BUGS.md`.

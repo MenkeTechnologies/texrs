@@ -250,6 +250,10 @@ pub enum ListOp<N = Num> {
     /// `make_accent` (§1123): character `accent` of font `f`, over character
     /// `over` (-1 for none) of font `g`.
     Accent { f: u16, accent: u32, g: u16, over: i64 },
+    /// `\special` (§1354): the text, expanded as `scan_toks(false,true)`
+    /// expands it, as a whatsit node where it stands; §1368 writes it as
+    /// the DVI `xxx` of the page it is shipped with.
+    Whatsit(String),
 }
 
 /// One argument as the compiler pushes it.
@@ -387,6 +391,7 @@ impl<N> ListOp<N> {
             ListOp::FinRow => 69,
             ListOp::FinAlign(_) => 70,
             ListOp::FinishDisplayAlignment => 71,
+            ListOp::Whatsit(_) => 74,
         }
     }
 
@@ -584,6 +589,7 @@ impl<N> ListOp<N> {
                 f(Arg::Int(i64::from(*id)));
                 f(Arg::Str(text));
             }
+            ListOp::Whatsit(text) => f(Arg::Str(text)),
             ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
                 f(Arg::Str(text))
             }
@@ -916,6 +922,7 @@ impl ListOp<i64> {
             69 => ListOp::FinRow,
             70 => ListOp::FinAlign(r.int()),
             71 => ListOp::FinishDisplayAlignment,
+            74 => ListOp::Whatsit(r.string()),
             72 => ListOp::AlterInteger {
                 which: u8::try_from(r.int()).unwrap_or(0),
                 value: r.int(),
@@ -1078,6 +1085,10 @@ mod tests {
                 },
             ),
             (ListOp::EndMath(vec![0, 7, 3]), ListOp::EndMath(vec![0, 7, 3])),
+            (
+                ListOp::Whatsit("papersize=210mm,297mm".into()),
+                ListOp::Whatsit("papersize=210mm,297mm".into()),
+            ),
             (
                 ListOp::LeftRight {
                     right: true,

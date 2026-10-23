@@ -6152,6 +6152,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::OpenOut { .. }
             | Cmd::WriteOut { .. }
             | Cmd::CloseOut(_)
+            | Cmd::Special(_)
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
@@ -6314,7 +6315,8 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::Write(_)
                 | Cmd::OpenOut { .. }
                 | Cmd::WriteOut { .. }
-                | Cmd::CloseOut(_) => {}
+                | Cmd::CloseOut(_)
+                | Cmd::Special(_) => {}
             }
         }
     }

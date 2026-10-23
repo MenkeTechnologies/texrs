@@ -283,6 +283,13 @@ fn b_out_write(vm: &mut VM, _argc: u8) -> Value {
     Value::Undef
 }
 
+/// `ops::MSG_TAKE`: the message being built, taken as the text of a
+/// `\special` rather than recorded.
+fn b_msg_take(_vm: &mut VM, _argc: u8) -> Value {
+    let text = BUILDING.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    Value::str(text)
+}
+
 /// How a value prints inside a message. An integer prints as TeX prints one;
 /// there are no floats in this subset, so anything else is a string already.
 fn render(v: &Value) -> String {
@@ -569,6 +576,7 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::ERR_SITE, b_err_site);
     vm.register_builtin(ops::EXPR_STEP, b_expr_step);
     vm.register_builtin(ops::EXPR_END, b_expr_end);
+    vm.register_builtin(ops::MSG_TAKE, b_msg_take);
     vm.register_builtin(ops::TRANSCRIPT_NOTICE, b_transcript_notice);
     vm.register_builtin(ops::FFI_COMPILE, b_ffi_compile);
     vm.register_builtin(ops::FFI_CALL, b_ffi_call);

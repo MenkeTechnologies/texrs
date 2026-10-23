@@ -907,6 +907,7 @@ back at the margin</pre></td></tr>
             <tr><td><code>WRITE_FLUSH</code></td><td><code>4018</code></td><td>Finish an `\immediate\write` and record it on a line of its own: glued to what came before, and the next message glued to it. No arguments.</td></tr>
             <tr><td><code>EXPR_STEP</code></td><td><code>4019</code></td><td>One step of an e-TeX expression (`crate::ir::Num::Expr`): the operands, then the operation's code and the bound, for `etex_arith::apply`.</td></tr>
             <tr><td><code>EXPR_END</code></td><td><code>4020</code></td><td>The end of an expression: its value or the error marker, then the report to make for the marker.</td></tr>
+            <tr><td><code>MSG_TAKE</code></td><td><code>4021</code></td><td>Take the message being built as a string, onto the stack: the text of a `\special` the run builds (`Cmd::Special`). No arguments.</td></tr>
             <tr><td><code>LIST</code></td><td><code>4100</code></td><td>A list action (`crate::ir::list::ListOp`): its opcode, then its arguments in the order `ListOp::visit` gives them.</td></tr>
             <tr><td><code>LIST_SHOWBOX</code></td><td><code>4101</code></td><td>Append §1296's display of a box register to the message being built: one argument, the register number.</td></tr>
             <tr><td><code>LIST_SHOWLISTS</code></td><td><code>4102</code></td><td>Append §218's `show_activities` to the message being built.</td></tr>

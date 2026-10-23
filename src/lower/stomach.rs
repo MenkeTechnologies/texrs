@@ -131,8 +131,10 @@ impl Default for State {
 /// A list command's right brace, waiting at the end of its body.
 pub(super) enum Closer {
     /// §1086's `package`, for a box opened in a group of this kind (and
-    /// §1168's `vcenter_group`).
-    Box(GroupKind),
+    /// §1168's `vcenter_group`); `appended` when §1086 puts the box on
+    /// the enclosing list (`box_context` below `box_flag`), as against
+    /// `\setbox`, `\shipout` and leaders.
+    Box { group: GroupKind, appended: bool },
     /// §1100's `insert_group`.
     Insert,
     /// §1119's `build_discretionary` for list `k`.
@@ -147,7 +149,7 @@ impl Closer {
     /// The group §1083, §1099, §1117, §1153 and §1172 open for it.
     fn group(&self) -> GroupKind {
         match self {
-            Closer::Box(kind) => *kind,
+            Closer::Box { group, .. } => *group,
             Closer::Insert => GroupKind::Insert,
             Closer::Disc(_) => GroupKind::Disc,
             Closer::Math => GroupKind::Math,
@@ -196,6 +198,15 @@ impl Lowerer {
     /// Emit a list action, with whatever the program has not been told yet
     /// in front of it.
     pub(super) fn st_emit(&mut self, out: &mut Vec<Cmd>, op: ListOp) -> R<()> {
+        self.st_before(out, &op)?;
+        out.push(Cmd::List(op));
+        Ok(())
+    }
+
+    /// What goes in front of list action `op`: the values the program has
+    /// not been told, and the output routine where `op` may fire it. Split
+    /// from [`Self::st_emit`] for an action the run builds (`Cmd::Special`).
+    fn st_before(&mut self, out: &mut Vec<Cmd>, op: &ListOp) -> R<()> {
         self.st_sync_values(out);
         // The output routine is lowered where the page builder may next fire
         // it, which is after an action that can build the page (§1076,
@@ -214,15 +225,19 @@ impl Lowerer {
                 | ListOp::InitMath { display: true, .. }
                 | ListOp::ResumeAfterDisplay
         );
-        // A box, a rule or a paragraph on the page's own list is what lets
-        // the builder fire (§1000-§1001).
+        // What §1000 moves onto an empty page -- a box, a rule, a paragraph,
+        // a whatsit, a mark -- is what lets the builder fire, at the latest
+        // from §1054's `\end`. Glue, kerns and penalties are discarded there
+        // instead. A box closed by its `}` sets the flag where it is closed
+        // (`st_list_body`), which knows whether it was appended or set.
         let contributes = matches!(
             op,
             ListOp::NewGraf(_)
                 | ListOp::Rule { leader: false, .. }
-                | ListOp::EndBox
-                | ListOp::Fetch { .. }
+                | ListOp::Fetch { context: Context::Shift(_), .. }
                 | ListOp::Unpackage { .. }
+                | ListOp::Whatsit(_)
+                | ListOp::Mark { .. }
         );
         if contributes && self.st_mode() == CMode::Vertical {
             self.st.page_has_content = true;
@@ -231,7 +246,6 @@ impl Lowerer {
             self.st_sync(out)?;
         }
         self.st.run_open = false;
-        out.push(Cmd::List(op));
         Ok(())
     }
 
@@ -469,17 +483,19 @@ impl Lowerer {
             }
             _ => return Ok(false),
         }
-        self.st_letter(lx, c, out)?;
+        self.st_letter(lx, c, cat, out)?;
         Ok(true)
     }
 
     /// §1045's `hmode+letter` and `hmode+other_char` (and `char_given`):
     /// extend the run of characters the main loop is reading, or start one.
-    fn st_letter(&mut self, lx: &mut Lexer, c: char, out: &mut Vec<Cmd>) -> R<()> {
+    fn st_letter(&mut self, lx: &mut Lexer, c: char, cat: Cat, out: &mut Vec<Cmd>) -> R<()> {
         if self.st_mode().vertical() {
-            // §1090: a letter in vertical mode starts a paragraph, and is
-            // read again after `\everypar`.
-            self.st_new_graf(lx, true, out)?;
+            // §1090's `back_input; new_graf`: a letter in vertical mode
+            // starts a paragraph, and is read again AFTER `\everypar`, which
+            // `new_graf` puts in front of it -- so `\everypar{X}a` sets `Xa`.
+            lx.push_back(&[Token::Char(c, cat)]);
+            return self.st_new_graf(lx, true, out);
         }
         let f = self.eng.cur_font;
         // The program must hear `c`'s space factor code before the main loop
@@ -916,6 +932,7 @@ impl Lowerer {
                 }
             }
             "mark" if managed => self.st_make_mark(lx, out)?,
+            "special" if managed => self.st_special(lx, out)?,
             "topmark" | "firstmark" | "botmark" | "splitfirstmark" | "splitbotmark"
                 if managed && mode != CMode::Unmanaged =>
             {
@@ -1023,7 +1040,9 @@ impl Lowerer {
             .ok()
             .and_then(char::from_u32)
             .ok_or_else(|| TexError(format!("Bad character code ({code})")))?;
-        self.st_letter(lx, c, out)
+        // §1090 reads the `\char` again after `\everypar`; the character it
+        // named stands in for it, which §1045 reads the same way.
+        self.st_letter(lx, c, Cat::Other, out)
     }
 
     /// §1269 after an assignment this file made.
@@ -1328,7 +1347,7 @@ impl Lowerer {
             BoxKind::Top => GroupKind::Vtop,
             BoxKind::VCenter => GroupKind::VCenter,
         };
-        self.st_list_body(lx, mode, Closer::Box(group), out)
+        self.st_list_body(lx, mode, Closer::Box { group, appended: moved }, out)
     }
 
     /// The braces of a list command: `scan_left_brace` (§403), the group
@@ -1355,8 +1374,8 @@ impl Lowerer {
             }
         }
         let every = match (&closer, mode) {
-            (Closer::Box(_), CMode::RestrictedHorizontal) => crate::params::toks_register("everyhbox"),
-            (Closer::Box(_), CMode::InternalVertical) => crate::params::toks_register("everyvbox"),
+            (Closer::Box { .. }, CMode::RestrictedHorizontal) => crate::params::toks_register("everyhbox"),
+            (Closer::Box { .. }, CMode::InternalVertical) => crate::params::toks_register("everyvbox"),
             _ => None,
         };
         if let Some(reg) = every {
@@ -1380,7 +1399,7 @@ impl Lowerer {
         // `unsave`, so they are read inside the group.
         let dimen = |name: &str| Num::Count(crate::params::register_slot(name).unwrap_or(0));
         match closer {
-            Closer::Box(_) => body.push(Cmd::List(ListOp::BoxMaxDepth(dimen("boxmaxdepth")))),
+            Closer::Box { .. } => body.push(Cmd::List(ListOp::BoxMaxDepth(dimen("boxmaxdepth")))),
             Closer::Insert => {
                 let s = crate::params::register_slot("splittopskip").unwrap_or(0);
                 let floating = crate::intpar::index("floatingpenalty")
@@ -1407,9 +1426,20 @@ impl Lowerer {
         // The insertion's own `}` is inside its body: §1100 packages before
         // the group's registers come back.
         out.push(Cmd::Group { saves, keeps, body });
+        // §1000: a box appended to the page's own list, or an insertion
+        // (§1008) on it, is what the builder can fire on; the sync below
+        // lowers the output routine for that, before the action that fires it.
+        let lands_on_page = match closer {
+            Closer::Box { appended, .. } => appended,
+            Closer::Insert => true,
+            Closer::Disc(_) | Closer::Math | Closer::Choice => false,
+        };
+        if lands_on_page && self.st_mode() == CMode::Vertical {
+            self.st.page_has_content = true;
+        }
         self.st_sync(out)?;
         match closer {
-            Closer::Box(_) => out.push(Cmd::List(ListOp::EndBox)),
+            Closer::Box { .. } => out.push(Cmd::List(ListOp::EndBox)),
             Closer::Disc(k) => out.push(Cmd::List(ListOp::EndDiscList(k))),
             Closer::Math => out.push(Cmd::List(ListOp::EndMathGroup)),
             Closer::Choice => out.push(Cmd::List(ListOp::EndChoiceList)),
@@ -1869,6 +1899,37 @@ impl Lowerer {
             }
         };
         self.st_emit(out, ListOp::Mark { id, text })
+    }
+
+    /// `\special` (§1354) in a list: the text expanded as `scan_toks(false,
+    /// true)` expands it, as a whatsit node where it stands, in any mode. The
+    /// DVI writer puts it out as §1368's `xxx` when the page holding it is
+    /// shipped. The text is built as a `\message`'s is, so a `\the\count0`
+    /// in it reads the register when the program reaches the `\special` --
+    /// the page number on the page the output routine has just advanced.
+    /// LuaTeX's `shipout` keyword, which would defer the expansion to the
+    /// shipout, is accepted and the text expanded here all the same.
+    fn st_special(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
+        let _late = self.eng.scan_keyword(lx, "shipout", false)?;
+        let body = self.eng.read_write_text(lx)?;
+        let mut work = Lexer::new("");
+        work.push_back(&body);
+        let parts = self.msg_ops(&mut work, &[])?;
+        let known: Option<String> = parts
+            .iter()
+            .map(|p| match p {
+                MsgOp::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        match known {
+            Some(text) => self.st_emit(out, ListOp::Whatsit(text)),
+            None => {
+                self.st_before(out, &ListOp::Whatsit(String::new()))?;
+                out.push(Cmd::Special(parts));
+                Ok(())
+            }
+        }
     }
 
     /// `\topmark` and its siblings (§386) in a list: whichever mark the

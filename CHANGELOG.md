@@ -13,6 +13,17 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\special` on a plain document's DVI path is §1354's whatsit, appended to
+  the current list in paragraph, vertical, math or box mode and written as
+  §1368's `xxx` where it stands; it was dropped unless a box held it. Its
+  text is built when the program reaches it, so `\special{\the\count0}` names
+  its own page. A page holding only a `\special` is shipped.
+- `\everypar` is read before the letter or `\char` that starts a
+  paragraph (§1090's `back_input`, §1091): `\everypar{X}abc` sets `Xabc`,
+  where texrs set `aXbc`.
+- A page holding only boxes, rules, marks, insertions or whatsits runs plain's
+  `\output`, headline and folio included: the routine was lowered only once a
+  paragraph had reached the page, and such a page was shipped bare.
 - A kern or ligature between a letter and the punctuation after it survives the
   first `.`, `,` or other character whose `\sfcode` the program had not yet
   been told (§1038-§1039): telling it ended the character run, so cmr10 set
