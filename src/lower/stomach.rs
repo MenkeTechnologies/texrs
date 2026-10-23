@@ -482,19 +482,35 @@ impl Lowerer {
             self.st_new_graf(lx, true, out)?;
         }
         let f = self.eng.cur_font;
-        let c = self.st_sf_sync(c, out);
+        // The program must hear `c`'s space factor code before the main loop
+        // reads `c` (§1034's `adjust_space_factor`), and it must NOT end the
+        // run to do so: §1038's lookahead continues over any character, and
+        // the ligature/kern program of the character before `c` is consulted
+        // with `c` as its right neighbour (§1039) whatever the two
+        // characters' `\sfcode`s are. So a code not yet told goes in FRONT of
+        // the open run, where the program applies it before the run is read.
+        // Ending the run instead ended the lookahead at the right boundary,
+        // and cmr10's `y.` lost the kern between its two characters -- the
+        // first time only, since the code was then synced.
+        let sf = self.st_sf_change(c);
         if self.st.run_open {
-            if let Some(Cmd::List(ListOp::Chars { f: g, text, .. })) =
-                out.iter_mut().rev().find(|c| !matches!(c, Cmd::Line(_)))
-            {
-                if *g == f {
-                    text.push(c);
-                    return Ok(());
+            if let Some(at) = out.iter().rposition(|c| !matches!(c, Cmd::Line(_))) {
+                if let Cmd::List(ListOp::Chars { f: g, text, .. }) = &mut out[at] {
+                    if *g == f {
+                        text.push(c);
+                        if let Some(code) = sf {
+                            out.insert(at, Cmd::List(ListOp::SfCodes(vec![code])));
+                        }
+                        return Ok(());
+                    }
                 }
             }
         }
         let cancel_left = std::mem::take(&mut self.st.no_boundary);
         self.st_sync(out)?;
+        if let Some(code) = sf {
+            out.push(Cmd::List(ListOp::SfCodes(vec![code])));
+        }
         out.push(Cmd::List(ListOp::Chars {
             f,
             text: c.to_string(),
@@ -505,23 +521,20 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Tell the program `c`'s space factor code if it is not what the
-    /// program last heard.
-    fn st_sf_sync(&mut self, c: char, out: &mut Vec<Cmd>) -> char {
+    /// `c`'s space factor code when it is not what the program last heard:
+    /// the pair the program is to be told, `None` when it already knows.
+    fn st_sf_change(&mut self, c: char) -> Option<(char, i64)> {
         let now = self.eng.charcodes.get(crate::charcodes::Table::Space, c);
         let initex = match c.is_ascii_uppercase() {
             true => 999,
             false => 1000,
         };
         let was = self.st.synced_sf.get(&c).copied().unwrap_or(initex);
-        if now != was {
-            self.st.synced_sf.insert(c, now);
-            // A change ends the run: the program applies it before the next
-            // character, which therefore starts a run of its own.
-            self.st.run_open = false;
-            out.push(Cmd::List(ListOp::SfCodes(vec![(c, now)])));
+        if now == was {
+            return None;
         }
-        c
+        self.st.synced_sf.insert(c, now);
+        Some((c, now))
     }
 
     /// Wrap a group's lowered body in the box-register save level the

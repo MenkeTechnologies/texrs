@@ -13,6 +13,13 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- A kern or ligature between a letter and the punctuation after it survives the
+  first `.`, `,` or other character whose `\sfcode` the program had not yet
+  been told (§1038-§1039): telling it ended the character run, so cmr10 set
+  the first `y.` of a document against the right boundary and lost its kern.
+- A hyphenated word is reconstituted against the character that ends it
+  (§897's `hyf_bchar`, §903's `bchar`), so `electroencephalographically.`
+  keeps the kern before its full stop; it was set against the font's boundary.
 - `\ref` names the number the class writes: `1` for an article's first section
   (was `0.1`), `A` after `\appendix` (was `0.2`), a caption's own figure or
   table number, report's `\ifnum \c@chapter>\z@` float and equation numbers;

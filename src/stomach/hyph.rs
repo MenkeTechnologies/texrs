@@ -377,6 +377,12 @@ impl Stomach {
                     if c.font != hf {
                         break;
                     }
+                    // `hyf_bchar:=character(s)` BEFORE the letter test: when
+                    // this character ends the word, it is the right
+                    // neighbour the word's last letter is reconstituted
+                    // against (§903's `bchar`), so the kern or ligature
+                    // between them -- cmr10's `y.` -- comes back.
+                    hyf_bchar = c.character as u16;
                     let lc = lc_code(self, c.character);
                     if lc == 0 || hu.len() > 63 {
                         break;

@@ -208,3 +208,96 @@ fn no_file_survives_the_round_trip_less_well_than_it_did() {
         "these files survive the round trip less well than they did: {dropped:#?}"
     );
 }
+
+/// The main loop's lookahead (§1038-§1039) runs over EVERY character of a run,
+/// so the ligature/kern program of a letter is consulted with the punctuation
+/// after it as its right neighbour, whatever `\sfcode` that punctuation
+/// carries. cmr10 kerns `y` against `.` and `,` by -0.083334 design units
+/// (`tftopl`: `KRN O 56 R -0.083334`), and `P` shares that program.
+///
+/// The lowerer tells the program a character's space factor code the first
+/// time it differs from INITEX's, and it used to END the character run to do
+/// so -- the letter before the first `.` or `,` of a document was set against
+/// the right boundary and lost its kern, once, while every later `y.` kept it.
+/// What tex 3.141592653 prints for each box is the fixture; the kern is in
+/// every one of them.
+#[test]
+fn a_kern_before_a_punctuation_mark_survives_its_space_factor_code() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    let src = "\\showboxdepth=100 \\showboxbreadth=1000 \\tracingonline=1\n\
+               \\setbox0\\hbox{ly.}\\showbox0\n\
+               \\setbox0\\hbox{y,}\\showbox0\n\
+               \\setbox0\\hbox{P.}\\showbox0\n\
+               \\setbox0\\hbox{y. x}\\showbox0\n\
+               \\setbox0\\hbox{Py, A}\\showbox0\n\
+               \\end\n";
+    let got = texrs::run_messages_tex(src).expect("the document runs");
+    for want in [
+        // The first `.` of the document: its code (3000 in plain) had not been
+        // told yet, and the kern before it is the one that went missing.
+        "\\hbox(6.94444+1.94444)x10.00003.\\tenrm l.\\tenrm y.\\kern-0.83334.\\tenrm .",
+        // The same for the first `,` (1250).
+        "\\hbox(4.30554+1.94444)x7.22224.\\tenrm y.\\kern-0.83334.\\tenrm ,",
+        // `P`'s program runs into `y`'s (§545: one program, two labels).
+        "\\hbox(6.83331+0.0)x8.75002.\\tenrm P.\\kern-0.83334.\\tenrm .",
+        // The code still reaches the space factor: the space after `.` is
+        // set with `\sfcode`.=3000`'s stretch (§1044), kern intact.
+        "\\hbox(4.30554+1.94444)x16.94449.\\tenrm y.\\kern-0.83334.\\tenrm ..\
+         \\glue 4.44444 plus 4.99997 minus 0.37036.\\tenrm x",
+        // ...and after `,`, with 1250's.
+        "\\hbox(6.83331+1.94444)x24.86116.\\tenrm P.\\tenrm y.\\kern-0.83334.\\tenrm ,.\
+         \\glue 3.33333 plus 2.08331 minus 0.88889.\\tenrm A",
+    ] {
+        assert!(got.contains(want), "missing {want:?} in {got:?}");
+    }
+}
+
+/// §897 records the character that ends a word (`hyf_bchar:=character(s)`)
+/// BEFORE testing whether it is a letter, so that when the word is rebuilt
+/// after hyphenation its last letter is reconstituted against that character
+/// (§903's `bchar`) and the kern or ligature between them comes back. The
+/// hyphenator tested the letter first, so a hyphenated word was set against
+/// the font's boundary instead and `electroencephalographically.` lost the
+/// kern before its full stop -- in the node list, and in the DVI tex writes
+/// as `right3 -54614`.
+#[test]
+fn a_hyphenated_word_keeps_the_kern_before_the_punctuation_after_it() {
+    if texrs::typeset::find_font("cmr10").is_none() {
+        eprintln!("skipping: no cmr10.tfm to set with");
+        return;
+    }
+    // `\pretolerance=-1` forces the second pass, which is the one that
+    // hyphenates (§863); `\showbox` then shows the rebuilt word.
+    let par = "\\hsize=200pt \\tolerance=10000 \\pretolerance=-1 \
+               \\noindent a electroencephalographically.\\par";
+    let src = format!(
+        "\\showboxdepth=100 \\showboxbreadth=1000 \\tracingonline=1\n\
+         \\setbox0\\vbox{{{par}}}\\showbox0\n\\end\n"
+    );
+    let got = texrs::run_messages_tex(&src).expect("the document runs");
+    assert!(got.contains("\\discretionary"), "the word was not hyphenated: {got:?}");
+    assert!(
+        got.contains("\\tenrm y..\\kern-0.83334..\\tenrm ."),
+        "the kern before the full stop is gone: {got:?}"
+    );
+    // tex's line, with the kern in it: 200pt less the word is the fil glue.
+    assert!(
+        got.contains("\\hbox(6.94444+1.94444)x200.0, glue set 69.6664fil"),
+        "the line is not set as tex sets it: {got:?}"
+    );
+
+    // The same paragraph as a page, read back out of the DVI: a `right3` of
+    // -54614sp (-0.083334 * 10pt, as tex rounds it) between `y` and `.`.
+    let (_, dvi) = texrs::run_tex_dvi(&format!("{par}\n\\end\n")).expect("the document runs");
+    let dvi = dvi.expect("a page was shipped");
+    let kern: i32 = -54614;
+    let wanted = [145u8, (kern >> 16) as u8, (kern >> 8) as u8, kern as u8];
+    assert!(
+        dvi.windows(4).any(|w| w == wanted),
+        "no right3 of {kern}sp in the DVI: {:02x?}",
+        &dvi[..dvi.len().min(400)]
+    );
+}
