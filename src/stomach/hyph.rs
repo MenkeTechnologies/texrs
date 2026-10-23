@@ -342,7 +342,7 @@ impl Stomach {
                     }
                     Some(&k) => (k, c.font),
                 },
-                Node::Kern { explicit: false, .. } | Node::Whatsit(_) => {
+                Node::Kern { explicit: false, .. } | Node::Whatsit(_) | Node::Out(_) => {
                     prev_s = s;
                     s += 1;
                     continue;
@@ -442,6 +442,7 @@ impl Stomach {
                 Some(Node::Kern { .. }) => break,
                 Some(
                     Node::Whatsit(_)
+                    | Node::Out(_)
                     | Node::Glue(_)
                     | Node::Penalty(_)
                     | Node::Ins(_)

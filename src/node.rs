@@ -341,6 +341,17 @@ pub struct DiscNode {
     pub replace_count: usize,
 }
 
+/// One of §1341's three file whatsits, as a list holds it.
+#[derive(Clone, Debug)]
+pub struct OutNode {
+    /// What §1356 displays for it: `\openout3=name`, `\write3{text}` with
+    /// the text unexpanded, or `\closeout3`.
+    pub display: String,
+    /// The run's number for what §1374 does with it, compiled
+    /// (`crate::stomach::run::out_what`).
+    pub action: usize,
+}
+
 /// One item of a horizontal or vertical list (§133-§159).
 #[derive(Clone, Debug)]
 pub enum Node {
@@ -359,6 +370,11 @@ pub enum Node {
     Disc(DiscNode),
     /// `\special` and friends: no dimensions, carried through.
     Whatsit(String),
+    /// `\openout`, `\write` or `\closeout` without `\immediate`: one of
+    /// §1341's `open_node`, `write_node` and `close_node`, which puts nothing
+    /// on the page and is carried out (§1373's `out_what`) when the page
+    /// holding it is shipped.
+    Out(OutNode),
     /// A `math_node` (§147) before a formula (`\mathon`), holding the
     /// `\mathsurround` it reserves.
     Math(Scaled),
@@ -392,7 +408,7 @@ impl Node {
             Node::Adjust(_) => 5,
             Node::Ligature(..) => 6,
             Node::Disc(_) => 7,
-            Node::Whatsit(_) => 8,
+            Node::Whatsit(_) | Node::Out(_) => 8,
             Node::Math(_) | Node::MathOff(_) => 9,
             Node::Glue(_) => 10,
             Node::Kern { .. } | Node::AccKern(_) => 11,

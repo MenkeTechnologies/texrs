@@ -21,6 +21,7 @@ thread_local! {
 /// void, no fonts but `\nullfont`, no hooks.
 pub fn reset() {
     STOMACH.with(|s| *s.borrow_mut() = Stomach::new());
+    ACTIONS.with(|a| a.borrow_mut().clear());
 }
 
 /// Hand the run's stomach to the caller -- the shipped pages and the fonts
@@ -91,6 +92,30 @@ pub fn b_list(vm: &mut VM, argc: u8) -> Value {
         STOMACH.with(|s| s.borrow_mut().pages.has_output_routine = has);
         return Value::Int(0);
     }
+    // A file whatsit's §1374 is a sub-chunk of the chunk that appended it,
+    // which may be the output routine's: keep it where its page's shipout
+    // can run it, and give the node its place there.
+    let op = match op {
+        ListOp::OutWhatsit { display, chunk } => {
+            let Some(chunk) = usize::try_from(chunk)
+                .ok()
+                .and_then(|k| vm.chunk.sub_chunks.get(k))
+                .map(|c| std::rc::Rc::new(c.clone()))
+            else {
+                return Value::Int(0);
+            };
+            let id = ACTIONS.with(|a| {
+                let mut a = a.borrow_mut();
+                a.push(chunk);
+                a.len() - 1
+            });
+            ListOp::OutWhatsit {
+                display,
+                chunk: id as i64,
+            }
+        }
+        op => op,
+    };
     let line = current_line(vm);
     step(vm, |s, e| {
         s.line = line;
@@ -104,6 +129,9 @@ pub fn b_list(vm: &mut VM, argc: u8) -> Value {
 thread_local! {
     /// The output routine (§230's `output_routine`), compiled.
     static OUTPUT: RefCell<Option<std::rc::Rc<fusevm::Chunk>>> = const { RefCell::new(None) };
+    /// What §1374 does for each file whatsit the run has appended, compiled;
+    /// an `OutNode` names its own by its place here.
+    static ACTIONS: RefCell<Vec<std::rc::Rc<fusevm::Chunk>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Run `f` on the stomach with the VM's slots, then write back what a
@@ -117,6 +145,36 @@ fn step(vm: &mut VM, f: impl FnOnce(&mut Stomach, &dyn Eqtb)) {
     });
     let online = STOMACH.with(|s| s.borrow().int_par("tracingonline") > 0);
     crate::runtime::tell(said, online);
+    out_what(vm);
+}
+
+/// §1373's `out_what` for each file whatsit of the pages just shipped, in
+/// the order they were met on the page, then the `]` §639 held for them.
+/// Each is run as the output routine is, on a VM of its own over the same
+/// registers, so a `\the\count0` in a `\write` reads the page number as it
+/// stands while the page ships.
+fn out_what(vm: &mut VM) {
+    let (actions, page_end) = STOMACH.with(|s| {
+        let out = &mut s.borrow_mut().output;
+        (
+            std::mem::take(&mut out.out_whats),
+            std::mem::take(&mut out.page_end_held),
+        )
+    });
+    for id in actions {
+        let Some(chunk) = ACTIONS.with(|a| a.borrow().get(id).cloned()) else {
+            continue;
+        };
+        let mut inner = VM::new((*chunk).clone());
+        crate::runtime::register_message_builtins(&mut inner);
+        for slot in 0..crate::compiler::TOTAL_SLOTS {
+            inner.set_slot(slot, vm.get_slot(slot));
+        }
+        let _ = inner.run();
+    }
+    if page_end {
+        crate::runtime::tell(vec![super::Said::Glued("]".into())], false);
+    }
 }
 
 /// What follows an action: §994's `build_page` when it asked for one, the
@@ -372,6 +430,12 @@ impl Stomach {
             }
             // §1354 appends the whatsit to the current list, whatever the mode.
             ListOp::Whatsit(text) => self.tail_append(crate::node::Node::Whatsit(text)),
+            ListOp::OutWhatsit { display, chunk } => {
+                self.tail_append(crate::node::Node::Out(crate::node::OutNode {
+                    display,
+                    action: chunk as usize,
+                }))
+            }
             ListOp::Converted { f, form, values } => {
                 let text = match form {
                     0 => values[0].to_string(),

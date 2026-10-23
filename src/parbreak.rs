@@ -273,7 +273,7 @@ impl Search<'_> {
             // §866.
             match &list[cur_p] {
                 Node::Box(_) | Node::Rule(_) => self.active_width[0] += node_width(&list[cur_p]),
-                Node::Whatsit(_) => {}
+                Node::Whatsit(_) | Node::Out(_) => {}
                 Node::Glue(g) => {
                     // §868.
                     if auto_breaking {

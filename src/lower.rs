@@ -214,12 +214,13 @@ pub struct Lowerer {
     /// (see `crate::write`).
     written: crate::write::Written,
     /// The `\openout`, `\write`, `\closeout` and `\special` whatsits read
-    /// without `\immediate`, in order (§1341-§1354).
+    /// without `\immediate` on the string path, in order (§1341-§1354).
     ///
     /// §1373 performs each one when the page holding it is shipped, and
-    /// `ship_whatsit` is that step; what is missing is the list a whatsit sits
-    /// in. Until pages are built from node lists here, they wait in this list
-    /// and no shipout reaches them, so a deferred `\write` writes nothing.
+    /// `ship_whatsit` is that step; what the string path lacks is the list a
+    /// whatsit sits in, so they wait here and no shipout reaches them. The
+    /// list path puts each in its list instead (`Cmd::OutWhatsit`,
+    /// `ListOp::Whatsit`).
     pub deferred_whatsits: Vec<crate::write::Whatsit>,
 }
 
@@ -4425,8 +4426,25 @@ impl Lowerer {
         immediate: bool,
         out: &mut Vec<Cmd>,
     ) -> R<()> {
+        let whatsit = self.read_extension(lx, which)?;
+        match immediate {
+            true => self.ship_whatsit(lx, &whatsit, false, out),
+            false => {
+                self.deferred_whatsits.push(whatsit);
+                Ok(())
+            }
+        }
+    }
+
+    /// §1350-§1354: the whatsit `\openout`, `\write`, `\closeout` or
+    /// `\special` builds, read from the input.
+    pub(super) fn read_extension(
+        &mut self,
+        lx: &mut Lexer,
+        which: &str,
+    ) -> R<crate::write::Whatsit> {
         use crate::write::{Stream, Whatsit};
-        let whatsit = match which {
+        Ok(match which {
             // `new_write_whatsit(open_node_size, 1)`: the stream is checked
             // against the last of LuaTeX's 128, then §1351 reads the name.
             "openout" => {
@@ -4458,14 +4476,7 @@ impl Lowerer {
                 };
                 Whatsit::Special { tokens, late }
             }
-        };
-        match immediate {
-            true => self.ship_whatsit(lx, &whatsit, out),
-            false => {
-                self.deferred_whatsits.push(whatsit);
-                Ok(())
-            }
-        }
+        })
     }
 
     /// LuaTeX's backend extensions (`crate::backend`): what is done now is
@@ -4530,15 +4541,19 @@ impl Lowerer {
     /// §1373's `out_what` (`wrapup_leader` in LuaTeX): do what a whatsit asks
     /// for, at the moment it is shipped -- or read, under `\immediate`.
     ///
-    /// The node-list stomach calls this for each whatsit on a page it ships,
-    /// in the order they sit on the page; `\immediate` calls it at once. A
-    /// `\write` is expanded HERE, as §1370 expands it when it is written, so
-    /// a macro redefined between the `\write` and the shipout writes its new
-    /// meaning.
+    /// `\immediate` calls it at once. On the list path a whatsit without it
+    /// is lowered by this when it is read, `deferred`, into the action the
+    /// run performs when the page holding it ships (`Cmd::OutWhatsit`). A
+    /// `\write` is expanded HERE: under `\immediate` that is where §1370
+    /// expands it; for a deferred one its macros take their meanings at the
+    /// `\write` rather than at the shipout, while a register it reads is
+    /// read at the shipout. A deferred write to the terminal leaves the
+    /// reports the lowerer made where they were printed.
     pub(crate) fn ship_whatsit(
         &mut self,
         lx: &mut Lexer,
         whatsit: &crate::write::Whatsit,
+        deferred: bool,
         out: &mut Vec<Cmd>,
     ) -> R<()> {
         use crate::write::{Stream, Whatsit};
@@ -4567,7 +4582,10 @@ impl Lowerer {
                 let closed = |this: &mut Self, parts: Vec<MsgOp>| match *stream {
                     Stream::LogOnly => Vec::new(),
                     _ => {
-                        let mut ops = this.take_reports();
+                        let mut ops = match deferred {
+                            true => Vec::new(),
+                            false => this.take_reports(),
+                        };
                         ops.extend(crate::ir::printed_ops(parts, nl));
                         vec![Cmd::Write(ops)]
                     }
@@ -6153,6 +6171,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             | Cmd::WriteOut { .. }
             | Cmd::CloseOut(_)
             | Cmd::Special(_)
+            | Cmd::OutWhatsit { .. }
             | Cmd::FileClose
             | Cmd::Text(_)
             | Cmd::Color { .. }
@@ -6316,7 +6335,8 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 | Cmd::OpenOut { .. }
                 | Cmd::WriteOut { .. }
                 | Cmd::CloseOut(_)
-                | Cmd::Special(_) => {}
+                | Cmd::Special(_)
+                | Cmd::OutWhatsit { .. } => {}
             }
         }
     }

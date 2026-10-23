@@ -13,6 +13,15 @@ All notable changes to texrs are recorded here. The format follows
 
 ### Fixed
 
+- `\write`, `\openout` and `\closeout` without `\immediate` on a plain
+  document's DVI path are §1341's whatsit nodes, carried out when the page
+  holding them is shipped (§1373-§1374), in the order the page is drawn and
+  not under leaders: a `\write` to the terminal prints between the page's `[1`
+  and its `]`, reading `\count0` and the other registers, and deciding
+  conditionals on them, as they stand then. They were held and never
+  performed. `\showbox` displays them as §1356 does.
+- `\tracingoutput` prints a space between `Completed box being shipped out`
+  and the page number (§638).
 - `\special` on a plain document's DVI path is §1354's whatsit, appended to
   the current list in paragraph, vertical, math or box mode and written as
   §1368's `xxx` where it stands; it was dropped unless a box held it. Its

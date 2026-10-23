@@ -51,6 +51,13 @@ pub struct Output {
     pub page_stretch: [Scaled; 4],
     pub page_shrink: Scaled,
     pub page_depth: Scaled,
+    /// The file whatsits (`crate::node::OutNode`) of the page just shipped,
+    /// in the order §619-§637 meet them, for the run to carry out as §1373's
+    /// `out_what` does (`crate::stomach::run::out_what`).
+    pub out_whats: Vec<usize>,
+    /// §639's `]`, held until those have been carried out: a `\write` to the
+    /// terminal prints between the page number and the bracket.
+    pub page_end_held: bool,
 }
 
 impl Output {
@@ -88,6 +95,20 @@ impl Output {
     }
 }
 
+/// The file whatsits of `list`, in the order `hlist_out` and `vlist_out`
+/// (§619-§637) meet them. The box a leader repeats is left out: §1374 does
+/// nothing while `doing_leaders`. A mark, an insertion or an adjustment
+/// inside a box is not drawn, and neither is what it holds.
+fn out_whatsits(list: &[crate::node::Node], into: &mut Vec<usize>) {
+    for node in list {
+        match node {
+            crate::node::Node::Out(w) => into.push(w.action),
+            crate::node::Node::Box(b) => out_whatsits(&b.list, into),
+            _ => {}
+        }
+    }
+}
+
 impl Stomach {
     /// `ship_out(p)` (§638-§641), with `h_offset`/`v_offset` as they stand.
     pub fn ship_out_box(&mut self, p: BoxNode) {
@@ -97,10 +118,13 @@ impl Stomach {
             j -= 1;
         }
         let shown: Vec<String> = self.counts[..=j].iter().map(|c| c.to_string()).collect();
-        let note = format!("[{}]", shown.join("."));
+        let number = format!("[{}", shown.join("."));
+        let note = format!("{number}]");
         let tracing = self.int_par("tracingoutput") > 0;
         if tracing {
-            let mut text = String::from("\nCompleted box being shipped out");
+            // §638: the page number follows on the same line after a space,
+            // since `term_offset>0` once the heading is printed.
+            let mut text = String::from("\nCompleted box being shipped out ");
             text.push_str(&note);
             text.push_str(&self.show_box_text(std::slice::from_ref(&crate::node::Node::Box(
                 p.clone(),
@@ -108,6 +132,7 @@ impl Stomach {
             self.diagnostic(&text);
         }
         let (h_offset, v_offset) = (self.h_offset, self.v_offset);
+        let mut whats = Vec::new();
         // §641: a page more than `max_dimen` in any direction is not shipped.
         if p.height > MAX_DIMEN
             || p.depth > MAX_DIMEN
@@ -123,6 +148,9 @@ impl Stomach {
             for (c, v) in counts.iter_mut().zip(self.counts.iter()) {
                 *c = *v as i32;
             }
+            // §640: `vlist_out` or `hlist_out` meets each file whatsit as it
+            // draws the page.
+            out_whatsits(&p.list, &mut whats);
             out.pages.push(Shipped {
                 page: p,
                 counts,
@@ -130,9 +158,18 @@ impl Stomach {
                 v_offset,
             });
         }
+        // §639: `]` after the page under `\tracingoutput<=0`; it was printed
+        // with the box display otherwise.
         if !tracing {
-            self.say(Said::Terminal(note));
+            match whats.is_empty() {
+                true => self.say(Said::Terminal(note)),
+                false => {
+                    self.say(Said::Terminal(number));
+                    self.output.page_end_held = true;
+                }
+            }
         }
+        self.output.out_whats.extend(whats);
         // §640: `dead_cycles:=0`, which is the page builder's to count.
         self.output.dead_cycles = 0;
         if let Some(b) = self.pages.builder.as_mut() {

@@ -21,8 +21,9 @@
 //!   it now stands and not as the run before left it.
 //!
 //! What is not here is the placement of a deferred whatsit in a list: that is
-//! the node-list stomach's, which appends one wherever `\write` stood and calls
-//! back into the lowerer's `ship_whatsit` when the page holding it ships.
+//! the node-list stomach's, which appends one wherever `\write` stood, with
+//! what the lowerer's `ship_whatsit` made of it compiled to run when the
+//! page holding it ships (`crate::stomach::run::out_what`).
 
 use crate::token::Token;
 use fusevm::{Value, VM};

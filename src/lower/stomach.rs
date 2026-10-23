@@ -237,6 +237,7 @@ impl Lowerer {
                 | ListOp::Fetch { context: Context::Shift(_), .. }
                 | ListOp::Unpackage { .. }
                 | ListOp::Whatsit(_)
+                | ListOp::OutWhatsit { .. }
                 | ListOp::Mark { .. }
         );
         if contributes && self.st_mode() == CMode::Vertical {
@@ -933,6 +934,9 @@ impl Lowerer {
             }
             "mark" if managed => self.st_make_mark(lx, out)?,
             "special" if managed => self.st_special(lx, out)?,
+            "openout" | "write" | "closeout" if managed => {
+                self.st_out_whatsit(lx, name.name(), out)?
+            }
             "topmark" | "firstmark" | "botmark" | "splitfirstmark" | "splitbotmark"
                 if managed && mode != CMode::Unmanaged =>
             {
@@ -1930,6 +1934,52 @@ impl Lowerer {
                 Ok(())
             }
         }
+    }
+
+    /// `\openout`, `\write` and `\closeout` without `\immediate` (§1350-§1353)
+    /// in a list: a whatsit node where it stands, in any mode, and what
+    /// §1374 does with it lowered now into the action the run performs when
+    /// the page holding the node is shipped (`Cmd::OutWhatsit`). A box
+    /// that is never shipped never performs it, and a copy of one performs
+    /// it as often as it is shipped, as tex does.
+    fn st_out_whatsit(&mut self, lx: &mut Lexer, which: &str, out: &mut Vec<Cmd>) -> R<()> {
+        use crate::write::{Stream, Whatsit};
+        let whatsit = self.read_extension(lx, which)?;
+        // §1356's display after its escape character: `print_write_whatsit`
+        // names a stream past 15 `*` and a negative one `-`.
+        let stream = |n: i64| match n {
+            0..=15 => n.to_string(),
+            n if n < 0 => "-".to_string(),
+            _ => "*".to_string(),
+        };
+        let display = match &whatsit {
+            Whatsit::Open { stream: n, name } => format!("openout{}={name}", stream(*n as i64)),
+            Whatsit::Write { stream: s, tokens } => {
+                let n = match s {
+                    Stream::File(n) => *n as i64,
+                    Stream::LogOnly => -1,
+                    Stream::Terminal => 16,
+                };
+                format!("write{}{{{}}}", stream(n), self.eng.tokens_shown(tokens))
+            }
+            Whatsit::Close { stream: n } => format!("closeout{}", stream(*n as i64)),
+            Whatsit::Special { .. } | Whatsit::Pdf(_) => unreachable!("read as \\{which}"),
+        };
+        // The action runs at the shipout, so it is lowered knowing no
+        // register: a conditional on `\count1` in the text is decided by the
+        // value the register has when the page ships.
+        let mut body = Vec::new();
+        let blind = self.eng.known.set_opaque(true);
+        let lowered = self.ship_whatsit(lx, &whatsit, true, &mut body);
+        self.eng.known.set_opaque(blind);
+        lowered?;
+        let marker = ListOp::OutWhatsit {
+            display: String::new(),
+            chunk: 0,
+        };
+        self.st_before(out, &marker)?;
+        out.push(Cmd::OutWhatsit { display, body });
+        Ok(())
     }
 
     /// `\topmark` and its siblings (§386) in a list: whichever mark the

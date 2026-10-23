@@ -210,6 +210,22 @@ impl Compiler {
         Ok(k)
     }
 
+    /// `body` compiled as a chunk of its own, added to this one's sub-chunks;
+    /// its index. The run executes it on a VM of its own over the same slot
+    /// file (`crate::stomach::run`), so it starts from the registers it is
+    /// given rather than from INITEX's zeros.
+    fn sub_chunk(&mut self, body: &[Cmd]) -> Result<i64, TexError> {
+        let mut sub = Compiler {
+            b: ChunkBuilder::new(),
+            debug: false,
+            line: self.line,
+            strings: rustc_hash::FxHashMap::default(),
+        };
+        sub.b.set_builtin_argc_is_arity(true);
+        sub.block(body)?;
+        Ok(i64::from(self.b.add_sub_chunk(sub.b.build())))
+    }
+
     fn block(&mut self, cmds: &[Cmd]) -> Result<(), TexError> {
         for c in cmds {
             self.cmd(c)?;
@@ -280,20 +296,20 @@ impl Compiler {
             // the registers it is given rather than from INITEX's zeros.
             Cmd::OutputRoutine(body) => {
                 let k = match body {
-                    Some(body) => {
-                        let mut sub = Compiler {
-                            b: ChunkBuilder::new(),
-                            debug: false,
-                            line: self.line,
-                            strings: rustc_hash::FxHashMap::default(),
-                        };
-                        sub.b.set_builtin_argc_is_arity(true);
-                        sub.block(body)?;
-                        i64::from(self.b.add_sub_chunk(sub.b.build()))
-                    }
+                    Some(body) => self.sub_chunk(body)?,
                     None => -1,
                 };
                 self.list_op(&crate::ir::list::ListOp::OutputRoutine(k))?;
+            }
+            // §1374 for the whatsit is run on a VM of its own when the page
+            // holding it ships (`crate::stomach::run::out_what`), as the
+            // output routine is.
+            Cmd::OutWhatsit { display, body } => {
+                let chunk = self.sub_chunk(body)?;
+                self.list_op(&crate::ir::list::ListOp::OutWhatsit {
+                    display: display.clone(),
+                    chunk,
+                })?;
             }
             Cmd::Text(t) => {
                 let k = self.str_const(t)?;

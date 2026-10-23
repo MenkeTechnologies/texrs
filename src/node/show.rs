@@ -203,13 +203,17 @@ impl Display<'_> {
                 out.push_str(&ins.float_cost.to_string());
                 self.nested(out, &ins.list, history, breadth);
             }
-            // §1356's `\special` display, the one whatsit texrs carries.
+            // §1356's `\special` display.
             Node::Whatsit(text) => {
                 self.esc(out, "special");
                 out.push('{');
                 out.push_str(text);
                 out.push('}');
             }
+            // §1356 for `open_node`, `write_node` and `close_node`: the
+            // primitive and its stream (`print_write_whatsit`), then the file
+            // name or the unexpanded text, as the lowerer wrote them.
+            Node::Out(w) => self.esc(out, &w.display),
             Node::Glue(g) if g.kind.is_leaders() => {
                 // §190.
                 self.esc(out, "");
@@ -368,7 +372,7 @@ impl Display<'_> {
                     print_ascii(out, c.character);
                 }
                 // §175.
-                Node::Box(_) | Node::Ins(_) | Node::Whatsit(_) | Node::Mark(_) | Node::Adjust(_) => {
+                Node::Box(_) | Node::Ins(_) | Node::Whatsit(_) | Node::Out(_) | Node::Mark(_) | Node::Adjust(_) => {
                     out.push_str("[]")
                 }
                 Node::Rule(_) => out.push('|'),

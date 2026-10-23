@@ -254,6 +254,14 @@ pub enum ListOp<N = Num> {
     /// expands it, as a whatsit node where it stands; §1368 writes it as
     /// the DVI `xxx` of the page it is shipped with.
     Whatsit(String),
+    /// `\openout`, `\write` or `\closeout` without `\immediate` (§1350-§1353):
+    /// a whatsit node where it stands, displayed as `display`, whose §1374
+    /// is sub-chunk `chunk` of the chunk the action is called from, run when
+    /// the page holding the node is shipped.
+    OutWhatsit {
+        display: String,
+        chunk: i64,
+    },
 }
 
 /// One argument as the compiler pushes it.
@@ -392,6 +400,7 @@ impl<N> ListOp<N> {
             ListOp::FinAlign(_) => 70,
             ListOp::FinishDisplayAlignment => 71,
             ListOp::Whatsit(_) => 74,
+            ListOp::OutWhatsit { .. } => 75,
         }
     }
 
@@ -590,6 +599,10 @@ impl<N> ListOp<N> {
                 f(Arg::Str(text));
             }
             ListOp::Whatsit(text) => f(Arg::Str(text)),
+            ListOp::OutWhatsit { display, chunk } => {
+                f(Arg::Int(*chunk));
+                f(Arg::Str(display));
+            }
             ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
                 f(Arg::Str(text))
             }
@@ -923,6 +936,10 @@ impl ListOp<i64> {
             70 => ListOp::FinAlign(r.int()),
             71 => ListOp::FinishDisplayAlignment,
             74 => ListOp::Whatsit(r.string()),
+            75 => ListOp::OutWhatsit {
+                chunk: r.int(),
+                display: r.string(),
+            },
             72 => ListOp::AlterInteger {
                 which: u8::try_from(r.int()).unwrap_or(0),
                 value: r.int(),
@@ -1088,6 +1105,16 @@ mod tests {
             (
                 ListOp::Whatsit("papersize=210mm,297mm".into()),
                 ListOp::Whatsit("papersize=210mm,297mm".into()),
+            ),
+            (
+                ListOp::OutWhatsit {
+                    display: "\\write3{x\\the \\count0 }".into(),
+                    chunk: 4,
+                },
+                ListOp::OutWhatsit {
+                    display: "\\write3{x\\the \\count0 }".into(),
+                    chunk: 4,
+                },
             ),
             (
                 ListOp::LeftRight {

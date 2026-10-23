@@ -293,13 +293,13 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\openout",
         "Expansion",
-        "Open a write stream on a file (tex.web \u{a7}1351, \u{a7}1374), closing it first if it is open. LuaTeX's 128 streams, 0 to 127. The name is read with expansion -- `\\openout1=\\jobname.aux` -- or taken whole from braces, spaces and all, and `.tex` is added when it has no extension; the file goes under `-output-directory` when one is given. A file written now is read back as it now stands by a later `\\input` or `\\openin`. Only `\\immediate\\openout` is done; one waiting for a shipout is held and never reached.",
+        "Open a write stream on a file (tex.web \u{a7}1351, \u{a7}1374), closing it first if it is open. LuaTeX's 128 streams, 0 to 127. The name is read with expansion -- `\\openout1=\\jobname.aux` -- or taken whole from braces, spaces and all, and `.tex` is added when it has no extension; the file goes under `-output-directory` when one is given. A file written now is read back as it now stands by a later `\\input` or `\\openin`. Without `\\immediate` it waits in its page as a whatsit and opens the file when that page is shipped -- on a plain document's list path (`--dvi`); on the string path it is held and never reached.",
         "\\immediate\\openout<number>=<file name>\n\\immediate\\openout1=\\jobname.aux   % => job.aux\n\\immediate\\openout2={my notes}   % => my notes.tex",
     ),
     (
         "\\closeout",
         "Expansion",
-        "Close a write stream (tex.web \u{a7}1374). Every stream still open is closed when the run ends. Only `\\immediate\\closeout` is done.",
+        "Close a write stream (tex.web \u{a7}1374). Every stream still open is closed when the run ends. Without `\\immediate` it closes the stream when its page is shipped, on a plain document's list path (`--dvi`); on the string path only `\\immediate\\closeout` is done.",
         "\\immediate\\closeout<number>",
     ),
     (
@@ -311,7 +311,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\write",
         "Expansion",
-        "Write a line (tex.web \u{a7}1350, \u{a7}1370). The text is read unexpanded and expanded when written, as `\\message` expands its own. To an open stream it goes into the file as LuaTeX writes it -- every character raw, `\\newlinechar` ending the line; to a negative number, the log alone; to a closed stream or one past 127, the terminal, on a line of its own. Only `\\immediate\\write` is done; one waiting for a shipout is held and never reached.",
+        "Write a line (tex.web \u{a7}1350, \u{a7}1370). The text is read unexpanded and expanded when written, as `\\message` expands its own. To an open stream it goes into the file as LuaTeX writes it -- every character raw, `\\newlinechar` ending the line; to a negative number, the log alone; to a closed stream or one past 127, the terminal, on a line of its own. Without `\\immediate`, on a plain document's list path (`--dvi`), it is a whatsit of its page, written when that page is shipped (§1373): between the page's `[1` and its `]` on the terminal, its registers read then, though its macros take the meanings they had at the `\\write`. On the string path one waiting for a shipout is held and never reached.",
         "\\immediate\\write<number>{<text>}\n\\immediate\\write16{\\the\\count0}   % => its own line on the terminal\n\\immediate\\write-1{log only}",
     ),
     (

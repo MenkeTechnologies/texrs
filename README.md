@@ -381,11 +381,13 @@ than none.
   files byte for byte against luatex's. A closed stream or one past 127 writes
   to the terminal and a negative one to the log alone. A file written in the run
   is read back by a later `\input` or `\openin` as it now stands, not as the
-  run before left it. A `\write`, `\openout` or `\closeout` WITHOUT
-  `\immediate` waits for the shipout of its page, and [0x06] says why none
-  reaches one yet; so does a `\special` on the string path. On a plain
-  document's list path a `\special` is a whatsit node of its page, in any
-  mode, and the DVI carries its `xxx` where it stands.
+  run before left it. On a plain document's list path (`--dvi`) a `\write`,
+  `\openout` or `\closeout` WITHOUT `\immediate` is a whatsit node of its
+  page and is carried out when that page ships (§1373), in the order the page
+  is drawn -- a `\write` to the terminal between the page's `[1` and its `]`,
+  reading its registers then -- and a `\special` is a whatsit node whose `xxx`
+  the DVI carries where it stands. On the string path all four wait for a
+  shipout that never comes, and [0x06] says why.
 - `\input`, which is what every real document does first: the file is read where
   it is named, and its own `(./name.tex …)` nests inside the outer one's. `\endinput`
   ends it with the line it is on.
@@ -635,17 +637,17 @@ still lacks.
 breaker reads its penalties once per document, and the shipper is handed line
 boxes built from already-broken strings.
 
-The same missing node list is why a `\write`, `\openout`, `\closeout` or
-`\special` without `\immediate` does nothing yet, nor a `\pdfextension
+The same missing node list is why, on the string path, a `\write`,
+`\openout`, `\closeout` or `\special` without `\immediate` does nothing yet, nor a `\pdfextension
 literal`, `dest`, `annot`, link, thread, `save`, `restore`, `setmatrix`,
 `colorstack` or `refobj`, a `\useimageresource` or a `\savepos`. Each is read and built as the
 whatsit §1341 describes, and `Lowerer::ship_whatsit` is §1373's `out_what` for
 it -- the `\write` expanded when it is shipped, not when it was read -- but a
 whatsit has to sit in the list of the page it is shipped with, and until pages
 are built from node lists the whatsits wait in `deferred_whatsits` for a
-shipout that never comes. `\immediate` does all three now. A plain
-document's `\special` on the list path is the one that has its node: it
-reaches the DVI with its page.
+shipout that never comes. `\immediate` does all three now. On a plain
+document's list path the four have their nodes: a `\special` reaches the DVI
+with its page, and the other three are done when their page ships.
 
 On the DVI ladder nine of the ten documents reach STRUCTURE: the text and its
 structure agree with `tex`, the bytes do not — see `BUGS.md`.

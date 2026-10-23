@@ -1285,6 +1285,17 @@ fn to_engine(arena: &Arena, at: usize) -> mlua::Result<Vec<ENode>> {
             out.extend(replace);
             return Ok(out);
         }
+        // An `open`, `write` or `close` whatsit the engine made goes back as
+        // it came, carrying what its shipout does.
+        WHATSIT if (0..=2).contains(&sub) && cell.get("action").is_some() => {
+            ENode::Out(crate::node::OutNode {
+                display: match cell.get("display") {
+                    Some(FV::V(Value::String(s))) => s.to_str()?.to_string(),
+                    _ => String::new(),
+                },
+                action: usize::try_from(cell.int("action")).unwrap_or(usize::MAX),
+            })
+        }
         WHATSIT => ENode::Whatsit(match cell.get("data") {
             Some(FV::V(Value::String(s))) => s.to_str()?.to_string(),
             _ => String::new(),
@@ -1461,6 +1472,22 @@ fn one_from_engine(arena: &mut Arena, n: &ENode) -> mlua::Result<usize> {
             if let Some(Ok(v)) = lua_text {
                 arena.cell_mut(at)?.set("data", Some(FV::V(v)));
             }
+            at
+        }
+        // LuaTeX's whatsit subtypes: 0 `open`, 1 `write`, 2 `close`.
+        ENode::Out(w) => {
+            let sub = match w.display.as_bytes().first() {
+                Some(b'o') => 0,
+                Some(b'w') => 1,
+                _ => 2,
+            };
+            let at = arena.make(WHATSIT, Some(sub));
+            let display = super::with_lua(|lua| lua.create_string(&w.display).map(Value::String));
+            let c = arena.cell_mut(at)?;
+            if let Some(Ok(v)) = display {
+                c.set("display", Some(FV::V(v)));
+            }
+            c.set("action", Some(FV::I(w.action as i64)));
             at
         }
         ENode::Math(s) | ENode::MathOff(s) => {

@@ -148,6 +148,14 @@ pub(crate) fn tell(said: Vec<crate::stomach::Said>, online: bool) {
                 }
                 record(text);
             }
+            Said::Glued(text) => {
+                let held = take_building();
+                if !held.is_empty() {
+                    record(held);
+                }
+                GLUED.with(|g| *g.borrow_mut() = true);
+                record(text);
+            }
         }
     }
 }

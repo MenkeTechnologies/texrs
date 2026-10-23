@@ -536,6 +536,10 @@ pub enum Said {
     /// Printed on the terminal as a message of its own: the `[1]` §638
     /// writes as each page ships.
     Terminal(String),
+    /// Printed on the terminal hard against what came before: §639's `]`
+    /// after the `\write`s a page carried out, which ends its line with
+    /// `print_ln`, or after the page number when they wrote to files alone.
+    Glued(String),
 }
 
 impl Stomach {

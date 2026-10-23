@@ -242,6 +242,11 @@ pub enum Cmd {
     /// as `ListOp::Whatsit`. One whose text the lowerer knows is a
     /// `Cmd::List` of that action directly.
     Special(Vec<MsgOp>),
+    /// `\openout`, `\write` or `\closeout` without `\immediate`, on the list
+    /// path: `body` is what §1374 does with the whatsit, compiled into a
+    /// sub-chunk the run calls when the page holding the node is shipped,
+    /// and the node goes on the current list as `ListOp::OutWhatsit`.
+    OutWhatsit { display: String, body: Vec<Cmd> },
     /// The `)` that closes an `\input` file, attached to the message before it.
     ///
     /// tex writes `(./inner.tex [msg])` with no space in front of the paren,
@@ -383,6 +388,10 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             Cmd::Special(ops) => {
                 out.push_str(&format!("{pad}Special\n"));
                 render_msg(ops, depth + 1, out);
+            }
+            Cmd::OutWhatsit { display, body } => {
+                out.push_str(&format!("{pad}OutWhatsit {display:?}\n"));
+                render_into(body, depth + 1, out);
             }
             Cmd::KeepGlobal { reg, into } => {
                 out.push_str(&format!("{pad}KeepGlobal \\count{reg} into={into:?}\n"))

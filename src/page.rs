@@ -159,7 +159,7 @@ pub fn vert_break(list: &[Node], h: Scaled, d: Scaled) -> Break {
                 prev_dp = bd;
                 Step::NotFound
             }
-            Some(Node::Whatsit(_)) => Step::NotFound,
+            Some(Node::Whatsit(_) | Node::Out(_)) => Step::NotFound,
             Some(Node::Glue(_)) => match list[prev_p].precedes_break() {
                 true => Step::Legal(0),
                 false => Step::UpdateHeights,
@@ -276,7 +276,7 @@ pub fn prune_page_top(list: Vec<Node>, split_top_skip: Glue) -> Vec<Node> {
             }
             // Whatsits, marks and insertions survive the pruning: a mark that
             // was thrown away here would take a running head with it.
-            Node::Whatsit(_) | Node::Mark(_) | Node::Ins(_) => out.push(node),
+            Node::Whatsit(_) | Node::Out(_) | Node::Mark(_) | Node::Ins(_) => out.push(node),
             // Glue, kerns and penalties are discarded.
             _ => {}
         }
@@ -825,7 +825,7 @@ impl PageBuilder {
                 self.page_depth = depth;
                 return self.contribute_node(node);
             }
-            Node::Whatsit(_) | Node::Mark(_) => return self.contribute_node(node),
+            Node::Whatsit(_) | Node::Out(_) | Node::Mark(_) => return self.contribute_node(node),
             Node::Ins(ins) => {
                 let ins = ins.clone();
                 self.append_insertion(&ins);

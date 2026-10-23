@@ -252,7 +252,7 @@ pub fn hpack(
             | Node::Math(width)
             | Node::MathOff(width) => x += *width,
             // §651's `othercases do_nothing`.
-            Node::Disc(_) | Node::Whatsit(_) | Node::Penalty(_) => {}
+            Node::Disc(_) | Node::Whatsit(_) | Node::Out(_) | Node::Penalty(_) => {}
             // §655: kept only when there is no adjustment list.
             Node::Ins(_) | Node::Mark(_) | Node::Adjust(_) => {}
         }
