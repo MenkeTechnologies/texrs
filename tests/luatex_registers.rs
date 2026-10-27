@@ -83,7 +83,9 @@ fn attribute_registers_start_unset_and_are_scoped_like_counts() {
         ),
     );
     assert!(
-        out.contains("[-2147483647][-2147483647] [3][\\attribute5][3] [9] [3][4] [5] [-2147483647]"),
+        out.contains(
+            "[-2147483647][-2147483647] [3][\\attribute5][3] [9] [3][4] [5] [-2147483647]"
+        ),
         "{out}"
     );
     assert!(out.contains("! Bad register code (65536)."), "{out}");

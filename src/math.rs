@@ -790,7 +790,7 @@ pub type Tap = std::sync::Arc<dyn Fn(usize, Settings) + Send + Sync>;
 
 /// The settings of the batches back so far, by formula index.
 ///
-/// A batch handed out holds [`BATCH`] formulas and starts at a multiple of
+/// A batch handed out holds `BATCH` formulas and starts at a multiple of
 /// it: `Formulas::push` sends exactly when that many are pending, and nothing
 /// else empties the pending list before the join.
 #[derive(Default)]
@@ -819,7 +819,7 @@ impl SettingsTable {
 /// A formula's setting depends only on what its [`Deferred`] holds, which is
 /// fixed when the formula is read, so it can be set while the lowerer goes
 /// on reading the rest of the document. Formulas are collected into batches
-/// of [`BATCH`] and each full batch is handed to the rayon pool as soon as it
+/// of `BATCH` and each full batch is handed to the rayon pool as soon as it
 /// fills; [`Formulas::fill`] sets what is left on the calling thread, waits
 /// for the batches still out and writes every setting into the slot its
 /// index names. With one thread in the pool -- `TEXRS_THREADS=1` -- nothing

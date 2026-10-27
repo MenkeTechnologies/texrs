@@ -43,13 +43,17 @@ pub struct DesignAxis {
     pub variants: Vec<AxisValue>,
 }
 
+/// `avar`'s segment maps, one per axis: `(from, to)` pairs, or `None` where
+/// the axis's map is not usable.
+pub type SegmentMaps = Vec<Option<Vec<(f64, f64)>>>;
+
 /// `fontdata.variabledata`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VariableData {
     pub axis: Option<Vec<Axis>>,
     pub instances: Option<Vec<Instance>>,
     /// `avar`'s segment maps per axis, `None` where the map is not usable.
-    pub segments: Option<Vec<Option<Vec<(f64, f64)>>>>,
+    pub segments: Option<SegmentMaps>,
     pub designaxis: Option<Vec<DesignAxis>>,
     pub fallbackname: Option<String>,
     /// HVAR gave the advances, so `gvar`'s phantom points do not.
@@ -157,7 +161,7 @@ pub fn read_avar(f: &mut Stream, fontdata: &mut FontData) {
         let usable = n > 2
             && values[0] == (-1.0, -1.0)
             && values[n - 1] == (1.0, 1.0)
-            && values[1..n - 1].iter().any(|v| *v == (0.0, 0.0));
+            && values[1..n - 1].contains(&(0.0, 0.0));
         segments.push(usable.then_some(values));
     }
     fontdata
@@ -264,7 +268,7 @@ pub fn complete_instances(vd: &mut VariableData) {
 /// segment map is a number, which none is, so a font with `avar` maps gets
 /// the plain normalisation back from the first one.
 fn getaxisscale(
-    segments: &Option<Vec<Option<Vec<(f64, f64)>>>>,
+    segments: &Option<SegmentMaps>,
     minimum: f64,
     default: f64,
     maximum: f64,
@@ -380,9 +384,13 @@ pub fn getscales(regions: &[Vec<RegionAxis>], factors: &[f64]) -> Vec<f64> {
             let mut s = 1.0;
             for (j, a) in region.iter().enumerate() {
                 let f = factors.get(j).copied().unwrap_or(0.0);
-                if a.start > a.peak || a.peak > a.stop {
-                } else if a.start < 0.0 && a.stop > 0.0 && a.peak != 0.0 {
-                } else if a.peak == 0.0 {
+                if a.start > a.peak
+                    || a.peak > a.stop
+                    || (a.start < 0.0 && a.stop > 0.0 && a.peak != 0.0)
+                    || a.peak == 0.0
+                {
+                    // An axis that is malformed, straddles zero or has no peak leaves the
+                    // scale alone.
                 } else if f < a.start || f > a.stop {
                     s = 0.0;
                     break;

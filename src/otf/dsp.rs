@@ -279,11 +279,10 @@ fn classdef(f: &mut Stream, offset: usize, preset: Preset) -> BTreeMap<u32, u32>
         }
     }
     if format == 1 {
-        let mut index = f.u16();
+        let start = f.u16();
         let n = f.u16();
-        for _ in 0..n {
+        for index in (start..).take(n as usize) {
             def.insert(index, f.u16() + 1);
-            index += 1;
         }
     } else if format == 2 {
         let ranges = f.u16();
@@ -700,7 +699,7 @@ fn gsub_step(
             let mut out = BTreeMap::new();
             if subtype == 1 {
                 let delta = f.i16();
-                for (&index, _) in &coverage_map(f, tableoffset + cov) {
+                for &index in coverage_map(f, tableoffset + cov).keys() {
                     let newindex = ((index as i64 + delta as i64).rem_euclid(65536)) as u32;
                     if index <= nofglyphs && newindex <= nofglyphs {
                         out.insert(index, newindex);
@@ -900,8 +899,10 @@ fn gpos_step(
                 let cov = f.u16() as usize;
                 let format1 = f.u16();
                 let format2 = f.u16();
+                // A PairSet table: each second glyph with its two value records.
+                type PairSet = Vec<(u32, Option<Pos>, Option<Pos>)>;
                 let sets = array(f, None).unwrap_or_default();
-                let sets: Vec<Vec<(u32, Option<Pos>, Option<Pos>)>> = sets
+                let sets: Vec<PairSet> = sets
                     .iter()
                     .map(|&o| {
                         let offset = tableoffset + o as usize;
@@ -1917,8 +1918,8 @@ pub fn read_math(f: &mut Stream, fontdata: &mut FontData, layout: &mut Layout) {
                 continue;
             }
             let coverage = coverage_list(f, offset + cov);
-            for i in 0..n {
-                let c = cons[i] as usize;
+            for (i, &c) in cons.iter().enumerate().take(n) {
+                let c = c as usize;
                 if c == 0 {
                     continue;
                 }

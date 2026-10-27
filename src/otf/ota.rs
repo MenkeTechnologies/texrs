@@ -9,7 +9,7 @@
 //! Not ported: `methods.mong` (needs char-def.lua's Mongolian joining data)
 //! and the Indic analyzers of font-osd.lua; `analyze` refuses those scripts.
 
-use super::nodes::{Ix, Kind, List};
+use super::nodes::{Ix, Kind, List, NotGlyph};
 use super::Face;
 
 pub const S_INIT: u8 = 1;
@@ -665,11 +665,11 @@ fn setstate(list: &mut List, head: Option<Ix>, font: usize, face: &Face) {
                 last = None;
                 n = 0;
             }
-            Err(()) if list.is_disc(Some(cur)) => {
+            Err(NotGlyph) if list.is_disc(Some(cur)) => {
                 list.set_state(cur, Some(S_MEDI));
                 last = Some(cur);
             }
-            Err(()) => {
+            Err(NotGlyph) => {
                 finish(list, first, last);
                 first = None;
                 last = None;

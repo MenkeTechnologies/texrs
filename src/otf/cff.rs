@@ -491,10 +491,7 @@ fn nibbles(data: &[u8], at: &mut usize) -> f64 {
         "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "E", "E-", "", "-", "",
     ];
     let mut text = String::new();
-    loop {
-        let Some(&b) = data.get(*at) else {
-            break;
-        };
+    while let Some(&b) = data.get(*at) {
         *at += 1;
         let hi = (b >> 4) as usize;
         let lo = (b & 0x0F) as usize;
@@ -832,7 +829,7 @@ impl<'a> Interp<'a> {
         if self.top == 0 {
             return;
         }
-        if self.top % 2 != 0 {
+        if !self.top.is_multiple_of(2) {
             let first = if self.stack.is_empty() {
                 0.0
             } else {
@@ -859,7 +856,7 @@ impl<'a> Interp<'a> {
         match self.stems {
             0 => 0,
             1..=8 => 1,
-            n => (n + 7) / 8,
+            n => n.div_ceil(8),
         }
     }
 
@@ -939,7 +936,7 @@ impl<'a> Interp<'a> {
             27 => {
                 // hhcurveto
                 let mut s = 1;
-                if top % 2 != 0 {
+                if !top.is_multiple_of(2) {
                     self.y += self.at(1);
                     s = 2;
                 }
@@ -970,7 +967,7 @@ impl<'a> Interp<'a> {
                 // vvcurveto
                 let mut s = 1;
                 let mut d = 0.0;
-                if top % 2 != 0 {
+                if !top.is_multiple_of(2) {
                     d = self.at(1);
                     s = 2;
                 }
@@ -1059,7 +1056,7 @@ impl<'a> Interp<'a> {
     /// `xxcurveto` (font-cff.lua:1122-1185): `swap` is hvcurveto.
     fn xxcurveto(&mut self, mut swap: bool) {
         let mut top = self.top;
-        let last = match top % 4 != 0 {
+        let last = match !top.is_multiple_of(4) {
             true => Some(self.at(top)),
             false => None,
         };

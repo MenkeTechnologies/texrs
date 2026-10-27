@@ -79,7 +79,7 @@
 //!
 //! ## The rest of LuaTeX's state
 //!
-//! [`build`] follows luastuff.c's `luainterpreter()`: `crate::lua::libs`
+//! `build` follows luastuff.c's `luainterpreter()`: `crate::lua::libs`
 //! opens Lua's libraries and LuaTeX's C ones (LPeg, slnunicode, LuaFileSystem,
 //! bit32, zlib, gzip -- compiled from the sources LuaTeX ships), `md5`, `sha2`
 //! and the `string`/`os` extensions; then come `tex`, `token`, `node`, `texio`,

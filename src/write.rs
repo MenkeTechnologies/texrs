@@ -12,7 +12,7 @@
 //! - the name an `\openout` file is given ([`out_file_name`]) and where it is
 //!   put ([`out_path`]);
 //! - the open files themselves, held by the run ([`b_out_open`],
-//!   [`b_out_write`], [`b_out_close`]), because a `\write`'s text carries
+//!   `b_out_write`, `b_out_close`), because a `\write`'s text carries
 //!   register reads that only the run can answer;
 //! - and what the LOWERING has written ([`Written`]), because texrs lowers the
 //!   whole document before it runs it, and a file written with

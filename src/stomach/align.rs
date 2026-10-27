@@ -13,7 +13,7 @@
 //! An unset box (§159) is a [`BoxNode`] with subtype [`UNSET`] or
 //! [`UNSET_ROW`]; what §159 overlays on a box's fields -- the span count and
 //! the total stretch and shrink with their orders -- is kept in
-//! [`Align::unsets`], indexed by the box's `glue_set` (where `tex.web` keeps
+//! `Align::unsets`, indexed by the box's `glue_set` (where `tex.web` keeps
 //! `glue_stretch`); its `shift_amount` stays zero, as `hpack` reads an unset
 //! node's (§653). No unset box leaves the alignment.
 
@@ -87,7 +87,11 @@ impl Stomach {
         let display = self.mode() == Mode::DisplayMath;
         // §775: in a display the baselines are the enclosing vertical list's.
         let prev_depth = match display {
-            true => self.nest.len().checked_sub(2).map_or(0, |i| self.nest[i].prev_depth),
+            true => self
+                .nest
+                .len()
+                .checked_sub(2)
+                .map_or(0, |i| self.nest[i].prev_depth),
             false => self.cur().prev_depth,
         };
         let mode = match halign {
@@ -299,7 +303,10 @@ impl Stomach {
         match halign {
             true => {
                 self.append_to_vlist(p);
-                let adjust = self.align().map(|a| std::mem::take(&mut a.adjust)).unwrap_or_default();
+                let adjust = self
+                    .align()
+                    .map(|a| std::mem::take(&mut a.adjust))
+                    .unwrap_or_default();
                 for n in adjust {
                     self.tail_append(n);
                 }
@@ -431,14 +438,20 @@ impl Stomach {
         let pre = self.int_par("predisplaypenalty");
         self.tail_append(Node::Penalty(pre));
         let above = super::glue_par(e, "abovedisplayskip");
-        self.tail_append(Node::Glue(GlueNode::param(above, GlueSource::AboveDisplaySkip)));
+        self.tail_append(Node::Glue(GlueNode::param(
+            above,
+            GlueSource::AboveDisplaySkip,
+        )));
         for n in list {
             self.tail_append(n);
         }
         let post = self.int_par("postdisplaypenalty");
         self.tail_append(Node::Penalty(post));
         let below = super::glue_par(e, "belowdisplayskip");
-        self.tail_append(Node::Glue(GlueNode::param(below, GlueSource::BelowDisplaySkip)));
+        self.tail_append(Node::Glue(GlueNode::param(
+            below,
+            GlueSource::BelowDisplaySkip,
+        )));
         self.cur_mut().prev_depth = aux_depth;
     }
 }
@@ -495,7 +508,11 @@ fn set_row(a: &Align, mut q: BoxNode, p: &BoxNode, o: Scaled) -> BoxNode {
             out.push(Node::Box(r));
             continue;
         }
-        let info = a.unsets.get(r.glue_set as usize).copied().unwrap_or_default();
+        let info = a
+            .unsets
+            .get(r.glue_set as usize)
+            .copied()
+            .unwrap_or_default();
         let size = |n: &Node| match n {
             Node::Box(b) => match a.halign {
                 true => b.width,

@@ -243,7 +243,9 @@ impl Stomach {
             false => Class::from_code(c / 0o10000),
         };
         let nucleus = Field::Char(math_char(c, self.cur_fam()));
-        self.cur_mut().mlist.push(Noad::Atom(Atom::new(class, nucleus)));
+        self.cur_mut()
+            .mlist
+            .push(Noad::Atom(Atom::new(class, nucleus)));
     }
 
     /// The end of `scan_math` (§1151): the chosen field gets a character.
@@ -280,7 +282,9 @@ impl Stomach {
                 return;
             }
         }
-        self.say(Said::Error("Limit controls must follow a math operator".into()));
+        self.say(Said::Error(
+            "Limit controls must follow a math operator".into(),
+        ));
     }
 
     /// `math_radical` (§1163).
@@ -391,11 +395,13 @@ impl Stomach {
                 Noad::Atom(a)
                     if a.class() == Class::Ord && a.subscr.is_empty() && a.supscr.is_empty() =>
                 {
-                    let nucleus = std::mem::take(&mut match p.remove(0) {
-                        Noad::Atom(a) => a,
-                        _ => unreachable!(),
-                    }
-                    .nucleus);
+                    let nucleus = std::mem::take(
+                        &mut match p.remove(0) {
+                            Noad::Atom(a) => a,
+                            _ => unreachable!(),
+                        }
+                        .nucleus,
+                    );
                     if let Some(field) = field_mut(q, target) {
                         *field = nucleus;
                     }
@@ -418,9 +424,7 @@ impl Stomach {
 
     /// `append_choices` (§1172).
     pub fn append_choices(&mut self) {
-        self.cur_mut()
-            .mlist
-            .push(Noad::Choice(Box::new(Choice::default())));
+        self.cur_mut().mlist.push(Noad::Choice(Box::default()));
         self.push_math(Mode::Math, Opened::MathChoice(0));
     }
 
@@ -717,7 +721,10 @@ impl Stomach {
         let pre = self.int_par("predisplaypenalty");
         self.tail_append(Node::Penalty(pre));
         let (g1, mut g2) = match dd + s <= d.pre_size || l {
-            true => (GlueSource::AboveDisplaySkip, Some(GlueSource::BelowDisplaySkip)),
+            true => (
+                GlueSource::AboveDisplaySkip,
+                Some(GlueSource::BelowDisplaySkip),
+            ),
             false => (
                 GlueSource::AboveDisplayShortSkip,
                 Some(GlueSource::BelowDisplayShortSkip),
@@ -781,7 +788,12 @@ impl Stomach {
     }
 
     /// §1201's `hpack(p,w,exactly)`, reporting as `hpack` reports.
-    fn pack_display(&mut self, list: Vec<Node>, w: Scaled, tol: crate::pack::Tolerances) -> BoxNode {
+    fn pack_display(
+        &mut self,
+        list: Vec<Node>,
+        w: Scaled,
+        tol: crate::pack::Tolerances,
+    ) -> BoxNode {
         let packed = hpack(list, Spec::Exactly(w), tol, None);
         self.last_badness = packed.badness;
         if let Some(r) = packed.report {

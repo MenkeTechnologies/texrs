@@ -570,7 +570,7 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
         }
         // `pdf_do_page_divert`: the page goes into the last `/Pages` node,
         // and a new node is begun when it is full.
-        if tree.last().map_or(true, |n| n.kids.len() == PAGES_KIDS_MAX) {
+        if tree.last().is_none_or(|n| n.kids.len() == PAGES_KIDS_MAX) {
             let number = w.create();
             tree.push(PagesNode {
                 number,
@@ -746,7 +746,6 @@ pub fn write(pages: &[Page], contents: Vec<String>, prepared: crate::backend::Pr
         .map(String::as_str)
         .collect::<Vec<_>>()
         .join(" ");
-    let mut w = w;
     w.trailer_id = (!prepared.lua.trailer_id.is_empty()).then(|| prepared.lua.trailer_id.clone());
     w.finish(catalog, Some(info), &trailer, id)
 }
@@ -850,7 +849,7 @@ fn dest_order(a: &str, b: &str) -> std::cmp::Ordering {
         let hex = raw.len() >= 2
             && raw[0] == b'<'
             && raw[raw.len() - 1] == b'>'
-            && raw.len() % 2 == 0
+            && raw.len().is_multiple_of(2)
             && raw[1..raw.len() - 1].iter().all(u8::is_ascii_hexdigit);
         match hex {
             true => raw[1..raw.len() - 1]
@@ -975,7 +974,7 @@ fn write_page_tree(w: &mut Writer, leaves: Vec<PagesNode>, attr: &str) -> Option
                 for node in &level {
                     if parents
                         .last()
-                        .map_or(false, |q| q.kids.len() == PAGES_KIDS_MAX)
+                        .is_some_and(|q| q.kids.len() == PAGES_KIDS_MAX)
                     {
                         let number = w.create();
                         parents.push(PagesNode {

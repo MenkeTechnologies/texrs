@@ -11,7 +11,7 @@
 //! where the registers are: a box's width depends on a `\hsize` a run-time
 //! `\advance` may have changed, and `\ifdim\wd0>\hsize` is a branch on both.
 //!
-//! So the lowered program carries [`crate::ir::ListOp`]s, the VM hands each
+//! So the lowered program carries [`crate::ir::list::ListOp`]s, the VM hands each
 //! to [`Stomach::apply`], and this module is the port of the action routines:
 //!
 //! - the semantic nest (§211-§219): one [`ListState`] per open list, the
@@ -237,8 +237,14 @@ struct Register {
 /// `\parshape` with the level it was assigned at.
 #[derive(Clone, Debug)]
 enum Saved {
-    Box { n: u16, old: Register },
-    ParShape { old: Vec<(Scaled, Scaled)>, level: usize },
+    Box {
+        n: u16,
+        old: Register,
+    },
+    ParShape {
+        old: Vec<(Scaled, Scaled)>,
+        level: usize,
+    },
 }
 
 /// The stomach's state for one run.
@@ -372,7 +378,9 @@ impl Stomach {
     }
 
     pub fn cur_mut(&mut self) -> &mut ListState {
-        self.nest.last_mut().expect("the outer list is never popped")
+        self.nest
+            .last_mut()
+            .expect("the outer list is never popped")
     }
 
     pub fn mode(&self) -> Mode {
@@ -408,7 +416,9 @@ impl Stomach {
 
     /// `box(n)`, without emptying it.
     pub fn box_register(&self, n: u16) -> Option<&BoxNode> {
-        self.registers.get(n as usize).and_then(|r| r.value.as_ref())
+        self.registers
+            .get(n as usize)
+            .and_then(|r| r.value.as_ref())
     }
 
     /// `box(n):=null` -- `\box n` takes the box and leaves the register void
@@ -562,7 +572,9 @@ impl Stomach {
     pub fn esc_text(&self) -> String {
         let e = self.int_par("escapechar");
         match (0..256).contains(&e) {
-            true => char::from_u32(e as u32).map(String::from).unwrap_or_default(),
+            true => char::from_u32(e as u32)
+                .map(String::from)
+                .unwrap_or_default(),
             false => String::new(),
         }
     }
@@ -829,7 +841,12 @@ impl Stomach {
 
     /// `\prevgraf=` (§1244): written to that same list.
     pub fn set_prev_graf(&mut self, value: i64) {
-        if let Some(l) = self.nest.iter_mut().rev().find(|l| l.mode.kind() == Kind::V) {
+        if let Some(l) = self
+            .nest
+            .iter_mut()
+            .rev()
+            .find(|l| l.mode.kind() == Kind::V)
+        {
             l.prev_graf = value;
         }
     }

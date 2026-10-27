@@ -577,7 +577,8 @@ fn append_disk(st: &State, file: &Path, names: &[String], found: &[Option<PathBu
 /// because a package that probes for an optional file asks for it repeatedly.
 pub fn find_as(name: &str, format: &str, progname: &str, must_exist: bool) -> Option<PathBuf> {
     type Key = (String, String, bool);
-    static MEMO: OnceLock<Mutex<HashMap<(Key, String), Option<PathBuf>>>> = OnceLock::new();
+    type Memo = HashMap<(Key, String), Option<PathBuf>>;
+    static MEMO: OnceLock<Mutex<Memo>> = OnceLock::new();
     static SERVERS: OnceLock<Mutex<HashMap<Key, Option<Server>>>> = OnceLock::new();
     let key: Key = (progname.to_string(), format.to_string(), must_exist);
     let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
@@ -683,8 +684,8 @@ fn format_suffixes() -> &'static HashMap<String, Vec<String>> {
 /// printed nothing, which is its answer for an unset variable. Memoised, since
 /// a variable cannot change under a running process.
 pub fn query(progname: &str, option: &str, value: &str) -> Option<String> {
-    static MEMO: OnceLock<Mutex<HashMap<(String, String, String), Option<String>>>> =
-        OnceLock::new();
+    type Memo = HashMap<(String, String, String), Option<String>>;
+    static MEMO: OnceLock<Mutex<Memo>> = OnceLock::new();
     let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
     let key = (progname.to_string(), option.to_string(), value.to_string());
     if let Some(hit) = memo.lock().ok()?.get(&key) {
@@ -751,7 +752,11 @@ mod tests {
 
         // A database or configuration file that appears where there was none
         // changes the search as much as one that changes.
-        let cache = format!("{}x.sty\t{}\n", stamp_of(&[cnf.clone()]), old.display());
+        let cache = format!(
+            "{}x.sty\t{}\n",
+            stamp_of(std::slice::from_ref(&cnf)),
+            old.display()
+        );
         assert!(parse_disk(&cache).is_some());
         std::fs::create_dir_all(cnf.parent().unwrap()).unwrap();
         std::fs::write(&cnf, "TEXINPUTS = .\n").unwrap();

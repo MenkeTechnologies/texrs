@@ -15,44 +15,397 @@ use std::collections::BTreeSet;
 
 /// writecff.c:50-144: the standard strings.
 const STDSTR: [&str; 391] = [
-    ".notdef", "space", "exclam", "quotedbl", "numbersign", "dollar", "percent", "ampersand", "quoteright", "parenleft", "parenright",
-    "asterisk", "plus", "comma", "hyphen", "period", "slash", "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
-    "nine", "colon", "semicolon", "less", "equal", "greater", "question", "at", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
-    "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "bracketleft", "backslash", "bracketright",
-    "asciicircum", "underscore", "quoteleft", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q",
-    "r", "s", "t", "u", "v", "w", "x", "y", "z", "braceleft", "bar", "braceright", "asciitilde", "exclamdown", "cent", "sterling",
-    "fraction", "yen", "florin", "section", "currency", "quotesingle", "quotedblleft", "guillemotleft", "guilsinglleft",
-    "guilsinglright", "fi", "fl", "endash", "dagger", "daggerdbl", "periodcentered", "paragraph", "bullet", "quotesinglbase",
-    "quotedblbase", "quotedblright", "guillemotright", "ellipsis", "perthousand", "questiondown", "grave", "acute", "circumflex",
-    "tilde", "macron", "breve", "dotaccent", "dieresis", "ring", "cedilla", "hungarumlaut", "ogonek", "caron", "emdash", "AE",
-    "ordfeminine", "Lslash", "Oslash", "OE", "ordmasculine", "ae", "dotlessi", "lslash", "oslash", "oe", "germandbls",
-    "onesuperior", "logicalnot", "mu", "trademark", "Eth", "onehalf", "plusminus", "Thorn", "onequarter", "divide", "brokenbar",
-    "degree", "thorn", "threequarters", "twosuperior", "registered", "minus", "eth", "multiply", "threesuperior", "copyright",
-    "Aacute", "Acircumflex", "Adieresis", "Agrave", "Aring", "Atilde", "Ccedilla", "Eacute", "Ecircumflex", "Edieresis", "Egrave",
-    "Iacute", "Icircumflex", "Idieresis", "Igrave", "Ntilde", "Oacute", "Ocircumflex", "Odieresis", "Ograve", "Otilde", "Scaron",
-    "Uacute", "Ucircumflex", "Udieresis", "Ugrave", "Yacute", "Ydieresis", "Zcaron", "aacute", "acircumflex", "adieresis",
-    "agrave", "aring", "atilde", "ccedilla", "eacute", "ecircumflex", "edieresis", "egrave", "iacute", "icircumflex", "idieresis",
-    "igrave", "ntilde", "oacute", "ocircumflex", "odieresis", "ograve", "otilde", "scaron", "uacute", "ucircumflex", "udieresis",
-    "ugrave", "yacute", "ydieresis", "zcaron", "exclamsmall", "Hungarumlautsmall", "dollaroldstyle", "dollarsuperior",
-    "ampersandsmall", "Acutesmall", "parenleftsuperior", "parenrightsuperior", "twodotenleader", "onedotenleader", "zerooldstyle",
-    "oneoldstyle", "twooldstyle", "threeoldstyle", "fouroldstyle", "fiveoldstyle", "sixoldstyle", "sevenoldstyle",
-    "eightoldstyle", "nineoldstyle", "commasuperior", "threequartersemdash", "periodsuperior", "questionsmall", "asuperior",
-    "bsuperior", "centsuperior", "dsuperior", "esuperior", "isuperior", "lsuperior", "msuperior", "nsuperior", "osuperior",
-    "rsuperior", "ssuperior", "tsuperior", "ff", "ffi", "ffl", "parenleftinferior", "parenrightinferior", "Circumflexsmall",
-    "hyphensuperior", "Gravesmall", "Asmall", "Bsmall", "Csmall", "Dsmall", "Esmall", "Fsmall", "Gsmall", "Hsmall", "Ismall",
-    "Jsmall", "Ksmall", "Lsmall", "Msmall", "Nsmall", "Osmall", "Psmall", "Qsmall", "Rsmall", "Ssmall", "Tsmall", "Usmall",
-    "Vsmall", "Wsmall", "Xsmall", "Ysmall", "Zsmall", "colonmonetary", "onefitted", "rupiah", "Tildesmall", "exclamdownsmall",
-    "centoldstyle", "Lslashsmall", "Scaronsmall", "Zcaronsmall", "Dieresissmall", "Brevesmall", "Caronsmall", "Dotaccentsmall",
-    "Macronsmall", "figuredash", "hypheninferior", "Ogoneksmall", "Ringsmall", "Cedillasmall", "questiondownsmall", "oneeighth",
-    "threeeighths", "fiveeighths", "seveneighths", "onethird", "twothirds", "zerosuperior", "foursuperior", "fivesuperior",
-    "sixsuperior", "sevensuperior", "eightsuperior", "ninesuperior", "zeroinferior", "oneinferior", "twoinferior",
-    "threeinferior", "fourinferior", "fiveinferior", "sixinferior", "seveninferior", "eightinferior", "nineinferior",
-    "centinferior", "dollarinferior", "periodinferior", "commainferior", "Agravesmall", "Aacutesmall", "Acircumflexsmall",
-    "Atildesmall", "Adieresissmall", "Aringsmall", "AEsmall", "Ccedillasmall", "Egravesmall", "Eacutesmall", "Ecircumflexsmall",
-    "Edieresissmall", "Igravesmall", "Iacutesmall", "Icircumflexsmall", "Idieresissmall", "Ethsmall", "Ntildesmall",
-    "Ogravesmall", "Oacutesmall", "Ocircumflexsmall", "Otildesmall", "Odieresissmall", "OEsmall", "Oslashsmall", "Ugravesmall",
-    "Uacutesmall", "Ucircumflexsmall", "Udieresissmall", "Yacutesmall", "Thornsmall", "Ydieresissmall", "001.000", "001.001",
-    "001.002", "001.003", "Black", "Bold", "Book", "Light", "Medium", "Regular", "Roman", "Semibold",
+    ".notdef",
+    "space",
+    "exclam",
+    "quotedbl",
+    "numbersign",
+    "dollar",
+    "percent",
+    "ampersand",
+    "quoteright",
+    "parenleft",
+    "parenright",
+    "asterisk",
+    "plus",
+    "comma",
+    "hyphen",
+    "period",
+    "slash",
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "colon",
+    "semicolon",
+    "less",
+    "equal",
+    "greater",
+    "question",
+    "at",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    "bracketleft",
+    "backslash",
+    "bracketright",
+    "asciicircum",
+    "underscore",
+    "quoteleft",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "braceleft",
+    "bar",
+    "braceright",
+    "asciitilde",
+    "exclamdown",
+    "cent",
+    "sterling",
+    "fraction",
+    "yen",
+    "florin",
+    "section",
+    "currency",
+    "quotesingle",
+    "quotedblleft",
+    "guillemotleft",
+    "guilsinglleft",
+    "guilsinglright",
+    "fi",
+    "fl",
+    "endash",
+    "dagger",
+    "daggerdbl",
+    "periodcentered",
+    "paragraph",
+    "bullet",
+    "quotesinglbase",
+    "quotedblbase",
+    "quotedblright",
+    "guillemotright",
+    "ellipsis",
+    "perthousand",
+    "questiondown",
+    "grave",
+    "acute",
+    "circumflex",
+    "tilde",
+    "macron",
+    "breve",
+    "dotaccent",
+    "dieresis",
+    "ring",
+    "cedilla",
+    "hungarumlaut",
+    "ogonek",
+    "caron",
+    "emdash",
+    "AE",
+    "ordfeminine",
+    "Lslash",
+    "Oslash",
+    "OE",
+    "ordmasculine",
+    "ae",
+    "dotlessi",
+    "lslash",
+    "oslash",
+    "oe",
+    "germandbls",
+    "onesuperior",
+    "logicalnot",
+    "mu",
+    "trademark",
+    "Eth",
+    "onehalf",
+    "plusminus",
+    "Thorn",
+    "onequarter",
+    "divide",
+    "brokenbar",
+    "degree",
+    "thorn",
+    "threequarters",
+    "twosuperior",
+    "registered",
+    "minus",
+    "eth",
+    "multiply",
+    "threesuperior",
+    "copyright",
+    "Aacute",
+    "Acircumflex",
+    "Adieresis",
+    "Agrave",
+    "Aring",
+    "Atilde",
+    "Ccedilla",
+    "Eacute",
+    "Ecircumflex",
+    "Edieresis",
+    "Egrave",
+    "Iacute",
+    "Icircumflex",
+    "Idieresis",
+    "Igrave",
+    "Ntilde",
+    "Oacute",
+    "Ocircumflex",
+    "Odieresis",
+    "Ograve",
+    "Otilde",
+    "Scaron",
+    "Uacute",
+    "Ucircumflex",
+    "Udieresis",
+    "Ugrave",
+    "Yacute",
+    "Ydieresis",
+    "Zcaron",
+    "aacute",
+    "acircumflex",
+    "adieresis",
+    "agrave",
+    "aring",
+    "atilde",
+    "ccedilla",
+    "eacute",
+    "ecircumflex",
+    "edieresis",
+    "egrave",
+    "iacute",
+    "icircumflex",
+    "idieresis",
+    "igrave",
+    "ntilde",
+    "oacute",
+    "ocircumflex",
+    "odieresis",
+    "ograve",
+    "otilde",
+    "scaron",
+    "uacute",
+    "ucircumflex",
+    "udieresis",
+    "ugrave",
+    "yacute",
+    "ydieresis",
+    "zcaron",
+    "exclamsmall",
+    "Hungarumlautsmall",
+    "dollaroldstyle",
+    "dollarsuperior",
+    "ampersandsmall",
+    "Acutesmall",
+    "parenleftsuperior",
+    "parenrightsuperior",
+    "twodotenleader",
+    "onedotenleader",
+    "zerooldstyle",
+    "oneoldstyle",
+    "twooldstyle",
+    "threeoldstyle",
+    "fouroldstyle",
+    "fiveoldstyle",
+    "sixoldstyle",
+    "sevenoldstyle",
+    "eightoldstyle",
+    "nineoldstyle",
+    "commasuperior",
+    "threequartersemdash",
+    "periodsuperior",
+    "questionsmall",
+    "asuperior",
+    "bsuperior",
+    "centsuperior",
+    "dsuperior",
+    "esuperior",
+    "isuperior",
+    "lsuperior",
+    "msuperior",
+    "nsuperior",
+    "osuperior",
+    "rsuperior",
+    "ssuperior",
+    "tsuperior",
+    "ff",
+    "ffi",
+    "ffl",
+    "parenleftinferior",
+    "parenrightinferior",
+    "Circumflexsmall",
+    "hyphensuperior",
+    "Gravesmall",
+    "Asmall",
+    "Bsmall",
+    "Csmall",
+    "Dsmall",
+    "Esmall",
+    "Fsmall",
+    "Gsmall",
+    "Hsmall",
+    "Ismall",
+    "Jsmall",
+    "Ksmall",
+    "Lsmall",
+    "Msmall",
+    "Nsmall",
+    "Osmall",
+    "Psmall",
+    "Qsmall",
+    "Rsmall",
+    "Ssmall",
+    "Tsmall",
+    "Usmall",
+    "Vsmall",
+    "Wsmall",
+    "Xsmall",
+    "Ysmall",
+    "Zsmall",
+    "colonmonetary",
+    "onefitted",
+    "rupiah",
+    "Tildesmall",
+    "exclamdownsmall",
+    "centoldstyle",
+    "Lslashsmall",
+    "Scaronsmall",
+    "Zcaronsmall",
+    "Dieresissmall",
+    "Brevesmall",
+    "Caronsmall",
+    "Dotaccentsmall",
+    "Macronsmall",
+    "figuredash",
+    "hypheninferior",
+    "Ogoneksmall",
+    "Ringsmall",
+    "Cedillasmall",
+    "questiondownsmall",
+    "oneeighth",
+    "threeeighths",
+    "fiveeighths",
+    "seveneighths",
+    "onethird",
+    "twothirds",
+    "zerosuperior",
+    "foursuperior",
+    "fivesuperior",
+    "sixsuperior",
+    "sevensuperior",
+    "eightsuperior",
+    "ninesuperior",
+    "zeroinferior",
+    "oneinferior",
+    "twoinferior",
+    "threeinferior",
+    "fourinferior",
+    "fiveinferior",
+    "sixinferior",
+    "seveninferior",
+    "eightinferior",
+    "nineinferior",
+    "centinferior",
+    "dollarinferior",
+    "periodinferior",
+    "commainferior",
+    "Agravesmall",
+    "Aacutesmall",
+    "Acircumflexsmall",
+    "Atildesmall",
+    "Adieresissmall",
+    "Aringsmall",
+    "AEsmall",
+    "Ccedillasmall",
+    "Egravesmall",
+    "Eacutesmall",
+    "Ecircumflexsmall",
+    "Edieresissmall",
+    "Igravesmall",
+    "Iacutesmall",
+    "Icircumflexsmall",
+    "Idieresissmall",
+    "Ethsmall",
+    "Ntildesmall",
+    "Ogravesmall",
+    "Oacutesmall",
+    "Ocircumflexsmall",
+    "Otildesmall",
+    "Odieresissmall",
+    "OEsmall",
+    "Oslashsmall",
+    "Ugravesmall",
+    "Uacutesmall",
+    "Ucircumflexsmall",
+    "Udieresissmall",
+    "Yacutesmall",
+    "Thornsmall",
+    "Ydieresissmall",
+    "001.000",
+    "001.001",
+    "001.002",
+    "001.003",
+    "Black",
+    "Bold",
+    "Book",
+    "Light",
+    "Medium",
+    "Regular",
+    "Roman",
+    "Semibold",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -167,7 +520,9 @@ struct Dict {
 impl Dict {
     /// `cff_dict_known`.
     fn known(&self, key: &str) -> bool {
-        self.entries.iter().any(|e| e.key() == key && !e.values.is_empty())
+        self.entries
+            .iter()
+            .any(|e| e.key() == key && !e.values.is_empty())
     }
     /// `cff_dict_get`.
     fn get(&self, key: &str, i: usize) -> Result<f64, String> {
@@ -176,7 +531,10 @@ impl Dict {
             .iter()
             .find(|e| e.key() == key)
             .ok_or_else(|| format!("cff: DICT entry '{key}' not found"))?;
-        e.values.get(i).copied().ok_or_else(|| "cff: invalid index number".to_string())
+        e.values
+            .get(i)
+            .copied()
+            .ok_or_else(|| "cff: invalid index number".to_string())
     }
     /// `cff_dict_set`.
     fn set(&mut self, key: &str, i: usize, v: f64) -> Result<(), String> {
@@ -241,8 +599,13 @@ fn dict_unpack(data: &[u8]) -> Result<Dict, String> {
             let (name, argtype) = operator(id).ok_or("cff: parsing DICT failed")?;
             match argtype {
                 ArgType::Number | ArgType::Boolean | ArgType::Sid | ArgType::Offset => {
-                    let v = stack.pop().ok_or("cff: parsing DICT failed (stack underflow)")?;
-                    dict.entries.push(Entry { id, values: vec![v] });
+                    let v = stack
+                        .pop()
+                        .ok_or("cff: parsing DICT failed (stack underflow)")?;
+                    dict.entries.push(Entry {
+                        id,
+                        values: vec![v],
+                    });
                 }
                 _ => {
                     // an operator without operands is ignored
@@ -444,9 +807,17 @@ impl Reader<'_> {
             return Err("cff: invalid index offset data".into());
         }
         let len = (offset[count as usize] - offset[0]) as usize;
-        let data = self.s.get(self.p..self.p + len).ok_or("cff: index past the end")?.to_vec();
+        let data = self
+            .s
+            .get(self.p..self.p + len)
+            .ok_or("cff: index past the end")?
+            .to_vec();
         self.p += len;
-        Ok(Index { count, offset, data })
+        Ok(Index {
+            count,
+            offset,
+            data,
+        })
     }
     /// `cff_get_index_header`: the offsets only.
     fn index_header(&mut self) -> Result<Index, String> {
@@ -532,7 +903,8 @@ impl Font<'_> {
             return Some(STDSTR[id].to_string());
         }
         let i = id - 391;
-        (i < self.string.count as usize).then(|| String::from_utf8_lossy(self.string.item(i)).into_owned())
+        (i < self.string.count as usize)
+            .then(|| String::from_utf8_lossy(self.string.item(i)).into_owned())
     }
 }
 
@@ -611,7 +983,13 @@ fn pack_integer(out: &mut Vec<u8>, v: i64) {
     } else if (-32768..=32767).contains(&v) {
         out.extend_from_slice(&[28, (v >> 8) as u8, v as u8]);
     } else {
-        out.extend_from_slice(&[29, (v >> 24) as u8, (v >> 16) as u8, (v >> 8) as u8, v as u8]);
+        out.extend_from_slice(&[
+            29,
+            (v >> 24) as u8,
+            (v >> 16) as u8,
+            (v >> 8) as u8,
+            v as u8,
+        ]);
     }
 }
 
@@ -702,8 +1080,15 @@ fn put_number(out: &mut Vec<u8>, value: f64, offset: bool) {
     let nearint = (value + 0.5).floor();
     if offset {
         let l = value as i64;
-        out.extend_from_slice(&[29, (l >> 24) as u8, (l >> 16) as u8, (l >> 8) as u8, l as u8]);
-    } else if value > i32::MAX as f64 || value < i32::MIN as f64 || (value - nearint).abs() > 1.0e-5 {
+        out.extend_from_slice(&[
+            29,
+            (l >> 24) as u8,
+            (l >> 16) as u8,
+            (l >> 8) as u8,
+            l as u8,
+        ]);
+    } else if value > i32::MAX as f64 || value < i32::MIN as f64 || (value - nearint).abs() > 1.0e-5
+    {
         pack_real(out, value);
     } else {
         pack_integer(out, nearint as i64);
@@ -715,7 +1100,10 @@ fn put_entry(out: &mut Vec<u8>, e: &Entry) {
     if e.values.is_empty() {
         return;
     }
-    let offset = matches!(operator(e.id).map(|o| o.1), Some(ArgType::Offset | ArgType::SzOff));
+    let offset = matches!(
+        operator(e.id).map(|o| o.1),
+        Some(ArgType::Offset | ArgType::SzOff)
+    );
     for &v in &e.values {
         put_number(out, v, offset);
     }
@@ -817,7 +1205,9 @@ impl Cs {
                 out.push(op);
                 if self.num_stems > 0 {
                     let masklen = self.num_stems.div_ceil(8);
-                    let mask = data.get(*p..*p + masklen).ok_or("cff: parsing charstring failed")?;
+                    let mask = data
+                        .get(*p..*p + masklen)
+                        .ok_or("cff: parsing charstring failed")?;
                     out.extend_from_slice(mask);
                     *p += masklen;
                 }
@@ -831,7 +1221,9 @@ impl Cs {
             14 => {
                 match self.stack.len() {
                     1 => self.clear_stack(out)?,
-                    4 | 5 => return Err("cff: 'seac' character deprecated in type 2 charstring".into()),
+                    4 | 5 => {
+                        return Err("cff: 'seac' character deprecated in type 2 charstring".into())
+                    }
                     _ => {}
                 }
                 out.push(op);
@@ -1018,7 +1410,13 @@ impl Cs {
     }
 
     /// `do_charstring`.
-    fn run(&mut self, out: &mut Vec<u8>, data: &[u8], gsubr: &Index, subr: Option<&Index>) -> Result<(), String> {
+    fn run(
+        &mut self,
+        out: &mut Vec<u8>,
+        data: &[u8],
+        gsubr: &Index,
+        subr: Option<&Index>,
+    ) -> Result<(), String> {
         if self.nest > 10 {
             return Err("cff: subroutine nested too deeply".into());
         }
@@ -1032,7 +1430,8 @@ impl Cs {
                 self.status = Status::SubrReturn;
             } else if b0 == 29 || b0 == 10 {
                 let id = self.stack.pop().ok_or("cff: charstring stack error")? as i64;
-                let idx = if b0 == 29 { Some(gsubr) } else { subr }.ok_or("cff: subroutine called but no subroutine found")?;
+                let idx = if b0 == 29 { Some(gsubr) } else { subr }
+                    .ok_or("cff: subroutine called but no subroutine found")?;
                 let count = idx.count as i64;
                 let biased = id
                     + if count < 1240 {
@@ -1043,7 +1442,9 @@ impl Cs {
                         32768
                     };
                 if biased >= count || biased < 0 {
-                    return Err(format!("cff: invalid subroutine index: {biased} (max={count})"));
+                    return Err(format!(
+                        "cff: invalid subroutine index: {biased} (max={count})"
+                    ));
                 }
                 let code = idx.item(biased as usize).to_vec();
                 self.run(out, &code, gsubr, subr)?;
@@ -1089,9 +1490,17 @@ pub struct CffSubset {
 /// `writetype0`'s subset of `used` glyph indices from the OpenType font in
 /// `data` (`subfont` counting from 1 in a collection). `tag` and
 /// `fontname` make the `TAG+fontname` the font is renamed to.
-pub fn make_cff_subset(data: &[u8], subfont: u32, used: &BTreeSet<u16>, tag: &str, fontname: &str) -> Result<CffSubset, String> {
+pub fn make_cff_subset(
+    data: &[u8],
+    subfont: u32,
+    used: &BTreeSet<u16>,
+    tag: &str,
+    fontname: &str,
+) -> Result<CffSubset, String> {
     let (cff_offset, cff_len) = cff_table(data, subfont)?;
-    let stream = data.get(cff_offset..cff_offset + cff_len).ok_or("cff: table past the end")?;
+    let stream = data
+        .get(cff_offset..cff_offset + cff_len)
+        .ok_or("cff: table past the end")?;
     let font = read_cff(stream)?;
     let fullname = format!("{tag}+{fontname}");
     match font.cid {
@@ -1137,12 +1546,18 @@ fn read_private(font: &Font, fd: &Dict) -> Result<(Option<Dict>, Option<Index>),
         return Ok((None, None));
     }
     let offset = fd.get("Private", 1)? as usize;
-    let bytes = font.stream.get(offset..offset + size).ok_or("cff: private past the end")?;
+    let bytes = font
+        .stream
+        .get(offset..offset + size)
+        .ok_or("cff: private past the end")?;
     let private = dict_unpack(bytes)?;
     let subrs = match private.known("Subrs") {
         true => {
             let at = offset + private.get("Subrs", 0)? as usize;
-            let mut r = Reader { s: font.stream, p: at };
+            let mut r = Reader {
+                s: font.stream,
+                p: at,
+            };
             Some(r.index()?)
         }
         false => None,
@@ -1202,7 +1617,10 @@ fn write_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result<Cff
         }
         let a = cs_data + cs_idx.offset[i] as usize - 1;
         let b = cs_data + cs_idx.offset[i + 1] as usize - 1;
-        let code = font.stream.get(a..b).ok_or("cff: charstring past the end")?;
+        let code = font
+            .stream
+            .get(a..b)
+            .ok_or("cff: charstring past the end")?;
         cstrings.push(copy_charstring(code, &gsub, subrs.as_ref())?);
     }
     let mut cidset = vec![0u8; last_cid as usize / 8 + 1];
@@ -1230,12 +1648,26 @@ fn write_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result<Cff
     top.set("ROS", 1, strings.sid("Identity").unwrap_or(0) as f64)?;
     top.set("ROS", 2, 0.0)?;
     let fdselect = vec![(0u16, 0u8)];
-    let fontfile = write_fontfile(&font, fullname, &strings, &charset, &fdselect, n as u32, &cstrings, &mut [fdarray], &[private])?;
+    let fontfile = write_fontfile(
+        &font,
+        fullname,
+        &strings,
+        &charset,
+        &fdselect,
+        n as u32,
+        &cstrings,
+        &mut [fdarray],
+        &[private],
+    )?;
     Ok(CffSubset { fontfile, cidset })
 }
 
 /// `write_cid_cff` (writecff.c:2915-3118): a CID-keyed font subset.
-fn write_cid_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result<CffSubset, String> {
+fn write_cid_cff(
+    mut font: Font,
+    used: &BTreeSet<u16>,
+    fullname: &str,
+) -> Result<CffSubset, String> {
     let mut gl: BTreeSet<u16> = used.clone();
     gl.insert(0);
     let last_cid = gl.iter().next_back().copied().unwrap_or(0);
@@ -1277,7 +1709,11 @@ fn write_cid_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result
     let mut fdarray: Vec<Dict> = Vec::new();
     for i in 0..fda.count as usize {
         let item = fda.item(i);
-        fdarray.push(if item.is_empty() { Dict::default() } else { dict_unpack(item)? });
+        fdarray.push(if item.is_empty() {
+            Dict::default()
+        } else {
+            dict_unpack(item)?
+        });
     }
     let mut privates = Vec::new();
     let mut subrs = Vec::new();
@@ -1299,7 +1735,10 @@ fn write_cid_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result
         }
         let a = cs_data + cs_idx.offset[cid as usize] as usize - 1;
         let b = cs_data + cs_idx.offset[cid as usize + 1] as usize - 1;
-        let code = font.stream.get(a..b).ok_or("cff: charstring past the end")?;
+        let code = font
+            .stream
+            .get(a..b)
+            .ok_or("cff: charstring past the end")?;
         cstrings.push(copy_charstring(code, &gsub, subrs[fd as usize].as_ref())?);
         if cid > 0 {
             charset.push(cid);
@@ -1320,8 +1759,18 @@ fn write_cid_cff(mut font: Font, used: &BTreeSet<u16>, fullname: &str) -> Result
     };
     let n = cstrings.len() as u32;
     font.num_glyphs = n;
-    write_fontfile(&font, fullname, &strings, &charset, &fdselect, n, &cstrings, &mut fdarray, &privates)
-        .map(|fontfile| CffSubset { fontfile, cidset })
+    write_fontfile(
+        &font,
+        fullname,
+        &strings,
+        &charset,
+        &fdselect,
+        n,
+        &cstrings,
+        &mut fdarray,
+        &privates,
+    )
+    .map(|fontfile| CffSubset { fontfile, cidset })
 }
 
 /// `write_fontfile` (writecff.c:2563-2663).
@@ -1338,7 +1787,9 @@ fn write_fontfile(
     privates: &[Option<Dict>],
 ) -> Result<Vec<u8>, String> {
     let mut top = font.topdict.clone();
-    for k in ["UniqueID", "XUID", "Private", "Encoding", "vstore", "maxstack"] {
+    for k in [
+        "UniqueID", "XUID", "Private", "Encoding", "vstore", "maxstack",
+    ] {
         top.remove(k);
     }
     // the Private sizes, a Private of only Subrs dropped

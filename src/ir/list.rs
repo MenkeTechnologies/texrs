@@ -64,7 +64,10 @@ pub enum ListOp<N = Num> {
     /// §1041-§1044: an interword space in font `f`; `normal` is
     /// `append_normal_space`, which ignores the space factor (§1045's
     /// `\ ` and `hmode+spacer` when `space_factor=1000`).
-    Space { f: u16, normal: bool },
+    Space {
+        f: u16,
+        normal: bool,
+    },
     /// `append_glue` (§1060): natural, stretch, shrink and the packed
     /// orders, as a glue register's slots hold them.
     Glue {
@@ -99,15 +102,24 @@ pub enum ListOp<N = Num> {
     /// §1086's `package`, after the group has ended.
     EndBox,
     /// §1079's other four cases.
-    Fetch { from: Fetch<N>, context: Context<N> },
+    Fetch {
+        from: Fetch<N>,
+        context: Context<N>,
+    },
     /// `unpackage` (§1110).
-    Unpackage { n: u16, copy: bool },
+    Unpackage {
+        n: u16,
+        copy: bool,
+    },
     /// `delete_last` (§1105).
     DeleteLast(Removed),
     /// `make_mark` (§1101), its text expanded, and the number the lowerer
     /// gave that text (0 when it could not keep its tokens), which
     /// `\topmark` and its siblings branch on.
-    Mark { id: u32, text: String },
+    Mark {
+        id: u32,
+        text: String,
+    },
     /// `\/` (§1113).
     ItalicCorrection,
     /// `\-` in font `f` (§1117).
@@ -129,17 +141,31 @@ pub enum ListOp<N = Num> {
     GroupBegin,
     GroupEnd,
     /// `\wd n=`, `\ht n=`, `\dp n=` (§1247): the box changes in place.
-    SetBoxDimen { n: u16, which: BoxDimen, value: N },
+    SetBoxDimen {
+        n: u16,
+        which: BoxDimen,
+        value: N,
+    },
     /// `\prevdepth=` and `\spacefactor=` (§1242-§1243), `\prevgraf=`
     /// (§1244).
     SetPrevDepth(N),
     SetSpaceFactor(N),
     SetPrevGraf(N),
     /// §1253: `\fontdimen n f=`.
-    SetFontDimen { f: u16, n: u16, value: N },
+    SetFontDimen {
+        f: u16,
+        n: u16,
+        value: N,
+    },
     /// §1253: `\hyphenchar f=` and `\skewchar f=`.
-    SetHyphenChar { f: u16, value: N },
-    SetSkewChar { f: u16, value: N },
+    SetHyphenChar {
+        f: u16,
+        value: N,
+    },
+    SetSkewChar {
+        f: u16,
+        value: N,
+    },
     /// `new_graf` (§1091): open a paragraph, indented or not.
     NewGraf(bool),
     /// `end_graf` (§1096): break the paragraph and go back to the vertical
@@ -158,7 +184,11 @@ pub enum ListOp<N = Num> {
     /// register only the program holds (§465, §470), set in font `f` as the main
     /// loop sets characters: `form` 0 is a number, 1 roman numerals, 2 a
     /// dimension, 3 a glue (all four values), 4 a math glue.
-    Converted { f: u16, form: u8, values: [N; 4] },
+    Converted {
+        f: u16,
+        form: u8,
+        values: [N; 4],
+    },
     /// §960 and §934: `\patterns{...}` and `\hyphenation{...}`, as the text that
     /// was between the braces, for the hyphenation pass to read.
     Patterns(String),
@@ -166,7 +196,10 @@ pub enum ListOp<N = Num> {
     /// `init_math` (§1138): `$` in horizontal mode, and `$$` (`display`) in
     /// unrestricted horizontal mode; `font` is the current font, whose quad
     /// §1146 reads.
-    InitMath { display: bool, font: u16 },
+    InitMath {
+        display: bool,
+        font: u16,
+    },
     /// `start_eq_no` (§1142): `\eqno`, or `\leqno` (`true`), in a display.
     EqNo(bool),
     /// `set_math_char(c)` (§1155) for a math code below `"8000`.
@@ -211,7 +244,10 @@ pub enum ListOp<N = Num> {
     },
     /// `math_left_right` (§1191): `\left` or `\right` (`true`) with its
     /// 24-bit delimiter code.
-    LeftRight { right: bool, delim: N },
+    LeftRight {
+        right: bool,
+        delim: N,
+    },
     /// `after_math` (§1194), at a closing `$` or `$$`: the family fonts
     /// `fam_fnt` holds then, sixteen per size (text, script, scriptscript).
     EndMath(Vec<u16>),
@@ -220,7 +256,11 @@ pub enum ListOp<N = Num> {
     /// `\mkern` (§1061 with `mu_glue`).
     MuKern(N),
     /// `init_align` (§774): `\halign` or `\valign`, `to` or `spread` a size.
-    InitAlign { halign: bool, exactly: bool, size: N },
+    InitAlign {
+        halign: bool,
+        exactly: bool,
+        size: N,
+    },
     /// §778: the tabskip glue in force, onto the preamble.
     AlignTabskip([N; 4]),
     /// §779: an alignrecord; `periodic` when the preamble repeats from it
@@ -242,14 +282,28 @@ pub enum ListOp<N = Num> {
     /// §1206: a display alignment placed, after its closing `$$`.
     FinishDisplayAlignment,
     /// §1246: `\deadcycles=` (0) or `\insertpenalties=` (1).
-    AlterInteger { which: u8, value: N },
+    AlterInteger {
+        which: u8,
+        value: N,
+    },
     /// §1245: `\pagegoal=` .. `\pagedepth=`, in `page_so_far` order.
-    AlterPageSoFar { which: u8, value: N },
+    AlterPageSoFar {
+        which: u8,
+        value: N,
+    },
     /// `\parshape` (§1248): the (indent, width) pairs, flattened.
-    ParShape { global: bool, dims: Vec<N> },
+    ParShape {
+        global: bool,
+        dims: Vec<N>,
+    },
     /// `make_accent` (§1123): character `accent` of font `f`, over character
     /// `over` (-1 for none) of font `g`.
-    Accent { f: u16, accent: u32, g: u16, over: i64 },
+    Accent {
+        f: u16,
+        accent: u32,
+        g: u16,
+        over: i64,
+    },
     /// `\special` (§1354): the text, expanded as `scan_toks(false,true)`
     /// expands it, as a whatsit node where it stands; §1368 writes it as
     /// the DVI `xxx` of the page it is shipped with.
@@ -436,7 +490,12 @@ impl<N> ListOp<N> {
             }
         };
         match self {
-            ListOp::DefineFont { f: font, name, id, size } => {
+            ListOp::DefineFont {
+                f: font,
+                name,
+                id,
+                size,
+            } => {
                 f(Arg::Int(i64::from(*font)));
                 f(Arg::Str(name));
                 f(Arg::Str(id));
@@ -491,7 +550,9 @@ impl<N> ListOp<N> {
                 f(Arg::Int(i64::from(*font)));
             }
             ListOp::EqNo(b) | ListOp::SubSup(b) => f(Arg::Int(i64::from(*b))),
-            ListOp::Noad(k) | ListOp::Limits(k) | ListOp::MathStyle(k) => f(Arg::Int(i64::from(*k))),
+            ListOp::Noad(k) | ListOp::Limits(k) | ListOp::MathStyle(k) => {
+                f(Arg::Int(i64::from(*k)))
+            }
             ListOp::Fraction {
                 code,
                 thickness,
@@ -507,13 +568,22 @@ impl<N> ListOp<N> {
                 f(Arg::Int(i64::from(*right)));
                 f(Arg::Num(delim));
             }
-            ListOp::Accent { f: font, accent, g, over } => {
+            ListOp::Accent {
+                f: font,
+                accent,
+                g,
+                over,
+            } => {
                 f(Arg::Int(i64::from(*font)));
                 f(Arg::Int(i64::from(*accent)));
                 f(Arg::Int(i64::from(*g)));
                 f(Arg::Int(*over));
             }
-            ListOp::InitAlign { halign, exactly, size } => {
+            ListOp::InitAlign {
+                halign,
+                exactly,
+                size,
+            } => {
                 f(Arg::Int(i64::from(*halign) + 2 * i64::from(*exactly)));
                 f(Arg::Num(size));
             }
@@ -603,9 +673,7 @@ impl<N> ListOp<N> {
                 f(Arg::Int(*chunk));
                 f(Arg::Str(display));
             }
-            ListOp::Patterns(text) | ListOp::Hyphenation(text) => {
-                f(Arg::Str(text))
-            }
+            ListOp::Patterns(text) | ListOp::Hyphenation(text) => f(Arg::Str(text)),
             ListOp::Hyphen(font) => f(Arg::Int(i64::from(*font))),
             ListOp::EndDiscList(k) => f(Arg::Int(i64::from(*k))),
             ListOp::BeginInsert(n) => f(Arg::Int(i64::from(*n))),
@@ -635,7 +703,11 @@ impl<N> ListOp<N> {
             }
             ListOp::NewGraf(indent) => f(Arg::Int(i64::from(*indent))),
             ListOp::OutputRoutine(k) => f(Arg::Int(*k)),
-            ListOp::Converted { f: font, form, values } => {
+            ListOp::Converted {
+                f: font,
+                form,
+                values,
+            } => {
                 f(Arg::Int(i64::from(*font)));
                 f(Arg::Int(i64::from(*form)));
                 for v in values {
@@ -1007,7 +1079,10 @@ mod tests {
                     size: 655360,
                 },
             ),
-            (ListOp::IntPars(vec![(1, 200), (26, -5)]), ListOp::IntPars(vec![(1, 200), (26, -5)])),
+            (
+                ListOp::IntPars(vec![(1, 200), (26, -5)]),
+                ListOp::IntPars(vec![(1, 200), (26, -5)]),
+            ),
             (
                 ListOp::Chars {
                     f: 1,
@@ -1055,13 +1130,19 @@ mod tests {
                     kind: BoxKind::Top,
                     exactly: true,
                     size: l(9),
-                    context: Context::SetBox { n: 255, global: true },
+                    context: Context::SetBox {
+                        n: 255,
+                        global: true,
+                    },
                 },
                 ListOp::BeginBox {
                     kind: BoxKind::Top,
                     exactly: true,
                     size: 9,
-                    context: Context::SetBox { n: 255, global: true },
+                    context: Context::SetBox {
+                        n: 255,
+                        global: true,
+                    },
                 },
             ),
             (
@@ -1086,7 +1167,10 @@ mod tests {
                     value: 12,
                 },
             ),
-            (ListOp::Unpackage { n: 9, copy: true }, ListOp::Unpackage { n: 9, copy: true }),
+            (
+                ListOp::Unpackage { n: 9, copy: true },
+                ListOp::Unpackage { n: 9, copy: true },
+            ),
             (
                 ListOp::Fraction {
                     code: 4,
@@ -1101,7 +1185,10 @@ mod tests {
                     right: 0x029301,
                 },
             ),
-            (ListOp::EndMath(vec![0, 7, 3]), ListOp::EndMath(vec![0, 7, 3])),
+            (
+                ListOp::EndMath(vec![0, 7, 3]),
+                ListOp::EndMath(vec![0, 7, 3]),
+            ),
             (
                 ListOp::Whatsit("papersize=210mm,297mm".into()),
                 ListOp::Whatsit("papersize=210mm,297mm".into()),

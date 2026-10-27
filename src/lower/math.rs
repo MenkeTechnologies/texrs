@@ -112,7 +112,8 @@ impl Lowerer {
         eqno: Option<bool>,
         out: &mut Vec<Cmd>,
     ) -> R<()> {
-        self.eng.compile_time_begin_group(GroupKind::MathShift, lx.line());
+        self.eng
+            .compile_time_begin_group(GroupKind::MathShift, lx.line());
         let mode = match display {
             true => CMode::DisplayMath,
             false => CMode::Math,
@@ -142,7 +143,9 @@ impl Lowerer {
             true => "everydisplay",
             false => "everymath",
         };
-        if let Some(toks) = crate::params::toks_register(every).and_then(|r| self.eng.toks.get(&r).cloned()) {
+        if let Some(toks) =
+            crate::params::toks_register(every).and_then(|r| self.eng.toks.get(&r).cloned())
+        {
             lx.push_back(&toks);
         }
         // An `\eqno`'s formula is the display's, inside its block.
@@ -302,12 +305,7 @@ impl Lowerer {
     /// The math code a control sequence stands for in `scan_math` (§1151):
     /// `\char`, `\mathchar`, `\delimiter`, a `\chardef` or `\mathchardef`
     /// name, or a `\let` copy of a letter. `None` when it is none of these.
-    fn st_math_char_cs(
-        &mut self,
-        lx: &mut Lexer,
-        n: CsId,
-        p: Option<CsId>,
-    ) -> R<Option<MathCode>> {
+    fn st_math_char_cs(&mut self, lx: &mut Lexer, n: CsId, p: Option<CsId>) -> R<Option<MathCode>> {
         match self.eng.meanings.get(&n) {
             Some(Meaning::CharDef(code)) => {
                 let code = *code;
@@ -349,7 +347,9 @@ impl Lowerer {
     fn st_literal(&mut self, lx: &mut Lexer, what: &str) -> R<i64> {
         match self.number(lx)? {
             Num::Literal(v) => Ok(v),
-            _ => Err(TexError(format!("{what} needs a number known while lowering"))),
+            _ => Err(TexError(format!(
+                "{what} needs a number known while lowering"
+            ))),
         }
     }
 
@@ -360,7 +360,9 @@ impl Lowerer {
             return Ok(Num::Literal(0));
         };
         let code = match &t {
-            Token::Char(c, Cat::Letter | Cat::Other) => self.eng.charcodes.get(Table::Delimiter, *c),
+            Token::Char(c, Cat::Letter | Cat::Other) => {
+                self.eng.charcodes.get(Table::Delimiter, *c)
+            }
             Token::Cs(n) => match self.eng.meanings.get(n) {
                 Some(Meaning::Char(c, Cat::Letter | Cat::Other)) => {
                     self.eng.charcodes.get(Table::Delimiter, *c)
@@ -381,7 +383,12 @@ impl Lowerer {
 
     /// The math-mode cases of §1045 that are commands. `Ok(false)` leaves the
     /// command to the rest of the dispatch.
-    pub(super) fn st_math_command(&mut self, lx: &mut Lexer, name: CsId, out: &mut Vec<Cmd>) -> R<bool> {
+    pub(super) fn st_math_command(
+        &mut self,
+        lx: &mut Lexer,
+        name: CsId,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
         // A `\let` copy of a character is that character (§1045's `cur_cmd`
         // is its category).
         if let Some(Meaning::Char(c, cat)) = self.eng.meanings.get(&name) {
@@ -503,24 +510,28 @@ impl Lowerer {
             // §1191-§1192.
             "left" => {
                 let delim = self.st_scan_delimiter(lx)?;
-                self.st_emit(out, ListOp::LeftRight { right: false, delim })?;
+                self.st_emit(
+                    out,
+                    ListOp::LeftRight {
+                        right: false,
+                        delim,
+                    },
+                )?;
                 self.st_left_group(lx, out)?;
             }
-            "right" => {
-                match self.eng.innermost_group() {
-                    Some(GroupKind::MathLeft) => {
-                        let delim = self.st_scan_delimiter(lx)?;
-                        self.st_emit(out, ListOp::LeftRight { right: true, delim })?;
-                        self.st.end_block = true;
-                    }
-                    Some(GroupKind::MathShift) => {
-                        let _ = self.st_scan_delimiter(lx)?;
-                        let esc = self.eng.esc().to_string();
-                        self.eng.report(lx, &format!("Extra {esc}right"));
-                    }
-                    _ => self.st_off_save(lx, Token::Cs(name)),
+            "right" => match self.eng.innermost_group() {
+                Some(GroupKind::MathLeft) => {
+                    let delim = self.st_scan_delimiter(lx)?;
+                    self.st_emit(out, ListOp::LeftRight { right: true, delim })?;
+                    self.st.end_block = true;
                 }
-            }
+                Some(GroupKind::MathShift) => {
+                    let _ = self.st_scan_delimiter(lx)?;
+                    let esc = self.eng.esc().to_string();
+                    self.eng.report(lx, &format!("Extra {esc}right"));
+                }
+                _ => self.st_off_save(lx, Token::Cs(name)),
+            },
             // §1140-§1142.
             "eqno" | "leqno" => {
                 if self.st_mode() == CMode::DisplayMath
@@ -535,8 +546,10 @@ impl Lowerer {
                     self.st.end_block = true;
                 } else {
                     let esc = self.eng.esc().to_string();
-                    self.eng
-                        .report(lx, &format!("You can't use `{esc}{}' in math mode", name.name()));
+                    self.eng.report(
+                        lx,
+                        &format!("You can't use `{esc}{}' in math mode", name.name()),
+                    );
                 }
             }
             // §1061 with `mu_glue`.
@@ -567,7 +580,8 @@ impl Lowerer {
     /// §1191's `push_math(math_left_group)` and the group's body, to the
     /// `\right` that ends it.
     fn st_left_group(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
-        self.eng.compile_time_begin_group(GroupKind::MathLeft, lx.line());
+        self.eng
+            .compile_time_begin_group(GroupKind::MathLeft, lx.line());
         self.st_push(CMode::Math);
         let mark = self.globals.len();
         let known_mark = self.eng.known.mark();

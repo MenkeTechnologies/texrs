@@ -66,7 +66,12 @@ pub(super) struct Align {
 impl Lowerer {
     fn tabskip_slots(&self) -> [Num; 4] {
         let s = crate::params::register_slot("tabskip").unwrap_or(0);
-        [Num::Count(s), Num::Count(s + 1), Num::Count(s + 2), Num::Count(s + 3)]
+        [
+            Num::Count(s),
+            Num::Count(s + 1),
+            Num::Count(s + 2),
+            Num::Count(s + 3),
+        ]
     }
 
     /// The primitive a token means, for the alignment's own commands.
@@ -83,7 +88,12 @@ impl Lowerer {
     }
 
     /// §1130's `init_align`, from `\halign` or `\valign` (§774-§777).
-    pub(super) fn st_init_align(&mut self, lx: &mut Lexer, halign: bool, out: &mut Vec<Cmd>) -> R<()> {
+    pub(super) fn st_init_align(
+        &mut self,
+        lx: &mut Lexer,
+        halign: bool,
+        out: &mut Vec<Cmd>,
+    ) -> R<()> {
         let display = self.st_mode() == CMode::DisplayMath;
         // §645's `scan_spec`.
         let (exactly, size) = if self.eng.scan_keyword(lx, "to", false)? {
@@ -93,17 +103,28 @@ impl Lowerer {
         } else {
             (false, Num::Literal(0))
         };
-        self.st_emit(out, ListOp::InitAlign { halign, exactly, size })?;
+        self.st_emit(
+            out,
+            ListOp::InitAlign {
+                halign,
+                exactly,
+                size,
+            },
+        )?;
         let mode = match halign {
             true => CMode::InternalVertical,
             false => CMode::RestrictedHorizontal,
         };
         self.st_push(mode);
-        self.eng.compile_time_begin_group(GroupKind::Align, lx.line());
+        self.eng
+            .compile_time_begin_group(GroupKind::Align, lx.line());
         let outer_mark = self.globals.len();
         let outer_known = self.eng.known.mark();
         let mut outer: Vec<Cmd> = Vec::new();
-        match self.st_next_non_blank(lx)?.map(|(t, p)| (self.st_implicit(t), p)) {
+        match self
+            .st_next_non_blank(lx)?
+            .map(|(t, p)| (self.st_implicit(t), p))
+        {
             Some((Token::Char(_, Cat::BeginGroup), _)) => {}
             other => {
                 if let Some((t, _)) = other {
@@ -126,10 +147,7 @@ impl Lowerer {
         self.st_every_cr(lx);
         // §785-§799: rows until the `}` that ends the alignment.
         let mut entry_body: Vec<Cmd> = Vec::new();
-        loop {
-            let Some(t) = self.st_align_peek(lx, &mut entry_body)? else {
-                break;
-            };
+        while let Some(t) = self.st_align_peek(lx, &mut entry_body)? {
             self.st_emit(&mut entry_body, ListOp::InitRow)?;
             if let Some(a) = self.st.aligns.last_mut() {
                 a.cur = 0;
@@ -235,7 +253,8 @@ impl Lowerer {
                         continue;
                     }
                     lx.back_input(&[t]);
-                    self.eng.report(lx, "Missing # inserted in alignment preamble");
+                    self.eng
+                        .report(lx, "Missing # inserted in alignment preamble");
                     break;
                 }
                 if !(t.is_space() && u.is_empty()) {
@@ -282,7 +301,9 @@ impl Lowerer {
     fn st_preamble_token(&mut self, lx: &mut Lexer, outer: &mut Vec<Cmd>) -> R<Token> {
         loop {
             let Some(mut t) = lx.next_token(&self.eng.cats) else {
-                return Err(TexError("File ended while scanning preamble of \\halign".into()));
+                return Err(TexError(
+                    "File ended while scanning preamble of \\halign".into(),
+                ));
             };
             if let Token::Char(c, Cat::Active) = t {
                 if let Some(id) = self.eng.active_meaning(c) {
@@ -312,7 +333,9 @@ impl Lowerer {
                 _ => {}
             }
             if matches!(&t, Token::Cs(n) if n.name() == END_TEMPLATE) {
-                return Err(TexError("(interwoven alignment preambles are not allowed)".into()));
+                return Err(TexError(
+                    "(interwoven alignment preambles are not allowed)".into(),
+                ));
             }
             return Ok(t);
         }
@@ -329,7 +352,8 @@ impl Lowerer {
     /// The entries' group: its compile-time frame, and the marks its body
     /// needs when it closes.
     fn st_open_entry_group(&mut self, lx: &Lexer) -> (usize, usize) {
-        self.eng.compile_time_begin_group(GroupKind::Align, lx.line());
+        self.eng
+            .compile_time_begin_group(GroupKind::Align, lx.line());
         (self.globals.len(), self.eng.known.mark())
     }
 
@@ -343,7 +367,11 @@ impl Lowerer {
         let mut b = std::mem::take(body);
         let (saves, keeps) = self.group_parts(&mut b, mark)?;
         self.known_after_group(known, &saves, &keeps);
-        outer.push(Cmd::Group { saves, keeps, body: b });
+        outer.push(Cmd::Group {
+            saves,
+            keeps,
+            body: b,
+        });
         Ok(())
     }
 
@@ -381,7 +409,10 @@ impl Lowerer {
     /// §785's `\noalign`: its group, in the alignment's own mode, and §1133's
     /// end of it.
     fn st_noalign(&mut self, lx: &mut Lexer, body: &mut Vec<Cmd>) -> R<()> {
-        match self.st_next_non_blank(lx)?.map(|(t, p)| (self.st_implicit(t), p)) {
+        match self
+            .st_next_non_blank(lx)?
+            .map(|(t, p)| (self.st_implicit(t), p))
+        {
             Some((Token::Char(_, Cat::BeginGroup), _)) => {}
             other => {
                 if let Some((t, _)) = other {
@@ -390,7 +421,8 @@ impl Lowerer {
                 self.eng.report(lx, "Missing { inserted");
             }
         }
-        self.eng.compile_time_begin_group(GroupKind::NoAlign, lx.line());
+        self.eng
+            .compile_time_begin_group(GroupKind::NoAlign, lx.line());
         let mark = self.globals.len();
         let known = self.eng.known.mark();
         let mut inner = Vec::new();
@@ -422,7 +454,11 @@ impl Lowerer {
     /// what ended it.
     fn st_read_entry(&mut self, lx: &mut Lexer, t: Token, body: &mut Vec<Cmd>) -> R<u8> {
         let (halign, column) = {
-            let a = self.st.aligns.last().ok_or_else(|| TexError("no alignment".into()))?;
+            let a = self
+                .st
+                .aligns
+                .last()
+                .ok_or_else(|| TexError("no alignment".into()))?;
             (a.halign, a.columns.get(a.cur).cloned())
         };
         let omit = matches!(self.st_meaning_of(&t).as_deref(), Some("omit"));
@@ -492,8 +528,10 @@ impl Lowerer {
             }
             None => {
                 let esc = self.eng.esc().to_string();
-                self.eng
-                    .report(lx, &format!("Extra alignment tab has been changed to {esc}cr"));
+                self.eng.report(
+                    lx,
+                    &format!("Extra alignment tab has been changed to {esc}cr"),
+                );
                 Ok(2)
             }
         }
@@ -504,7 +542,12 @@ impl Lowerer {
     /// `\cr` at level zero bringing in the v template (§789), and the
     /// `\endtemplate` that ends it (§1131). `Ok(true)` when the token was
     /// taken.
-    pub(super) fn st_align_token(&mut self, lx: &mut Lexer, t: &Token, out: &mut Vec<Cmd>) -> R<bool> {
+    pub(super) fn st_align_token(
+        &mut self,
+        lx: &mut Lexer,
+        t: &Token,
+        out: &mut Vec<Cmd>,
+    ) -> R<bool> {
         let meaning = self.st_meaning_of(t);
         let in_group = self.eng.innermost_group();
         let Some(a) = self.st.aligns.last_mut() else {
@@ -528,8 +571,12 @@ impl Lowerer {
                     lx.push_back(&[*t]);
                     let esc = self.eng.esc().to_string();
                     let (closer, shown) = match in_group {
-                        Some(GroupKind::SemiSimple) => (Token::cs("endgroup"), format!("{esc}endgroup")),
-                        Some(GroupKind::MathShift) => (Token::Char('$', Cat::MathShift), "$".into()),
+                        Some(GroupKind::SemiSimple) => {
+                            (Token::cs("endgroup"), format!("{esc}endgroup"))
+                        }
+                        Some(GroupKind::MathShift) => {
+                            (Token::Char('$', Cat::MathShift), "$".into())
+                        }
                         _ => (Token::Char('}', Cat::EndGroup), "}".into()),
                     };
                     lx.push_back(&[closer]);

@@ -223,9 +223,14 @@ fn cat_to_u8(cat: Cat) -> u8 {
 /// A register file from the number a format stores it as (`RegFile as u8`).
 fn file_of(n: u8) -> Option<crate::compiler::RegFile> {
     use crate::compiler::RegFile;
-    [RegFile::Count, RegFile::Dimen, RegFile::Skip, RegFile::MuSkip]
-        .into_iter()
-        .find(|f| *f as u8 == n)
+    [
+        RegFile::Count,
+        RegFile::Dimen,
+        RegFile::Skip,
+        RegFile::MuSkip,
+    ]
+    .into_iter()
+    .find(|f| *f as u8 == n)
 }
 
 fn u8_to_cat(n: u8) -> Cat {

@@ -56,7 +56,10 @@ impl CMode {
     }
 
     pub(super) fn vertical(self) -> bool {
-        matches!(self, CMode::Unmanaged | CMode::Vertical | CMode::InternalVertical)
+        matches!(
+            self,
+            CMode::Unmanaged | CMode::Vertical | CMode::InternalVertical
+        )
     }
 
     pub(super) fn math(self) -> bool {
@@ -234,7 +237,10 @@ impl Lowerer {
             op,
             ListOp::NewGraf(_)
                 | ListOp::Rule { leader: false, .. }
-                | ListOp::Fetch { context: Context::Shift(_), .. }
+                | ListOp::Fetch {
+                    context: Context::Shift(_),
+                    ..
+                }
                 | ListOp::Unpackage { .. }
                 | ListOp::Whatsit(_)
                 | ListOp::OutWhatsit { .. }
@@ -326,13 +332,22 @@ impl Lowerer {
         self.st.lowered_output = Some(key);
         let (saves, keeps) = self.group_parts(&mut body, mark)?;
         self.known_after_group(known_mark, &saves, &keeps);
-        out.push(Cmd::OutputRoutine(Some(vec![Cmd::Group { saves, keeps, body }])));
+        out.push(Cmd::OutputRoutine(Some(vec![Cmd::Group {
+            saves,
+            keeps,
+            body,
+        }])));
         Ok(())
     }
 
     /// §1091's `new_graf` as the lowerer follows it: the paragraph opens,
     /// and `\everypar` is read next.
-    pub(super) fn st_new_graf(&mut self, lx: &mut Lexer, indented: bool, out: &mut Vec<Cmd>) -> R<()> {
+    pub(super) fn st_new_graf(
+        &mut self,
+        lx: &mut Lexer,
+        indented: bool,
+        out: &mut Vec<Cmd>,
+    ) -> R<()> {
         self.st_emit(out, ListOp::NewGraf(indented))?;
         self.st_push(CMode::Horizontal);
         if let Some(reg) = crate::params::toks_register("everypar") {
@@ -611,10 +626,10 @@ impl Lowerer {
                     }
                     return Ok(true);
                 }
-                "cr" | "crcr" | "span" | "noalign" | "omit" => {
-                    if self.st_misplaced_align(lx, name) {
-                        return Ok(true);
-                    }
+                "cr" | "crcr" | "span" | "noalign" | "omit"
+                    if self.st_misplaced_align(lx, name) =>
+                {
+                    return Ok(true);
                 }
                 _ => {}
             }
@@ -719,7 +734,10 @@ impl Lowerer {
                 self.st_emit(out, ListOp::AlterInteger { which, value })?;
                 self.st_after_assignment(lx);
             }
-            "pagegoal" | "pagetotal" | "pagestretch" | "pagefilstretch" | "pagefillstretch" | "pagefilllstretch" | "pageshrink" | "pagedepth" if managed => {
+            "pagegoal" | "pagetotal" | "pagestretch" | "pagefilstretch" | "pagefillstretch"
+            | "pagefilllstretch" | "pageshrink" | "pagedepth"
+                if managed =>
+            {
                 let _ = self.eng.take_global_prefix();
                 self.eng.skip_equals_file(lx)?;
                 let value = self.dimen_number(lx, false)?;
@@ -859,7 +877,9 @@ impl Lowerer {
                 self.st_scan_box(lx, Context::Leaders(kind), out)?;
                 self.st_leader_glue(lx, kind, out)?;
             }
-            "hskip" | "hfil" | "hfill" | "hss" | "hfilneg" if managed && (mode.horizontal() || mode.math()) => {
+            "hskip" | "hfil" | "hfill" | "hss" | "hfilneg"
+                if managed && (mode.horizontal() || mode.math()) =>
+            {
                 let spec = self.st_glue_spec(lx, name.name(), false)?;
                 self.st_emit(
                     out,
@@ -1095,11 +1115,7 @@ impl Lowerer {
             let size = self.dimen_number(lx, false)?;
             let s = match self.eng.known.num(&size) {
                 Some(v) => v,
-                None => {
-                    return Err(TexError(
-                        "a font size must be known while lowering".into(),
-                    ))
-                }
+                None => return Err(TexError("a font size must be known while lowering".into())),
             };
             // §1259.
             match s > 0 && s < 0o1000000000 {
@@ -1168,9 +1184,7 @@ impl Lowerer {
                 let esc = self.eng.esc().to_string();
                 self.eng.report(
                     lx,
-                    &format!(
-                        "Font {esc}{id}={file} not loadable: Metric (TFM) file not found"
-                    ),
+                    &format!("Font {esc}{id}={file} not loadable: Metric (TFM) file not found"),
                 );
             }
         }
@@ -1343,15 +1357,21 @@ impl Lowerer {
         // §1083: an `\hbox` moved or appended in vertical mode is an adjusted
         // one, whose `\vadjust` and `\insert` material migrates out (§1076).
         let group = match kind {
-            BoxKind::H if self.st_mode().vertical() && moved => {
-                GroupKind::AdjustedHbox
-            }
+            BoxKind::H if self.st_mode().vertical() && moved => GroupKind::AdjustedHbox,
             BoxKind::H => GroupKind::Hbox,
             BoxKind::V => GroupKind::Vbox,
             BoxKind::Top => GroupKind::Vtop,
             BoxKind::VCenter => GroupKind::VCenter,
         };
-        self.st_list_body(lx, mode, Closer::Box { group, appended: moved }, out)
+        self.st_list_body(
+            lx,
+            mode,
+            Closer::Box {
+                group,
+                appended: moved,
+            },
+            out,
+        )
     }
 
     /// The braces of a list command: `scan_left_brace` (§403), the group
@@ -1378,8 +1398,12 @@ impl Lowerer {
             }
         }
         let every = match (&closer, mode) {
-            (Closer::Box { .. }, CMode::RestrictedHorizontal) => crate::params::toks_register("everyhbox"),
-            (Closer::Box { .. }, CMode::InternalVertical) => crate::params::toks_register("everyvbox"),
+            (Closer::Box { .. }, CMode::RestrictedHorizontal) => {
+                crate::params::toks_register("everyhbox")
+            }
+            (Closer::Box { .. }, CMode::InternalVertical) => {
+                crate::params::toks_register("everyvbox")
+            }
             _ => None,
         };
         if let Some(reg) = every {
@@ -1406,8 +1430,8 @@ impl Lowerer {
             Closer::Box { .. } => body.push(Cmd::List(ListOp::BoxMaxDepth(dimen("boxmaxdepth")))),
             Closer::Insert => {
                 let s = crate::params::register_slot("splittopskip").unwrap_or(0);
-                let floating = crate::intpar::index("floatingpenalty")
-                    .map_or(0, |i| self.eng.intpars.get(i));
+                let floating =
+                    crate::intpar::index("floatingpenalty").map_or(0, |i| self.eng.intpars.get(i));
                 body.push(Cmd::List(ListOp::EndInsert {
                     split_top_skip: [
                         Num::Count(s),
@@ -1466,8 +1490,14 @@ impl Lowerer {
             Token::Cs(n) => p.unwrap_or(n).name().to_string(),
             Token::Char(..) => String::new(),
         };
-        let horizontal = matches!(prim.as_str(), "hskip" | "hfil" | "hfill" | "hss" | "hfilneg");
-        let vertical = matches!(prim.as_str(), "vskip" | "vfil" | "vfill" | "vss" | "vfilneg");
+        let horizontal = matches!(
+            prim.as_str(),
+            "hskip" | "hfil" | "hfill" | "hss" | "hfilneg"
+        );
+        let vertical = matches!(
+            prim.as_str(),
+            "vskip" | "vfil" | "vfill" | "vss" | "vfilneg"
+        );
         let fits = match self.st_mode().vertical() {
             true => vertical,
             false => horizontal,
@@ -1498,7 +1528,9 @@ impl Lowerer {
         let online = self.eng.intpars.get(crate::intpar::TRACING_ONLINE) > 0;
         let ops = match online {
             true => vec![MsgOp::ShowLists, MsgOp::Report(format!("! OK.{context}"))],
-            false => vec![MsgOp::Report(format!("! OK (see the transcript file).{context}"))],
+            false => vec![MsgOp::Report(format!(
+                "! OK (see the transcript file).{context}"
+            ))],
         };
         self.queue_report(ops);
         self.flush_reports(out);
@@ -1613,8 +1645,19 @@ fn begins_paragraph(name: &str) -> bool {
 fn insert_dollar_sign(name: &str) -> bool {
     matches!(
         name,
-        "par" | "end" | "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" | "hrule" | "unvbox"
-            | "unvcopy" | "moveleft" | "moveright" | "dump"
+        "par"
+            | "end"
+            | "vskip"
+            | "vfil"
+            | "vfill"
+            | "vss"
+            | "vfilneg"
+            | "hrule"
+            | "unvbox"
+            | "unvcopy"
+            | "moveleft"
+            | "moveright"
+            | "dump"
     )
 }
 
@@ -1623,7 +1666,16 @@ fn insert_dollar_sign(name: &str) -> bool {
 fn ends_paragraph(name: &str) -> bool {
     matches!(
         name,
-        "end" | "vskip" | "vfil" | "vfill" | "vss" | "vfilneg" | "hrule" | "unvbox" | "unvcopy" | "halign"
+        "end"
+            | "vskip"
+            | "vfil"
+            | "vfill"
+            | "vss"
+            | "vfilneg"
+            | "hrule"
+            | "unvbox"
+            | "unvcopy"
+            | "halign"
     )
 }
 
@@ -1769,7 +1821,9 @@ impl Lowerer {
     /// the scan and is read again after the accent.
     fn st_make_accent(&mut self, lx: &mut Lexer, out: &mut Vec<Cmd>) -> R<()> {
         let Num::Literal(code) = self.number(lx)? else {
-            return Err(TexError("\\accent needs a number known while lowering".into()));
+            return Err(TexError(
+                "\\accent needs a number known while lowering".into(),
+            ));
         };
         let accent = u32::try_from(code).unwrap_or(0);
         let f = self.eng.cur_font;
@@ -1803,7 +1857,11 @@ impl Lowerer {
                 Some(Meaning::CharDef(code)) => *code,
                 _ if p.unwrap_or(n).name() == "char" => match self.number(lx)? {
                     Num::Literal(v) => v,
-                    _ => return Err(TexError("\\char needs a number known while lowering".into())),
+                    _ => {
+                        return Err(TexError(
+                            "\\char needs a number known while lowering".into(),
+                        ))
+                    }
                 },
                 _ => {
                     lx.push_back(&[Token::Cs(n)]);

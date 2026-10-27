@@ -301,7 +301,9 @@ impl Stomach {
             return None;
         }
         if cur.mode == Mode::Vertical && cur.list.is_empty() {
-            self.say(Said::Error("You can't use `\\lastbox' in vertical mode".into()));
+            self.say(Said::Error(
+                "You can't use `\\lastbox' in vertical mode".into(),
+            ));
             return None;
         }
         if !matches!(cur.list.last(), Some(Node::Box(_))) {
@@ -348,13 +350,7 @@ impl Stomach {
             self.say(Said::Error("\\vsplit needs a \\vbox".into()));
             return None;
         }
-        let split = crate::page::vsplit(
-            v,
-            h,
-            self.split_max_depth,
-            self.split_top_skip,
-            tol,
-        )?;
+        let split = crate::page::vsplit(v, h, self.split_max_depth, self.split_top_skip, tol)?;
         self.output.split_first_mark = split.first_mark;
         self.output.split_bot_mark = split.bot_mark;
         self.mirror_page();
@@ -404,16 +400,18 @@ impl Stomach {
                     Removed::Kern => "\\unkern",
                     Removed::Glue => "\\unskip",
                 };
-                self.say(Said::Error(format!("You can't use `{name}' in vertical mode")));
+                self.say(Said::Error(format!(
+                    "You can't use `{name}' in vertical mode"
+                )));
             }
             return;
         }
-        let matches = match (cur.list.last(), what) {
-            (Some(Node::Penalty(_)), Removed::Penalty) => true,
-            (Some(Node::Kern { .. }), Removed::Kern) => true,
-            (Some(Node::Glue(_)), Removed::Glue) => true,
-            _ => false,
-        };
+        let matches = matches!(
+            (cur.list.last(), what),
+            (Some(Node::Penalty(_)), Removed::Penalty)
+                | (Some(Node::Kern { .. }), Removed::Kern)
+                | (Some(Node::Glue(_)), Removed::Glue)
+        );
         if matches && !self.tail_is_replaced() {
             self.cur_mut().list.pop();
         }
@@ -600,7 +598,14 @@ mod tests {
     #[test]
     fn a_setbox_inside_a_box_is_local_to_it() {
         let mut s = Stomach::new();
-        s.begin_box(BoxKind::H, NATURAL, BoxContext::SetBox { n: 2, global: false });
+        s.begin_box(
+            BoxKind::H,
+            NATURAL,
+            BoxContext::SetBox {
+                n: 2,
+                global: false,
+            },
+        );
         s.set_box(3, Some(BoxNode::null()), false);
         s.package(Tolerances::default());
         assert!(s.box_register(3).is_none());

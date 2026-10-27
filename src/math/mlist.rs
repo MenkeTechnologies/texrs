@@ -1120,7 +1120,12 @@ impl<'a> Converter<'a> {
                             let next_is_space = matches!(
                                 work.get(at + 1),
                                 Some(Noad::Node(Node::Glue(_) | Node::Kern { .. }))
-                                    | Some(Noad::MuGlue(_) | Noad::MuKern(_) | Noad::Glue(_) | Noad::Kern(_))
+                                    | Some(
+                                        Noad::MuGlue(_)
+                                            | Noad::MuKern(_)
+                                            | Noad::Glue(_)
+                                            | Noad::Kern(_)
+                                    )
                             );
                             if next_is_space {
                                 work.to_mut().remove(at + 1);

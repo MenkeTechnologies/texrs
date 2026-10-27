@@ -157,7 +157,8 @@ impl Stomach {
             tolerances: tol,
         };
         let mut prev_depth = self.cur().prev_depth;
-        let mut out = crate::postline::post_line_break(list, &positions, &par_params, &mut prev_depth);
+        let mut out =
+            crate::postline::post_line_break(list, &positions, &par_params, &mut prev_depth);
         // §814's `just_box`: the last line, which §1146 measures.
         self.just_box = out.lines.last().and_then(|&at| match out.list.get(at) {
             Some(Node::Box(b)) => Some(b.clone()),

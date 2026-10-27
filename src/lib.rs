@@ -66,15 +66,15 @@ pub mod otf;
 pub mod pack;
 pub mod page;
 pub mod parallel;
-pub mod parbreak;
 pub mod params;
+pub mod parbreak;
 pub mod parity;
 pub mod pdf;
 pub mod pdf_parity;
 pub mod pdfdoc;
 pub mod pdfpage;
-pub mod pdfship;
 pub mod pdfread;
+pub mod pdfship;
 pub mod pk;
 pub mod postline;
 pub mod primitives;
@@ -774,8 +774,14 @@ pub fn run_tex_pdf(src: &str) -> Result<(String, Option<Vec<u8>>), TexError> {
     let frame = crate::pdfship::PageFrame {
         width: dimen("pagewidth", 40_258_437),
         height: dimen("pageheight", 52_099_153),
-        h_origin: dimen("pdfvariable horigin", crate::backend::format_default("horigin")),
-        v_origin: dimen("pdfvariable vorigin", crate::backend::format_default("vorigin")),
+        h_origin: dimen(
+            "pdfvariable horigin",
+            crate::backend::format_default("horigin"),
+        ),
+        v_origin: dimen(
+            "pdfvariable vorigin",
+            crate::backend::format_default("vorigin"),
+        ),
     };
     let chunk = crate::compiler::Compiler::new().compile(&cmds)?;
     let msgs = crate::runtime::run(chunk).map_err(TexError)?;
@@ -795,7 +801,11 @@ pub fn run_tex_pdf(src: &str) -> Result<(String, Option<Vec<u8>>), TexError> {
                 .collect(),
         })
         .collect();
-    let pages: Vec<(crate::node::BoxNode, crate::node::Scaled, crate::node::Scaled)> = stomach
+    let pages: Vec<(
+        crate::node::BoxNode,
+        crate::node::Scaled,
+        crate::node::Scaled,
+    )> = stomach
         .output
         .pages
         .iter()

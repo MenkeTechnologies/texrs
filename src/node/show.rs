@@ -21,8 +21,8 @@
 //! would write `3.33333pt plus 1.66666pt`.
 
 use super::{BoxNode, GlueSign, GlueSource, LeaderKind, Node, Scaled};
-use crate::math::noad::{Class, Delimiter, Field, Limits, MathChar, Noad, Style};
 use crate::dimen::{print_scaled, UNITY};
+use crate::math::noad::{Class, Delimiter, Field, Limits, MathChar, Noad, Style};
 
 /// The names a display needs from the font table: §267's `font_id_text`,
 /// which is the control sequence `\font` defined (`tenrm`), not the file name.
@@ -236,9 +236,7 @@ impl Display<'_> {
                     match g.source {
                         GlueSource::CondMath => self.esc(out, "nonscript"),
                         GlueSource::MuGlue => self.esc(out, "mskip"),
-                        other => {
-                            self.esc(out, skip_param_name(other.param_code().unwrap_or(99)))
-                        }
+                        other => self.esc(out, skip_param_name(other.param_code().unwrap_or(99))),
                     }
                     out.push(')');
                 }
@@ -372,9 +370,12 @@ impl Display<'_> {
                     print_ascii(out, c.character);
                 }
                 // §175.
-                Node::Box(_) | Node::Ins(_) | Node::Whatsit(_) | Node::Out(_) | Node::Mark(_) | Node::Adjust(_) => {
-                    out.push_str("[]")
-                }
+                Node::Box(_)
+                | Node::Ins(_)
+                | Node::Whatsit(_)
+                | Node::Out(_)
+                | Node::Mark(_)
+                | Node::Adjust(_) => out.push_str("[]"),
                 Node::Rule(_) => out.push('|'),
                 Node::Glue(g) if g.spec != crate::glue::Glue::default() => out.push(' '),
                 Node::Math(_) | Node::MathOff(_) => out.push('$'),
@@ -464,7 +465,12 @@ impl Display<'_> {
                 self.fam_and_char(out, m);
             }
             Field::Box(b) => {
-                self.show_node_list(out, std::slice::from_ref(&Node::Box(b.as_ref().clone())), history, breadth);
+                self.show_node_list(
+                    out,
+                    std::slice::from_ref(&Node::Box(b.as_ref().clone())),
+                    history,
+                    breadth,
+                );
             }
             Field::List(l) if l.is_empty() => {
                 out.push('\n');
@@ -499,7 +505,12 @@ impl Display<'_> {
             Noad::Style(s) => return self.style(out, *s),
             Noad::Choice(c) => {
                 self.esc(out, "mathchoice");
-                for (ch, l) in [('D', &c.display), ('T', &c.text), ('S', &c.script), ('s', &c.script_script)] {
+                for (ch, l) in [
+                    ('D', &c.display),
+                    ('T', &c.text),
+                    ('S', &c.script),
+                    ('s', &c.script_script),
+                ] {
                     history.push(ch);
                     self.show_noad_list(out, l, history, breadth);
                     history.pop();
@@ -520,8 +531,20 @@ impl Display<'_> {
                     out.push_str(", right-delimiter ");
                     self.delimiter(out, &f.right_delimiter);
                 }
-                self.subsidiary(out, &Field::List(f.numerator.clone()), '\\', history, breadth);
-                self.subsidiary(out, &Field::List(f.denominator.clone()), '/', history, breadth);
+                self.subsidiary(
+                    out,
+                    &Field::List(f.numerator.clone()),
+                    '\\',
+                    history,
+                    breadth,
+                );
+                self.subsidiary(
+                    out,
+                    &Field::List(f.denominator.clone()),
+                    '/',
+                    history,
+                    breadth,
+                );
                 return;
             }
             Noad::Left(d) | Noad::Right(d) => {

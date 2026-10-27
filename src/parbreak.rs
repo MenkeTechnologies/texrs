@@ -150,7 +150,11 @@ fn finite(g: &mut Glue) -> bool {
 /// start of the pass sets the same list.
 pub type Hyphenate<'a> = &'a mut dyn FnMut(&mut Vec<Node>);
 
-pub fn line_break(list: &mut Vec<Node>, p: &BreakParams, mut hyphenate: Option<Hyphenate>) -> Breaks {
+pub fn line_break(
+    list: &mut Vec<Node>,
+    p: &BreakParams,
+    mut hyphenate: Option<Hyphenate>,
+) -> Breaks {
     let mut infinite_shrinkage = false;
     // §827 for the two skips; §868 does the paragraph's own glue as it goes,
     // but the answer is the same done once here.
@@ -280,7 +284,13 @@ impl Search<'_> {
                         let prev = &list[prev_p];
                         let legal = prev.is_char()
                             || prev.precedes_break()
-                            || matches!(prev, Node::Kern { explicit: false, .. });
+                            || matches!(
+                                prev,
+                                Node::Kern {
+                                    explicit: false,
+                                    ..
+                                }
+                            );
                         if legal {
                             self.try_break(0, false, Some(cur_p));
                         }
@@ -446,8 +456,8 @@ impl Search<'_> {
         loop {
             // §832.
             if let Some(Entry::Delta(d)) = self.active.get(r) {
-                for k in 0..6 {
-                    self.cur_active_width[k] += d[k];
+                for (w, dk) in self.cur_active_width.iter_mut().zip(d) {
+                    *w += dk;
                 }
                 prev_prev_r = prev_r;
                 prev_r = Some(r);
@@ -463,7 +473,13 @@ impl Search<'_> {
                     hyphenated,
                     total_demerits,
                     passive,
-                }) => (*line_number, *fitness, *hyphenated, *total_demerits, *passive),
+                }) => (
+                    *line_number,
+                    *fitness,
+                    *hyphenated,
+                    *total_demerits,
+                    *passive,
+                ),
                 _ => (MAX_HALFWORD, 0, true, 0, None),
             };
             let at_end = r >= self.active.len();
@@ -505,10 +521,8 @@ impl Search<'_> {
                     self.minimum_demerits = AWFUL_BAD;
                     // §844.
                     if r < self.active.len() {
-                        let mut d = [0; 6];
-                        for k in 0..6 {
-                            d[k] = self.cur_active_width[k] - self.break_width[k];
-                        }
+                        let d: [Scaled; 6] =
+                            std::array::from_fn(|k| self.cur_active_width[k] - self.break_width[k]);
                         self.active.insert(r, Entry::Delta(d));
                         prev_prev_r = prev_r;
                         prev_r = Some(r);
@@ -527,8 +541,8 @@ impl Search<'_> {
                 true => self.stretch_badness(shortfall),
                 false => self.shrink_badness(shortfall),
             };
-            let node_r_stays_active;
-            if b > INF_BAD || pi == EJECT_PENALTY {
+
+            let node_r_stays_active = if b > INF_BAD || pi == EJECT_PENALTY {
                 // §854.
                 let next_is_last = r + 1 >= self.active.len();
                 if self.final_pass
@@ -541,19 +555,21 @@ impl Search<'_> {
                     self.deactivate(&mut r, &mut prev_r, &mut prev_prev_r);
                     continue;
                 }
-                node_r_stays_active = false;
+                false
             } else {
                 prev_r = Some(r);
                 if b > self.threshold {
                     r += 1;
                     continue;
                 }
-                node_r_stays_active = true;
-            }
+                true
+            };
             // §855.
             let mut d = match artificial_demerits {
                 true => 0,
-                false => self.demerits(b, pi, hyphenated, r_hyphenated, cur_p, fit_class, r_fitness),
+                false => {
+                    self.demerits(b, pi, hyphenated, r_hyphenated, cur_p, fit_class, r_fitness)
+                }
             };
             d += r_total;
             let fc = fit_class as usize;
@@ -706,17 +722,19 @@ impl Search<'_> {
         match *prev_r {
             Some(pr) if matches!(self.active[pr], Entry::Delta(_)) => {
                 if let Entry::Delta(d) = &mut self.active[pr] {
-                    for k in 0..6 {
-                        d[k] = d[k] - self.cur_active_width[k] + self.break_width[k];
+                    for ((dk, cur), brk) in d
+                        .iter_mut()
+                        .zip(self.cur_active_width)
+                        .zip(self.break_width)
+                    {
+                        *dk = *dk - cur + brk;
                     }
                 }
             }
             None => self.active_width = self.break_width,
             Some(_) => {
-                let mut d = [0; 6];
-                for k in 0..6 {
-                    d[k] = self.break_width[k] - self.cur_active_width[k];
-                }
+                let d: [Scaled; 6] =
+                    std::array::from_fn(|k| self.break_width[k] - self.cur_active_width[k]);
                 self.active.insert(*r, Entry::Delta(d));
                 *prev_prev_r = *prev_r;
                 *prev_r = Some(*r);
@@ -739,8 +757,8 @@ impl Search<'_> {
             // delta that now leads the list.
             None => {
                 if let Some(Entry::Delta(d)) = self.active.first().cloned() {
-                    for k in 0..6 {
-                        self.active_width[k] += d[k];
+                    for (w, dk) in self.active_width.iter_mut().zip(d) {
+                        *w += dk;
                     }
                     self.cur_active_width = self.active_width;
                     self.active.remove(0);
@@ -752,20 +770,20 @@ impl Search<'_> {
                     // The delta before the end is no longer between two
                     // active nodes.
                     if let Entry::Delta(d) = self.active[pr].clone() {
-                        for k in 0..6 {
-                            self.cur_active_width[k] -= d[k];
+                        for (w, dk) in self.cur_active_width.iter_mut().zip(d) {
+                            *w -= dk;
                         }
                     }
                     self.active.remove(pr);
                     *prev_r = *prev_prev_r;
                     *r = pr;
                 } else if let Entry::Delta(next) = self.active[after].clone() {
-                    for k in 0..6 {
-                        self.cur_active_width[k] += next[k];
+                    for (w, nk) in self.cur_active_width.iter_mut().zip(next) {
+                        *w += nk;
                     }
                     if let Entry::Delta(d) = &mut self.active[pr] {
-                        for k in 0..6 {
-                            d[k] += next[k];
+                        for (dk, nk) in d.iter_mut().zip(next) {
+                            *dk += nk;
                         }
                     }
                     self.active.remove(after);
@@ -865,11 +883,7 @@ mod tests {
     /// §831: a penalty of 10000 forbids its break, and -10000 forces one.
     #[test]
     fn penalties_forbid_and_force() {
-        let mut list = ended(vec![
-            word(10 * PT),
-            Node::Penalty(-10000),
-            word(10 * PT),
-        ]);
+        let mut list = ended(vec![word(10 * PT), Node::Penalty(-10000), word(10 * PT)]);
         let b = line_break(&mut list, &params(100 * PT), None);
         assert_eq!(b.breaks, vec![Some(1), None]);
     }

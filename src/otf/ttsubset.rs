@@ -63,7 +63,7 @@ struct Directory {
 
 impl Directory {
     fn find(&self, tag: &str) -> Option<usize> {
-        self.tables.iter().position(|t| &t.tag == tag.as_bytes())
+        self.tables.iter().position(|t| t.tag == tag.as_bytes())
     }
     fn pos(&self, tag: &str) -> u32 {
         self.find(tag).map_or(0, |i| self.tables[i].offset)

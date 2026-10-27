@@ -33,8 +33,7 @@ const FEEDBACK: &str = r"\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
 ";
 
 /// What luatex 1.24.0 printed for it, message by message.
-const PRINTED: &str =
-    "[3] [3] [2] [/Foo 1 0 R] [144.54pt] [140][0][0] [1] [3] [4] [4] [1]";
+const PRINTED: &str = "[3] [3] [2] [/Foo 1 0 R] [144.54pt] [140][0][0] [1] [3] [4] [4] [1]";
 
 /// A page with every document-level backend feature on it: an immediate
 /// object, the information dictionary, the catalogue, two nested outline
@@ -122,7 +121,12 @@ fn backend_objects(pdf: &[u8]) -> BTreeMap<u32, String> {
 #[test]
 fn outlines_destinations_and_names_are_written_as_luatex_writes_them() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (_, pdf) = run(env!("CARGO_BIN_EXE_texrs"), &["--pdf"], dir.path(), DOCUMENT);
+    let (_, pdf) = run(
+        env!("CARGO_BIN_EXE_texrs"),
+        &["--pdf"],
+        dir.path(),
+        DOCUMENT,
+    );
     let all = objects(&pdf.expect("a PDF"));
     for (n, body) in [
         (1, "<< /A 1 >>"),
@@ -159,8 +163,18 @@ fn every_backend_object_agrees_with_luatex_when_it_is_installed() {
     }
     let ours = tempfile::tempdir().expect("tempdir");
     let theirs = tempfile::tempdir().expect("tempdir");
-    let (_, a) = run("luatex", &["-interaction=nonstopmode"], theirs.path(), DOCUMENT);
-    let (_, b) = run(env!("CARGO_BIN_EXE_texrs"), &["--pdf"], ours.path(), DOCUMENT);
+    let (_, a) = run(
+        "luatex",
+        &["-interaction=nonstopmode"],
+        theirs.path(),
+        DOCUMENT,
+    );
+    let (_, b) = run(
+        env!("CARGO_BIN_EXE_texrs"),
+        &["--pdf"],
+        ours.path(),
+        DOCUMENT,
+    );
     let (a, b) = (a.expect("luatex wrote one"), b.expect("texrs wrote one"));
     // Where TeX is installed texrs embeds the same CMR10 luatex does, so the
     // font's own objects are part of the comparison too.

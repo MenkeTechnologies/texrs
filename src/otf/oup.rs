@@ -80,8 +80,7 @@ pub fn unify_glyphs(fontdata: &mut FontData) -> (BTreeMap<u32, Description>, Vec
     indices[0] = zerocode;
     // `nofglyphs = #glyphs`: the glyphs are dense from 0, so the border is
     // the last index.
-    for index in 1..fontdata.glyphs.len() {
-        let glyph = &fontdata.glyphs[index];
+    for (index, glyph) in fontdata.glyphs.iter().enumerate().skip(1) {
         let unicode = match glyph.unicode {
             None => {
                 private += 1;
@@ -117,11 +116,11 @@ pub fn copy_duplicates(
             continue;
         };
         for &v in d {
-            if !descriptions.contains_key(&v) {
+            descriptions.entry(v).or_insert_with(|| {
                 let mut c = du.clone();
                 c.unicode = Some(Unicode::One(v));
-                descriptions.insert(v, c);
-            }
+                c
+            });
         }
     }
 }

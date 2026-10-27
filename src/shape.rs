@@ -23,7 +23,7 @@
 //! and writes on a node (a glyph's character and offsets, a glue's subtype and
 //! width, a discretionary's three lists), because a stomach that wants
 //! luatex's output has to give the shaper luatex's input. The port works on a
-//! doubly linked arena ([`List`]) since the Lua code edits a linked list in
+//! doubly linked arena (`List`) since the Lua code edits a linked list in
 //! place -- splicing a discretionary's replacement in, inserting kerns before
 //! or after a glyph, copying stretches of nodes into a new `pre` -- and a port
 //! that rewrote that into slice operations would be a different algorithm.

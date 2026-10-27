@@ -3314,7 +3314,7 @@ pub fn to_pdf_ahead(
                     &mut page,
                     left - min_x,
                     bottom - min_y,
-                    std::sync::Arc::clone(&main_shared),
+                    std::sync::Arc::clone(main_shared),
                 );
                 // Exactly what `line_height` reserved for it, or the line after
                 // the picture is set somewhere the fitter did not put it.
@@ -3555,7 +3555,7 @@ pub fn to_pdf_ahead(
         let shown = folio.to_string();
         let width = width_of(&shown, Face::MAIN, layout.size);
         page.text_in(
-            std::sync::Arc::clone(&main_shared),
+            std::sync::Arc::clone(main_shared),
             layout.size,
             (page.width - width) / 2.0,
             page.height - layout.margin - layout.height - FOOTSKIP,
@@ -3813,7 +3813,10 @@ pub struct Pipeline {
 enum Fed {
     /// The families and layout in force when the first text was handed on,
     /// which the paragraphs are measured with.
-    Start { families: Families, layout: Layout },
+    Start {
+        families: Box<Families>,
+        layout: Layout,
+    },
     /// More of the text, in order, slots and all.
     Text(String),
     /// A batch of formula settings, by the index of its first formula.
@@ -3936,7 +3939,7 @@ impl Feed {
         if !self.started {
             self.started = true;
             let start = Fed::Start {
-                families: families.clone(),
+                families: Box::new(families.clone()),
                 layout: layout.clone(),
             };
             self.stopped = self.tx.send(start).is_err();
@@ -4031,7 +4034,7 @@ fn break_fed(rx: &std::sync::mpsc::Receiver<Fed>, near: Option<&std::path::Path>
             // Borrowed glyphs are reserved off the whole text, which no
             // stretch of it can stand in for.
             Fed::Start { families, .. } if !families.fallbacks.is_empty() => return None,
-            Fed::Start { families, layout } => start = Some((families, layout)),
+            Fed::Start { families, layout } => start = Some((*families, layout)),
             Fed::Text(text) => unsettled.push_str(&text),
             Fed::Settings(first, batch) => settings.insert(first, batch),
         }
@@ -5471,15 +5474,15 @@ fn break_penalties(lines: &[String], params: &PageParams) -> Vec<f64> {
             }
             continue;
         }
-        for e in from + 1..upto {
+        for (e, c) in cost.iter_mut().enumerate().take(upto).skip(from + 1) {
             if e == from + 1 {
-                cost[e] += params.club;
+                *c += params.club;
             }
             if e == upto - 1 {
-                cost[e] += params.widow;
+                *c += params.widow;
             }
             if hyphen(e - 1) {
-                cost[e] += params.broken;
+                *c += params.broken;
             }
         }
     }
@@ -5715,6 +5718,9 @@ fn plan_pages(items: &[Item], lines: &[String], layout: &Layout, leadings: &[f64
 mod plan_tests {
     use super::*;
 
+    /// A planned page as `(from, upto, foot)`, the fields of [`Planned`].
+    type PagePlan = (usize, usize, Option<(usize, usize)>);
+
     /// xorshift64*, so the documents are the same on every run.
     struct Rng(u64);
 
@@ -5775,7 +5781,7 @@ mod plan_tests {
         lines: &[String],
         layout: &Layout,
         leadings: &[f64],
-    ) -> Vec<(usize, usize, Option<(usize, usize)>)> {
+    ) -> Vec<PagePlan> {
         const SLACK: f64 = 1e-6;
         let penalty = break_penalties(lines, &layout.paging);
         let count = items.len();

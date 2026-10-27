@@ -496,9 +496,8 @@ impl Compiler {
         self.b.emit(Op::LoadInt(op.code()), self.line);
         let mut args: Vec<Arg<'_, Num>> = Vec::new();
         op.visit(&mut |a| args.push(a));
-        let argc = u8::try_from(args.len() + 1).map_err(|_| {
-            TexError(format!("a list action with {} arguments", args.len()))
-        })?;
+        let argc = u8::try_from(args.len() + 1)
+            .map_err(|_| TexError(format!("a list action with {} arguments", args.len())))?;
         for a in args {
             match a {
                 Arg::Num(n) => self.num(n)?,
@@ -553,11 +552,13 @@ impl Compiler {
                 }
                 MsgOp::ShowBox(n) => {
                     self.b.emit(Op::LoadInt(i64::from(*n)), self.line);
-                    self.b.emit(Op::CallBuiltin(ops::LIST_SHOWBOX, 1), self.line);
+                    self.b
+                        .emit(Op::CallBuiltin(ops::LIST_SHOWBOX, 1), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::ShowLists => {
-                    self.b.emit(Op::CallBuiltin(ops::LIST_SHOWLISTS, 0), self.line);
+                    self.b
+                        .emit(Op::CallBuiltin(ops::LIST_SHOWLISTS, 0), self.line);
                     self.b.emit(Op::Pop, self.line);
                 }
                 MsgOp::Discard(n) => {

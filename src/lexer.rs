@@ -429,7 +429,7 @@ impl Lexer {
         while i + want.len() <= self.chars.len() {
             // The first character alone rules out nearly every position, and is
             // one compare where the slice is a call.
-            let opens = want.first().map_or(true, |w| self.chars[i] == *w);
+            let opens = want.first().is_none_or(|w| self.chars[i] == *w);
             if opens && self.chars[i..i + want.len()] == want[..] {
                 let text: String = self.chars[self.pos..i].iter().collect();
                 self.pos = i + want.len();

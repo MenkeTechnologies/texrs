@@ -124,8 +124,7 @@ fn a_latex_preamble_is_the_same_at_any_thread_count() {
         // Twice: the first run writes the `.aux`, the second seeds from it.
         seen.push(vec![run(&dir, threads, false), run(&dir, threads, false)]);
     }
-    for pass in 0..2 {
-        let (one, many) = (&seen[0][pass], &seen[1][pass]);
+    for (pass, (one, many)) in seen[0].iter().zip(&seen[1]).enumerate() {
         assert_eq!(one.stdout, many.stdout, "stdout, run {pass}");
         assert_eq!(one.stderr, many.stderr, "stderr, run {pass}");
         assert!(one.pdf == many.pdf, "PDF differs, run {pass}");

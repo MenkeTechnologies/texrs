@@ -1029,13 +1029,18 @@ impl Lowerer {
                     // a formula's or a `\left`'s innermost, closes nothing; it
                     // is reported and dropped (§1069's `extra_right_brace`).
                     Token::Char(_, Cat::EndGroup)
-                        if !self.eng.innermost_group().is_some_and(GroupKind::closed_by_brace) =>
+                        if !self
+                            .eng
+                            .innermost_group()
+                            .is_some_and(GroupKind::closed_by_brace) =>
                     {
                         let esc = self.eng.esc().to_string();
                         let msg = match self.eng.innermost_group() {
                             None => "Too many }'s".to_string(),
                             Some(GroupKind::MathShift) => "Extra }, or forgotten $".to_string(),
-                            Some(GroupKind::MathLeft) => format!("Extra }}, or forgotten {esc}right"),
+                            Some(GroupKind::MathLeft) => {
+                                format!("Extra }}, or forgotten {esc}right")
+                            }
                             Some(_) => format!("Extra }}, or forgotten {esc}endgroup"),
                         };
                         self.eng.report(lx, &msg);
@@ -1354,9 +1359,9 @@ impl Lowerer {
                     self.eng.compile_time_intpar(lx, i)?
                 }
                 "count" => {
-                    let reg = self
-                        .eng
-                        .scan_register_slot(lx, false, crate::compiler::RegFile::Count)?;
+                    let reg =
+                        self.eng
+                            .scan_register_slot(lx, false, crate::compiler::RegFile::Count)?;
                     self.eng.skip_equals_file(lx)?;
                     let v = self.number(lx)?;
                     let global = self.note_global(&[reg]);
@@ -1390,16 +1395,17 @@ impl Lowerer {
                 // glue file: what differs is the unit the right-hand side is
                 // read in, and `glue_assign` reads that off the base.
                 "skip" | "muskip" => {
-                    let file = crate::compiler::RegFile::of_name(name.name()).expect("skip or muskip");
+                    let file =
+                        crate::compiler::RegFile::of_name(name.name()).expect("skip or muskip");
                     let base = self.eng.scan_register_slot(lx, false, file)?;
                     self.eng.skip_equals_file(lx)?;
                     self.note_global(&[base, base + 1, base + 2, base + 3]);
                     out.extend(self.glue_assign(lx, base)?);
                 }
                 "dimen" => {
-                    let slot = self
-                        .eng
-                        .scan_register_slot(lx, false, crate::compiler::RegFile::Dimen)?;
+                    let slot =
+                        self.eng
+                            .scan_register_slot(lx, false, crate::compiler::RegFile::Dimen)?;
                     self.eng.skip_equals_file(lx)?;
                     // `\dimen1=\dimen0` copies a register whose value is only
                     // known at run time, and `\dimen1=\skip0` takes a glue's
@@ -1849,25 +1855,25 @@ impl Lowerer {
                 // same equality chain the `\message` arm builds. Leaving this
                 // to the expander answered from its own copy of the register,
                 // which no run-time `\count1=2` ever reaches.
-                "ifcase" => match {
+                "ifcase" => {
                     self.eng.begin_test();
                     let line = lx.line();
-                    let selector = self.number(lx);
-                    (line, selector?)
-                } {
-                    // A selector whose value is known -- a constant, or a
-                    // register the lowerer has followed -- is the expander's.
-                    (line, value) if self.eng.known.num(&value).is_some() => {
-                        let n = self.eng.known.num(&value).expect("just matched");
-                        self.eng.ifcase_file(lx, n, line)?
+                    let selector = self.number(lx)?;
+                    match (line, selector) {
+                        // A selector whose value is known -- a constant, or a
+                        // register the lowerer has followed -- is the expander's.
+                        (line, value) if self.eng.known.num(&value).is_some() => {
+                            let n = self.eng.known.num(&value).expect("just matched");
+                            self.eng.ifcase_file(lx, n, line)?
+                        }
+                        (_, value) => {
+                            self.eng.end_test();
+                            self.flush_reports(&mut out);
+                            let branches = self.case_arms(lx)?;
+                            out.extend(case_chain_cmds(value, branches));
+                        }
                     }
-                    (_, value) => {
-                        self.eng.end_test();
-                        self.flush_reports(&mut out);
-                        let branches = self.case_arms(lx)?;
-                        out.extend(case_chain_cmds(value, branches));
-                    }
-                },
+                }
                 "ifodd" => {
                     let negated = self.eng.take_unless();
                     let line = lx.line();
@@ -1920,7 +1926,9 @@ impl Lowerer {
                 // both are compile-time: what they define changes how the rest
                 // of the file READS, exactly as `\def` does.
                 "chardef" | "countdef" | "mathchardef" | "dimendef" | "skipdef" | "muskipdef"
-                | "toksdef" | "attributedef" => self.eng.compile_time_numeric_def(lx, name.name())?,
+                | "toksdef" | "attributedef" => {
+                    self.eng.compile_time_numeric_def(lx, name.name())?
+                }
                 "newcommand" | "renewcommand" | "providecommand" | "DeclareRobustCommand" => {
                     self.eng.compile_time_newcommand(lx, name.name())?
                 }
@@ -2295,7 +2303,8 @@ impl Lowerer {
         };
         let (params, body) = self.eng.read_edef_parts(lx, name, &mut frozen)?;
         self.next_scratch = frozen.next_scratch;
-        self.eng.define_macro_with_params(name, params, body, global)?;
+        self.eng
+            .define_macro_with_params(name, params, body, global)?;
         Ok(frozen.snapshots)
     }
 
@@ -4210,9 +4219,11 @@ impl Lowerer {
             }
             match n.name() {
                 "dimen" => {
-                    let slot =
-                        self.eng
-                            .scan_register_slot(lx, pending, crate::compiler::RegFile::Dimen)?;
+                    let slot = self.eng.scan_register_slot(
+                        lx,
+                        pending,
+                        crate::compiler::RegFile::Dimen,
+                    )?;
                     return Ok(Num::Count(slot));
                 }
                 // A glue where a dimension is wanted is its NATURAL width
@@ -4337,7 +4348,10 @@ impl Lowerer {
         if let Some(name) = crate::params::name_of_slot(slot) {
             return Ok(vec![Token::cs(name)]);
         }
-        let pooled = self.eng.pooled_register(slot).map(|(file, n)| (file.name(), n));
+        let pooled = self
+            .eng
+            .pooled_register(slot)
+            .map(|(file, n)| (file.name(), n));
         let (word, n) = match slot {
             _ if pooled.is_some() => pooled.expect("just matched"),
             s if s < DIMEN_BASE => ("count", s),
@@ -4923,9 +4937,11 @@ impl Lowerer {
                             },
                             _ => return Err(TexError("Unsupported \\the".into())),
                         }
-                        let reg =
-                            self.eng
-                                .scan_register_slot(work, true, crate::compiler::RegFile::Count)?;
+                        let reg = self.eng.scan_register_slot(
+                            work,
+                            true,
+                            crate::compiler::RegFile::Count,
+                        )?;
                         out.push(MsgOp::Number(Num::Count(reg)));
                         continue;
                     }
@@ -4946,26 +4962,32 @@ impl Lowerer {
                     // `\number\skip0` gives the natural component only.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "skip") {
                         let _ = work.pending.pop();
-                        let slot =
-                            self.eng
-                                .scan_register_slot(work, true, crate::compiler::RegFile::Skip)?;
+                        let slot = self.eng.scan_register_slot(
+                            work,
+                            true,
+                            crate::compiler::RegFile::Skip,
+                        )?;
                         out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "muskip") {
                         let _ = work.pending.pop();
-                        let slot =
-                            self.eng
-                                .scan_register_slot(work, true, crate::compiler::RegFile::MuSkip)?;
+                        let slot = self.eng.scan_register_slot(
+                            work,
+                            true,
+                            crate::compiler::RegFile::MuSkip,
+                        )?;
                         out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
                     // `\number\dimen0` gives the scaled points, unrendered.
                     if matches!(work.pending.last(), Some(Token::Cs(w)) if w.name() == "dimen") {
                         let _ = work.pending.pop();
-                        let slot =
-                            self.eng
-                                .scan_register_slot(work, true, crate::compiler::RegFile::Dimen)?;
+                        let slot = self.eng.scan_register_slot(
+                            work,
+                            true,
+                            crate::compiler::RegFile::Dimen,
+                        )?;
                         out.push(MsgOp::Number(Num::Count(slot)));
                         continue;
                     }
@@ -5835,7 +5857,6 @@ impl Lowerer {
         }
         Ok(name)
     }
-
 
     /// Find `name`, read it, and say what to print for it.
     ///

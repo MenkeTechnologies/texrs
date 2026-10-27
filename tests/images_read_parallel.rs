@@ -43,13 +43,10 @@ fn png(name: &str, w: u32, h: u32, alpha: bool, shade: u8) -> std::path::PathBuf
         true => &[shade, 0x90, 0x60, 0x80],
         false => &[shade, 0x90, 0x60],
     };
-    let mut raw = Vec::new();
-    for _ in 0..h {
-        raw.push(0u8);
-        for _ in 0..w {
-            raw.extend_from_slice(pixel);
-        }
-    }
+    // Each row is filter type 0 (None) followed by its pixels.
+    let mut row = vec![0u8];
+    row.extend(pixel.repeat(w as usize));
+    let raw = row.repeat(h as usize);
     let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     z.write_all(&raw).expect("deflate the rows");
     let mut file = b"\x89PNG\r\n\x1a\n".to_vec();

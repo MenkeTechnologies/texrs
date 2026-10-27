@@ -278,7 +278,10 @@ fn a_hyphenated_word_keeps_the_kern_before_the_punctuation_after_it() {
          \\setbox0\\vbox{{{par}}}\\showbox0\n\\end\n"
     );
     let got = texrs::run_messages_tex(&src).expect("the document runs");
-    assert!(got.contains("\\discretionary"), "the word was not hyphenated: {got:?}");
+    assert!(
+        got.contains("\\discretionary"),
+        "the word was not hyphenated: {got:?}"
+    );
     assert!(
         got.contains("\\tenrm y..\\kern-0.83334..\\tenrm ."),
         "the kern before the full stop is gone: {got:?}"
@@ -381,7 +384,10 @@ fn specials_everypar_and_box_only_pages_match_tex_byte_for_byte() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(differ.is_empty(), "these DVIs differ from tex's: {differ:#?}");
+    assert!(
+        differ.is_empty(),
+        "these DVIs differ from tex's: {differ:#?}"
+    );
 }
 
 /// §1354 appends a `\special`'s whatsit to the current list in every mode,
@@ -455,7 +461,11 @@ fn a_page_of_a_box_alone_gets_plains_footline() {
         eprintln!("skipping: no cmr10.tfm to set with");
         return;
     }
-    for src in ["\\hbox{x}\\end\n", "\\mark{x}\\end\n", "\\insert100{\\hbox{x}}\\end\n"] {
+    for src in [
+        "\\hbox{x}\\end\n",
+        "\\mark{x}\\end\n",
+        "\\insert100{\\hbox{x}}\\end\n",
+    ] {
         let dvi = shipped(src);
         let page = texrs::dvi::Dvi::parse(&dvi).expect("a readable DVI");
         assert!(

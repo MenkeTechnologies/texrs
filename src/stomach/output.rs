@@ -126,9 +126,9 @@ impl Stomach {
             // since `term_offset>0` once the heading is printed.
             let mut text = String::from("\nCompleted box being shipped out ");
             text.push_str(&note);
-            text.push_str(&self.show_box_text(std::slice::from_ref(&crate::node::Node::Box(
-                p.clone(),
-            ))));
+            text.push_str(
+                &self.show_box_text(std::slice::from_ref(&crate::node::Node::Box(p.clone()))),
+            );
             self.diagnostic(&text);
         }
         let (h_offset, v_offset) = (self.h_offset, self.v_offset);
@@ -212,10 +212,9 @@ pub struct Pages {
 
 impl Stomach {
     fn builder(&mut self) -> &mut crate::page::PageBuilder {
-        let b = self
-            .pages
-            .builder
-            .get_or_insert_with(|| crate::page::PageBuilder::new(crate::page::PageParams::default()));
+        let b = self.pages.builder.get_or_insert_with(|| {
+            crate::page::PageBuilder::new(crate::page::PageParams::default())
+        });
         b
     }
 
@@ -252,14 +251,17 @@ impl Stomach {
         for node in self.nest[0].list.iter() {
             if let crate::node::Node::Ins(ins) = node {
                 let n = ins.number;
-                classes.entry(n).or_insert_with(|| crate::page::InsertClass {
-                    count: e.slot(i64::from(n)),
-                    dimen: e.slot(crate::compiler::DIMEN_BASE + i64::from(n)),
-                    skip: super::glue_at(
-                        e,
-                        crate::compiler::SKIP_BASE + i64::from(n) * crate::compiler::SKIP_STRIDE,
-                    ),
-                });
+                classes
+                    .entry(n)
+                    .or_insert_with(|| crate::page::InsertClass {
+                        count: e.slot(i64::from(n)),
+                        dimen: e.slot(crate::compiler::DIMEN_BASE + i64::from(n)),
+                        skip: super::glue_at(
+                            e,
+                            crate::compiler::SKIP_BASE
+                                + i64::from(n) * crate::compiler::SKIP_STRIDE,
+                        ),
+                    });
             }
         }
         if let Some(b) = &self.pages.builder {
@@ -343,10 +345,8 @@ impl Stomach {
                     // of its own.
                     self.output.output_penalty = output_penalty;
                     self.output.dead_cycles = dead_cycles;
-                    let mut l = super::ListState::new(
-                        super::Mode::InternalVertical,
-                        super::Opened::Output,
-                    );
+                    let mut l =
+                        super::ListState::new(super::Mode::InternalVertical, super::Opened::Output);
                     l.mode_line = -self.line;
                     self.nest.push(l);
                     self.group_begin();
@@ -369,7 +369,9 @@ impl Stomach {
         }
         // §1028.
         if self.box_register(255).is_some() {
-            self.say(Said::Error("Output routine didn't use all of \\box255".into()));
+            self.say(Said::Error(
+                "Output routine didn't use all of \\box255".into(),
+            ));
             self.set_box(255, None, true);
         }
         let Some(l) = self.pop_list() else {
@@ -417,7 +419,10 @@ impl Stomach {
                 .and_then(|t| self.mark_ids.get(t))
                 .map_or(0, |&n| i64::from(n))
         };
-        let split = [id(&self.output.split_first_mark), id(&self.output.split_bot_mark)];
+        let split = [
+            id(&self.output.split_first_mark),
+            id(&self.output.split_bot_mark),
+        ];
         let page = match self.pages.builder.as_ref() {
             Some(b) => [id(&b.top_mark), id(&b.first_mark), id(&b.bot_mark)],
             None => [0; 3],

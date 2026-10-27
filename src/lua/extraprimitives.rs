@@ -15,7 +15,7 @@ pub(super) enum Origin {
 }
 
 /// `(origin, name)`, in luatex's primitive-table order.
-pub(super) const PRIMITIVES: [(Origin, &str); 726] = [
+pub(super) static PRIMITIVES: [(Origin, &str); 726] = [
     (Origin::Tex, "vskip"),
     (Origin::Luatex, "Umathcloseopspacing"),
     (Origin::Etex, "unless"),

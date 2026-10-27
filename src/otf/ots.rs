@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::dsp::{BaseAnchor, Coverage, Flags, LigTree, PairValue, Pos, Sequence};
-use super::nodes::{Ix, Kind, List, Slot, GLYPH_LIGATURE};
+use super::nodes::{Ix, Kind, List, NotGlyph, Slot, GLYPH_LIGATURE};
 use super::otj::{self, Counts};
 use super::oup::RuleData;
 use super::Face;
@@ -199,7 +199,7 @@ impl<'a> State<'a> {
     }
 
     /// `ischar(n, currentfont)`.
-    fn ischar(&self, n: Option<Ix>) -> Result<Option<u32>, ()> {
+    fn ischar(&self, n: Option<Ix>) -> Result<Option<u32>, NotGlyph> {
         self.list.ischar(n, self.fid())
     }
 
@@ -701,11 +701,11 @@ impl<'a> State<'a> {
                         }
                     }
                     Ok(None) => break,
-                    Err(()) if self.list.is_disc(Some(cur)) => {
+                    Err(NotGlyph) if self.list.is_disc(Some(cur)) => {
                         discfound = Some(cur);
                         break;
                     }
-                    Err(()) => break,
+                    Err(NotGlyph) => break,
                 }
             }
             if let Some(df) = discfound {
@@ -1252,7 +1252,7 @@ impl<'a> State<'a> {
                                 }
                                 continue 'contexts;
                             }
-                            Err(()) if self.list.is_disc(Some(lst)) => {
+                            Err(NotGlyph) if self.list.is_disc(Some(lst)) => {
                                 discseen = true;
                                 discfound = Some(lst);
                                 self.notmatchpre.remove(&lst);
@@ -1301,7 +1301,7 @@ impl<'a> State<'a> {
                                 }
                                 last = self.next(Some(lst));
                             }
-                            Err(()) => continue 'contexts,
+                            Err(NotGlyph) => continue 'contexts,
                         }
                     }
                 }
@@ -1351,7 +1351,7 @@ impl<'a> State<'a> {
                                 }
                                 break;
                             }
-                            Err(()) => match self.list.nodes[pv].kind.clone() {
+                            Err(NotGlyph) => match self.list.nodes[pv].kind.clone() {
                                 Kind::Disc { .. } => {
                                     discseen = true;
                                     discfound = Some(pv);
@@ -1471,7 +1471,7 @@ impl<'a> State<'a> {
                                 }
                                 continue 'contexts;
                             }
-                            Err(()) => match self.list.nodes[cur].kind.clone() {
+                            Err(NotGlyph) => match self.list.nodes[cur].kind.clone() {
                                 Kind::Disc { .. } => {
                                     discseen = true;
                                     discfound = Some(cur);
@@ -1702,7 +1702,7 @@ impl<'a> State<'a> {
                             return (head, Some(start), true, 0, None);
                         }
                         Ok(None) => break,
-                        Err(()) => {
+                        Err(NotGlyph) => {
                             if Some(cur) == stop {
                                 break;
                             }
@@ -1735,7 +1735,7 @@ impl<'a> State<'a> {
                             return (head, Some(start), true, 0, None);
                         }
                         Ok(None) => break,
-                        Err(()) => {
+                        Err(NotGlyph) => {
                             if Some(cur) == stop {
                                 break;
                             }
@@ -2768,7 +2768,7 @@ impl State<'_> {
                         start = if df { cur } else { self.next(cur) };
                     }
                     Ok(None) => start = self.next(Some(st)),
-                    Err(()) => match self.list.nodes[st].kind.clone() {
+                    Err(NotGlyph) => match self.list.nodes[st].kind.clone() {
                         Kind::Glue { .. } => start = self.next(Some(st)),
                         Kind::Disc { .. } => {
                             if self.discs.is_none() || self.uses_font(st) {
@@ -2844,8 +2844,8 @@ impl State<'_> {
                     start = cur.and_then(|c| self.next(Some(c)));
                 }
                 Ok(None) => return (head, done),
-                Err(()) if swept => return (head, done),
-                Err(()) => start = self.next(Some(st)),
+                Err(NotGlyph) if swept => return (head, done),
+                Err(NotGlyph) => start = self.next(Some(st)),
             }
         }
         (head, done)
@@ -3051,44 +3051,37 @@ impl State<'_> {
         nextstart
     }
 
-    /// The three sub-runs `comprun` and `testrun` end with.
+    /// The three sub-runs `comprun` and `testrun` end with, over `disc`'s
+    /// pre, post and replace lists in that order.
     fn sweep(
         &mut self,
         disc: Ix,
-        pre: Option<Ix>,
-        post: Option<Ix>,
-        replace: Option<Ix>,
+        mut parts: [Option<Ix>; 3],
         dataset: &Dataset,
         seq: &Sequence,
         rlmode: i32,
         skip: &Option<Skip>,
     ) {
-        let (mut pre, mut post, mut replace) = (pre, post, replace);
         let mut renewed = false;
-        for (which, t) in [(0, Sweep::Pre), (1, Sweep::Post), (2, Sweep::Replace)] {
-            let l = match which {
-                0 => pre,
-                1 => post,
-                _ => replace,
-            };
-            let Some(h) = l else {
+        for (part, t) in parts
+            .iter_mut()
+            .zip([Sweep::Pre, Sweep::Post, Sweep::Replace])
+        {
+            let Some(h) = *part else {
                 continue;
             };
             self.sweepnode = Some(disc);
             self.sweeptype = Some(t);
             let (new, done) = self.c_run(h, dataset, seq, rlmode, skip);
             if done {
-                match which {
-                    0 => pre = new,
-                    1 => post = new,
-                    _ => replace = new,
-                }
+                *part = new;
                 renewed = true;
             }
         }
         self.sweepnode = None;
         self.sweeptype = None;
         if renewed {
+            let [pre, post, replace] = parts;
             self.list.set_disc(disc, pre, post, replace);
         }
     }
@@ -3103,7 +3096,7 @@ impl State<'_> {
         skip: &Option<Skip>,
     ) -> Option<Ix> {
         let (pre, post, replace) = self.list.disc(disc);
-        self.sweep(disc, pre, post, replace, dataset, seq, rlmode, skip);
+        self.sweep(disc, [pre, post, replace], dataset, seq, rlmode, skip);
         self.next(Some(disc))
     }
 
@@ -3174,7 +3167,7 @@ impl State<'_> {
                 self.list.set_next(Some(disc), None);
             }
         }
-        self.sweep(disc, pre, post, replace, dataset, seq, rlmode, skip);
+        self.sweep(disc, [pre, post, replace], dataset, seq, rlmode, skip);
         self.next(Some(disc))
     }
 }

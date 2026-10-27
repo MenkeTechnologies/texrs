@@ -489,7 +489,11 @@ impl Stomach {
             ListOp::EndMath(fams) => self.after_math(&fams, e),
             ListOp::ResumeAfterDisplay => self.resume_after_display(),
             ListOp::MuKern(w) => self.append_mu_kern(w),
-            ListOp::InitAlign { halign, exactly, size } => {
+            ListOp::InitAlign {
+                halign,
+                exactly,
+                size,
+            } => {
                 let spec = match exactly {
                     true => crate::pack::Spec::Exactly(size),
                     false => crate::pack::Spec::Additional(size),
@@ -514,7 +518,10 @@ impl Stomach {
             ListOp::AlterInteger { which, value } => self.alter_integer(which, value),
             ListOp::AlterPageSoFar { which, value } => self.alter_page_so_far(which, value),
             ListOp::ParShape { global, dims } => {
-                let shape = dims.chunks(2).map(|p| (p[0], p.get(1).copied().unwrap_or(0))).collect();
+                let shape = dims
+                    .chunks(2)
+                    .map(|p| (p[0], p.get(1).copied().unwrap_or(0)))
+                    .collect();
                 self.set_par_shape(shape, global);
             }
             ListOp::Accent { f, accent, g, over } => {

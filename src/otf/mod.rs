@@ -43,8 +43,8 @@ pub mod procs;
 pub mod registry;
 pub mod stream;
 pub mod tfm;
-pub mod ttsubset;
 pub mod ttf;
+pub mod ttsubset;
 pub mod var;
 
 pub use registry::{clear_lua_fonts, is_lua_font, lua_font, register_lua_font, LuaFont};

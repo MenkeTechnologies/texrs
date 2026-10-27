@@ -342,7 +342,11 @@ impl Stomach {
                     }
                     Some(&k) => (k, c.font),
                 },
-                Node::Kern { explicit: false, .. } | Node::Whatsit(_) | Node::Out(_) => {
+                Node::Kern {
+                    explicit: false, ..
+                }
+                | Node::Whatsit(_)
+                | Node::Out(_) => {
                     prev_s = s;
                     s += 1;
                     continue;
@@ -420,7 +424,9 @@ impl Stomach {
                         false => NON_CHAR,
                     };
                 }
-                Some(Node::Kern { explicit: false, .. }) => {
+                Some(Node::Kern {
+                    explicit: false, ..
+                }) => {
                     hb = s;
                     hyf_bchar = font.bchar_code();
                 }
@@ -438,7 +444,9 @@ impl Stomach {
             match list.get(t) {
                 None => break,
                 Some(Node::Char(_)) | Some(Node::Ligature(..)) => {}
-                Some(Node::Kern { explicit: false, .. }) => {}
+                Some(Node::Kern {
+                    explicit: false, ..
+                }) => {}
                 Some(Node::Kern { .. }) => break,
                 Some(
                     Node::Whatsit(_)
@@ -465,7 +473,18 @@ impl Stomach {
         if !(l_hyf..=hn.saturating_sub(r_hyf)).any(|j| hyf[j] % 2 == 1) {
             return;
         }
-        self.reconstitute_word(list, cur_p, ha, hb, hf, &font, hu, hyf, hyf_char as u16, hyf_bchar);
+        self.reconstitute_word(
+            list,
+            cur_p,
+            ha,
+            hb,
+            hf,
+            &font,
+            hu,
+            hyf,
+            hyf_char as u16,
+            hyf_bchar,
+        );
     }
 
     /// §903 and §913-§918: replace `ha..hb` by the word rebuilt, with the
@@ -632,7 +651,7 @@ impl Stomach {
                     out.append(&mut major);
                     w.hyphen_passed = j - 1;
                     w.hold.clear();
-                    if w.hyf[j - 1] % 2 == 0 {
+                    if w.hyf[j - 1].is_multiple_of(2) {
                         break;
                     }
                 }

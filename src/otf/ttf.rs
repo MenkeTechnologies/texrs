@@ -293,7 +293,8 @@ fn apply_axis(
                         if last >= first {
                             let mut lastindex = cnt;
                             if firstindex < cnt {
-                                for currentindex in firstindex..=cnt {
+                                let from = firstindex;
+                                for currentindex in from..=cnt {
                                     let found = dp(currentindex);
                                     if found <= first {
                                         firstindex = currentindex;
@@ -518,9 +519,13 @@ pub fn gvar(
                 let stop = istop
                     .as_ref()
                     .map_or(if peak > 0.0 { peak } else { 0.0 }, |v| v[a]);
-                if start > peak || peak > stop {
-                } else if start < 0.0 && stop > 0.0 && peak != 0.0 {
-                } else if peak == 0.0 {
+                if start > peak
+                    || peak > stop
+                    || (start < 0.0 && stop > 0.0 && peak != 0.0)
+                    || peak == 0.0
+                {
+                    // An axis that is malformed, straddles zero or has no peak leaves the
+                    // scale alone.
                 } else if fa < start || fa > stop {
                     s = 0.0;
                     break;
@@ -655,7 +660,7 @@ pub fn bounding_boxes(fontdata: &mut FontData, shapes: &[Option<Shape>]) {
         let (mut px, mut py);
         let mut first = 1usize;
         for &last in contours {
-            if last >= first && last != first {
+            if last > first {
                 let pt = |i: usize| points[i - 1];
                 let mut first_pt = pt(first);
                 let last_pt = pt(last);

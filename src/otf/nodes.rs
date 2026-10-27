@@ -117,6 +117,10 @@ pub enum Slot {
     Empty,
 }
 
+/// [`List::ischar`]'s answer for a node that is not a glyph: the Lua `nil`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotGlyph;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Props {
     pub slots: [Field<Inj>; 5],
@@ -246,10 +250,10 @@ impl List {
     }
 
     /// `ischar(n, font)`: `Ok(Some(c))` the character, `Ok(None)` the Lua
-    /// `false` (a glyph that does not qualify), `Err(())` not a glyph (nil).
-    pub fn ischar(&self, n: Option<Ix>, font: Option<usize>) -> Result<Option<u32>, ()> {
+    /// `false` (a glyph that does not qualify), `Err(NotGlyph)` not a glyph (nil).
+    pub fn ischar(&self, n: Option<Ix>, font: Option<usize>) -> Result<Option<u32>, NotGlyph> {
         let Some(n) = n else {
-            return Err(());
+            return Err(NotGlyph);
         };
         match &self.nodes[n].kind {
             Kind::Glyph {
@@ -266,7 +270,7 @@ impl List {
                     _ => Ok(Some(*char)),
                 }
             }
-            _ => Err(()),
+            _ => Err(NotGlyph),
         }
     }
 
@@ -570,10 +574,10 @@ impl List {
             match &p.slots[slot_index(s)] {
                 Field::Value(v) => return Some(v),
                 Field::False => return None,
-                Field::Unset => match p.parent {
-                    Some(parent) => at = parent,
-                    None => return None,
-                },
+                Field::Unset => {
+                    let parent = p.parent?;
+                    at = parent
+                }
             }
         }
     }
@@ -588,10 +592,10 @@ impl List {
             match &p.cursivedy {
                 Field::Value(v) => return Some(*v),
                 Field::False => return None,
-                Field::Unset => match p.parent {
-                    Some(parent) => at = parent,
-                    None => return None,
-                },
+                Field::Unset => {
+                    let parent = p.parent?;
+                    at = parent
+                }
             }
         }
     }
@@ -606,10 +610,10 @@ impl List {
             match &p.state {
                 Field::Value(v) => return Some(*v),
                 Field::False => return None,
-                Field::Unset => match p.parent {
-                    Some(parent) => at = parent,
-                    None => return None,
-                },
+                Field::Unset => {
+                    let parent = p.parent?;
+                    at = parent
+                }
             }
         }
     }
@@ -652,10 +656,10 @@ impl List {
                 match &p.slots[slot_index(s)] {
                     Field::Value(_) => break,
                     Field::False => return None,
-                    Field::Unset => match p.parent {
-                        Some(parent) => at = parent,
-                        None => return None,
-                    },
+                    Field::Unset => {
+                        let parent = p.parent?;
+                        at = parent
+                    }
                 }
             }
             return match &mut self.nodes[at].props {

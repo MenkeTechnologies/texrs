@@ -1494,7 +1494,10 @@ impl Engine {
     pub fn define_family(&mut self, size: u8, fam: u8, f: u16, global: bool) {
         let (s, k) = (size.min(2) as usize, (fam & 15) as usize);
         let old = self.fam_fonts[s][k];
-        self.save_as(Save::FamFont(s as u8, k as u8, old), self.global_defs_applied(global));
+        self.save_as(
+            Save::FamFont(s as u8, k as u8, old),
+            self.global_defs_applied(global),
+        );
         self.fam_fonts[s][k] = f;
     }
 
@@ -1736,7 +1739,9 @@ impl Engine {
     /// assignment, scoped by the group unless `\global`.
     pub fn compile_time_attribute(&mut self, lx: &mut Lexer, n: i64) -> R<()> {
         self.global = self.take_global_prefix();
-        let out = self.skip_equals(lx).and_then(|_| self.scan_number(lx, false));
+        let out = self
+            .skip_equals(lx)
+            .and_then(|_| self.scan_number(lx, false));
         if let Ok(v) = &out {
             self.set_attribute(n, *v);
         }
@@ -2461,7 +2466,9 @@ impl Engine {
 
     /// Where the conditional whose test is being read sits.
     fn testing_at(&self) -> Option<usize> {
-        self.conds.iter().rposition(|c| matches!(c, CondState::Testing))
+        self.conds
+            .iter()
+            .rposition(|c| matches!(c, CondState::Testing))
     }
 
     /// Where the description of `conds[at]` goes in `cond_info`, which holds
@@ -2763,7 +2770,7 @@ impl Engine {
                 return Err(TexError(format!("Missing = inserted for \\{test}")));
             };
             match &t {
-                t if self.is_spacer(&t) => continue,
+                t if self.is_spacer(t) => continue,
                 Token::Char(c @ ('<' | '=' | '>'), Cat::Other) => return Ok(*c),
                 Token::Cs(n) if self.try_expand(lx, *n, pending_only)? => continue,
                 _ => {
@@ -2957,7 +2964,7 @@ impl Engine {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
-                t if self.is_spacer(&t) => continue,
+                t if self.is_spacer(t) => continue,
                 Token::Char('-', _) => sign = -sign,
                 Token::Char('+', _) => {}
                 other => {
@@ -3240,7 +3247,9 @@ impl Engine {
                     // register it was given, in every position the spelt-out
                     // form works -- and `10\p@` is that position.
                     None => match self.numeric_cs(*n) {
-                        Some(NumericCs::Register(r)) if !crate::compiler::is_count_slot(r) => Some(r),
+                        Some(NumericCs::Register(r)) if !crate::compiler::is_count_slot(r) => {
+                            Some(r)
+                        }
                         _ => None,
                     },
                 };
@@ -3357,8 +3366,8 @@ impl Engine {
         // the digits and `pt`, which §448 reads back as the same scaled points
         // -- the register, whole, and §453's optional space after its unit.
         if let Some(reg) = self.take_expanded_register(lx, pending_only)? {
-            let dimension =
-                !crate::compiler::is_count_slot(reg.slot) && !crate::compiler::is_glue_slot(reg.slot);
+            let dimension = !crate::compiler::is_count_slot(reg.slot)
+                && !crate::compiler::is_glue_slot(reg.slot);
             if reg.the && dimension {
                 if let Some(t) = self.take(lx, pending_only) {
                     if !self.is_spacer(&t) {
@@ -3579,7 +3588,7 @@ impl Engine {
                 Token::Char(..) => 0,
             };
             let fam = self.scan_stream_number(lx, pending_only)?;
-            font = self.fam_fonts[size][(fam & 15) as usize];
+            font = self.fam_fonts[size][fam & 15];
         }
         Ok(self.fonts.describe(font))
     }
@@ -3607,12 +3616,17 @@ impl Engine {
             let reg = self.scan_register_any(lx, pending_only)?;
             spelt.extend(reg.to_string().chars().map(|c| Token::Char(c, Cat::Other)));
             spelt.push(Token::Char(' ', Cat::Space));
-            return Ok(Some((crate::stomach::box_dimen_slot(reg as u16, which), spelt)));
+            return Ok(Some((
+                crate::stomach::box_dimen_slot(reg as u16, which),
+                spelt,
+            )));
         }
         // §413's internal quantities the stomach computes are slots it writes.
         // `\outputpenalty` is left to the integer parameters.
         if let Some(i) = crate::stomach::Internal::of_name(name.name()) {
-            if i != crate::stomach::Internal::OutputPenalty && i != crate::stomach::Internal::LastSkip {
+            if i != crate::stomach::Internal::OutputPenalty
+                && i != crate::stomach::Internal::LastSkip
+            {
                 return Ok(Some((i.slot(), spelt)));
             }
         }
@@ -5459,12 +5473,16 @@ impl Engine {
             "mathchardef" => Meaning::MathCharDef(v),
             // A dimension register is a register: the name stands for the slot,
             // and the slot is the one the dimensions live in.
-            "dimendef" => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Dimen, v)?),
+            "dimendef" => {
+                Meaning::CountDef(self.register_address(crate::compiler::RegFile::Dimen, v)?)
+            }
             // A token register is not a slot: the list lives in the frontend,
             // so the name stands for the register number itself.
             "toksdef" => Meaning::ToksDef(v),
             "attributedef" => Meaning::AttributeDef(v),
-            "skipdef" => Meaning::CountDef(self.register_address(crate::compiler::RegFile::Skip, v)?),
+            "skipdef" => {
+                Meaning::CountDef(self.register_address(crate::compiler::RegFile::Skip, v)?)
+            }
             // A math glue register is a glue register in the second glue file,
             // so its name stands for a slot exactly as `\skipdef`'s does.
             "muskipdef" => {
@@ -6089,7 +6107,7 @@ impl Engine {
     fn skip_equals(&mut self, lx: &mut Lexer) -> R<()> {
         while let Some(t) = lx.next_token(&self.cats) {
             match &t {
-                t if self.is_spacer(&t) => continue,
+                t if self.is_spacer(t) => continue,
                 Token::Char('=', _) => return Ok(()),
                 other => {
                     // §405: anything else is put back to be read again.
@@ -6108,7 +6126,7 @@ impl Engine {
                 return Err(TexError("Missing number, treated as zero".into()));
             };
             match &t {
-                t if self.is_spacer(&t) => continue,
+                t if self.is_spacer(t) => continue,
                 Token::Char('-', _) => {
                     sign = -sign;
                     continue;
@@ -7615,9 +7633,10 @@ impl Engine {
         };
         let at = frozen.next_scratch;
         frozen.next_scratch -= 1;
-        frozen
-            .snapshots
-            .push(crate::ir::Cmd::SetCount(file + at, crate::ir::Num::Count(i.slot())));
+        frozen.snapshots.push(crate::ir::Cmd::SetCount(
+            file + at,
+            crate::ir::Num::Count(i.slot()),
+        ));
         let mut toks = vec![Token::cs("the"), Token::cs(kind)];
         toks.extend(str_toks(&at.to_string()));
         Some(toks)
@@ -7667,7 +7686,9 @@ impl Engine {
                         if let Some(next) = self.take(lx, false) {
                             let expandable = match &next {
                                 Token::Cs(m) => self.is_expandable(*m),
-                                Token::Char(c, Cat::Active) => self.is_expandable(Self::active_cs(*c)),
+                                Token::Char(c, Cat::Active) => {
+                                    self.is_expandable(Self::active_cs(*c))
+                                }
                                 Token::Char(..) => false,
                             };
                             match expandable {
@@ -8316,8 +8337,8 @@ impl Engine {
             self.cats.set(c, cat);
             return;
         }
-        if !self.cat_tables.contains_key(&table) {
-            self.cat_tables.insert(table, CatTable::all_other());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.cat_tables.entry(table) {
+            e.insert(CatTable::all_other());
             self.unset_cat_tables.insert(table);
         }
         let old = self.cat_tables[&table].get(c);

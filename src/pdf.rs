@@ -938,7 +938,7 @@ impl TexFont {
         })
     }
 
-    /// The glyph code `code` draws: see [`glyph_for_code`].
+    /// The glyph code `code` draws: see `glyph_for_code`.
     pub fn glyph_for(&self, code: u8) -> Option<String> {
         glyph_for_code(&self.program, code)
     }
@@ -1766,7 +1766,7 @@ fn base14_font(pdf: &mut impl Sink, font: &Font) -> Object {
         });
         entries.push(("ToUnicode", map));
     }
-    return Object::dict(entries);
+    Object::dict(entries)
 }
 
 /// Add a font to the file, embedding it when it is not one of the fourteen.

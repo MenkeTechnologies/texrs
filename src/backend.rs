@@ -570,6 +570,7 @@ pub struct OutlineEntry {
 }
 
 /// What the run hands the file at its end.
+#[derive(Default)]
 pub struct Prepared {
     pub writer: Option<crate::pdfdoc::Writer>,
     pub vars: crate::pdfdoc::Variables,
@@ -590,31 +591,6 @@ pub struct Prepared {
     pub dest_names: Vec<(String, u32)>,
     pub pages: BTreeMap<i64, u32>,
     pub lua: LuaStrings,
-}
-
-impl Default for Prepared {
-    fn default() -> Self {
-        Prepared {
-            writer: None,
-            vars: crate::pdfdoc::Variables::default(),
-            info: String::new(),
-            catalog: String::new(),
-            open_action: None,
-            names: String::new(),
-            trailer: String::new(),
-            page_attr: String::new(),
-            page_resources: String::new(),
-            pages_attr: String::new(),
-            outlines: Vec::new(),
-            first_outline: 0,
-            last_outline: 0,
-            parent_outline: 0,
-            dests: BTreeMap::new(),
-            dest_names: Vec::new(),
-            pages: BTreeMap::new(),
-            lua: LuaStrings::default(),
-        }
-    }
 }
 
 // ── scanning ─────────────────────────────────────────────────────────────
@@ -990,7 +966,7 @@ pub fn pdf_string(s: &str) -> String {
     let hex = b.len() >= 2
         && b[0] == b'<'
         && b[b.len() - 1] == b'>'
-        && b.len() % 2 == 0
+        && b.len().is_multiple_of(2)
         && b[1..b.len() - 1].iter().all(u8::is_ascii_hexdigit);
     match hex {
         true => s.to_string(),

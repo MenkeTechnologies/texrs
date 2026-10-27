@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use super::nodes::{Ix, Kind, List, GLYPH_PROTECTED};
+use super::nodes::{Ix, Kind, List, NotGlyph, GLYPH_PROTECTED};
 use super::normalize::Tables;
 use super::Face;
 
@@ -34,7 +34,7 @@ pub fn szss(list: &mut List, head: Option<Ix>, font: usize) -> Option<Ix> {
                 head = h;
                 n = nn;
             }
-            Err(()) if list.is_disc(Some(cur)) => {
+            Err(NotGlyph) if list.is_disc(Some(cur)) => {
                 let (pre, post, replace) = list.disc(cur);
                 let pre = szss(list, pre, font);
                 let post = szss(list, post, font);
@@ -75,10 +75,7 @@ pub fn amtra(list: &mut List, head: Option<Ix>, font: usize, t: &Tables) {
         let mut base = start;
         let mut prev = Some(start);
         n = list.nodes[start].next;
-        loop {
-            let Some(this) = ccc_of(list, n) else {
-                break;
-            };
+        while let Some(this) = ccc_of(list, n) {
             if this == 33 || this == 220 || this == 230 {
                 let mut after = n;
                 let mut tail;

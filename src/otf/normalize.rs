@@ -280,7 +280,7 @@ pub fn nodes_to_nfc(
                     }
                 } else if (0x11A8..=0x11C2).contains(&c)
                     && (0xAC00..=0xD7A3).contains(&st)
-                    && (st - 0xAC00) % 28 == 0
+                    && (st - 0xAC00).is_multiple_of(28)
                 {
                     let s = st + c - 0x11A7;
                     if allowed(s) {

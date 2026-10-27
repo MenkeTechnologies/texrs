@@ -9,13 +9,19 @@
 use std::process::Command;
 
 fn run(name: &str, files: &[(&str, &str)]) -> String {
-    let dir = std::env::temp_dir().join(format!("texrs-luatex-gullet-{}-{name}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("texrs-luatex-gullet-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     for (file, body) in files {
         std::fs::write(dir.join(file), body).expect("write");
     }
     let out = Command::new(env!("CARGO_BIN_EXE_texrs"))
-        .args(["-ini", "-progname=luatex", "-interaction=nonstopmode", "main.tex"])
+        .args([
+            "-ini",
+            "-progname=luatex",
+            "-interaction=nonstopmode",
+            "main.tex",
+        ])
         .current_dir(&dir)
         .output()
         .expect("run texrs");
@@ -72,5 +78,8 @@ fn readline_csname_and_lua_in_the_gullet() {
             ),
         ],
     );
-    assert!(out.contains("[macro:->a {b} c] [N] [41] [macro:->z]"), "{out}");
+    assert!(
+        out.contains("[macro:->a {b} c] [N] [41] [macro:->z]"),
+        "{out}"
+    );
 }

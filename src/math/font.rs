@@ -110,7 +110,9 @@ impl MathFont {
     /// The `exten` table of the `.tfm` file at `path`, which [`Tfm`] does not
     /// keep.
     pub fn exten_of(path: &std::path::Path) -> Vec<[u8; 4]> {
-        std::fs::read(path).map(|b| exten_table(&b)).unwrap_or_default()
+        std::fs::read(path)
+            .map(|b| exten_table(&b))
+            .unwrap_or_default()
     }
 
     /// A value in design-size units, in scaled points at this font's size,

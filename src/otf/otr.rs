@@ -286,7 +286,7 @@ fn utf16_be(s: &[u8]) -> Vec<u8> {
     };
     let mut out = String::new();
     let mut more = 0u32;
-    for pair in s.chunks_exact(2) {
+    for pair in s.as_chunks::<2>().0 {
         let now = 256 * pair[0] as u32 + pair[1] as u32;
         if more > 0 {
             let c = (more - 0xD800) * 0x400 + now.wrapping_sub(0xDC00) + 0x10000;
@@ -944,9 +944,8 @@ fn cmap4(f: &mut Stream, fontdata: &mut FontData, offset: usize) -> u32 {
         let endchar = endchars[segment - 1];
         let off = offsets[segment - 1];
         let delta = deltas[segment - 1];
-        if startchar == 0xFFFF && endchar == 0xFFFF {
-        } else if startchar == 0xFFFF && off == 0 {
-        } else if off == 0xFFFF {
+        if (startchar == 0xFFFF && (endchar == 0xFFFF || off == 0)) || off == 0xFFFF {
+            // The closing sentinel segment, or one with no glyphs: nothing to map.
         } else if off == 0 {
             for unicode in startchar..=endchar {
                 let index = (unicode + delta) % 65536;
@@ -1000,10 +999,9 @@ fn cmap12(f: &mut Stream, fontdata: &mut FontData, offset: usize) -> u32 {
     for _ in 0..nofgroups {
         let first = f.u32();
         let last = f.u32();
-        let mut index = f.u32();
-        for unicode in first..=last {
+        let start = f.u32();
+        for (unicode, index) in (first..=last).zip(start..) {
             nofdone += assign(fontdata, index, unicode, true);
-            index += 1;
         }
     }
     nofdone

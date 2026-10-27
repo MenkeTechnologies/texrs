@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use super::nodes::{Field, Inj, Ix, Kind, List, Slot};
+use super::nodes::{Field, Inj, Ix, Kind, List, NotGlyph, Slot};
 
 /// `nofregisteredkerns`, `...positions`, `...marks`, `...cursives`.
 #[derive(Clone, Debug, Default)]
@@ -321,20 +321,17 @@ pub fn set_mark(
     }
     let has = list.has_props(start);
     if has {
-        match list.slot_own(start, Slot::Injections) {
-            Some(i) => {
-                if !i.markmark {
-                    i.markx = Some(dx);
-                    i.marky = Some(dy);
-                    i.markdir = Some(rlmode);
-                    i.markbase = Some(markbase);
-                    i.markbasenode = Some(base);
-                    i.markmark = mkmk;
-                    i.checkmark = checkmark;
-                }
-                return (dx, dy);
+        if let Some(i) = list.slot_own(start, Slot::Injections) {
+            if !i.markmark {
+                i.markx = Some(dx);
+                i.marky = Some(dy);
+                i.markdir = Some(rlmode);
+                i.markbase = Some(markbase);
+                i.markbasenode = Some(base);
+                i.markmark = mkmk;
+                i.checkmark = checkmark;
             }
-            None => {}
+            return (dx, dy);
         }
     }
     list.set_slot(
@@ -506,13 +503,8 @@ fn inject(
     let mut prev: Option<Ix> = None;
     let mut prevdisc: Option<Ix> = None;
     let mut prevglyph: Option<Ix> = None;
-    let (mut pre, mut post, mut replace, mut posttail, mut replacetail): (
-        Option<Ix>,
-        Option<Ix>,
-        Option<Ix>,
-        Option<Ix>,
-        Option<Ix>,
-    ) = (None, None, None, None, None);
+    let (mut pre, mut post, mut replace, mut posttail, mut replacetail) =
+        (None::<Ix>, None::<Ix>, None::<Ix>, None::<Ix>, None::<Ix>);
     let mut cursiveanchor: Option<Ix> = None;
     let mut minc = 0usize;
     let mut maxc = 0usize;
@@ -662,10 +654,9 @@ fn inject(
                                 }
                             }
                         }
-                    } else if positions && next.is_some() {
+                    } else if let Some(nx) = next.filter(|_| positions) {
                         if let Some(e) = list.slot(cur, Slot::Empty).cloned() {
                             if let Some(rk) = e.rightkern.filter(|k| *k != 0.0) {
-                                let nx = next.unwrap();
                                 if list.is_disc(Some(nx)) && list.disc(nx).2.is_none() {
                                     let k = fontkern(list, rk);
                                     list.set_replace(nx, Some(k));
@@ -726,7 +717,7 @@ fn inject(
                 prevdisc = None;
                 prevglyph = Some(cur);
             }
-            Err(()) if list.is_disc(Some(cur)) => {
+            Err(NotGlyph) if list.is_disc(Some(cur)) => {
                 let (p0, q0, r0, _pt, qt, rt) = list.disc_tails(cur);
                 pre = p0;
                 post = q0;
@@ -816,7 +807,7 @@ fn inject(
                 prevglyph = None;
                 prevdisc = Some(cur);
             }
-            Err(()) => {
+            Err(NotGlyph) => {
                 prevglyph = None;
                 prevdisc = None;
             }

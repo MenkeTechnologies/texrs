@@ -199,7 +199,6 @@ impl CatTable {
             self.generation = self.generation.wrapping_add(1);
         }
     }
-
 }
 
 /// `tex.web`'s numbering, for `\catcode` reads and writes.
