@@ -484,7 +484,7 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     }
 }
 
-/// [`b_arith_checked`]'s step without its test: `None` where §1236 would find
+/// `b_arith_checked`'s step without its test: `None` where §1236 would find
 /// `arith_error` set. `which` as there.
 pub fn arith_checked(old: i64, operand: i64, which: i64) -> Option<i64> {
     let result = match which {
