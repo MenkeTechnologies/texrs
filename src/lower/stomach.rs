@@ -264,6 +264,10 @@ impl Lowerer {
         // (§1000 discards glue, kerns and penalties at the top of an empty
         // page), so the routine is not lowered before then.
         if self.st.paragraphs && !self.st.lowering_output && self.st.page_has_content {
+            // The routine may fire here and ship a page, and the `[1]` it
+            // prints comes after whatever tex reported before it -- tex
+            // printed each report as it was made.
+            self.flush_reports(out);
             let reg = crate::params::toks_register("output").unwrap_or(0);
             let toks = self.eng.toks.get(&reg).cloned().unwrap_or_default();
             self.st_lower_output(toks, out)?;
@@ -299,9 +303,16 @@ impl Lowerer {
         self.eng.compile_time_begin_group(GroupKind::Output, 0);
         self.st_push(CMode::InternalVertical);
         let mark = self.globals.len();
+        // What the document reported and has not printed yet waits for the
+        // document's next message, not for the routine's: lowered with them
+        // in hand, the routine's first test (`\ifvoid`) printed them inside
+        // its body, which runs only when the builder fires it -- and not at
+        // all at the places it is lowered and does not fire.
+        let pending = self.set_aside_reports();
         let known_mark = self.eng.known.mark();
         let mut body = Vec::new();
         let lowered = self.lower_into(&toks, &mut body);
+        self.reports.splice(0..0, pending);
         if lowered.is_ok() && self.st_mode() == CMode::Horizontal {
             self.st_end_graf(&mut body)?;
         }

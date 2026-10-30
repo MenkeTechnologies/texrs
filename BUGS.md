@@ -214,8 +214,11 @@ where it reaches `expl3.lua`, on `tex.runtoks`.
 
   The output routine is lowered at each place the page builder may fire it,
   and emitted again only when what it lowers to changes. So a macro it
-  expands is taken as it was defined at the last such place. A LaTeX document
-  still takes the string path described next.
+  expands is taken as it was defined at the last such place. What the
+  document reported and has not printed yet is printed at such a place, ahead
+  of the `[n]` a page shipped there prints, and is kept out of the routine's
+  body, which runs only where the builder fires it. A LaTeX document still
+  takes the string path described next.
 
   `--pdf` of a plain document still takes the string path too. The list
   path's pages drawn by LuaTeX's backend (`texrs::run_tex_pdf`, with

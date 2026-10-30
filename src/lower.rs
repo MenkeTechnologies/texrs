@@ -613,6 +613,20 @@ impl Lowerer {
         std::mem::take(&mut self.reports)
     }
 
+    /// The reports waiting to be printed, taken out of the way of something
+    /// lowered out of line -- the output routine -- and to be put back in
+    /// front of whatever that leaves waiting.
+    fn set_aside_reports(&mut self) -> Vec<MsgOp> {
+        let fresh = self.eng.take_errors();
+        self.reported = self.reported
+            || fresh
+                .iter()
+                .any(|r| !r.starts_with(crate::expand::DIAGNOSTIC));
+        let mut held = std::mem::take(&mut self.reports);
+        held.extend(fresh.into_iter().map(MsgOp::Report));
+        held
+    }
+
     /// Print what was reported so far HERE, ahead of the arms of a conditional
     /// the run decides. Held for the next message instead, the reports landed
     /// in whichever arm was lowered first and were lost when the run took the

@@ -1,7 +1,8 @@
 //! What a plain document's list path (`--dvi`) prints for the expansions
 //! that ask about the list being built: the mode conditionals (§501), the
 //! mode-bound quantities `\spacefactor` and `\prevdepth` (§418), and a
-//! font's quantities in an `\edef` (§425, §578).
+//! font's quantities in an `\edef` (§425, §578); and where a report made
+//! before a page ships lands against the page's `[n]`.
 //!
 //! Pinned as tex 3.141592653 prints each document, line ends removed as
 //! texrs's message stream removes them; when the pinned `tex` is on the PATH
@@ -61,6 +62,25 @@ const PRINTED: &[(&str, &str)] = &[
     (
         "\\edef\\x{\\the\\hyphenchar\\relax}\\message{[\\x]}A\\par\\end\n",
         "! Missing font identifier.<to be read again>                    \\relax l.1 \\edef\\x{\\the\\hyphenchar\\relax                                 }\\message{[\\x]}A\\par\\end[45\\relax ] [1] )(see the transcript file for additional information",
+    ),
+    // A report made before the page builder fires is printed before the
+    // `[n]` of the page it ships, not after it -- and not inside the output
+    // routine lowered there, which runs only where the builder fires it.
+    (
+        "\\foo\\hbox{}\n\\end\n",
+        "! Undefined control sequence.l.1 \\foo        \\hbox{}[1] )(see the transcript file for additional information",
+    ),
+    (
+        "x\\foo\\par\n\\end\n",
+        "! Undefined control sequence.l.1 x\\foo         \\par[1] )(see the transcript file for additional information",
+    ),
+    (
+        "\\count1=99999999999 x\\par\n\\end\n",
+        "! Number too big.l.1 \\count1=9999999999                      9 x\\par[1.2147483647] )(see the transcript file for additional information",
+    ),
+    (
+        "\\hbox{\\number\\relax}\n\\end\n",
+        "! Missing number, treated as zero.<to be read again>                    \\relax l.1 \\hbox{\\number\\relax                       }[1] )(see the transcript file for additional information",
     ),
 ];
 
