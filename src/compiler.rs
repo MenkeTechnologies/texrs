@@ -104,6 +104,16 @@ pub mod ops {
     /// Take the message being built as a string, onto the stack: the text
     /// of a `\special` the run builds (`Cmd::Special`). No arguments.
     pub const MSG_TAKE: u16 = 4021;
+    /// One component of a glue `\multiply` or `\divide` (`Cmd::GlueArith`):
+    /// [`ARITH_CHECKED`]'s three arguments, with an overflow noted rather
+    /// than reported.
+    pub const ARITH_GLUE: u16 = 4022;
+    /// The value a glue component is left with: the new value, then the old;
+    /// the old one back if any component overflowed.
+    pub const ARITH_KEEP: u16 = 4023;
+    /// Report the overflow a glue `\multiply` or `\divide` noted, once. No
+    /// arguments.
+    pub const ARITH_SETTLE: u16 = 4024;
 }
 
 /// TeX has exactly 256 count registers (`tex.web` §236).
@@ -289,6 +299,32 @@ impl Compiler {
                     }
                 }
                 self.b.emit(Op::SetSlot(slot(*reg)), self.line);
+            }
+            // §1240 scales all three components, and only then does §1236
+            // test `arith_error`: the products go on the stack, and each is
+            // written back -- or the old value is -- once all three are known.
+            Cmd::GlueArith(op, base, n) => {
+                let which = match op {
+                    Arith::Mul => 2,
+                    Arith::Div => 1,
+                    Arith::Add => {
+                        return Err(TexError("a glue \\advance is not a GlueArith".into()))
+                    }
+                };
+                for part in 0..3 {
+                    self.b.emit(Op::GetSlot(slot(base + part)), self.line);
+                    self.num(n)?;
+                    self.b.emit(Op::LoadInt(which), self.line);
+                    self.b.emit(Op::CallBuiltin(ops::ARITH_GLUE, 3), self.line);
+                }
+                for part in (0..3).rev() {
+                    self.b.emit(Op::GetSlot(slot(base + part)), self.line);
+                    self.b.emit(Op::CallBuiltin(ops::ARITH_KEEP, 2), self.line);
+                    self.b.emit(Op::SetSlot(slot(base + part)), self.line);
+                }
+                self.b
+                    .emit(Op::CallBuiltin(ops::ARITH_SETTLE, 0), self.line);
+                self.b.emit(Op::Pop, self.line);
             }
             Cmd::List(op) => self.list_op(op)?,
             // The routine runs on a VM of its own over the same slot file

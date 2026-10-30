@@ -162,6 +162,12 @@ pub enum Cmd {
     SetCount(i64, Num),
     /// `\advance`/`\multiply`/`\divide` on a count register.
     Arith(Arith, i64, Num),
+    /// `\multiply` or `\divide` of the glue register whose width is in the
+    /// slot given (`tex.web` §1240): width, stretch and shrink scaled by the
+    /// same integer, and §1236's ONE test of `arith_error` after all three --
+    /// an overflow in any component reports once and leaves the whole glue as
+    /// it was. The orders are not touched.
+    GlueArith(Arith, i64, Num),
     /// Where the next command would be reported from, as `tex.web` §311's
     /// context display for that point in the source.
     ///
@@ -352,6 +358,9 @@ fn render_into(cmds: &[Cmd], depth: usize, out: &mut String) {
             }
             Cmd::Arith(op, reg, num) => {
                 out.push_str(&format!("{pad}{op:?} \\count{reg} by {}\n", num_text(num)))
+            }
+            Cmd::GlueArith(op, reg, num) => {
+                out.push_str(&format!("{pad}{op:?} glue at {reg} by {}\n", num_text(num)))
             }
             Cmd::ErrorSite(site) => out.push_str(&format!("{pad}ErrorSite {site:?}\n")),
             Cmd::TranscriptNotice { notes, .. } => {

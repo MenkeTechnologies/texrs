@@ -172,6 +172,30 @@ impl Known {
                 };
                 self.set(*reg, next.filter(|v| v.abs() <= LIMIT));
             }
+            // All three components or none (§1236), by the run's own rule.
+            Cmd::GlueArith(op, base, n) => {
+                let which = match op {
+                    Arith::Div => 1,
+                    _ => 2,
+                };
+                let by = self.num(n);
+                let parts: Vec<Option<i64>> = (0..3)
+                    .map(|k| crate::runtime::arith_checked(self.get(base + k)?, by?, which))
+                    .collect();
+                let unknown = parts.iter().any(|p| p.is_none());
+                for (k, p) in (0..3).zip(parts) {
+                    let next = match unknown {
+                        // An overflow leaves the glue as it was; a component
+                        // that was not known leaves nothing known.
+                        true if by.is_some() && (0..3).all(|j| self.get(base + j).is_some()) => {
+                            self.get(base + k)
+                        }
+                        true => None,
+                        false => p,
+                    };
+                    self.set(base + k, next);
+                }
+            }
             // A group puts its registers back itself, where it is lowered.
             Cmd::Group { .. } => {}
             // Just after a `\global` assignment: its value is the one the

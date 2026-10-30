@@ -64,6 +64,10 @@ thread_local! {
     /// Whether anything was REPORTED during the run, which is what §1335
     /// consults before printing `(see the transcript file …)`.
     static REPORTED: RefCell<bool> = const { RefCell::new(false) };
+    /// §104's `arith_error`, for the one command that tests it after more
+    /// than one step: §1240's glue `\multiply` and `\divide`, whose three
+    /// components [`b_arith_glue`] scales before [`b_arith_settle`] looks.
+    static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
 }
 
 /// Append a run of the document's text.
@@ -471,6 +475,18 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
     let which = vm.pop().to_int();
     let operand = vm.pop().to_int();
     let old = vm.pop().to_int();
+    match arith_checked(old, operand, which) {
+        Some(v) => Value::Int(v),
+        None => {
+            report("Arithmetic overflow");
+            Value::Int(old)
+        }
+    }
+}
+
+/// [`b_arith_checked`]'s step without its test: `None` where §1236 would find
+/// `arith_error` set. `which` as there.
+pub fn arith_checked(old: i64, operand: i64, which: i64) -> Option<i64> {
     let result = match which {
         0 => old.checked_mul(operand),
         2 => old
@@ -481,13 +497,44 @@ fn b_arith_checked(vm: &mut VM, _argc: u8) -> Value {
             d => old.checked_div(d),
         },
     };
-    match result {
-        Some(v) if (i32::MIN as i64..=i32::MAX as i64).contains(&v) => Value::Int(v),
-        _ => {
-            report("Arithmetic overflow");
+    result.filter(|v| (i32::MIN as i64..=i32::MAX as i64).contains(v))
+}
+
+/// One component of §1240's glue `\multiply` or `\divide`: the arguments
+/// [`b_arith_checked`] takes, and the result, with an overflow only NOTED in
+/// `arith_error` -- §1240 computes all three components before §1236 tests it.
+fn b_arith_glue(vm: &mut VM, _argc: u8) -> Value {
+    let which = vm.pop().to_int();
+    let operand = vm.pop().to_int();
+    let old = vm.pop().to_int();
+    match arith_checked(old, operand, which) {
+        Some(v) => Value::Int(v),
+        None => {
+            ARITH_ERROR.with(|e| *e.borrow_mut() = true);
             Value::Int(old)
         }
     }
+}
+
+/// What a glue component is left holding: two arguments, the new value
+/// [`b_arith_glue`] computed and the old one. §1236 assigns nothing when
+/// `arith_error` is set, so then the old value comes back.
+fn b_arith_keep(vm: &mut VM, _argc: u8) -> Value {
+    let old = vm.pop();
+    let new = vm.pop();
+    match ARITH_ERROR.with(|e| *e.borrow()) {
+        true => old,
+        false => new,
+    }
+}
+
+/// §1236's test after a glue `\multiply` or `\divide`: one `Arithmetic
+/// overflow` however many components overflowed, and `arith_error` cleared.
+fn b_arith_settle(_vm: &mut VM, _argc: u8) -> Value {
+    if ARITH_ERROR.with(|e| std::mem::take(&mut *e.borrow_mut())) {
+        report("Arithmetic overflow");
+    }
+    Value::Int(0)
 }
 
 /// `tex.web` §453's `<factor><internal unit>`: the internal dimension, the
@@ -579,6 +626,9 @@ pub fn register_message_builtins(vm: &mut VM) {
     vm.register_builtin(ops::MSG_ROMAN, b_msg_roman);
     vm.register_builtin(ops::MSG_GLUE, b_msg_glue);
     vm.register_builtin(ops::ARITH_CHECKED, b_arith_checked);
+    vm.register_builtin(ops::ARITH_GLUE, b_arith_glue);
+    vm.register_builtin(ops::ARITH_KEEP, b_arith_keep);
+    vm.register_builtin(ops::ARITH_SETTLE, b_arith_settle);
     vm.register_builtin(ops::SCALE_DIMEN, b_scale_dimen);
     vm.register_builtin(ops::MSG_MUGLUE, b_msg_muglue);
     vm.register_builtin(ops::ERR_SITE, b_err_site);
@@ -616,6 +666,7 @@ fn run_with(
     FAULT.with(|f| *f.borrow_mut() = None);
     ERROR_SITE.with(|s| s.borrow_mut().clear());
     REPORTED.with(|r| *r.borrow_mut() = false);
+    ARITH_ERROR.with(|e| *e.borrow_mut() = false);
     crate::stomach::run::reset();
     // The decision needs the ops, and `VM::new` takes the chunk by value.
     let chunk_for_jit = chunk.clone();

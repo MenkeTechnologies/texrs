@@ -1550,13 +1550,12 @@ impl Lowerer {
                             }
                         }
                         // A glue scaled by an integer scales in every
-                        // component and keeps both orders (§1240).
+                        // component and keeps both orders (§1240), and is
+                        // assigned only if no component overflowed (§1236).
                         (true, false) => {
                             let v = self.number(lx)?;
                             self.note_error_site(&mut out, lx, op);
-                            for part in 0..3 {
-                                out.push(Cmd::Arith(op, reg + part, v.clone()));
-                            }
+                            out.push(Cmd::GlueArith(op, reg, v));
                         }
                         (false, _) => {
                             self.eng.clear_scaling_sites();
@@ -6155,6 +6154,7 @@ fn state_only(cmds: &[Cmd], out: &mut Vec<Cmd>) {
             // font, a parameter it was told -- which is state the document reads.
             Cmd::SetCount(..)
             | Cmd::Arith(..)
+            | Cmd::GlueArith(..)
             | Cmd::ErrorSite(_)
             | Cmd::KeepGlobal { .. }
             | Cmd::List(_)
@@ -6344,6 +6344,13 @@ pub(crate) fn assigned_counts(cmds: &[Cmd]) -> Vec<i64> {
                 Cmd::SetCount(r, _) | Cmd::Arith(_, r, _) => {
                     if !regs.contains(r) {
                         regs.push(*r);
+                    }
+                }
+                Cmd::GlueArith(_, base, _) => {
+                    for r in *base..*base + 3 {
+                        if !regs.contains(&r) {
+                            regs.push(r);
+                        }
                     }
                 }
                 Cmd::IfNum {

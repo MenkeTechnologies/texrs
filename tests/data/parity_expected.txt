@@ -182,6 +182,8 @@ B A A \char"41undefined
 [6]
 #==# globaldefs_overrides_the_prefix.tex
 3AA112.0pt1.0ptT\char"5113E0 0undefinedundefinedundefined0.0pt[]
+#==# glue_multiply_divide_overflow.tex
+! Arithmetic overflow.l.6 \skip5=16383.99998pt \divide\skip5 by 0                                             \message{[\the\skip5]}[16383.99998pt]! Arithmetic overflow.l.7 ...lus 16383pt minus 2pt \multiply\skip5 by 2                                                   \message{[\the\skip5]}[1.0pt plus 16383.0pt minus 2.0pt]! Arithmetic overflow.l.8 \skip5=10000pt plus 1pt \multiply\skip5 by 2                                                  \message{[\the\skip5]}[10000.0pt plus 1.0pt]! Arithmetic overflow.l.9 ...plus 1pt minus 9000pt \multiply\skip5 by 2                                                   \dimen0=\skip5[8000.0pt]! Arithmetic overflow.l.11 ...5=1mu plus 16383mu \multiply\muskip5 by 2                                                   \message{[\the\muskip5]}[1.0mu plus 16383.0mu] [-3.0pt plus -6.0fil minus -9.0fill] [-1.5pt plus -3.0fil minus -4.5fill] )(see the transcript file for additional information
 #==# glue_register_operand.tex
 [4.0pt plus 2.0fil minus 1.0fill] [2.0pt plus 2.0fil] [-1.0pt plus 1.0fill minus 1.0pt] [0.0pt plus 1.0fill minus 1.0fil] [-2.0pt plus -3.0fil minus -1.0pt]
 #==# glue_registers.tex

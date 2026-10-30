@@ -1112,11 +1112,12 @@ context, leaves the register alone and carries on --
 `\dimen1=16000pt \multiply\dimen1 2` overflows where the same product in a
 count would not (`tests/cases/dimen_multiply_overflow.tex`).
 
-What is left is a GLUE multiplied past that bound. §1240 builds the product
-glue whole and drops it if any component overflowed, so the register is left
-entirely alone and one error is reported; texrs multiplies the three
-components as three checked operations, so the components that fit change, the
-one that does not stays, and each overflowing component reports.
+A GLUE multiplied or divided past that bound is §1240's too: the product glue
+is built whole and dropped if any component overflowed, so the register is left
+entirely alone and one error is reported. The run scales all three components
+with the overflow only noted (§104's `arith_error`), writes each back -- or its
+old value -- once all three are known, and tests the flag once
+(`Cmd::GlueArith`, `tests/cases/glue_multiply_divide_overflow.tex`).
 The scanner's own limit recovers the way tex does — `\count1=99999999999`
 reports `! Number too big.`, clamps to 2147483647 and carries on — and
 `tests/cases/number_too_big.tex` and `tests/cases/error_context_trimmed.tex` pin

@@ -1,0 +1,14 @@
+% tex.web 1240 scales a glue's width, stretch and shrink and only then does
+% 1236 test arith_error: one `Arithmetic overflow' however many components
+% overflowed, and the glue left exactly as it was -- not the components that
+% fitted scaled and the one that did not left alone.
+\catcode`\{=1 \catcode`\}=2 \errorcontextlines=5
+\skip5=16383.99998pt \divide\skip5 by 0 \message{[\the\skip5]}
+\skip5=1pt plus 16383pt minus 2pt \multiply\skip5 by 2 \message{[\the\skip5]}
+\skip5=10000pt plus 1pt \multiply\skip5 by 2 \message{[\the\skip5]}
+\skip5=8000pt plus 1pt minus 9000pt \multiply\skip5 by 2 \dimen0=\skip5
+\message{[\the\dimen0]}
+\muskip5=1mu plus 16383mu \multiply\muskip5 by 2 \message{[\the\muskip5]}
+\skip5=1pt plus 2fil minus 3fill \multiply\skip5 by -3 \message{[\the\skip5]}
+\divide\skip5 by 2 \message{[\the\skip5]}
+\end
