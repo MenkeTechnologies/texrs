@@ -268,6 +268,8 @@
     "\\eTeXglueshrinkorder"
     "\\glueexpr"
     "\\muexpr"
+    "\\gluetomu"
+    "\\mutoglue"
     "\\input"
     "\\endinput"
     "\\openin"
@@ -628,6 +630,8 @@
     (puthash "\\eTeXglueshrinkorder" "\\eTeXglueshrinkorder  —  The order of a glue's shrink as e-TeX counts it. [Registers]" table)
     (puthash "\\glueexpr" "\\glueexpr  —  A glue expression, the same grammar as `\\numexpr` over glue. [Registers]" table)
     (puthash "\\muexpr" "\\muexpr  —  The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts — eTeX gives each unit its own primitive so the two cannot be mixed. [Registers]" table)
+    (puthash "\\gluetomu" "\\gluetomu  —  The glue that follows, read as MATH glue: the same width, stretch and shrink, each point taken as one mu. [Registers]" table)
+    (puthash "\\mutoglue" "\\mutoglue  —  The math glue that follows, read as ordinary glue: the same width, stretch and shrink, each mu taken as one point. [Registers]" table)
     (puthash "\\input" "\\input  —  Read another file here, sharing every piece of state with it: a macro it defines is defined afterwards, and a `\\catcode` it sets stays set. [Files]" table)
     (puthash "\\endinput" "\\endinput  —  End the file being read with the line `\\endinput` is on (tex.web §362): the rest of that line is still read, and nothing after it is. [Files]" table)
     (puthash "\\openin" "\\openin  —  Open a `\\read` stream on a file (tex.web §1275): the stream is closed first, then opened on the file the name finds — searched for as `\\input` searches, with `.tex` supplied — and left closed when nothing has it. [Files]" table)
@@ -656,7 +660,7 @@
     (puthash "\\useboxresource" "\\useboxresource  —  Place a saved form (`scan_pdfrefxform`): optional dimensions and the number. [PDF backend]" table)
     (puthash "\\lastsavedimageresourceindex" "\\lastsavedimageresourceindex  —  The number the last `\\saveimageresource` gave its picture: an internal integer. [PDF backend]" table)
     (puthash "\\lastsavedimageresourcepages" "\\lastsavedimageresourcepages  —  How many pages the last `\\saveimageresource`'s file holds: 1, since only a picture's file is counted yet. [PDF backend]" table)
-    (puthash "\\lastsavedboxresourceindex" "\\lastsavedboxresourceindex  —  The number the last `\\saveboxresource` gave its form. [PDF backend]" table)
+    (puthash "\\lastsavedboxresourceindex" "\\lastsavedboxresourceindex  —  The number the last `\\saveboxresource` gave its form, assigned when the form is read; `\\useboxresource` takes it. [PDF backend]" table)
     (puthash "\\savepos" "\\savepos  —  A whatsit that records where on the page it is shipped, for `\\lastxpos` and `\\lastypos` to read after. [PDF backend]" table)
     (puthash "\\newcommand" "\\newcommand  —  Define a macro with `n` positional parameters: `\\newcommand{\\x}[2]{#1 and #2}`. [LaTeX]" table)
     (puthash "\\renewcommand" "\\renewcommand  —  Redefine a macro. [LaTeX]" table)
