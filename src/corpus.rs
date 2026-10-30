@@ -1411,6 +1411,18 @@ pub const CORPUS: &[Entry] = &[
         "The same expression grammar over MATH glue, and the only kind of expression a `\\muskip` assignment accepts \u{2014} eTeX gives each unit its own primitive so the two cannot be mixed. Its operands are math glue, and like `\\glueexpr`'s they may be registers the run holds.",
         "\\muskip0=\\muexpr 3mu plus 1mu + 2mu plus 2mu\\relax   % => 5.0mu plus 3.0mu",
     ),
+    (
+        "\\gluetomu",
+        "Registers",
+        "The glue that follows, read as MATH glue: the same width, stretch and shrink, each point taken as one mu. eTeX's way across the wall `\\muexpr` keeps between the two kinds.",
+        "\\skip0=1pt plus 2pt \\muskip0=\\gluetomu\\skip0   % => 1.0mu plus 2.0mu",
+    ),
+    (
+        "\\mutoglue",
+        "Registers",
+        "The math glue that follows, read as ordinary glue: the same width, stretch and shrink, each mu taken as one point. The inverse of `\\gluetomu`.",
+        "\\muskip1=3mu minus 1mu \\skip1=\\mutoglue\\muskip1   % => 3.0pt minus 1.0pt",
+    ),
     // ══ Files — lower::open_input ═════════════════════════════════════════
     (
         "\\input",
@@ -1586,7 +1598,7 @@ pub const CORPUS: &[Entry] = &[
     (
         "\\lastsavedboxresourceindex",
         "PDF backend",
-        "The number the last `\\saveboxresource` gave its form.",
+        "The number the last `\\saveboxresource` gave its form, assigned when the form is read; `\\useboxresource` takes it.",
         "\\message{\\the\\lastsavedboxresourceindex}",
     ),
     (

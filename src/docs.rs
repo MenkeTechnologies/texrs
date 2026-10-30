@@ -553,6 +553,10 @@ const ENVIRONMENT: &[(&str, &str)] = &[
         "Set to <code>1</code> to lex a document on several threads. Off by default: the mouth is 22% of the time on the documents measured, so the win did not pay for the coordination.",
     ),
     (
+        "TEXRS_PDFSHIP_DUMP",
+        "A path. The test that compares a shipped page object by object with the file <code>luatex</code> writes for it saves texrs's PDF there, to inspect when the two disagree.",
+    ),
+    (
         "TEXRS_PRELEX_STATS",
         "Set to anything to print the pre-lexer's hit and miss counts when the run ends.",
     ),
