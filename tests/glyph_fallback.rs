@@ -16,6 +16,8 @@
 //! asked, the glyph is drawn, and it is drawn in a way a reader can copy back
 //! out as the character the document wrote.
 
+mod common;
+
 use std::collections::BTreeSet;
 
 /// A `\directlua` chunk is read for its fallback chain and for nothing else.
@@ -188,6 +190,9 @@ fn the_symbol_font_is_still_asked_before_the_document_s_own_chain() {
 /// one: the stand-ins, and no borrowed face in the file.
 #[test]
 fn without_a_chain_a_missing_glyph_still_falls_to_its_stand_in() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(&book(None, "tree ─── branch")).expect("pdf");
     // Inflated: the font dictionaries are packed into an object stream and
     // are not in the file's own bytes at all. A raw scan would find neither

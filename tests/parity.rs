@@ -15,6 +15,8 @@
 //! that is still what tex prints". So: this catches a regression in texrs, and
 //! `differential.rs` catches a wrong belief about tex.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -52,6 +54,9 @@ fn every_case_is_frozen_and_every_frozen_case_exists() {
 
 #[test]
 fn the_corpus_still_prints_what_tex_printed() {
+    if !common::tex_tree() {
+        return;
+    }
     let known = texrs::parity::known_gaps(&repo());
     let mut regressions = Vec::new();
     let mut healed = Vec::new();

@@ -70,6 +70,9 @@ fn every_example_runs_and_prints_something() {
 /// still describes tex.
 #[test]
 fn every_example_still_prints_what_tex_printed() {
+    if !common::tex_tree() {
+        return;
+    }
     let frozen = texrs::parity::thawed(include_str!("data/examples_expected.txt"));
     let on_disk: std::collections::BTreeSet<String> = examples()
         .iter()

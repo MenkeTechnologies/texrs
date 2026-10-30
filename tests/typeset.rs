@@ -12,6 +12,8 @@
 //! still NOT claimed is the rest of `tex.web`'s typesetting: one font, no
 //! maths, and pages stacked by count rather than broken by penalty.
 
+mod common;
+
 use texrs::tfm::Tfm;
 use texrs::typeset::{
     break_lines, find_font, to_dvi, to_dvi_chain, FontChain, Layout, LISTING_BREAK,
@@ -324,6 +326,9 @@ fn a_missing_fallback_is_not_an_error() {
 
 #[test]
 fn colour_reaches_the_dvi_as_a_special() {
+    if !common::tex_tree() {
+        return;
+    }
     // DVI has no colour of its own: a driver is told through a `\special`, and
     // `color push rgb R G B` / `color pop` is the pair dvipdfmx and dvips both
     // read. dvipdfmx turns them into `1 0 0 rg` around the words.
@@ -345,6 +350,9 @@ fn colour_reaches_the_dvi_as_a_special() {
 
 #[test]
 fn the_colour_markers_are_not_part_of_the_document_text() {
+    if !common::tex_tree() {
+        return;
+    }
     // They are instructions to a driver. A caller asking for the TEXT should
     // not have to know they exist, and a `--text` run that emitted control
     // characters would be wrong for every consumer of it.
@@ -392,6 +400,9 @@ fn the_font_a_document_asks_for_is_the_font_it_gets() {
 
 #[test]
 fn setmainfont_reaches_the_pdf() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = |f: &str| {
         format!(
             "\\documentclass{{article}}\n\\usepackage{{fontspec}}\n\\setmainfont{{{f}}}\n\
@@ -419,6 +430,9 @@ fn setmainfont_reaches_the_pdf() {
 
 #[test]
 fn colour_survives_the_pdf_path_as_pdfs_own_operator() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                plain \\textcolor[rgb]{1.00,0.00,0.00}{RED} plain\n\\end{document}\n";
     let pdf = texrs::run_pdf(src).expect("pdf");
@@ -433,6 +447,9 @@ fn colour_survives_the_pdf_path_as_pdfs_own_operator() {
 
 #[test]
 fn a_line_is_split_into_runs_where_the_colour_changes() {
+    if !common::tex_tree() {
+        return;
+    }
     // A colour marker turns colour on part way ALONG a line, so a line is not
     // one string in one colour. Treating it as one drew no colour at all: the
     // closing marker put the state back before anything was emitted.
@@ -485,6 +502,9 @@ fn drawn(pdf: &[u8]) -> Vec<(String, String)> {
 
 #[test]
 fn a_colour_switch_survives_the_textcolor_nested_inside_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\color` is in force until its group closes, so the `\textcolor` inside
     // it is a colour ON TOP of it, not instead of it: what follows goes back to
     // the switch, not to black. Popping to black is what drew every book in the
@@ -516,6 +536,9 @@ fn a_colour_switch_survives_the_textcolor_nested_inside_it() {
 
 #[test]
 fn a_colour_switch_holds_for_every_line_under_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // The switch is set once, above a whole document, and the text under it is
     // broken into lines afterwards. A colour that only lasted the line its
     // marker landed on coloured the first line of a book and left the other
@@ -581,6 +604,9 @@ fn the_font_file_the_document_named_is_carried_in_the_pdf() {
 
 #[test]
 fn a_family_nothing_matches_still_typesets() {
+    if !common::tex_tree() {
+        return;
+    }
     // Refusing to set a document because a font is missing would be worse than
     // setting it in a face that carries the same widths.
     let src = "\\documentclass{article}\n\\usepackage{fontspec}\n\
@@ -616,6 +642,9 @@ fn an_embedded_font_is_measured_in_its_own_widths() {
 /// out in whatever fc-match answered with.
 #[test]
 fn the_lowerer_keeps_the_font_file_the_preamble_named() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = concat!(
         "\\documentclass{article}\n\\usepackage{fontspec}\n",
         "\\setmainfont{Arimo}[\n",
@@ -734,6 +763,9 @@ fn the_family_and_upright_font_spelling_embeds_the_same_file_as_before() {
 /// `arimovfttf`.
 #[test]
 fn a_filename_in_the_braces_reaches_the_file_slot_for_every_font_command() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = concat!(
         "\\documentclass{article}\n\\usepackage{fontspec}\n",
         "\\setmainfont{Arimo-VF.ttf}[Path=/somewhere/.fonts/]\n",
@@ -769,6 +801,9 @@ fn a_filename_in_the_braces_reaches_the_file_slot_for_every_font_command() {
 /// notice and the opening of the next section drawn over each other.
 #[test]
 fn a_forced_break_starts_a_new_page() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = concat!(
         "\\documentclass{article}\n\\begin{document}\n",
         "first page text\n\\newpage\nsecond page text\n",
@@ -784,6 +819,9 @@ fn a_forced_break_starts_a_new_page() {
 
 #[test]
 fn consecutive_breaks_do_not_make_a_blank_page() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\clearpage` right after `\newpage` is one break between two pages.
     // Emitting a page per marker would leave an empty sheet between chapters.
     let src = concat!(
@@ -795,6 +833,9 @@ fn consecutive_breaks_do_not_make_a_blank_page() {
 
 #[test]
 fn a_chapter_begins_a_page_in_both_its_forms() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\chapter` was `#1` in the prelude -- the heading text and nothing else
     // -- so no chapter began a page. The starred form is one token different
     // and, unread, that `*` becomes the first character of the heading.
@@ -832,6 +873,9 @@ fn coloured_and_plain(preamble: &str, repeats: usize) -> (usize, usize) {
 
 #[test]
 fn colouring_a_word_does_not_change_where_the_pdf_breaks_the_line() {
+    if !common::tex_tree() {
+        return;
+    }
     // The marker's SPEC -- `0.25,0.44,0.63` between U+0001 and U+0002 -- is
     // digits and commas, and the widths tables the PDF path measures with have
     // real widths for those, so a five-letter word inside one \textcolor was
@@ -896,6 +940,9 @@ fn sized_document(class_options: &str, margin: &str) -> String {
 
 #[test]
 fn the_type_size_and_margins_the_preamble_states_reach_the_page() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\documentclass[11pt]` and `\usepackage[margin=0.95in]{geometry}` were
     // consumed and thrown away, so every book was set at plain.tex's 10pt on
     // 12pt leading with 1in margins whatever it asked for. Measured against
@@ -929,6 +976,9 @@ fn the_type_size_and_margins_the_preamble_states_reach_the_page() {
 
 #[test]
 fn bigger_type_needs_more_pages_for_the_same_words() {
+    if !common::tex_tree() {
+        return;
+    }
     // The size has to reach BOTH the measuring and the pagination, not just
     // the `Tf`: type set larger takes more lines to say the same thing and
     // fewer lines fit the page. Setting an 11pt book at 10pt is why texrs
@@ -948,6 +998,9 @@ fn bigger_type_needs_more_pages_for_the_same_words() {
 
 #[test]
 fn a_document_that_states_no_page_still_gets_plain_texs() {
+    if !common::tex_tree() {
+        return;
+    }
     // The other half of the contract: a document that asks for nothing is
     // still set on plain.tex's page, so a reader comparing against a `tex` run
     // does not first have to account for a different one.
@@ -985,6 +1038,9 @@ fn the_class_options_and_geometrys_are_read_where_they_are_written() {
 
 #[test]
 fn options_passed_to_the_class_and_to_geometry_reach_the_page_too() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\PassOptionsToPackage` puts its options in the FIRST brace and names
     // its target in the second -- there is no `[...]` on it at all -- so
     // reading the bracket the other two directives carry would have found
@@ -1057,6 +1113,9 @@ fn a_code_listing_keeps_one_line_per_source_line() {
 /// its close.
 #[test]
 fn a_listings_colour_markers_survive_the_line_split() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\newcommand{\\NormalTok}[1]{\\textcolor[rgb]{0.25,0.44,0.63}{#1}}\n\
                \\begin{document}\n\
@@ -1107,6 +1166,9 @@ fn at(runs: &[(f64, f64, String)], want: &str) -> (f64, f64) {
 
 #[test]
 fn a_centred_line_is_drawn_by_its_width_and_not_at_the_margin() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\begin{center}` expanded to nothing, so "centred line" and "left line"
     // were filled into ONE line at the margin. A title page is built out of
     // nothing but centred pieces, which is a large part of why a novel's front
@@ -1133,6 +1195,9 @@ fn a_centred_line_is_drawn_by_its_width_and_not_at_the_margin() {
 
 #[test]
 fn centring_ends_with_the_environment_that_switched_it_on() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\centering` is a switch, and every LaTeX environment is a group that
     // ends it. Environments here are a macro pair rather than a group, so
     // without the `\end{...}` closing the region one `\centering` on a title
@@ -1179,6 +1244,9 @@ const SECOND_LEVEL: f64 = 122.0;
 
 #[test]
 fn each_item_of_a_list_starts_its_own_line_with_a_bullet_and_an_indent() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\begin{itemize}` expanded to nothing and `\item` to its optional
     // argument, so an itemize of two items read back as "alpha item bravo
     // item": one line, at the margin, with no bullet between them. `\item` is
@@ -1228,6 +1296,9 @@ fn each_item_of_a_list_starts_its_own_line_with_a_bullet_and_an_indent() {
 
 #[test]
 fn an_enumerate_numbers_its_items_and_a_description_sets_its_term_in_bold() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = document(concat!(
         "\\begin{enumerate}\n\\tightlist\n",
         "\\item\n  alpha item\n",
@@ -1296,6 +1367,9 @@ fn wide_document(body: &str) -> String {
 
 #[test]
 fn a_long_item_wraps_inside_the_list_and_in_the_measure_the_indent_leaves() {
+    if !common::tex_tree() {
+        return;
+    }
     // Two documents, the same words: once as prose at the margin, once as one
     // item. The item is set in a measure narrowed by exactly what it is moved
     // in by, so it takes MORE lines than the prose does -- an item that wrapped
@@ -1332,6 +1406,9 @@ fn a_long_item_wraps_inside_the_list_and_in_the_measure_the_indent_leaves() {
 
 #[test]
 fn a_list_inside_a_list_sets_one_level_further_in() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = document(concat!(
         "\\begin{itemize}\n",
         "\\item outer item\n",
@@ -1357,6 +1434,9 @@ fn a_list_inside_a_list_sets_one_level_further_in() {
 
 #[test]
 fn centring_inside_a_list_still_centres_over_the_whole_measure() {
+    if !common::tex_tree() {
+        return;
+    }
     // The one thing an earlier revision of this got wrong, and the reason the
     // order of the arms in `fill`'s `start` is spelt out there: the indent was
     // tested before the centring, so a centred line at any list depth lost its
@@ -1395,6 +1475,9 @@ fn centring_inside_a_list_still_centres_over_the_whole_measure() {
 
 #[test]
 fn a_heading_is_given_vertical_space_above_and_below_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // A heading set hard against its paragraphs is indistinguishable from
     // them, and the page then holds lines that a real run spends on white
     // space: lualatex leaves 3.5ex above a section and 2.3ex below it.
@@ -1416,6 +1499,9 @@ fn a_heading_is_given_vertical_space_above_and_below_it() {
 
 #[test]
 fn vertical_space_is_space_and_not_a_character() {
+    if !common::tex_tree() {
+        return;
+    }
     // The space a heading asks for travels in the text as a vertical tab, the
     // way a forced break travels as a form feed. Drawn rather than skipped it
     // would come out as whatever the font has in that slot, in the middle of
@@ -1556,6 +1642,9 @@ fn face_of<'a>(runs: &'a [(String, String)], want: &str) -> &'a str {
 
 #[test]
 fn texttt_textbf_and_emph_are_set_in_the_faces_they_name() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\texttt` appears 683,577 times in the corpus, `\emph` 35,369 and
     // `\textbf` 34,159, and all three came out in the body face: a document
     // with one of each produced ONE font resource and ONE Tf operator, so every
@@ -1583,6 +1672,9 @@ fn texttt_textbf_and_emph_are_set_in_the_faces_they_name() {
 
 #[test]
 fn a_book_that_redefines_texttt_still_reaches_the_mono_face() {
+    if !common::tex_tree() {
+        return;
+    }
     // Every book in the corpus redefines `\texttt` to colour its inline code,
     // so dispatching on `\texttt` itself would never fire for the documents
     // this is for -- and if it did it would drop that colour. What the
@@ -1612,6 +1704,9 @@ fn a_book_that_redefines_texttt_still_reaches_the_mono_face() {
 
 #[test]
 fn a_face_marker_costs_nothing_on_the_line_and_is_never_set() {
+    if !common::tex_tree() {
+        return;
+    }
     // A face marker is U+000E, ONE character naming the face, and U+000F. The
     // naming character is a LETTER: measured as text it pushes words onto later
     // pages, and drawn as text it sets an `m` in front of every one of the
@@ -1637,6 +1732,9 @@ fn a_face_marker_costs_nothing_on_the_line_and_is_never_set() {
 
 #[test]
 fn the_lowerer_keeps_the_files_the_preamble_named_for_every_face() {
+    if !common::tex_tree() {
+        return;
+    }
     // The bold and italic files are named in the SAME option list as the
     // upright one, and the monospace family names its own. Reading past those
     // three keys is why `\texttt` and `\emph` could not be honoured for the
@@ -1678,6 +1776,9 @@ fn the_lowerer_keeps_the_files_the_preamble_named_for_every_face() {
 
 #[test]
 fn a_symbol_a_document_spells_as_a_macro_still_typesets_and_reaches_the_page() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\rightarrow` was undefined, and an undefined control sequence is not a
     // missing glyph: the run STOPS -- `! Undefined control sequence
     // \rightarrow.` -- and the document produces no page at all. The corpus
@@ -1707,6 +1808,9 @@ fn a_symbol_a_document_spells_as_a_macro_still_typesets_and_reaches_the_page() {
 
 #[test]
 fn a_character_the_face_lacks_is_drawn_rather_than_written_out_as_its_utf8() {
+    if !common::tex_tree() {
+        return;
+    }
     // A `char` pushed into the content stream is written as UTF-8, so the arrow
     // in `A -> B` went into the file as three bytes and a reader drew three
     // letters of whatever the face has at 0xE2, 0x86 and 0x92 -- `pdftotext`
@@ -1775,6 +1879,9 @@ fn table_document(body: &str) -> String {
 
 #[test]
 fn a_table_is_set_as_rows_rather_than_filled_into_the_prose_around_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = table_document("Name & Value \\\\\n\\midrule\nalpha & 1 \\\\\nbeta & 2 \\\\\n");
     let runs = placed(&texrs::run_pdf(&src).expect("pdf"));
     let (_, header) = at(&runs, "Name");
@@ -1803,6 +1910,9 @@ fn a_table_is_set_as_rows_rather_than_filled_into_the_prose_around_it() {
 
 #[test]
 fn a_tables_columns_line_up_across_its_rows() {
+    if !common::tex_tree() {
+        return;
+    }
     // The second cell of every row is coloured, which splits the line into runs
     // exactly where the column starts -- so the x a column was set at can be
     // read back out of the file rather than taken on trust. The first cells are
@@ -1860,6 +1970,9 @@ fn rules(pdf: &[u8]) -> Vec<(f64, f64, f64, f64)> {
 
 #[test]
 fn the_three_booktabs_rules_are_drawn_as_rules() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\toprule`, `\midrule` and `\bottomrule` were defined by the prelude to
     // expand to nothing, so a table had no rules at all -- and the corpus
     // writes `\toprule` 3,455 times.
@@ -1891,6 +2004,9 @@ fn the_three_booktabs_rules_are_drawn_as_rules() {
 
 #[test]
 fn a_wrapped_table_row_does_not_leak_its_face_into_the_cell_beside_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // The defect a previous attempt at tables shipped. A row taller than one
     // line is set by putting the nth fragment of every column on the nth line,
     // and `to_pdf` walks ONE face stack down the page -- so a first column that
@@ -1946,6 +2062,9 @@ fn a_wrapped_table_row_does_not_leak_its_face_into_the_cell_beside_it() {
 
 #[test]
 fn a_longtable_sets_its_foot_after_its_body_and_not_before_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // longtable states its head, then its foot, then its body: `\endhead`
     // closes the head and `\endlastfoot` the foot, so `\bottomrule` is WRITTEN
     // before the first row of data. Set in arrival order the bottom rule lands
@@ -2051,6 +2170,9 @@ fn long_table(rows: usize) -> String {
 
 #[test]
 fn a_longtable_repeats_its_head_on_every_page_it_runs_onto() {
+    if !common::tex_tree() {
+        return;
+    }
     // What a longtable IS. A table that crosses a page boundary repeats its
     // head at the top of the next one, or the reader gets a page of unlabelled
     // numbers. `\endhead` says which rows are that head, and the corpus writes
@@ -2109,6 +2231,9 @@ fn a_longtable_repeats_its_head_on_every_page_it_runs_onto() {
 
 #[test]
 fn a_longtable_sets_its_first_head_once_and_its_foot_on_every_page_but_the_last() {
+    if !common::tex_tree() {
+        return;
+    }
     // The other three boundaries. `\endfirsthead` is a head for the first page
     // that differs from the one repeated after it; `\endfoot` is a foot for
     // every page the table runs PAST and `\endlastfoot` the one under the end
@@ -2174,6 +2299,9 @@ fn a_longtable_sets_its_first_head_once_and_its_foot_on_every_page_but_the_last(
 
 #[test]
 fn a_page_break_does_not_fall_inside_a_row_of_a_longtable() {
+    if !common::tex_tree() {
+        return;
+    }
     // A row is not a line. A cell that wrapped makes a row several lines tall,
     // and a break between those lines leaves half a row at the foot of one
     // page and half at the head of the next -- under the repeated head, which
@@ -2224,6 +2352,9 @@ const FILLER: &str = "lorem ipsum dolor sit amet consectetur adipiscing elit sed
 
 #[test]
 fn a_paragraph_boundary_leaves_half_a_line_and_a_wrapped_line_does_not() {
+    if !common::tex_tree() {
+        return;
+    }
     // texrs stacked every line one leading below the last, whatever stood
     // between them, so a paragraph boundary cost the page nothing. LaTeX
     // spends `\parskip` there, and every book in the corpus loads pandoc's
@@ -2276,6 +2407,9 @@ fn a_paragraph_boundary_leaves_half_a_line_and_a_wrapped_line_does_not() {
 
 #[test]
 fn the_space_between_paragraphs_fills_the_page_sooner() {
+    if !common::tex_tree() {
+        return;
+    }
     // The page is filled to its HEIGHT, not to a count of lines, or the space
     // between paragraphs would be free: 40 lines is under the 53 that 643.2pt
     // of \textheight holds at a 12pt leading, and all 40 went on one page
@@ -2388,6 +2522,9 @@ fn set_on(pages: &[String], contents: usize, word: &str) -> usize {
 
 #[test]
 fn a_contents_is_set_where_the_document_asked_for_one() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\tableofcontents` expanded to nothing, so every book in the corpus --
     // all 123 of them ask for one -- opened straight on its first chapter.
     let src = concat!(
@@ -2411,6 +2548,9 @@ fn a_contents_is_set_where_the_document_asked_for_one() {
 
 #[test]
 fn the_contents_names_the_page_each_chapter_starts_on() {
+    if !common::tex_tree() {
+        return;
+    }
     // The number an entry prints is not decoration: it is the page the chapter
     // is set on, which is only known after the document has been broken and
     // paginated WITH the contents in place -- and the contents moves those
@@ -2438,6 +2578,9 @@ fn the_contents_names_the_page_each_chapter_starts_on() {
 
 #[test]
 fn a_cover_sheet_is_not_counted_in_the_numbers_the_contents_prints() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\end{titlepage}` is `\newpage` and then `\setcounter{page}\@ne` unless
     // the class is two-sided (extreport.cls:514-518), and no document in the
     // corpus says twoside. So the chapter on the third sheet of this is the
@@ -2465,6 +2608,9 @@ fn a_cover_sheet_is_not_counted_in_the_numbers_the_contents_prints() {
 
 #[test]
 fn tocdepth_says_how_deep_the_contents_goes() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\setcounter{tocdepth}{0}` is what every book in the corpus writes
     // immediately above its `\tableofcontents`: a contents of chapters. Listing
     // the sections too would put four hundred entries where lualatex puts
@@ -2499,6 +2645,9 @@ fn tocdepth_says_how_deep_the_contents_goes() {
 
 #[test]
 fn a_document_that_asks_for_no_contents_is_set_exactly_as_it_was() {
+    if !common::tex_tree() {
+        return;
+    }
     // The contents costs two extra passes over the whole document, and a
     // document that never wrote `\tableofcontents` must not pay for them --
     // nor gain a page it did not ask for.
@@ -2523,6 +2672,9 @@ fn a_document_that_asks_for_no_contents_is_set_exactly_as_it_was() {
 /// when it was drawn.
 #[test]
 fn every_page_carries_its_number_at_the_foot() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = concat!(
         "\\documentclass{article}\n\\begin{document}\n",
         "alpha\n\\newpage\nbravo\n\\newpage\ncharlie\n\\end{document}\n"
@@ -2563,6 +2715,9 @@ fn sectioned(count: usize) -> String {
 
 #[test]
 fn a_heading_is_never_left_at_the_foot_of_a_page_without_its_text() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\@xsect` is `\par \nobreak` after the title (latex.ltx:17282) and
     // `\clubpenalty\@M` on the paragraph under it (latex.ltx:17322): the
     // heading, the space below it and the first two lines of what it
@@ -2592,6 +2747,9 @@ fn a_heading_is_never_left_at_the_foot_of_a_page_without_its_text() {
 
 #[test]
 fn no_page_ends_on_a_paragraphs_first_line_or_begins_on_its_last() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\clubpenalty` and `\widowpenalty`, both 150 (latex.ltx:500-501). One
     // line of a paragraph alone at the foot of a page, or alone at the top of
     // the next, is what they are there to stop, and filling to the height
@@ -2641,6 +2799,9 @@ fn no_page_ends_on_a_paragraphs_first_line_or_begins_on_its_last() {
 /// a page count typed into the test, which would pin this to a font.
 #[test]
 fn a_pageref_sets_the_page_its_label_fell_on() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = concat!(
         "\\documentclass{report}\n\\begin{document}\n",
         "\\tableofcontents\n",
@@ -2691,6 +2852,9 @@ fn a_pageref_sets_the_page_its_label_fell_on() {
 /// a font.
 #[test]
 fn a_label_is_set_as_nothing_and_pays_for_no_space() {
+    if !common::tex_tree() {
+        return;
+    }
     let body = |labels: bool| {
         let mark = |key: &str| match labels {
             true => format!("\\label{{{key}}}"),
@@ -2776,6 +2940,9 @@ fn around_a_picture(options: &str, body: &str) -> String {
 
 #[test]
 fn a_picture_reaches_the_page_as_the_path_operators_that_draw_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // The whole of the gap this closes: the document below produced a PDF with
     // no `m`, no `l` and no `S` in it, and the two words welded into one line.
     let pdf = texrs::run_pdf(&around_a_picture(
@@ -2802,6 +2969,9 @@ fn a_picture_reaches_the_page_as_the_path_operators_that_draw_it() {
 
 #[test]
 fn the_text_around_a_picture_does_not_run_over_it() {
+    if !common::tex_tree() {
+        return;
+    }
     // The picture is a block on its own lines: the paragraph before it ends
     // above its box and the one after starts below. Both used to be set on the
     // same line, because a picture that draws nothing takes no room.
@@ -2828,6 +2998,9 @@ fn the_text_around_a_picture_does_not_run_over_it() {
 
 #[test]
 fn a_taller_picture_pushes_the_text_under_it_further_down() {
+    if !common::tex_tree() {
+        return;
+    }
     // The room a picture takes is its BOUNDING BOX and not a line: two pictures
     // differing only in height must move the paragraph under them by exactly
     // the difference. A picture that took one line whatever it drew would put
@@ -2851,6 +3024,9 @@ fn a_taller_picture_pushes_the_text_under_it_further_down() {
 
 #[test]
 fn a_picture_is_drawn_with_its_bounding_box_at_the_margin() {
+    if !common::tex_tree() {
+        return;
+    }
     // A picture's own coordinates are its own and regularly negative, so the
     // origin the page draws it at is chosen from its BOUNDS rather than from
     // its (0,0): a picture drawn from -2cm would otherwise hang two
@@ -2873,6 +3049,9 @@ fn a_picture_is_drawn_with_its_bounding_box_at_the_margin() {
 
 #[test]
 fn a_picture_between_two_paragraphs_does_not_leak_its_source_onto_the_page() {
+    if !common::tex_tree() {
+        return;
+    }
     // The picture travels the text stream as an encoded marker span, and every
     // character of it is an instruction. One that reached the drawing loop as
     // text would set several hundred characters of base64 where the diagram is.
@@ -2895,6 +3074,9 @@ fn a_picture_between_two_paragraphs_does_not_leak_its_source_onto_the_page() {
 
 #[test]
 fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\begin{center}\begin{tikzpicture}` is how most documents put a drawing
     // on a page, and centring is a REGION that outlives the paragraph its
     // marker landed in -- the picture is a paragraph of its own, so the flag
@@ -2950,6 +3132,9 @@ fn a_picture_inside_a_centre_region_is_placed_by_its_own_width() {
 /// writes.
 #[test]
 fn every_size_command_sets_at_the_size_its_class_file_states() {
+    if !common::tex_tree() {
+        return;
+    }
     let bp = 72.0 / 72.27;
     for (command, points) in [
         ("tiny", 5.0),
@@ -2982,6 +3167,9 @@ fn every_size_command_sets_at_the_size_its_class_file_states() {
 /// its level.
 #[test]
 fn a_heading_is_set_larger_than_the_body_under_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\begin{document}\n\
          \\chapter{Chapter}\nbody one\n\\section{Section}\nbody two\n\
@@ -3013,6 +3201,9 @@ fn a_heading_is_set_larger_than_the_body_under_it() {
 /// colour spec already had, and it cost whole pages.
 #[test]
 fn a_size_marker_costs_nothing_on_the_line_and_is_never_set() {
+    if !common::tex_tree() {
+        return;
+    }
     let doc = |body: String| {
         format!("\\documentclass{{article}}\n\\begin{{document}}\n{body}\n\\end{{document}}\n")
     };
@@ -3042,6 +3233,9 @@ fn a_size_marker_costs_nothing_on_the_line_and_is_never_set() {
 /// above -- which is why the leading is walked in order across the document.
 #[test]
 fn a_wrapped_heading_is_led_at_its_own_size_on_every_line() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\begin{document}\n\\section{A section heading long \
          enough that it cannot possibly be set on one line of the measure and so \
@@ -3134,6 +3328,9 @@ fn figure_document(image: Option<&std::path::Path>, options: &str) -> String {
 /// had been seen. It cost a page count every figure in the book.
 #[test]
 fn a_figure_reserves_the_room_its_image_takes_and_carries_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let png = a_png("reserves", 200, 100);
     let with = texrs::run_pdf(&figure_document(Some(&png), "width=200bp")).expect("pdf");
     let without = texrs::run_pdf(&figure_document(None, "")).expect("pdf");
@@ -3169,6 +3366,9 @@ fn a_figure_reserves_the_room_its_image_takes_and_carries_it() {
 /// resolved where the layout is known.
 #[test]
 fn a_width_given_as_a_fraction_of_the_measure_keeps_the_files_proportions() {
+    if !common::tex_tree() {
+        return;
+    }
     let png = a_png("fraction", 200, 100);
     let pdf = texrs::run_pdf(&figure_document(Some(&png), "width=0.5\\textwidth")).expect("pdf");
     let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
@@ -3209,6 +3409,9 @@ fn regex_lite_cm(content: &str) -> Option<(f64, f64)> {
 /// remaining pages.
 #[test]
 fn a_figure_whose_file_is_missing_still_typesets() {
+    if !common::tex_tree() {
+        return;
+    }
     let missing = std::env::temp_dir().join("texrs-there-is-no-such-figure.png");
     let _ = std::fs::remove_file(&missing);
     let pdf = texrs::run_pdf(&figure_document(Some(&missing), "width=100bp")).expect("pdf");
@@ -3224,6 +3427,9 @@ fn a_figure_whose_file_is_missing_still_typesets() {
 /// the prose and not the path.
 #[test]
 fn an_image_contributes_no_words_and_leaves_no_marker() {
+    if !common::tex_tree() {
+        return;
+    }
     let png = a_png("marker", 40, 40);
     let text = texrs::run_text(&figure_document(Some(&png), "width=40bp")).expect("text");
     assert!(text.contains("Before the figure."));
@@ -3244,6 +3450,9 @@ fn an_image_contributes_no_words_and_leaves_no_marker() {
 /// exists to scale exactly this case down, and says so in its own comment.
 #[test]
 fn an_image_too_big_for_the_page_is_brought_down_to_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let png = a_png("oversize", 1600, 800);
     let pdf = texrs::run_pdf(&figure_document(Some(&png), "")).expect("pdf");
     let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
@@ -3263,6 +3472,9 @@ fn an_image_too_big_for_the_page_is_brought_down_to_it() {
 /// An image that already fits is left at its own size, never scaled up.
 #[test]
 fn an_image_that_fits_the_page_is_left_at_its_own_size() {
+    if !common::tex_tree() {
+        return;
+    }
     let png = a_png("small", 120, 60);
     let pdf = texrs::run_pdf(&figure_document(Some(&png), "")).expect("pdf");
     let text = String::from_utf8_lossy(&texrs::pdf::inflate_streams(&pdf)).to_string();
@@ -3287,6 +3499,9 @@ fn an_image_that_fits_the_page_is_left_at_its_own_size() {
 /// pages shorter for it.
 #[test]
 fn a_size_an_environment_opens_does_not_outlive_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\newenvironment{Boxed}{\\small}{}\n\\begin{document}\n\
          BEFORE the environment.\n\n\\begin{Boxed}\nINSIDE the environment.\n\\end{Boxed}\n\n\
@@ -3372,6 +3587,9 @@ fn corpus_fonts() -> Option<String> {
 /// a second time.
 #[test]
 fn a_sans_family_with_no_file_falls_back_to_a_sans_and_not_to_the_body_face() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\setmainfont{Times New Roman}\n\
          \\setsansfont{Helvetica Neue}\n\\begin{document}\n\
@@ -3398,6 +3616,9 @@ fn a_sans_family_with_no_file_falls_back_to_a_sans_and_not_to_the_body_face() {
 /// once and neither visible as an error.
 #[test]
 fn a_titleformat_sets_the_heading_it_names() {
+    if !common::tex_tree() {
+        return;
+    }
     let big = 24.88 * 72.0 / 72.27;
     let larger = 17.28 * 72.0 / 72.27;
     let pdf = texrs::run_pdf(
@@ -3427,6 +3648,9 @@ fn a_titleformat_sets_the_heading_it_names() {
 /// adding to it.
 #[test]
 fn a_titleformat_naming_no_size_leaves_the_heading_at_the_body_size() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\titleformat*{\\section}{\\bfseries}\n\
          \\begin{document}\n\\section{Section}\nbody\n\\end{document}\n",
@@ -3448,6 +3672,9 @@ fn a_titleformat_naming_no_size_leaves_the_heading_at_the_body_size() {
 /// size too, so the lines it sits on are wrong as well as the glyphs.
 #[test]
 fn a_numeric_scale_sets_the_family_at_that_fraction() {
+    if !common::tex_tree() {
+        return;
+    }
     let pdf = texrs::run_pdf(
         "\\documentclass{book}\n\\setmainfont{Times New Roman}\n\
          \\setsansfont{Helvetica Neue}[Scale=0.5]\n\\begin{document}\n\
@@ -3553,6 +3780,9 @@ fn a_family_switch_and_a_series_switch_compose_rather_than_replacing() {
 /// than failing.
 #[test]
 fn the_prelude_and_the_decoder_agree_about_the_face_letters() {
+    if !common::tex_tree() {
+        return;
+    }
     use texrs::typeset::{Face, Family};
     let doc = |markup: &str| {
         format!("\\documentclass{{article}}\n\\begin{{document}}\n{markup}\n\\end{{document}}\n")
@@ -3766,6 +3996,9 @@ fn orphans_and_widows(pages: &[Vec<String>], count: usize) -> (Vec<usize>, Vec<u
 
 #[test]
 fn the_page_builder_reads_the_penalties_the_document_set() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\clubpenalty`, `\widowpenalty` and `\brokenpenalty` are the document's
     // (tex.web §890), not constants. At plain.tex's 150 a single line alone at
     // a page's foot is sometimes cheaper than the white space that avoiding it

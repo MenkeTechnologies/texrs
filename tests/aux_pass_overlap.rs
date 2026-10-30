@@ -10,6 +10,8 @@
 //! (overlap thrown away) -- is played at one thread and at several, and every
 //! byte of stdout, stderr, the PDF and the `.aux` must agree step for step.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -105,6 +107,9 @@ const RERUN: &str = "Rerun to get cross-references right.";
 
 #[test]
 fn overlapping_the_label_pass_changes_no_byte_of_any_run() {
+    if !common::tex_tree() {
+        return;
+    }
     let one = history("1");
     // The history does what it is meant to: the first run and the edit find
     // labels that moved, the rerun between them finds none.

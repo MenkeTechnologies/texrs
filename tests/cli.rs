@@ -5,6 +5,8 @@
 //! drift silently — a flag added to one and not the others is a flag nobody
 //! discovers — so they are compared here rather than by remembering to.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -1393,6 +1395,9 @@ fn the_special_reader_says_what_a_special_means() {
 /// input.
 #[test]
 fn output_directory_writes_there_and_not_beside_the_input() {
+    if !common::tex_tree() {
+        return;
+    }
     let root = std::env::temp_dir().join(format!("texrs_outdir_{}", std::process::id()));
     let input = root.join("in");
     let elsewhere = root.join("out");

@@ -6,6 +6,8 @@
 //! paragraphs broken early, against the state as it stood then, would be set
 //! to the wrong measure or in the wrong face.
 
+mod common;
+
 use texrs::math::noad::TEXT_STYLE;
 use texrs::math::set_mlist;
 
@@ -56,6 +58,9 @@ fn pdf(src: &str, threads: usize) -> Vec<u8> {
 
 #[test]
 fn a_switch_after_paragraphs_were_broken_early_sets_as_one_thread_does() {
+    if !common::tex_tree() {
+        return;
+    }
     // The file's date and id come from this, so two runs can be compared.
     std::env::set_var("SOURCE_DATE_EPOCH", "1");
     // Formulas exercise the slots the breaker fills before the lowerer does;

@@ -14,6 +14,8 @@
 
 /// One `BT ... ET` in a content stream: a run of text, where it was put, and
 /// what its spaces were widened by.
+mod common;
+
 #[derive(Debug, Clone, PartialEq)]
 struct Drawn {
     x: f64,
@@ -102,6 +104,9 @@ fn pdf(src: &str) -> Vec<u8> {
 /// claim is made about is a real one.
 #[test]
 fn a_full_line_is_drawn_at_the_measure() {
+    if !common::tex_tree() {
+        return;
+    }
     let prose = "The typesetting of a paragraph is a global optimisation problem, \
                  not a local one. A greedy algorithm that fills each line until the \
                  following word will no longer fit is straightforward to implement \
@@ -161,6 +166,9 @@ fn a_full_line_is_drawn_at_the_measure() {
 /// The last line of a paragraph is left ragged, the way TeX leaves it.
 #[test]
 fn the_last_line_of_a_paragraph_is_not_stretched() {
+    if !common::tex_tree() {
+        return;
+    }
     let long = "x".repeat(200);
     let src = format!(
         "\\documentclass{{article}}\n\\begin{{document}}\n\
@@ -189,6 +197,9 @@ fn the_last_line_of_a_paragraph_is_not_stretched() {
 /// A centred line is positioned by its own width, so nothing stretches it.
 #[test]
 fn a_centred_line_is_left_at_its_own_width() {
+    if !common::tex_tree() {
+        return;
+    }
     let long = "x".repeat(200);
     let src = format!(
         "\\documentclass{{article}}\n\\begin{{document}}\n\
@@ -216,6 +227,9 @@ fn a_centred_line_is_left_at_its_own_width() {
 /// stretches every line drawn after it, on this page and the next.
 #[test]
 fn the_word_spacing_never_outlives_the_run_that_set_it() {
+    if !common::tex_tree() {
+        return;
+    }
     let long = "x".repeat(200);
     let src = format!(
         "\\documentclass{{article}}\n\\begin{{document}}\n\
@@ -238,6 +252,9 @@ fn the_word_spacing_never_outlives_the_run_that_set_it() {
 /// document, and never reaches a page as one.
 #[test]
 fn the_justification_marker_is_never_drawn() {
+    if !common::tex_tree() {
+        return;
+    }
     let long = "x".repeat(200);
     let src = format!(
         "\\documentclass{{article}}\n\\begin{{document}}\n\

@@ -11,6 +11,8 @@
 /// to an estimate, which breaks the same prose somewhere else and makes an
 /// exact line a false statement about the algorithm rather than a true one.
 /// tests/typeset.rs guards its metric tests the same way.
+mod common;
+
 fn metrics_available() -> bool {
     texrs::typeset::find_font("cmr10").is_some()
 }
@@ -194,6 +196,9 @@ fn lowered_text(lowerer: &mut texrs::lower::Lowerer, src: &str) -> String {
 /// not text for a prelude macro to eat.
 #[test]
 fn the_breaker_reads_the_parameters_the_document_set() {
+    if !common::tex_tree() {
+        return;
+    }
     let base = texrs::linebreak::Params::default();
     let mut plain = texrs::lower::Lowerer::new().with_text_output();
     let text = lowered_text(

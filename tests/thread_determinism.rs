@@ -5,6 +5,8 @@
 //! the terminal output, so the same document is run at several counts and the
 //! results compared exactly.
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -98,6 +100,9 @@ fn one_thread_and_many_produce_identical_output() {
 /// the run reports is the writer's, so it is checked against the file.
 #[test]
 fn a_latex_preamble_is_the_same_at_any_thread_count() {
+    if !common::tex_tree() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("texrs_threads_latex_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");

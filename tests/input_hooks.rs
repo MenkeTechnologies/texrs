@@ -2,10 +2,15 @@
 //! each is consulted where luatex consults it, and a run with none installed
 //! reads as before. No TeX installation is needed.
 
+mod common;
+
 use texrs::input_hooks;
 
 #[test]
 fn process_input_buffer_sees_each_line_of_the_document_without_its_end() {
+    if !common::tex_tree() {
+        return;
+    }
     let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let log = seen.clone();
     input_hooks::set_process_input_buffer(Some(Box::new(move |line: &str| {
@@ -32,6 +37,9 @@ fn process_input_buffer_sees_each_line_of_the_document_without_its_end() {
 
 #[test]
 fn a_line_processed_into_a_catcode_change_changes_the_next_line() {
+    if !common::tex_tree() {
+        return;
+    }
     // The callback runs as each line is reached, so what an earlier line did
     // is in force when a later one is read -- not one pass over the file.
     input_hooks::set_process_input_buffer(Some(Box::new(|line: &str| {
@@ -46,6 +54,9 @@ fn a_line_processed_into_a_catcode_change_changes_the_next_line() {
 
 #[test]
 fn find_and_open_read_file_stand_in_for_the_file_system() {
+    if !common::tex_tree() {
+        return;
+    }
     input_hooks::set_find_read_file(Some(Box::new(|id, asked: &str| {
         assert_eq!(id, 0, "\\input asks with id 0");
         Some(format!("{asked}-found.tex"))

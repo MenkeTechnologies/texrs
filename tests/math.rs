@@ -10,6 +10,8 @@
 //! The metrics belong to a TeX INSTALLATION, so a machine without one skips
 //! rather than fails, exactly as `tests/typeset.rs` does.
 
+mod common;
+
 use texrs::math::font::MathFonts;
 use texrs::math::noad::{Class, Space, DISPLAY_STYLE, SCRIPT_STYLE, TEXT_STYLE};
 use texrs::math::set::Setting;
@@ -600,6 +602,9 @@ fn a_formula_in_a_document_reaches_both_the_reader_and_the_page() {
 /// runaway formula.
 #[test]
 fn an_escaped_dollar_is_a_dollar_and_a_bare_one_opens_a_formula() {
+    if !common::tex_tree() {
+        return;
+    }
     let source = "\\documentclass{article}\n\\begin{document}\n\
                   It costs \\$5 and $a+b$ holds.\n\\end{document}\n";
     let text = texrs::run_text(source).expect("the document runs");
@@ -614,6 +619,9 @@ fn an_escaped_dollar_is_a_dollar_and_a_bare_one_opens_a_formula() {
 /// paragraph rather than the rest of the document.
 #[test]
 fn a_stray_dollar_stops_at_the_end_of_its_paragraph() {
+    if !common::tex_tree() {
+        return;
+    }
     let source = "\\documentclass{article}\n\\begin{document}\n\
                   A stray $ dollar here.\n\n\
                   The paragraph after it is unharmed.\n\\end{document}\n";
@@ -1108,6 +1116,9 @@ fn an_equation_number_sits_at_the_edge_of_the_display_width() {
 /// used to be dropped and a two-row display used to set as one row.
 #[test]
 fn an_align_environment_sets_every_row_of_itself() {
+    if !common::tex_tree() {
+        return;
+    }
     let source = "\\documentclass{article}\n\\begin{document}\n\
                   \\begin{align}\na &= b + c \\\\\nxyzw &= d\n\\end{align}\n\
                   \\end{document}\n";
@@ -1131,6 +1142,9 @@ fn an_align_environment_sets_every_row_of_itself() {
 /// half of a formula `--text` prints.
 #[test]
 fn the_new_constructions_read_back_as_their_own_words() {
+    if !common::tex_tree() {
+        return;
+    }
     let source = "\\documentclass{article}\n\\begin{document}\n\
                   Here are $\\hat x$, $\\bar y$, $\\sqrt[3]{z}$ and $\\vcenter{w}$.\n\
                   \\end{document}\n";

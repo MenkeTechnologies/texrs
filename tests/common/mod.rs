@@ -9,8 +9,32 @@
 
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 pub fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Whether a TeX tree is installed: `kpsewhich` finds plain TeX's macros, the
+/// LaTeX article class and LuaTeX's support module, which every run that loads
+/// a format reads. CI has no TeX installation, so a test that typesets through
+/// one says so and stops, as tests/typeset.rs's metric tests do.
+#[allow(dead_code)]
+pub fn tex_tree() -> bool {
+    let missing = ["plain.tex", "article.cls", "ltluatex.lua"]
+        .into_iter()
+        .find(|name| {
+            std::process::Command::new("kpsewhich")
+                .arg(name)
+                .output()
+                .map_or(true, |o| {
+                    String::from_utf8_lossy(&o.stdout).trim().is_empty()
+                })
+        });
+    if let Some(name) = missing {
+        eprintln!("skipping: kpsewhich finds no {name} -- no TeX tree installed");
+        return false;
+    }
+    true
 }
 
 /// The pinned oracle, or `None` with the reason printed.

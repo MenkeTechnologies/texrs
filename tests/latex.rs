@@ -11,12 +11,17 @@
 //! Everything else is `src/latex/prelude.tex`, loaded when a document says
 //! `\documentclass` or `\usepackage`.
 
+mod common;
+
 fn out(src: &str) -> String {
     texrs::run_messages(src).expect("run")
 }
 
 #[test]
 fn newcommand_defines_a_macro_with_no_arguments() {
+    if !common::tex_tree() {
+        return;
+    }
     assert_eq!(
         out("\\documentclass{article}\n\\newcommand{\\hi}{HELLO}\n\\message{\\hi}\n\\end\n"),
         "HELLO"
@@ -25,6 +30,9 @@ fn newcommand_defines_a_macro_with_no_arguments() {
 
 #[test]
 fn newcommand_defines_one_taking_arguments() {
+    if !common::tex_tree() {
+        return;
+    }
     assert_eq!(
         out("\\documentclass{article}\n\\newcommand{\\w}[1]{[#1]}\n\\message{\\w{x}}\n\\end\n"),
         "[x]"
@@ -37,6 +45,9 @@ fn newcommand_defines_one_taking_arguments() {
 
 #[test]
 fn renewcommand_replaces_and_providecommand_does_not() {
+    if !common::tex_tree() {
+        return;
+    }
     assert_eq!(
         out("\\documentclass{article}\n\\newcommand{\\a}{one}\\renewcommand{\\a}{two}\n\\message{\\a}\n\\end\n"),
         "two"
@@ -49,6 +60,9 @@ fn renewcommand_replaces_and_providecommand_does_not() {
 
 #[test]
 fn a_preamble_directive_consumes_its_arguments() {
+    if !common::tex_tree() {
+        return;
+    }
     // The point is that the document AFTER it is still read. Leaving the
     // arguments in the stream would put `[11pt]{article}` in the text.
     let src = "\\documentclass[11pt]{article}\n\\usepackage[utf8]{inputenc}\n\
@@ -58,6 +72,9 @@ fn a_preamble_directive_consumes_its_arguments() {
 
 #[test]
 fn text_macros_yield_their_argument() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\message{\\texttt{a}\\textbf{b}\\emph{c}\\texorpdfstring{d}{e}}\n\\end\n";
     assert_eq!(out(src), "abcd");
@@ -65,18 +82,27 @@ fn text_macros_yield_their_argument() {
 
 #[test]
 fn character_macros_produce_their_character() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\message{\\textless\\textgreater\\textbar}\n\\end\n";
     assert_eq!(out(src), "<>|");
 }
 
 #[test]
 fn state_macros_consume_their_arguments_and_produce_nothing() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\message{[\\label{x}\\setcounter{a}{1}]}\n\\end\n";
     assert_eq!(out(src), "[]");
 }
 
 #[test]
 fn an_engine_test_takes_the_branch_for_an_engine_we_are_not() {
+    if !common::tex_tree() {
+        return;
+    }
     // iftex spells these with \let to \iffalse. texrs is not pdfTeX, LuaTeX or
     // XeTeX, and the false arm is the one whose primitives it might have.
     let src = "\\documentclass{article}\n\\usepackage{iftex}\n\
@@ -95,6 +121,9 @@ fn a_plain_tex_document_is_left_alone() {
 
 #[test]
 fn a_pandoc_style_document_runs() {
+    if !common::tex_tree() {
+        return;
+    }
     // The shape the publications are generated in: a class, packages, token
     // macros defined by the document, and text through them.
     let src = "\\documentclass[11pt]{article}\n\\usepackage{xcolor}\n\
@@ -107,6 +136,9 @@ fn a_pandoc_style_document_runs() {
 
 #[test]
 fn an_engine_test_for_dimensions_takes_the_false_branch() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\ifdim` is recognised-but-not-evaluated: there are no dimen registers to
     // compare. The prelude \lets it to \iffalse so a document that guards a
     // measurement with it takes the path that does not ask for one. Without
@@ -119,6 +151,9 @@ fn an_engine_test_for_dimensions_takes_the_false_branch() {
 
 #[test]
 fn a_newcommand_whose_name_is_not_definable_does_not_stop_the_document() {
+    if !common::tex_tree() {
+        return;
+    }
     // LaTeX raises an error and carries on. Refusing the whole file over one
     // definition loses everything after it; the definition is dropped, and its
     // arguments with it so they do not land in the text.
@@ -128,6 +163,9 @@ fn a_newcommand_whose_name_is_not_definable_does_not_stop_the_document() {
 
 #[test]
 fn what_a_chunk_prints_is_input_and_not_a_message() {
+    if !common::tex_tree() {
+        return;
+    }
     // The chunk RUNS -- `tests/lua.rs` pins the arithmetic -- and what
     // `tex.print` writes is pushed back as INPUT, to be read as the document
     // continues. It is not a message, so it does not reach this stream: the
@@ -144,6 +182,9 @@ fn what_a_chunk_prints_is_input_and_not_a_message() {
 
 #[test]
 fn a_tikz_path_command_is_consumed_to_its_semicolon() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\usepackage{tikz}\n\
                \\draw[thick,red] (0,0) -- (1,1);\n\\message{after}\n\\end\n";
     assert_eq!(out(src), "after");
@@ -155,6 +196,9 @@ fn a_tikz_path_command_is_consumed_to_its_semicolon() {
 /// then undefined and the document stopped.
 #[test]
 fn the_starred_newcommand_defines_the_command() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\newcommand*\\a[1]{[#1]}\n\
                \\newcommand*{\\b}[1]{<#1>}\n\\message{\\a{x}\\b{y}}\n\\end\n";
     assert_eq!(out(src), "[x]<y>");
@@ -165,6 +209,9 @@ fn the_starred_newcommand_defines_the_command() {
 /// the bracket group reached the text and shifted every argument after it.
 #[test]
 fn an_optional_argument_is_matched_at_the_call() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\newcommand{\\c}[3][def]{(#1|#2|#3)}\n\
                \\message{\\c[opt]{a}{b} \\c{a}{b}}\n\\end\n";
     assert_eq!(out(src), "(opt|a|b) (def|a|b)");
@@ -174,6 +221,9 @@ fn an_optional_argument_is_matched_at_the_call() {
 /// and `\includegraphics` with its options.
 #[test]
 fn the_optional_argument_forms_the_documents_write() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                \\textcolor[rgb]{1.00,0.00,0.00}{RED}\\textcolor{blue}{BLUE}\n\
                \\includegraphics[keepaspectratio]{f.pdf}\\hyperref[lab]{LINK}\n\
@@ -192,6 +242,9 @@ fn the_optional_argument_forms_the_documents_write() {
 /// the arguments are matched, so the source of the tokens does not matter.
 #[test]
 fn an_optional_argument_is_matched_inside_an_expansion() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\newcommand{\\NormalTok}[1]{\\textcolor[rgb]{0.25,0.44,0.63}{#1}}\n\
                \\begin{document}\n\\NormalTok{code}\n\\end{document}\n";
@@ -205,6 +258,9 @@ fn an_optional_argument_is_matched_inside_an_expansion() {
 /// `\ifnum` still lowers both arms; its test is a register read.
 #[test]
 fn only_the_taken_arm_of_a_decided_conditional_assigns() {
+    if !common::tex_tree() {
+        return;
+    }
     let same = "\\documentclass{article}\n\\def\\a{A}\\def\\b{A}\n\
                 \\ifx\\a\\b\\def\\r{TAKEN}\\else\\def\\r{SKIPPED}\\fi\n\\message{\\r}\n\\end\n";
     assert_eq!(out(same), "TAKEN");
@@ -218,6 +274,9 @@ fn only_the_taken_arm_of_a_decided_conditional_assigns() {
 /// need the arm that did not run to have made no assignment.
 #[test]
 fn a_starred_form_dispatches_on_the_star() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\def\\x{\\@ifstar\\xstar\\xplain}\n\
                \\def\\xstar#1{[STAR #1]}\\def\\xplain#1{[PLAIN #1]}\n\
@@ -237,6 +296,9 @@ fn a_starred_form_dispatches_on_the_star() {
 /// expand -- and an argumentless stub left the brackets in the text.
 #[test]
 fn an_environment_takes_its_options_at_begin() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                \\begin{Shaded}\\begin{Highlighting}[]\ncode\n\
                \\end{Highlighting}\\end{Shaded}\n\
@@ -251,6 +313,9 @@ fn an_environment_takes_its_options_at_begin() {
 /// it uses. Read as plain TeX, its `\@ifundefined` stopped it.
 #[test]
 fn a_header_fragment_is_recognised_as_latex() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\makeatletter\n\\@ifundefined{Shaded}{\\newenvironment{Shaded}{}{}}{}\n\
                \\makeatother\n\\message{after}\n\\end\n";
     assert_eq!(out(src), "after");
@@ -262,6 +327,9 @@ fn a_header_fragment_is_recognised_as_latex() {
 /// the trailing group was text; the optional argument is declared instead.
 #[test]
 fn a_font_declaration_consumes_features_on_either_side() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                \\setmainfont{Arimo}[Path=/fonts/,Extension=.ttf]\n\
                \\setsansfont[Scale=1]{Orbitron}\\setmathfont[]{STIX Two Math}\n\
@@ -283,6 +351,9 @@ fn a_font_declaration_consumes_features_on_either_side() {
 /// backslashes in the text, and a path `C:\Users` printed as `C:\\Users`.
 #[test]
 fn textbackslash_is_a_single_backslash() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                [\\textbackslash{}] [C:\\textbackslash Users]\n\\end{document}\n";
     let got = texrs::run_text(src).expect("run");
@@ -296,6 +367,9 @@ fn textbackslash_is_a_single_backslash() {
 /// The same inside a `\message`, which reaches the primitive by another path.
 #[test]
 fn textbackslash_is_a_single_backslash_in_a_message() {
+    if !common::tex_tree() {
+        return;
+    }
     assert_eq!(
         out("\\documentclass{article}\n\\message{[\\textbackslash]}\n\\end\n"),
         "[\\]"
@@ -309,6 +383,9 @@ fn textbackslash_is_a_single_backslash_in_a_message() {
 /// comes through as the letter, since texrs composes no glyph.
 #[test]
 fn a_circumflex_over_nothing_is_a_caret() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                /\\^{}END/ \\^e \\^{o} \\textasciicircum{}\n\\end{document}\n";
     assert_eq!(
@@ -327,6 +404,9 @@ fn a_circumflex_over_nothing_is_a_caret() {
 /// was declared with and `\arabic` had nothing to read.
 #[test]
 fn a_declared_counter_is_set_stepped_and_read_back() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\newcounter{step}\n\
                \\setcounter{step}{4}\\stepcounter{step}\\addtocounter{step}{2}\n\
                \\message{[\\arabic{step}][\\alph{step}][\\Alph{step}]}\n\\end\n";
@@ -342,6 +422,9 @@ fn a_declared_counter_is_set_stepped_and_read_back() {
 /// `\message` wrote them out as the document's text.
 #[test]
 fn a_counter_that_was_never_declared_writes_nothing_and_eats_its_arguments() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\message{[\\setcounter{nosuch}{1}\\addtocounter{nosuch}{2}]}\n\\end\n";
     assert_eq!(out(src), "[]");
@@ -354,6 +437,9 @@ fn a_counter_that_was_never_declared_writes_nothing_and_eats_its_arguments() {
 /// and the optional argument -- the contents entry -- is read and dropped.
 #[test]
 fn a_section_steps_its_counter_and_a_starred_one_does_not() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                \\section{One}\\section[toc]{Two}\\section*{Unnumbered}\n\
                \\message{[\\arabic{section}]}\n\\end{document}\n";
@@ -368,6 +454,9 @@ fn a_section_steps_its_counter_and_a_starred_one_does_not() {
 /// came out as `n page`, the reference gone and the `o` of `on` with it.
 #[test]
 fn an_unresolved_reference_is_two_question_marks_and_eats_no_text() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                See \\ref{gone} on page \\pageref{gone} now.\n\\end{document}\n";
     assert_eq!(
@@ -387,6 +476,9 @@ fn an_unresolved_reference_is_two_question_marks_and_eats_no_text() {
 /// Every class stopped at its own `\ExecuteOptions` line before this.
 #[test]
 fn declared_options_are_run_by_execute_options_in_the_order_written() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\DeclareOption{a}{\\message{A}}\\DeclareOption{b}{\\message{B}}\n\
                \\ExecuteOptions{b,a,b}\n\\makeatother\n\\end\n";
@@ -398,6 +490,9 @@ fn declared_options_are_run_by_execute_options_in_the_order_written() {
 /// neither half of it.
 #[test]
 fn a_new_environment_runs_both_of_its_bodies() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\newenvironment{note}[1]{<#1:}{>}\n\
                \\message{\\begin{note}{k}body\\end{note}}\n\\end\n";
@@ -410,6 +505,9 @@ fn a_new_environment_runs_both_of_its_bodies() {
 /// everything after the bibliography was lost.
 #[test]
 fn a_bibliography_numbers_its_entries_and_its_citations_alike() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                Read \\cite{one} and \\cite{two}.\n\
                \\begin{thebibliography}{9}\n\
@@ -427,6 +525,9 @@ fn a_bibliography_numbers_its_entries_and_its_citations_alike() {
 /// `latex` has to be run twice.
 #[test]
 fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
+    if !common::tex_tree() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("texrs-aux-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let doc = dir.join("crossref.tex");
@@ -463,6 +564,9 @@ fn a_label_written_to_the_aux_is_what_the_next_run_resolves() {
 /// row -- and a `\label` inside a display names its number.
 #[test]
 fn a_document_with_mathematics_still_writes_its_aux() {
+    if !common::tex_tree() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("texrs-aux-math-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let doc = dir.join("maths.tex");
@@ -502,6 +606,9 @@ fn a_document_with_mathematics_still_writes_its_aux() {
 /// without it -- `texrs: package article needs \@mparswitchfalse`.
 #[test]
 fn a_kernel_switch_has_both_of_its_setters() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\@mparswitchtrue\\if@mparswitch\\message{on}\\else\\message{off}\\fi\n\
                \\@mparswitchfalse\\if@mparswitch\\message{on}\\else\\message{off}\\fi\n\
@@ -518,6 +625,9 @@ fn a_kernel_switch_has_both_of_its_setters() {
 /// and its own rather than shared with the next declaration.
 #[test]
 fn the_newcount_family_gives_each_name_a_register_of_its_own() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\newcount\\testa\\newcount\\testb\\newdimen\\testd\\newskip\\tests\n\
                \\testa=7 \\testb=9 \\advance\\testa by 1 \\testd=3pt \\tests=4pt\n\
@@ -538,6 +648,9 @@ fn the_newcount_family_gives_each_name_a_register_of_its_own() {
 /// assignable, readable, and its own rather than shared with its neighbour.
 #[test]
 fn the_display_glue_parameters_are_registers_of_their_own() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\abovedisplayskip=10pt plus 2pt minus 5pt\n\
                \\belowdisplayskip=11pt\n\
@@ -567,6 +680,9 @@ fn the_display_glue_parameters_are_registers_of_their_own() {
 /// run on one, since that is what `size10.clo` does with five of them.
 #[test]
 fn the_page_dimensions_are_registers_and_settopoint_rounds_one() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\textwidth=345.678pt\n\
                \\paperwidth=597.5pt\n\
@@ -589,6 +705,9 @@ fn the_page_dimensions_are_registers_and_settopoint_rounds_one() {
 /// `\baselineskip` of 12pt, 480pt of `\@tempdima` is forty lines.
 #[test]
 fn a_glue_parameter_divides_a_dimension_as_a_number() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\baselineskip=12pt\n\
                \\@tempdima=480pt\n\
@@ -603,6 +722,9 @@ fn a_glue_parameter_divides_a_dimension_as_a_number() {
 /// plain TeX's `\chardef` allocator makes it.
 #[test]
 fn a_new_token_register_holds_a_list() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\newtoks\\testt \\testt={A B}\n\\message{[\\the\\testt]}\n\
                \\makeatother\n\\end\n";
@@ -619,6 +741,9 @@ fn a_new_token_register_holds_a_list() {
 /// could match.
 #[test]
 fn if_file_exists_answers_the_file_system() {
+    if !common::tex_tree() {
+        return;
+    }
     // In the working directory rather than in a temp one, and under a name
     // nothing else uses: `\IfFileExists` searches where `\input` searches, which
     // begins at `.`, and changing the process's directory would race every other
@@ -674,6 +799,9 @@ fn the_minimal_class_loads_end_to_end() {
 /// something: `\@ifpackageloaded` is `\@ifundefined{ver@NAME.sty}`.
 #[test]
 fn ifundefined_answers_both_ways_and_a_loaded_package_is_known() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\makeatletter\n\
                \\def\\@known{}\n\
                \\@ifundefined{@known}{\\message{[wrong]}}{\\message{[known]}}\n\
@@ -690,6 +818,9 @@ fn ifundefined_answers_both_ways_and_a_loaded_package_is_known() {
 /// every earlier shape of this lost the first one.
 #[test]
 fn at_begin_document_defers_its_body_and_keeps_every_one() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\
                \\AtBeginDocument{\\message{[first]}}\n\
                \\AtBeginDocument{\\message{[second]}}\n\
@@ -708,6 +839,9 @@ fn at_begin_document_defers_its_body_and_keeps_every_one() {
 /// semicolon, so it consumes the whole command and nothing after it.
 #[test]
 fn every_tikz_path_command_is_answered_and_stops_at_its_semicolon() {
+    if !common::tex_tree() {
+        return;
+    }
     let commands = [
         r"\draw[thick] (0,0) -- (1,1);",
         r"\fill[red] (0,0) circle (1);",
@@ -828,6 +962,9 @@ fn display_settings(marked: &str) -> Vec<texrs::math::set::Setting> {
 /// from the sectioning units only.
 #[test]
 fn a_display_is_numbered_and_a_reference_to_it_resolves() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n\
                \\section{First}\n\
                \\begin{equation} E = mc^2 \\label{eq:one} \\end{equation}\n\
@@ -874,6 +1011,9 @@ fn a_display_is_numbered_and_a_reference_to_it_resolves() {
 /// document, each number at the left margin.
 #[test]
 fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass[leqno]{article}\n\\usepackage{amsmath}\n\
                \\numberwithin{equation}{section}\n\\begin{document}\n\
                \\section{A}\n\
@@ -922,6 +1062,9 @@ fn numbering_within_sections_follows_the_class_and_leqno_sets_it_left() {
 /// to workers.
 #[test]
 fn equation_numbers_are_the_same_on_one_thread_and_many() {
+    if !common::tex_tree() {
+        return;
+    }
     let mut src = String::from(
         "\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n\\section{S}\n",
     );
@@ -982,6 +1125,9 @@ const CLASS_UNITS: &str = "\\begin{document}\n\
 /// or book.
 #[test]
 fn a_reference_names_the_number_the_class_writes() {
+    if !common::tex_tree() {
+        return;
+    }
     let article = "\\documentclass{article}\n\\begin{document}\n\
                    \\label{pre}\n\
                    \\section{One}\\label{s1}\n\
@@ -1022,6 +1168,9 @@ fn a_reference_names_the_number_the_class_writes() {
 /// `\newlabel{t1}{{1}{1}...}` for the first table (measured, two runs).
 #[test]
 fn the_aux_carries_the_article_s_own_numbers() {
+    if !common::tex_tree() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("texrs-aux-class-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let doc = dir.join("classnum.tex");
@@ -1054,6 +1203,9 @@ fn the_aux_carries_the_article_s_own_numbers() {
 /// resets were local to the group it makes them in.
 #[test]
 fn a_report_s_floats_are_numbered_within_the_chapter_once_there_is_one() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{report}\n\\begin{document}\n\
                \\begin{figure}x\\caption{F}\\label{f0}\\end{figure}\n\
                \\chapter{A}\\label{c}\n\
@@ -1092,6 +1244,9 @@ fn a_report_s_floats_are_numbered_within_the_chapter_once_there_is_one() {
 /// `! Undefined control sequence.` on `\numberwithin`.
 #[test]
 fn numberwithin_is_amsmath_s_and_counterwithin_is_the_kernel_s() {
+    if !common::tex_tree() {
+        return;
+    }
     let within = "\\documentclass{article}\n\\usepackage{amsmath}\n\
                   \\numberwithin{equation}{section}\n\
                   \\counterwithin{figure}{section}\n\

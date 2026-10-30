@@ -9,6 +9,8 @@
 //! This is not typesetting. There is no line breaking, no page, no font. It is
 //! the text, in order, after every macro has been expanded.
 
+mod common;
+
 fn text(src: &str) -> String {
     texrs::run_text(src).expect("run")
 }
@@ -30,6 +32,9 @@ fn a_macro_is_expanded_before_the_text_is_taken() {
 
 #[test]
 fn a_latex_document_yields_its_prose_with_the_markup_resolved() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                \\section{Title}\nA paragraph with \\textbf{bold} and \\emph{stress}.\n\
                \\end{document}\n";
@@ -43,6 +48,9 @@ fn a_latex_document_yields_its_prose_with_the_markup_resolved() {
 
 #[test]
 fn the_escaped_characters_come_through_as_themselves() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\%` and `\textless` are the two shapes: a control symbol and a named
     // character. `\%` is the one that cannot be written naively, because a per
     // cent sign in a macro body starts a comment and eats the closing brace.
@@ -55,6 +63,9 @@ fn the_escaped_characters_come_through_as_themselves() {
 
 #[test]
 fn a_redefined_primitive_is_the_redefinition() {
+    if !common::tex_tree() {
+        return;
+    }
     // LaTeX redefines \end to close an environment. Dispatching primitives by
     // name meant \end was always the run-stopping primitive, so a LaTeX
     // document stopped at its first \end{...} and produced its preamble only.
@@ -75,6 +86,9 @@ fn messages_are_not_the_text_and_the_text_is_not_the_messages() {
 
 #[test]
 fn a_group_that_only_carries_text_does_not_break_the_run() {
+    if !common::tex_tree() {
+        return;
+    }
     // A group exists to save registers and scope the macro table; the table is
     // a compile-time fact, so a group assigning no register has nothing to do
     // at run time. Keeping it split the text either side into separate
@@ -97,6 +111,9 @@ fn a_group_that_only_carries_text_does_not_break_the_run() {
 
 #[test]
 fn a_verbatim_body_is_characters_and_not_tex() {
+    if !common::tex_tree() {
+        return;
+    }
     // The point of the environment: a backslash in a listing is a backslash.
     // Reading it as TeX is why a book of code samples could not be read --
     // roff markup inside a listing, \fINAME, became a control sequence nobody
@@ -115,6 +132,9 @@ fn a_verbatim_body_is_characters_and_not_tex() {
 
 #[test]
 fn pandoc_highlighting_expands_rather_than_passing_through() {
+    if !common::tex_tree() {
+        return;
+    }
     // Highlighting and Shaded LOOK like code environments and are not: Pandoc
     // fills them with \NormalTok and friends, which have to expand for the code
     // to come out as code rather than as markup.
@@ -135,6 +155,9 @@ fn pandoc_highlighting_expands_rather_than_passing_through() {
 
 #[test]
 fn a_character_above_latin1_ends_a_control_word() {
+    if !common::tex_tree() {
+        return;
+    }
     // TeX82 reads BYTES, so such a character is a run of Others and never part
     // of a control word. Calling them Letters made `\textgreater→key` lex as
     // ONE control sequence named `textgreater→key`, so a document full of
@@ -147,6 +170,9 @@ fn a_character_above_latin1_ends_a_control_word() {
 
 #[test]
 fn a_blank_line_ends_the_paragraph() {
+    if !common::tex_tree() {
+        return;
+    }
     // The mouth already synthesises a `\par` per blank line (§304) and the
     // lowerer dropped it on the floor, so a book arrived at the line breaker as
     // ONE paragraph: scifi2/docs/book.tex holds 3,163 blank lines and produced
@@ -171,6 +197,9 @@ fn a_blank_line_ends_the_paragraph() {
 
 #[test]
 fn an_explicit_par_ends_the_paragraph_too() {
+    if !common::tex_tree() {
+        return;
+    }
     // Same break, written out. Pandoc's output uses `\par` directly in places
     // where a blank line would be swallowed by an environment, so the two
     // spellings have to mean the same thing.
@@ -185,6 +214,9 @@ fn an_explicit_par_ends_the_paragraph_too() {
 
 #[test]
 fn an_alignment_tab_separates_cells_and_is_not_an_ampersand() {
+    if !common::tex_tree() {
+        return;
+    }
     // plain.tex:14 makes `&` catcode 4; nothing here did, so every cell
     // separator stayed an ordinary character and printed itself. A book of
     // keybinding tables came out of --pdf with 8,941 stray ampersands where
@@ -202,6 +234,9 @@ fn an_alignment_tab_separates_cells_and_is_not_an_ampersand() {
 
 #[test]
 fn an_escaped_ampersand_is_still_an_ampersand() {
+    if !common::tex_tree() {
+        return;
+    }
     // The other half of giving `&` catcode 4: `\&` is defined one line before
     // the `\catcode` in the prelude, while `&` is still ordinary, so its body
     // holds the character and not an alignment tab. Defined after, `AT\&T`
@@ -223,6 +258,9 @@ fn csstring_reaches_running_text_as_string_does() {
 
 #[test]
 fn a_list_reads_back_as_marked_items_rather_than_as_one_run_of_words() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\begin{itemize}` expanded to nothing and `\item` to its optional
     // argument, so a list came back as "alpha item bravo item" -- one line,
     // no mark, welded to the prose after it. The indent that separates them
@@ -319,6 +357,9 @@ fn a_colour_spec_does_not_reach_the_reader_as_digits() {
 
 #[test]
 fn a_table_reads_back_as_rows_rather_than_as_one_run_of_words() {
+    if !common::tex_tree() {
+        return;
+    }
     // `&` was a space and `\\` a newline that `split_whitespace` swallowed, so
     // a table came back as "Name Value alpha 1 beta 2" welded to the sentence
     // after it. A row ends at a line in text, which is what the row marker
@@ -365,6 +406,9 @@ fn a_table_reads_back_as_rows_rather_than_as_one_run_of_words() {
 /// this document before: `See chapter , section , chapter , and .`
 #[test]
 fn a_ref_sets_the_number_of_the_unit_its_label_stands_in() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{report}\n\\begin{document}\n\
                \\chapter{First}\\label{ch:one}\nText in the first chapter.\n\
                \\section{Alpha}\\label{sec:alpha}\nMore text.\n\
@@ -390,6 +434,9 @@ fn a_ref_sets_the_number_of_the_unit_its_label_stands_in() {
 /// `typeset::MARKERS`.
 #[test]
 fn a_label_leaves_neither_its_key_nor_its_marker_in_the_words() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{report}\n\\begin{document}\n\
                \\chapter{First}\\label{ch:one}\n\
                Before \\label{mid-word-key} after.\n\
@@ -419,6 +466,9 @@ fn a_label_leaves_neither_its_key_nor_its_marker_in_the_words() {
 /// of the paragraph.
 #[test]
 fn a_picture_contributes_no_words_and_leaves_no_marker() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n\
                Before.\n\\begin{tikzpicture}\n\
                \\draw[thick] (0,0) -- (3,0) -- (3,2) -- cycle;\n\
@@ -448,6 +498,9 @@ fn a_picture_contributes_no_words_and_leaves_no_marker() {
 
 #[test]
 fn a_pair_of_backticks_and_a_pair_of_apostrophes_are_the_curly_quotes() {
+    if !common::tex_tree() {
+        return;
+    }
     // TeX's own spelling of the quotation marks, and the reason it is a
     // ligature rather than a font's business: the two characters are joined
     // into one BEFORE anything measures the line. A literal pair of backticks
@@ -466,6 +519,9 @@ fn a_pair_of_backticks_and_a_pair_of_apostrophes_are_the_curly_quotes() {
 
 #[test]
 fn two_hyphens_are_an_en_dash_and_three_are_an_em_dash() {
+    if !common::tex_tree() {
+        return;
+    }
     let src = "\\documentclass{article}\n\\begin{document}\n\
                pages 1--10, and then--- a break.\n\\end{document}\n";
     let got = text(src);
@@ -476,6 +532,9 @@ fn two_hyphens_are_an_en_dash_and_three_are_an_em_dash() {
 
 #[test]
 fn a_lone_hyphen_or_quote_forms_no_ligature() {
+    if !common::tex_tree() {
+        return;
+    }
     // A PAIR is what the ligature program joins. What a lone quote is drawn as
     // is the FONT's encoding -- cmr draws an apostrophe as a right single
     // quote -- which is a different question and not decided here, so nothing
@@ -493,6 +552,9 @@ fn a_lone_hyphen_or_quote_forms_no_ligature() {
 
 #[test]
 fn four_hyphens_are_an_em_dash_and_a_hyphen_the_way_tex_sets_them() {
+    if !common::tex_tree() {
+        return;
+    }
     // The pairs are applied left to right and nothing joins an em dash to a
     // hyphen, so a longer run falls out of them: four are `---' and `-', five
     // are `---' and `--'. Documented here because the run has to mean
@@ -509,6 +571,9 @@ fn four_hyphens_are_an_em_dash_and_a_hyphen_the_way_tex_sets_them() {
 
 #[test]
 fn a_group_between_two_hyphens_keeps_them_apart() {
+    if !common::tex_tree() {
+        return;
+    }
     // `-{}-' is how a LaTeX document has always asked for two hyphens where
     // two hyphens are meant, so the group has to break the pair.
     let src = "\\documentclass{article}\n\\begin{document}\n\
@@ -520,6 +585,9 @@ fn a_group_between_two_hyphens_keeps_them_apart() {
 
 #[test]
 fn a_flag_inside_texttt_keeps_both_of_its_hyphens() {
+    if !common::tex_tree() {
+        return;
+    }
     // `\texttt' is a text command, not an environment: the prelude expands it
     // to face markers and its ARGUMENT's characters flow through the same
     // funnel prose does. Joining the pair would rename the flag.
@@ -535,6 +603,9 @@ fn a_flag_inside_texttt_keeps_both_of_its_hyphens() {
 
 #[test]
 fn a_declared_mono_face_keeps_the_hyphens_inside_its_group() {
+    if !common::tex_tree() {
+        return;
+    }
     // The declaration form of the same thing: `{\ttfamily ...}' is what every
     // book in the corpus redefines `\texttt' to reach.
     let src = "\\documentclass{article}\n\\begin{document}\n\
@@ -546,6 +617,9 @@ fn a_declared_mono_face_keeps_the_hyphens_inside_its_group() {
 
 #[test]
 fn a_pandoc_listing_keeps_the_dashes_and_quotes_of_its_source() {
+    if !common::tex_tree() {
+        return;
+    }
     // Highlighting is deliberately not verbatim -- its lines are re-lexed so
     // that \NormalTok and the colour it carries still expand -- so a program's
     // characters reach the funnel exactly as prose does.
@@ -574,6 +648,9 @@ fn a_pandoc_listing_keeps_the_dashes_and_quotes_of_its_source() {
 
 #[test]
 fn a_verbatim_body_keeps_the_dashes_and_quotes_it_wrote() {
+    if !common::tex_tree() {
+        return;
+    }
     // A verbatim body is pushed whole and never reaches the funnel, and the
     // character before `\begin{verbatim}' must not pair with the first of it
     // either.
@@ -604,6 +681,9 @@ fn a_verbatim_body_keeps_the_dashes_and_quotes_it_wrote() {
 /// ODD number so the formula runs to the end of the block.
 #[test]
 fn a_dollar_in_a_listing_is_a_dollar_and_not_a_formula() {
+    if !common::tex_tree() {
+        return;
+    }
     let doc = "\\documentclass{article}\n\\usepackage{fancyvrb}\n\
                \\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\\\\{\\}}\n\
                \\newcommand{\\NormalTok}[1]{#1}\n\\begin{document}\n\
@@ -627,6 +707,9 @@ fn a_dollar_in_a_listing_is_a_dollar_and_not_a_formula() {
 /// The other characters fancyvrb makes ordinary stay ordinary too.
 #[test]
 fn a_listing_keeps_the_characters_tex_would_otherwise_act_on() {
+    if !common::tex_tree() {
+        return;
+    }
     let doc = "\\documentclass{article}\n\\usepackage{fancyvrb}\n\
                \\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\\\\{\\}}\n\
                \\newcommand{\\NormalTok}[1]{#1}\n\\begin{document}\n\
