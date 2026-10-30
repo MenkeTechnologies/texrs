@@ -65,6 +65,27 @@ fn have_cc() -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a TeX tree is installed with the inputs a LaTeX run reads: the
+/// class, fontspec, and LuaTeX's support module. Without them the run stops in
+/// the preamble, compiled or not.
+fn have_latex_inputs() -> bool {
+    let missing = ["article.cls", "fontspec.sty", "ltluatex.lua"]
+        .into_iter()
+        .find(|name| {
+            Command::new("kpsewhich")
+                .arg(name)
+                .output()
+                .map_or(true, |o| {
+                    String::from_utf8_lossy(&o.stdout).trim().is_empty()
+                })
+        });
+    if let Some(name) = missing {
+        eprintln!("skipping: kpsewhich finds no {name} -- no TeX tree installed");
+        return false;
+    }
+    true
+}
+
 /// AOT-compile `src` in a scratch directory and return what the binary printed.
 fn aot_output(dir: &Path, name: &str, src: &str) -> String {
     let doc = dir.join(format!("{name}.tex"));
@@ -251,7 +272,7 @@ fn a_compiled_document_typesets_the_pages_the_interpreted_one_does() {
 /// size, the main font -- are not in the chunk; the binary has to carry them.
 #[test]
 fn a_compiled_latex_document_keeps_its_preamble_page_inputs() {
-    if !can_link() {
+    if !can_link() || !have_latex_inputs() {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");
