@@ -31,8 +31,8 @@ fn dispatched() -> BTreeSet<String> {
         // And the cases math mode has of its own (tex.web 1136-1207).
         include_str!("../src/lower/math.rs"),
     ] {
-        for line in src.lines() {
-            let line = line.trim();
+        let lines: Vec<&str> = src.lines().map(str::trim).collect();
+        for (i, &line) in lines.iter().enumerate() {
             // Dispatch is not always a match arm. `\numexpr` and `\dimexpr` are
             // reached by `if name.name() == "numexpr"`, which has no `=>` in
             // it, so the scan below could not see them and reported two
@@ -48,8 +48,20 @@ fn dispatched() -> BTreeSet<String> {
                 }
             }
             // A dispatch arm: `"name" => ...`, `"a" | "b" => ...`, or a bare
-            // `"name",` inside the CONDITIONALS table.
-            let is_arm = line.contains("=>") || line.ends_with("\",");
+            // `"name",` inside the CONDITIONALS table. rustfmt puts a long arm's
+            // pattern on lines of its own (`"cr" | "crcr" | "span"`,
+            // `| "pagedepth"`) with the guard or `=>` on a line after it;
+            // missing those reported `\cr`, `\hskip` and `\pagedepth` as
+            // undispatched. Such a line counts when the pattern it belongs to
+            // ends at an `=>` -- a `matches!` list (`insert_dollar_sign`'s
+            // `"dump"`) ends at `)` and classifies rather than dispatches.
+            let is_arm = line.contains("=>")
+                || line.ends_with("\",")
+                || (is_pattern_line(line)
+                    && lines[i..]
+                        .iter()
+                        .find(|l| !is_pattern_line(l))
+                        .is_some_and(|l| l.contains("=>")));
             if !is_arm {
                 continue;
             }
@@ -71,6 +83,17 @@ fn dispatched() -> BTreeSet<String> {
         }
     }
     names
+}
+
+/// A line holding nothing but `|`-joined quoted alternatives: one line of a
+/// match pattern rustfmt wrapped.
+fn is_pattern_line(line: &str) -> bool {
+    line.contains('|')
+        && line.trim_start_matches('|').trim_start().starts_with('"')
+        && line.split('|').all(|p| {
+            let p = p.trim();
+            p.is_empty() || (p.len() >= 2 && p.starts_with('"') && p.ends_with('"'))
+        })
 }
 
 /// The control sequences the corpus documents, without the leading backslash.
