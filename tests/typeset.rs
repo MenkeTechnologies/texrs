@@ -578,6 +578,9 @@ fn some_installed_family() -> Option<&'static str> {
 
 #[test]
 fn the_font_file_the_document_named_is_carried_in_the_pdf() {
+    if !common::tex_tree() {
+        return;
+    }
     // Naming one of the fourteen gets Arimo's WIDTHS via Helvetica and the
     // wrong shapes. This is the font itself: `/FontFile2` is the font program,
     // and `pdffonts` reports such a file as embedded.
@@ -703,6 +706,9 @@ fn a_probe_font_directory(label: &str) -> Option<std::path::PathBuf> {
 /// nothing installed under it, and fell silently back to one of the fourteen.
 #[test]
 fn a_mandatory_argument_that_names_a_font_file_embeds_that_file() {
+    if !common::tex_tree() {
+        return;
+    }
     let Some(dir) = a_probe_font_directory("filename") else {
         eprintln!("skipping: no embeddable font installed");
         return;
@@ -739,6 +745,9 @@ fn a_mandatory_argument_that_names_a_font_file_embeds_that_file() {
 /// family in the braces, the file in the options.
 #[test]
 fn the_family_and_upright_font_spelling_embeds_the_same_file_as_before() {
+    if !common::tex_tree() {
+        return;
+    }
     let Some(dir) = a_probe_font_directory("options") else {
         eprintln!("skipping: no embeddable font installed");
         return;
@@ -893,6 +902,9 @@ fn colouring_a_word_does_not_change_where_the_pdf_breaks_the_line() {
 
 #[test]
 fn a_coloured_word_costs_nothing_in_an_embedded_fonts_own_widths() {
+    if !common::tex_tree() {
+        return;
+    }
     // The branch above measures in cmr10's metrics; a document that ships or
     // names a real font is measured in that font's `/Widths`, which is the
     // branch every book in the corpus takes. Both had to be given the skip.

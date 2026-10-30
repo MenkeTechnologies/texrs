@@ -114,6 +114,9 @@ fn book(chain: Option<&str>, body: &str) -> String {
 /// and reaches the page's TEXT as itself.
 #[test]
 fn a_character_the_face_lacks_is_drawn_from_the_face_the_document_named() {
+    if !common::tex_tree() {
+        return;
+    }
     let Some(family) = family_carrying('─') else {
         eprintln!("skipping: no installed face carries U+2500");
         return;
@@ -160,6 +163,9 @@ fn a_character_the_face_lacks_is_drawn_from_the_face_the_document_named() {
 /// keeps the map that makes an arrow searchable.
 #[test]
 fn the_symbol_font_is_still_asked_before_the_document_s_own_chain() {
+    if !common::tex_tree() {
+        return;
+    }
     let Some(family) = family_carrying('─') else {
         return;
     };
