@@ -259,6 +259,29 @@ parameters, count arithmetic, conditionals, groups, `\csname`, `\edef` — and
 known-gap escape hatch. Documentation that has drifted from the engine is worse
 than none.
 
+### Embedding
+
+```rust
+pub fn texrs::run_program(src: &str, input: &str) -> Result<String, String>
+```
+
+Runs `src` as a whole document and returns its text, as `texrs::run_text`
+returns it and `texrs --text` prints it (the `\message` stream is not part of
+it). `input` is the terminal: each line answers one `\read16`, `\read-1` or
+`\read` from a closed stream (tex.web §484), and the run starts in scroll mode
+so those reads are allowed; running out of lines is tex's
+`*** (job aborted, no legal \end found)`. Each call runs on its own thread with
+a 64 MiB stack and fresh thread-local state, so calls share nothing and
+concurrent calls never mix output. A refused document (an undefined control
+sequence, a fatal error) or an engine panic is `Err`; nothing is written to the
+process stdout.
+
+```rust
+let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\read16 to \\name\nHello, \\name!\n\\end\n";
+let out = texrs::run_program(src, "world\n")?;
+assert_eq!(out.trim(), "Hello, world !");
+```
+
 ## [0x03] What works
 
 - Category codes, `\catcode`, and INITEX's sparse defaults — `{` is not a group
@@ -394,7 +417,8 @@ than none.
 - `\openin`, `\closein`, `\read` and `\ifeof`: a stream opens on the file the
   name finds, as `\input` finds one, and `\read` takes it a line at a time
   (more while a brace is open), closing it when a read finds nothing left. A
-  `\read` from a closed stream would read the terminal, and stops the run.
+  `\read` from a closed stream reads the terminal: the CLI has none, so it stops
+  the run, and an embedded run reads the lines of its input (see Embedding).
 - Verbatim environments — `verbatim`, `Verbatim` and the fancyvrb family,
   `lstlisting`, `minted`, `alltt`, `filecontents` — where the catcodes are
   suspended, so `#`, `&` and `\` inside one are characters rather than markup.

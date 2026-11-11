@@ -14,7 +14,33 @@ use crate::catcode::{cat_from_i64, Cat, CatTable};
 use crate::lexer::Lexer;
 use crate::token::{CsId, Token};
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
+
+thread_local! {
+    /// §32's `term_in` for this thread's run: the lines an embedder attached
+    /// with [`with_terminal`], or `None` for the CLI, which has no terminal to
+    /// read (see [`Engine::interaction`]).
+    static TERMINAL: RefCell<Option<VecDeque<String>>> = const { RefCell::new(None) };
+}
+
+/// Run `f` with `input` as the terminal, line by line: what `\read16`,
+/// `\read-1` and a `\read` from any closed stream take (§484). A run that
+/// starts with a terminal starts in scroll mode, so those reads are allowed;
+/// errors still never stop to ask.
+pub fn with_terminal<R>(input: &str, f: impl FnOnce() -> R) -> R {
+    let lines = input.lines().map(str::to_string).collect();
+    let was = TERMINAL.with(|t| t.replace(Some(lines)));
+    let r = f();
+    TERMINAL.with(|t| t.replace(was));
+    r
+}
+
+/// Whether [`with_terminal`] attached a terminal to this thread.
+fn has_terminal() -> bool {
+    TERMINAL.with(|t| t.borrow().is_some())
+}
 
 /// The token a list keeps for one read from the stream: §358's `dont_expand`
 /// marker lives only in the stream, so a `\noexpand`ed control sequence is
@@ -530,7 +556,9 @@ pub struct Engine {
     /// §73's `interaction`: 0 batch, 1 nonstop, 2 scroll, 3 errorstop. texrs
     /// never stops to ask, so the four differ in what reaches the terminal:
     /// in batch mode nothing does. A run starts in nonstop mode, which is what
-    /// the harnesses run luatex in.
+    /// the harnesses run luatex in. A run with a terminal attached
+    /// ([`with_terminal`]) starts in scroll mode instead, so `\read` can take
+    /// its lines (§484).
     pub interaction: i64,
     /// luatex's `is_in_csname`: how many `\csname`s are reading their names,
     /// which `\ifincsname` asks.
@@ -730,7 +758,10 @@ impl Engine {
             recover: false,
             error_count: 0,
             halted: false,
-            interaction: 1,
+            interaction: match has_terminal() {
+                true => 2,
+                false => 1,
+            },
             in_csname: 0,
             last_cs_name: None,
             cat_table: 0,
@@ -7914,17 +7945,15 @@ impl Engine {
     /// keeps it.
     fn read_line_toks(&mut self, _lx: &Lexer, n: i64) -> R<Vec<Token>> {
         let m = usize::try_from(n).ok().filter(|m| *m < 16);
-        let Some(stream) = m.and_then(|m| self.read_streams[m].as_mut()) else {
-            return Err(TexError(
-                "*** (cannot \\read from terminal in nonstop modes)".into(),
-            ));
-        };
-        let line = match stream.lines.pop_front() {
-            Some(line) => line,
-            None => {
-                self.read_streams[m.expect("an open stream")] = None;
-                String::new()
-            }
+        let line = match m.and_then(|m| self.read_streams[m].as_mut()) {
+            None => self.term_input()?,
+            Some(stream) => match stream.lines.pop_front() {
+                Some(line) => line,
+                None => {
+                    self.read_streams[m.expect("an open stream")] = None;
+                    String::new()
+                }
+            },
         };
         let line = line.trim_end_matches([' ', '\t', '\r']);
         let toks: Vec<Token> = line
@@ -7946,25 +7975,24 @@ impl Engine {
         // §483's `align_state`, less its 1000000.
         let mut depth = 0i64;
         loop {
-            // §484: there is no terminal to read in nonstop mode.
-            let Some(stream) = m.and_then(|m| self.read_streams[m].as_mut()) else {
-                return Err(TexError(
-                    "*** (cannot \\read from terminal in nonstop modes)".into(),
-                ));
-            };
-            let line = match stream.lines.pop_front() {
-                Some(line) => line,
-                // §485 and §486: a file that has run out is closed, and the
-                // line it gave is empty -- which reads as a `\par`. Running out
-                // with a brace still open is an error.
-                None => {
-                    self.read_streams[m.expect("an open stream")] = None;
-                    if depth != 0 {
-                        self.report(lx, "File ended within \\read");
-                        depth = 0;
+            // §484: a closed stream, or a number outside 0..15, reads the
+            // terminal.
+            let line = match m.and_then(|m| self.read_streams[m].as_mut()) {
+                None => self.term_input()?,
+                Some(stream) => match stream.lines.pop_front() {
+                    Some(line) => line,
+                    // §485 and §486: a file that has run out is closed, and the
+                    // line it gave is empty -- which reads as a `\par`. Running out
+                    // with a brace still open is an error.
+                    None => {
+                        self.read_streams[m.expect("an open stream")] = None;
+                        if depth != 0 {
+                            self.report(lx, "File ended within \\read");
+                            depth = 0;
+                        }
+                        String::new()
                     }
-                    String::new()
-                }
+                },
             };
             // §31's `input_ln` drops the line's trailing blanks.
             let line = line.trim_end_matches([' ', '\t', '\r']);
@@ -7984,6 +8012,28 @@ impl Engine {
             if depth == 0 {
                 return Ok(toks);
             }
+        }
+    }
+
+    /// §71's `term_input`, reached from §484 when a `\read` finds no open
+    /// stream: the next line of the terminal an embedder attached through
+    /// [`with_terminal`]. The prompt §484 prints first (`\cs=` for a stream
+    /// number of 0 or more) and §71's echo to the log are not kept; an
+    /// embedded run returns the document's text, which neither belongs to.
+    ///
+    /// With no terminal attached, or in batch or nonstop mode, it is §484's
+    /// fatal error; a terminal that has run out is §71's.
+    fn term_input(&mut self) -> R<String> {
+        let line = match self.interaction > 1 {
+            true => TERMINAL.with(|t| t.borrow_mut().as_mut().map(VecDeque::pop_front)),
+            false => None,
+        };
+        match line {
+            Some(Some(line)) => Ok(line),
+            Some(None) => Err(TexError("*** (job aborted, no legal \\end found)".into())),
+            None => Err(TexError(
+                "*** (cannot \\read from terminal in nonstop modes)".into(),
+            )),
         }
     }
 

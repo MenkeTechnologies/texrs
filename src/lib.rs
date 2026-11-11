@@ -34,6 +34,7 @@ pub mod docs;
 pub mod document;
 pub mod dvi;
 pub mod dvi_parity;
+pub mod embed;
 pub mod etex_arith;
 pub mod expand;
 pub mod fontmap;
@@ -97,6 +98,7 @@ pub mod typeset;
 pub mod vf;
 pub mod write;
 
+pub use embed::run_program;
 pub use expand::{Engine, TexError};
 
 /// The messages `src` writes, as a list rather than one joined line.

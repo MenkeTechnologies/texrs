@@ -152,3 +152,57 @@ fn a_diagnostic_carries_the_line_it_broke_on() {
     assert!(err.0.contains("Undefined control sequence"), "{}", err.0);
     assert_eq!(line, 3, "the error is on line 3");
 }
+
+// ── run_program: a whole document with a terminal ────────────────────────────
+
+/// The document's text comes back as the value.
+#[test]
+fn run_program_returns_the_document_text() {
+    let out = texrs::run_program("Hello, world.\n\\end\n", "").expect("runs");
+    assert_eq!(out.trim(), "Hello, world.");
+}
+
+/// `\read16` and `\read-1` take terminal lines in order, read with the
+/// category codes in force (the braces of the first line are a group) and
+/// ended by `\endlinechar`, which is the space after each.
+#[test]
+fn run_program_input_is_the_terminal_read() {
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\
+               \\read16 to \\a \\read-1 to \\b\n\
+               [\\a][\\b]\n\\end\n";
+    let out = texrs::run_program(src, "{one two}\nthree\n").expect("runs");
+    assert_eq!(out.trim(), "[one two ][three ]");
+    // The README's example.
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\\read16 to \\name\nHello, \\name!\n\\end\n";
+    let out = texrs::run_program(src, "world\n").expect("runs");
+    assert_eq!(out.trim(), "Hello, world !");
+}
+
+/// A terminal that runs out is tex's own fatal error, and an undefined control
+/// sequence is refused, as `run_text` refuses it.
+#[test]
+fn run_program_errors_are_err() {
+    let e = texrs::run_program("\\read16 to \\a\n\\end\n", "").expect_err("no terminal line");
+    assert!(e.contains("no legal \\end found"), "{e}");
+    let e = texrs::run_program("\\nosuchprimitive\n\\end\n", "").expect_err("undefined");
+    assert!(e.contains("Undefined control sequence"), "{e}");
+}
+
+/// Concurrent runs each read their own terminal and return their own text.
+#[test]
+fn run_program_concurrent_runs_do_not_mix() {
+    let src = "\\catcode`\\{=1 \\catcode`\\}=2\n\
+               \\count1=0 \\read16 to \\w\n\
+               \\def\\loop{\\w \\advance\\count1 by 1 \\ifnum\\count1<300 \\expandafter\\loop\\fi}\n\
+               \\loop\n\\end\n";
+    let handles: Vec<_> = ["alpha", "beta", "gamma", "delta"]
+        .into_iter()
+        .map(|w| std::thread::spawn(move || (w, texrs::run_program(src, w).expect("runs"))))
+        .collect();
+    for h in handles {
+        let (w, out) = h.join().expect("thread");
+        let words: Vec<&str> = out.split_whitespace().collect();
+        assert_eq!(words.len(), 300, "run fed {w:?}: {out:?}");
+        assert!(words.iter().all(|x| *x == w), "run fed {w:?}: {out:?}");
+    }
+}
