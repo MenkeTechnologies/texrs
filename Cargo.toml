@@ -135,7 +135,7 @@ rustc-hash = "2"
 # local half of tectonic's `bundles`. Deflate only — a bundle is read, never
 # written, and every other codec zip can carry is one more thing to keep
 # building in ten years.
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
 # Taking a PNG's pixels apart (src/image.rs). A picture goes into a PDF
 # without being decoded -- PDF's compressions are PNG's -- except when it

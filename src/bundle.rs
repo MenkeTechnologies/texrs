@@ -56,7 +56,10 @@ impl Bundle {
             if entry.is_dir() {
                 continue;
             }
-            let name = entry.name().to_string();
+            let name = entry
+                .name()
+                .map_err(|e| format!("{}: {e}", path.display()))?
+                .into_owned();
             let mut content = String::new();
             // A bundle holds TeX, which is text. Anything that is not gets
             // skipped rather than failing the whole bundle: an archive with a
