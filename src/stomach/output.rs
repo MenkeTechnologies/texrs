@@ -435,8 +435,8 @@ impl Stomach {
         let out = &mut self.output;
         out.page_goal = b.page_so_far(PageDimen::Goal);
         out.page_total = b.page_so_far(PageDimen::Total);
-        for o in 0..4 {
-            out.page_stretch[o] = b.page_so_far(PageDimen::Stretch(o));
+        for (o, s) in out.page_stretch.iter_mut().enumerate() {
+            *s = b.page_so_far(PageDimen::Stretch(o));
         }
         out.page_shrink = b.page_so_far(PageDimen::Shrink);
         out.page_depth = b.page_so_far(PageDimen::Depth);

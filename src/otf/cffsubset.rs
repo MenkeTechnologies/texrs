@@ -959,9 +959,9 @@ fn dict_update(dict: &mut Dict, font: &Font, strings: &mut Strings) {
                 }
             }
             Some(ArgType::Ros) => {
-                for k in 0..2 {
-                    if let Some(s) = font.get_string(e.values[k] as usize) {
-                        e.values[k] = strings.add(&s) as f64;
+                for v in &mut e.values[..2] {
+                    if let Some(s) = font.get_string(*v as usize) {
+                        *v = strings.add(&s) as f64;
                     }
                 }
             }

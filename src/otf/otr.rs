@@ -448,8 +448,8 @@ fn read_os2(f: &mut Stream, fontdata: &mut FontData) {
     for _ in 0..11 {
         f.i16();
     }
-    for k in 0..10 {
-        m.panose[k] = f.u8();
+    for p in &mut m.panose {
+        *p = f.u8();
     }
     f.u32s(4);
     f.bytes(4);
